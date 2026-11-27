@@ -52,8 +52,9 @@ pub(crate) fn tool() -> Arc<dyn Tool> {
             effect: Effect::Read,
             category: PermissionCategory::System,
             platforms: vec![Platform::All],
-            // Process names and command lines are private machine state.
-            content: ContentClass::private_read(),
+            // Process names are private machine state, and any local program (or a page that
+            // starts one) picks its own name, so the text is untrusted too.
+            content: ContentClass::untrusted_private(),
         },
     })
 }

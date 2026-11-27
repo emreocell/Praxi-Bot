@@ -91,7 +91,24 @@ pub enum Derived {
 pub fn is_scoped_family(tool: &str) -> bool {
     matches!(
         tool,
-        "browser_open" | "fs_write" | "fs_edit" | "fs_move" | "shell_run" | "shell_interactive"
+        "browser_open"
+            | "fs_write"
+            | "fs_edit"
+            | "fs_move"
+            | "shell_run"
+            | "shell_interactive"
+            // The document and git tools that write or change files are remembered per folder
+            // like `fs_write`: "always" must not mean "everywhere".
+            | "docx_write"
+            | "docx_append"
+            | "xlsx_write"
+            | "xlsx_append_rows"
+            | "xlsx_update_cells"
+            | "csv_transform"
+            | "doc_convert"
+            | "doc_preview"
+            | "git_commit"
+            | "git_branch"
     )
 }
 
@@ -135,6 +152,38 @@ pub fn derive(tool: &str, input: &Value) -> Derived {
         // whatever the bot chooses afterwards, so no target describes what a rule would allow.
         // Every call is approved once.
         "shell_interactive" => None,
+        // What these write is the output, not the file they read; left out, it lands next to
+        // the source.
+        "csv_transform" | "doc_convert" => input
+            .get("output_path")
+            .or_else(|| input.get("path"))
+            .and_then(Value::as_str)
+            .and_then(folder_of)
+            .map(|pattern| Scope {
+                kind: ScopeKind::Folder,
+                pattern,
+            }),
+        // The folder the pictures go in (the document's folder when none is named).
+        "doc_preview" => match input.get("output_dir").and_then(Value::as_str) {
+            Some(dir) => dir_of(dir),
+            None => input
+                .get("path")
+                .and_then(Value::as_str)
+                .and_then(folder_of),
+        }
+        .map(|pattern| Scope {
+            kind: ScopeKind::Folder,
+            pattern,
+        }),
+        // A repository is a folder; none named is the bot's own folder.
+        "git_commit" | "git_branch" => match input.get("repo").and_then(Value::as_str) {
+            Some(repo) => dir_of(repo),
+            None => Some(".".to_owned()),
+        }
+        .map(|pattern| Scope {
+            kind: ScopeKind::Folder,
+            pattern,
+        }),
         _ => input
             .get("path")
             .and_then(Value::as_str)
@@ -166,6 +215,15 @@ pub fn origin_of(url: &str) -> Option<String> {
 fn is_relative(folder: &str) -> bool {
     let bytes = folder.as_bytes();
     !(folder.starts_with('/') || bytes.len() >= 2 && bytes[1] == b':')
+}
+
+/// `dir` itself as a folder pattern (the same normalisation as [`folder_of`]).
+fn dir_of(dir: &str) -> Option<String> {
+    let dir = dir.trim_end_matches(['/', '\\']);
+    if dir.is_empty() {
+        return None;
+    }
+    folder_of(&format!("{dir}/x"))
 }
 
 /// The folder a path lies in, lexically normalised (`/` separators, no `.`,
@@ -387,6 +445,83 @@ mod tests {
         assert!(ws.covers(&call("notes/x.md")));
         assert!(!ws.covers(&call("/etc/x")));
         assert!(!ws.covers(&call("C:/Work/x")));
+    }
+
+    #[test]
+    fn document_and_git_writers_are_remembered_per_folder_not_everywhere() {
+        for tool in [
+            "docx_write",
+            "docx_append",
+            "xlsx_write",
+            "xlsx_append_rows",
+            "xlsx_update_cells",
+            "csv_transform",
+            "doc_convert",
+            "doc_preview",
+            "git_commit",
+            "git_branch",
+        ] {
+            assert!(is_scoped_family(tool), "{tool}");
+        }
+        // The read tools stay as they were.
+        for tool in [
+            "docx_read",
+            "xlsx_read",
+            "git_status",
+            "git_diff",
+            "process_list",
+        ] {
+            assert!(!is_scoped_family(tool), "{tool}");
+        }
+        let rule = scope("docx_append", &json!({"path": "C:/Work/Proj/a.docx"}));
+        assert_eq!(rule.pattern, "c:/work/proj");
+        assert!(!rule.covers(&scope("docx_append", &json!({"path": "C:/Other/a.docx"}))));
+        // The folder written is the output's, not the source's; left out, the source's.
+        let out = scope(
+            "doc_convert",
+            &json!({"path": "C:/In/a.docx", "to": "pdf", "output_path": "C:/Out/a.pdf"}),
+        );
+        assert_eq!(out.pattern, "c:/out");
+        let dflt = scope("doc_convert", &json!({"path": "C:/In/a.docx", "to": "pdf"}));
+        assert_eq!(dflt.pattern, "c:/in");
+        assert_eq!(
+            scope(
+                "doc_preview",
+                &json!({"path": "C:/In/a.docx", "output_dir": "C:/Pics"})
+            )
+            .pattern,
+            "c:/pics"
+        );
+        assert_eq!(
+            scope("doc_preview", &json!({"path": "C:/In/a.docx"})).pattern,
+            "c:/in"
+        );
+        // A repository is a folder; none named is the bot's own folder.
+        let repo = scope(
+            "git_commit",
+            &json!({"repo": "C:/Work/App", "paths": ["a"], "message": "m"}),
+        );
+        assert_eq!(repo.pattern, "c:/work/app");
+        assert!(repo.covers(&scope(
+            "git_branch",
+            &json!({"repo": "C:/Work/App/sub", "action": "switch", "name": "x"})
+        )));
+        assert!(!repo.covers(&scope(
+            "git_commit",
+            &json!({"repo": "C:/Work/Other", "paths": ["a"], "message": "m"})
+        )));
+        assert_eq!(
+            scope("git_commit", &json!({"paths": ["a"], "message": "m"})).pattern,
+            "."
+        );
+        // A path that cannot be named safely is approved once.
+        assert_eq!(
+            derive(
+                "git_commit",
+                &json!({"repo": "C:/Work/../x", "paths": ["a"], "message": "m"})
+            ),
+            Derived::Unscopable
+        );
     }
 
     #[test]

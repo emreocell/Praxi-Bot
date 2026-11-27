@@ -2,7 +2,7 @@
 //! other part byte for byte, so other sheets, styles, images and macros-free
 //! formatting survive an edit untouched.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read, Write};
 
 use quick_xml::Reader;
@@ -11,14 +11,128 @@ use quick_xml::events::{BytesStart, Event};
 use tool_registry::ToolError;
 use zip::write::SimpleFileOptions;
 
-use crate::common::{exec, invalid};
+use crate::common::{clip, exec, invalid};
 
-/// Largest single part this module reads for editing.
+/// Largest single part this module reads for editing, or writes back.
 pub(crate) const MAX_PART_BYTES: u64 = 64 * 1024 * 1024;
 
+/// The refusal for an XML part with a `<!DOCTYPE>`: it is never read for editing or copied
+/// into a rewritten part, since entity declarations are not part of any Office format.
+pub(crate) fn doctype_refused() -> ToolError {
+    invalid("invalid xml: DOCTYPE is not allowed")
+}
+
+/// Whether `name` is a zip entry name no Office package has: empty, absolute, a drive path,
+/// one with a backslash or NUL, or one with an empty, `.` or `..` segment (a trailing `/`
+/// marks a directory entry and is fine).
+fn unsafe_entry_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    name.is_empty()
+        || name.contains(['\\', '\0'])
+        || name.starts_with('/')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || name
+            .strip_suffix('/')
+            .unwrap_or(name)
+            .split('/')
+            .any(|segment| matches!(segment, "" | "." | ".."))
+}
+
+/// Refuse a package whose entry names are ambiguous or point outside the package: the same
+/// name twice (names are compared without regard to case, as Office does), or an unsafe name.
+fn check_entry_names(zip: &zip::ZipArchive<Cursor<&[u8]>>) -> Result<(), ToolError> {
+    let repeated = || invalid("not an Office file: the package repeats an entry name");
+    if zip.has_duplicate_names() {
+        return Err(repeated());
+    }
+    let mut seen = HashSet::new();
+    for name in zip.file_names() {
+        let name = name.map_err(|e| invalid(format!("not an Office file: {e}")))?;
+        if unsafe_entry_name(&name) {
+            return Err(invalid(format!(
+                "not an Office file: unsafe entry name {:?}",
+                clip(&name, 60)
+            )));
+        }
+        if !seen.insert(name.to_lowercase()) {
+            return Err(repeated());
+        }
+    }
+    Ok(())
+}
+
+/// Opens the package; one with a repeated or unsafe entry name is refused.
 pub(crate) fn open(bytes: &[u8]) -> Result<zip::ZipArchive<Cursor<&[u8]>>, ToolError> {
-    zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|e| invalid(format!("not an Office file: {e}")))
+    let zip = zip::ZipArchive::new(Cursor::new(bytes))
+        .map_err(|e| invalid(format!("not an Office file: {e}")))?;
+    check_entry_names(&zip)?;
+    Ok(zip)
+}
+
+/// Lower-case fragments that mark a macro project: its binary (`vbaProject.bin`, in any
+/// spelling or numbering, and its signature or rels), the macro-enabled content types and
+/// the Excel 4 macro sheets.
+const MACRO_MARKERS: [&str; 3] = ["vbaproject", "macroenabled", "macrosheet"];
+
+fn has_macro_marker(text: &str) -> bool {
+    let text = text.to_lowercase();
+    MACRO_MARKERS.iter().any(|m| text.contains(m))
+}
+
+/// Whether the content types part declares macros. The raw text is searched first (with NUL
+/// bytes dropped, so UTF-16 is read too), then every attribute value after unescaping, so a
+/// character reference such as `macro&#69;nabled` cannot hide the word.
+fn declares_macros(types: &[u8]) -> Result<bool, ToolError> {
+    let flat: Vec<u8> = types.iter().copied().filter(|b| *b != 0).collect();
+    if has_macro_marker(&String::from_utf8_lossy(&flat)) {
+        return Ok(true);
+    }
+    let mut reader = Reader::from_reader(types);
+    loop {
+        match reader
+            .read_event()
+            .map_err(|e| invalid(format!("invalid [Content_Types].xml: {e}")))?
+        {
+            Event::Eof => return Ok(false),
+            Event::DocType(_) => return Err(doctype_refused()),
+            Event::Start(e) | Event::Empty(e) => {
+                for a in e.attributes().flatten() {
+                    let value = quick_xml::escape::unescape(&a.value)
+                        .map_err(|e| invalid(format!("invalid [Content_Types].xml: {e}")))?;
+                    if has_macro_marker(&value) {
+                        return Ok(true);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Refuse a package that carries a macro project, whatever its entry is called or how its
+/// content type is spelled. `what` names the kind of file (`documents`, `workbooks`).
+pub(crate) fn refuse_macros(
+    zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
+    what: &str,
+) -> Result<(), ToolError> {
+    let refused = || invalid(format!("{what} with macros are never edited"));
+    let mut types = None;
+    for name in zip.file_names() {
+        let name = name.map_err(|e| invalid(format!("not an Office file: {e}")))?;
+        if has_macro_marker(&name.replace('\\', "/")) {
+            return Err(refused());
+        }
+        if name.eq_ignore_ascii_case("[Content_Types].xml") {
+            types = Some(name.into_owned());
+        }
+    }
+    if let Some(types) = types
+        && let Some(part) = read_part(zip, &types)?
+        && declares_macros(&part)?
+    {
+        return Err(refused());
+    }
+    Ok(())
 }
 
 /// One part of the package, or `None` when it is absent.
@@ -40,13 +154,22 @@ pub(crate) fn read_part(
 }
 
 /// A copy of the package where the parts in `replace` carry new bytes and the parts in
-/// `remove` are gone. Every other part is copied raw (same compression, same bytes).
+/// `remove` are gone. Every other part is copied raw (same compression, same bytes). A part
+/// of more than [`MAX_PART_BYTES`] is refused before anything is compressed.
 pub(crate) fn rewrite(
     bytes: &[u8],
     replace: &HashMap<String, Vec<u8>>,
     remove: &[&str],
 ) -> Result<Vec<u8>, ToolError> {
     let zerr = |e: zip::result::ZipError| exec(format!("zip error: {e}"));
+    if let Some((name, _)) = replace
+        .iter()
+        .find(|(_, new)| new.len() as u64 > MAX_PART_BYTES)
+    {
+        return Err(exec(format!(
+            "{name} would grow beyond the {MAX_PART_BYTES} byte part limit"
+        )));
+    }
     let mut src = open(bytes)?;
     let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -82,6 +205,7 @@ pub(crate) fn attr(e: &BytesStart<'_>, key: &str) -> Option<String> {
 }
 
 /// `xml` without the empty elements `skip` selects (matched on local name and attributes).
+/// A `<!DOCTYPE>` is refused, never copied.
 pub(crate) fn remove_empty_elements(
     xml: &[u8],
     skip: impl Fn(&BytesStart<'_>) -> bool,
@@ -94,6 +218,7 @@ pub(crate) fn remove_empty_elements(
             .map_err(|e| exec(format!("invalid xml: {e}")))?;
         match ev {
             Event::Eof => break,
+            Event::DocType(_) => return Err(doctype_refused()),
             Event::Empty(e) if skip(&e) => {}
             other => writer
                 .write_event(other)
@@ -111,3 +236,257 @@ pub(crate) fn xml_text(s: &str) -> String {
 }
 
 pub(crate) type XmlHashMap = HashMap<String, Vec<u8>>;
+
+/// Package builders shared by the tests of the editing tools.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// A package of the given parts, in order.
+    pub(crate) fn zip_of(parts: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = SimpleFileOptions::default();
+        for (name, body) in parts {
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(body).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// Every part of `bytes` as (name, body), in order.
+    pub(crate) fn parts_of(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        (0..zip.len())
+            .map(|i| {
+                let mut f = zip.by_index(i).unwrap();
+                let mut body = Vec::new();
+                f.read_to_end(&mut body).unwrap();
+                (f.name().unwrap().into_owned(), body)
+            })
+            .collect()
+    }
+
+    /// `bytes` repacked after `change` edited its part list (add, replace or drop parts).
+    pub(crate) fn repack(
+        bytes: &[u8],
+        change: impl FnOnce(&mut Vec<(String, Vec<u8>)>),
+    ) -> Vec<u8> {
+        let mut parts = parts_of(bytes);
+        change(&mut parts);
+        let refs: Vec<(&str, &[u8])> = parts
+            .iter()
+            .map(|(n, b)| (n.as_str(), b.as_slice()))
+            .collect();
+        zip_of(&refs)
+    }
+
+    /// Rename the entry `from` to `to` (the same length) without any check. The zip writer
+    /// refuses a repeated name and some odd names; this makes both.
+    pub(crate) fn force_name(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
+        assert_eq!(from.len(), to.len());
+        let (from, to) = (from.as_bytes(), to.as_bytes());
+        let mut out = bytes.to_vec();
+        let mut i = 0;
+        let mut hits = 0;
+        while i + from.len() <= out.len() {
+            if &out[i..i + from.len()] == from {
+                out[i..i + from.len()].copy_from_slice(to);
+                i += from.len();
+                hits += 1;
+            } else {
+                i += 1;
+            }
+        }
+        assert!(hits >= 2, "the name sits in a local and a central header");
+        out
+    }
+
+    /// `bytes` plus one more entry that carries the (possibly unsafe or repeated) name `name`.
+    pub(crate) fn with_entry_named(bytes: &[u8], name: &str) -> Vec<u8> {
+        let placeholder = "q".repeat(name.len());
+        let with = repack(bytes, |parts| {
+            parts.push((placeholder.clone(), b"<x/>".to_vec()));
+        });
+        force_name(&with, &placeholder, name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
+
+    const TYPES: &[u8] = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
+
+    fn package() -> Vec<u8> {
+        zip_of(&[
+            ("[Content_Types].xml", TYPES),
+            ("word/document.xml", b"<d/>"),
+            ("word/styles.xml", b"<s/>"),
+        ])
+    }
+
+    fn with_types(types: &[u8]) -> Vec<u8> {
+        zip_of(&[
+            ("[Content_Types].xml", types),
+            ("word/document.xml", b"<d/>"),
+        ])
+    }
+
+    fn macros_refused(bytes: &[u8]) -> bool {
+        let mut zip = open(bytes).unwrap();
+        refuse_macros(&mut zip, "documents").is_err()
+    }
+
+    #[test]
+    fn a_plain_package_opens_rewrites_and_has_no_macros() {
+        let bytes = package();
+        let mut zip = open(&bytes).unwrap();
+        refuse_macros(&mut zip, "documents").unwrap();
+        let mut replace = XmlHashMap::new();
+        replace.insert("word/document.xml".to_owned(), b"<new/>".to_vec());
+        let out = rewrite(&bytes, &replace, &[]).unwrap();
+        let mut zip = open(&out).unwrap();
+        assert_eq!(
+            read_part(&mut zip, "word/document.xml").unwrap().unwrap(),
+            b"<new/>"
+        );
+        assert_eq!(
+            read_part(&mut zip, "word/styles.xml").unwrap().unwrap(),
+            b"<s/>"
+        );
+        // A directory entry (trailing slash) is an ordinary name.
+        let with_dir = {
+            let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            zip.add_directory("word/", SimpleFileOptions::default())
+                .unwrap();
+            zip.start_file("word/document.xml", SimpleFileOptions::default())
+                .unwrap();
+            zip.finish().unwrap().into_inner()
+        };
+        open(&with_dir).unwrap();
+    }
+
+    #[test]
+    fn repeated_and_unsafe_entry_names_are_refused_by_open_and_rewrite() {
+        let mut bad: Vec<(String, Vec<u8>)> = Vec::new();
+        for name in [
+            "../evil.xml",
+            "a/../b.xml",
+            "..\\x.xml",
+            "a\\b.xml",
+            "/abs.xml",
+            "C:/x.xml",
+            "c:x.xml",
+            "a/./b.xml",
+            "a//b.xml",
+        ] {
+            bad.push((name.to_owned(), with_entry_named(&package(), name)));
+        }
+        // The same name twice, exactly and in another case.
+        bad.push((
+            "word/styles.xml twice".to_owned(),
+            with_entry_named(&package(), "word/styles.xml"),
+        ));
+        bad.push((
+            "word/Document.XML".to_owned(),
+            with_entry_named(&package(), "word/Document.XML"),
+        ));
+        for (what, bytes) in bad {
+            let err = open(&bytes)
+                .err()
+                .unwrap_or_else(|| panic!("{what} opened"));
+            assert!(
+                err.to_string().contains("not an Office file"),
+                "{what}: {err}"
+            );
+            assert!(
+                rewrite(&bytes, &XmlHashMap::new(), &[]).is_err(),
+                "{what} was rewritten"
+            );
+        }
+    }
+
+    #[test]
+    fn macro_projects_are_found_under_any_name() {
+        for name in [
+            "word/vbaProject.bin",
+            "word/VBAProject.bin",
+            "xl/vbaProject1.bin",
+            "XL/VBAPROJECT.BIN",
+            "word/_rels/vbaProject.bin.rels",
+            "xl/vbaProjectSignature.bin",
+            "xl/macrosheets/sheet1.xml",
+        ] {
+            assert!(
+                macros_refused(&with_entry_named(&package(), name)),
+                "{name}"
+            );
+        }
+        assert!(!macros_refused(&with_entry_named(
+            &package(),
+            "word/media/image1.png"
+        )));
+    }
+
+    #[test]
+    fn macro_enabled_content_types_are_found_in_any_spelling() {
+        let types = |ct: &str| {
+            format!(
+                "<Types xmlns=\"x\"><Override PartName=\"/a.xml\" ContentType=\"{ct}\"/></Types>"
+            )
+            .into_bytes()
+        };
+        for ct in [
+            "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+            "application/vnd.ms-word.document.macroEnabled.main+xml",
+            "application/vnd.ms-word.document.MACROENABLED.main+xml",
+            "application/vnd.ms-word.document.macro&#69;nabled.main+xml",
+            "application/vnd.ms-word.document.macro&#x45;nabled.main+xml",
+            "application/vnd.ms-office.vbaProject",
+            "application/vnd.ms-excel.macrosheet+xml",
+        ] {
+            assert!(macros_refused(&with_types(&types(ct))), "{ct}");
+        }
+        assert!(!macros_refused(&with_types(&types(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+        ))));
+        // Another case of the part name, and UTF-16 text, hide nothing either.
+        let upper = zip_of(&[
+            ("[CONTENT_TYPES].XML", &types("application/x-macroEnabled")),
+            ("word/document.xml", b"<d/>"),
+        ]);
+        assert!(macros_refused(&upper));
+        let utf16: Vec<u8> = "<Types ContentType=\"x.macroEnabled\"/>"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        assert!(macros_refused(&with_types(&utf16)));
+        let doctype = b"<!DOCTYPE Types [<!ENTITY a \"b\">]><Types/>";
+        assert!(
+            macros_refused(&with_types(doctype)),
+            "a DOCTYPE in the content types is refused"
+        );
+    }
+
+    #[test]
+    fn rewrite_refuses_a_part_past_the_size_limit_before_zipping_it() {
+        let bytes = package();
+        let over = XmlHashMap::from([(
+            "word/styles.xml".to_owned(),
+            vec![b'a'; usize::try_from(MAX_PART_BYTES).unwrap() + 1],
+        )]);
+        let err = rewrite(&bytes, &over, &[]).unwrap_err();
+        assert!(err.to_string().contains("part limit"), "{err}");
+    }
+
+    #[test]
+    fn removing_empty_elements_refuses_a_doctype() {
+        let xml = b"<!DOCTYPE r [<!ENTITY a \"b\">]><r><k/><keep/></r>";
+        let err = remove_empty_elements(xml, |e| e.local_name().as_ref() == "k").unwrap_err();
+        assert!(err.to_string().contains("DOCTYPE is not allowed"), "{err}");
+        let ok = remove_empty_elements(b"<r><k/><keep/></r>", |e| e.local_name().as_ref() == "k")
+            .unwrap();
+        assert_eq!(ok, b"<r><keep/></r>");
+    }
+}

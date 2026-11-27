@@ -18,7 +18,13 @@
 //!   configured `filter.<name>` clean/smudge/process driver is blanked, and
 //!   commit/tag signing and `log.showSignature` are forced off;
 //! - the repository's work tree, git dir and common dir must all be inside the
-//!   allowed roots (a `.git` file or `core.worktree` cannot point outside);
+//!   allowed roots (a `.git` file or `core.worktree` cannot point outside), and each one
+//!   passes the embedder's [`GitPolicy::check_dir`] (credential folders, other bots'
+//!   workspaces, daemon data);
+//! - with a [`GitPolicy`], `paths` naming a protected file are refused, `git_diff` /
+//!   `git_show` / `git_status` leave out the files it protects (including the whole-tree
+//!   diff against the empty tree), `rev` must name a commit or tree (never a bare blob),
+//!   and `git_commit` refuses `.` and anything that would record a protected file;
 //! - output is capped (`max_bytes`, and the caller's `ToolContext::max_inline_bytes`);
 //! - every `git` process has a timeout and is killed on drop.
 //!
@@ -26,9 +32,11 @@
 //! status/diff/log/show; `Write` for commit and branch, because one tool has
 //! one effect), `process_list` uses `PermissionCategory::System` with `Read`.
 
+mod filter;
 mod git;
 mod git_tools;
 mod guard;
+mod policy;
 mod process;
 
 use std::path::PathBuf;
@@ -37,6 +45,7 @@ use std::time::Duration;
 
 use tool_registry::{Tool, ToolRegistry};
 
+pub use policy::{GitPolicy, MutationScope};
 pub use process::PROCESS_LIST_TOOL_NAME;
 
 /// Names of the git tools, in registration order.
@@ -58,6 +67,8 @@ pub struct DevToolsConfig {
     pub git_binary: String,
     /// Per-process time limit for `git` calls.
     pub git_timeout: Duration,
+    /// The embedder's rules on top of the roots (see [`GitPolicy`]). `None` = roots only.
+    pub policy: Option<Arc<dyn GitPolicy>>,
 }
 
 impl DevToolsConfig {
@@ -68,7 +79,15 @@ impl DevToolsConfig {
             allowed_roots,
             git_binary: "git".to_string(),
             git_timeout: Duration::from_secs(30),
+            policy: None,
         }
+    }
+
+    /// The same config with the embedder's rules attached.
+    #[must_use]
+    pub fn with_policy(mut self, policy: Arc<dyn GitPolicy>) -> Self {
+        self.policy = Some(policy);
+        self
     }
 }
 

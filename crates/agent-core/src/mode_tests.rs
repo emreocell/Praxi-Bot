@@ -200,6 +200,71 @@ async fn a_tainted_balanced_run_still_asks_before_sending_data_out() {
     lp.cancel(run).unwrap();
 }
 
+/// Read an untrusted page, then make one call of `name` with `input`; report whether it asked.
+async fn asks_after_untrusted_page(extra: &str, name: &str, input: serde_json::Value) -> bool {
+    let env = setup();
+    let page = Arc::new(with_class(
+        "web_read",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_private(),
+        "page text",
+    ));
+    let change = tool(name, Effect::Write, PermissionCategory::Fs);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "web_read", json!({"url": "https://a.example"}))]),
+        calls(&[("c2", name, input)]),
+        text("done"),
+    ]);
+    let policy = if extra == FULL {
+        Policy::full()
+    } else {
+        Policy::approve_destructive()
+    };
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&page), t(&change)],
+        profile(extra),
+        cfg(policy),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let asked = tokio::select! {
+        _ = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))) => true,
+        state = lp.wait(run) => {
+            assert_eq!(state.unwrap(), RunState::Succeeded);
+            false
+        }
+    };
+    if asked {
+        assert_eq!(change.count.load(Ordering::SeqCst), 0);
+        lp.cancel(run).unwrap();
+    } else {
+        assert_eq!(change.count.load(Ordering::SeqCst), 1);
+    }
+    asked
+}
+
+#[tokio::test]
+async fn a_git_change_after_untrusted_content_asks_below_full_and_never_prompts_in_full() {
+    let commit = json!({"paths": ["a.txt"], "message": "m"});
+    let switch = json!({"action": "switch", "name": "other"});
+    // Balanced: the lane lets file edits run, but a commit or a switch after a page asks.
+    assert!(asks_after_untrusted_page(BALANCED, "git_commit", commit.clone()).await);
+    assert!(asks_after_untrusted_page(BALANCED, "git_branch", switch.clone()).await);
+    assert!(asks_after_untrusted_page(ASK, "git_commit", commit.clone()).await);
+    // Listing branches is a read: no new prompt.
+    assert!(!asks_after_untrusted_page(BALANCED, "git_branch", json!({"action": "list"})).await);
+    // The owner's Full level: only money asks.
+    assert!(!asks_after_untrusted_page(FULL, "git_commit", commit).await);
+    assert!(!asks_after_untrusted_page(FULL, "git_branch", switch).await);
+    // Without untrusted content in the run, Balanced commits as freely as it edits files.
+    let commit = tool("git_commit", Effect::Write, PermissionCategory::Fs);
+    assert!(!asks(BALANCED, &commit).await);
+}
+
 // ── approval fatigue: host-status commands (docs/design/approval-fatigue.md) ───────────────
 
 /// Run `commands` as `shell_run` calls in one Full-level run, after an optional read of an

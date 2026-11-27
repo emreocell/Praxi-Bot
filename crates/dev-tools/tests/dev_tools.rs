@@ -855,3 +855,388 @@ async fn branch_list_reports_truncated_flag() {
     .unwrap();
     assert_eq!(v["truncated"], json!(false));
 }
+
+// ---------------------------------------------------------------- embedder policy
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use dev_tools::{GitPolicy, MutationScope};
+
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// Hides `.env` and anything under `.ssh`; refuses git places with a `blocked` component;
+/// records what a change asked for.
+#[derive(Debug, Default)]
+struct TestPolicy {
+    events: Mutex<Vec<String>>,
+    over_budget: bool,
+}
+
+impl GitPolicy for TestPolicy {
+    fn check_dir(&self, dir: &Path, mutates: bool) -> Result<(), String> {
+        self.events
+            .lock()
+            .unwrap()
+            .push(format!("dir {} {mutates}", dir.display()));
+        if dir.components().any(|c| c.as_os_str() == "blocked") {
+            return Err("a protected folder".into());
+        }
+        Ok(())
+    }
+
+    fn is_protected(&self, path: &Path) -> bool {
+        path.components()
+            .any(|c| c.as_os_str() == ".env" || c.as_os_str() == ".ssh")
+    }
+
+    fn begin_mutation(
+        &self,
+        op: &'static str,
+        _repo: &Path,
+        control_files: &[PathBuf],
+        added_bytes: u64,
+    ) -> Result<Box<dyn MutationScope>, String> {
+        if self.over_budget {
+            return Err("the workspace is over its limit".into());
+        }
+        let names: Vec<String> = control_files
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .collect();
+        self.events
+            .lock()
+            .unwrap()
+            .push(format!("begin {op} {names:?} {added_bytes}"));
+        Ok(Box::new(Scope))
+    }
+}
+
+struct Scope;
+
+impl MutationScope for Scope {
+    fn finish(self: Box<Self>, ok: bool, tree: Option<&Path>) -> Result<Option<String>, String> {
+        Ok(ok.then(|| format!("cp-{}", tree.is_some())))
+    }
+}
+
+fn guarded(f: &Fixture, policy: Arc<TestPolicy>) -> ToolRegistry {
+    let reg = ToolRegistry::new();
+    let _ = register(
+        &reg,
+        &DevToolsConfig::new(vec![f.root.clone()]).with_policy(policy),
+    );
+    reg
+}
+
+async fn run(reg: &ToolRegistry, name: &str, input: Value) -> Result<Value, ToolError> {
+    let out = reg
+        .get(name)
+        .unwrap()
+        .call(&ToolContext::default(), input)
+        .await?;
+    Ok(match out.content.into_iter().next().unwrap() {
+        ContentPart::Text { text } => Value::String(text),
+        ContentPart::Json { data } => data,
+        ContentPart::Binary { .. } => panic!("binary"),
+    })
+}
+
+/// A fixture whose repository also tracks a credential file next to an ordinary one.
+fn fixture_with_secret() -> Fixture {
+    let f = fixture();
+    std::fs::write(f.repo.join(".env"), "TOKEN=hunter2\n").unwrap();
+    git(&f.repo, &["add", "-f", ".env"]);
+    git(&f.repo, &["commit", "-q", "-m", "add the env file"]);
+    f
+}
+
+#[tokio::test]
+async fn diff_leaves_out_protected_files_even_against_the_empty_tree() {
+    let f = fixture_with_secret();
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    let r = repo_arg(&f);
+    for input in [
+        json!({"repo": r, "rev": EMPTY_TREE}),
+        json!({"repo": r, "rev": EMPTY_TREE, "paths": ["."]}),
+        json!({"repo": r, "rev": EMPTY_TREE, "stat": true}),
+    ] {
+        let v = run(&reg, "git_diff", input.clone()).await.unwrap();
+        assert!(!text(&v).contains("hunter2"), "{input}: {v}");
+        assert!(
+            !text(&v).contains(".env |") && !text(&v).contains("b/.env"),
+            "{v}"
+        );
+        assert!(text(&v).contains("a.txt"), "{v}");
+        assert!(text(&v).contains("protected file(s) left out"), "{v}");
+    }
+    // A working-tree change of the tracked credential file is left out as well.
+    std::fs::write(f.repo.join(".env"), "TOKEN=changed-secret\n").unwrap();
+    let v = run(&reg, "git_diff", json!({"repo": r})).await.unwrap();
+    assert!(
+        !text(&v).contains("changed-secret") && !text(&v).contains("hunter2"),
+        "{v}"
+    );
+    // Naming the file itself is refused, not answered with an empty diff.
+    let err = run(&reg, "git_diff", json!({"repo": r, "paths": [".env"]}))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    // Without the policy the plain tools are unchanged (the behaviour this fixes).
+    let plain = call(&f, "git_diff", json!({"repo": r, "rev": EMPTY_TREE}))
+        .await
+        .unwrap();
+    assert!(text(&plain).contains("changed-secret"));
+}
+
+#[tokio::test]
+async fn show_and_status_leave_out_protected_files_and_a_blob_cannot_be_shown() {
+    let f = fixture_with_secret();
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    let r = repo_arg(&f);
+    let shown = run(&reg, "git_show", json!({"repo": r})).await.unwrap();
+    assert!(!text(&shown).contains("hunter2"), "{shown}");
+    assert!(
+        text(&shown).contains("add the env file"),
+        "the message stays: {shown}"
+    );
+    let stat = run(&reg, "git_show", json!({"repo": r, "stat": true}))
+        .await
+        .unwrap();
+    assert!(!text(&stat).contains(".env |"), "{stat}");
+
+    std::fs::write(f.repo.join("new.env"), "x\n").unwrap();
+    std::fs::create_dir_all(f.repo.join(".ssh")).unwrap();
+    std::fs::write(f.repo.join(".ssh").join("id_rsa"), "KEY\n").unwrap();
+    std::fs::write(f.repo.join(".env"), "TOKEN=changed\n").unwrap();
+    let status = run(&reg, "git_status", json!({"repo": r})).await.unwrap();
+    assert!(text(&status).contains("new.env"), "{status}");
+    assert!(
+        !text(&status).contains(" .env") && !text(&status).contains(".ssh"),
+        "{status}"
+    );
+
+    // The id of the credential blob is not a revision git_show or git_diff will print.
+    let blob = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD:.env"])
+        .current_dir(&f.repo)
+        .output()
+        .unwrap();
+    let blob = String::from_utf8(blob.stdout).unwrap().trim().to_owned();
+    for (tool, input) in [
+        ("git_show", json!({"repo": r, "rev": blob})),
+        (
+            "git_diff",
+            json!({"repo": r, "rev": format!("{blob}..{blob}")}),
+        ),
+        ("git_diff", json!({"repo": r, "rev": blob})),
+    ] {
+        let err = run(&reg, tool, input.clone()).await.unwrap_err();
+        assert!(
+            matches!(err, ToolError::InvalidInput(_)),
+            "{tool} {input}: {err}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn commit_refuses_the_whole_folder_and_any_protected_file_and_stages_nothing() {
+    let f = fixture();
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    let r = repo_arg(&f);
+    std::fs::write(f.repo.join("a.txt"), "changed\n").unwrap();
+    std::fs::write(f.repo.join(".env"), "TOKEN=hunter2\n").unwrap();
+    std::fs::create_dir_all(f.repo.join("conf")).unwrap();
+    std::fs::write(f.repo.join("conf").join(".env"), "X=1\n").unwrap();
+    std::fs::write(f.repo.join("conf").join("ok.txt"), "ok\n").unwrap();
+    for paths in [
+        json!(["."]),
+        json!(["./"]),
+        json!([".env"]),
+        json!(["conf"]),
+        json!(["a.txt", "conf"]),
+    ] {
+        let err = run(
+            &reg,
+            "git_commit",
+            json!({"repo": r, "paths": paths, "message": "m"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ToolError::PermissionDenied(_) | ToolError::InvalidInput(_)
+            ),
+            "{paths}: {err}"
+        );
+    }
+    // Nothing was staged or committed by the refused calls.
+    let staged = std::process::Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(&f.repo)
+        .output()
+        .unwrap();
+    assert!(
+        staged.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&staged.stdout)
+    );
+    // A file that was staged earlier by someone else is caught too.
+    git(&f.repo, &["add", "-f", ".env"]);
+    let err = run(
+        &reg,
+        "git_commit",
+        json!({"repo": r, "paths": ["a.txt", "conf/ok.txt"], "message": "m"}),
+    )
+    .await;
+    // `--only` with these paths never records `.env`, so this one is allowed ...
+    assert!(err.is_ok(), "{err:?}");
+    let head_files = std::process::Command::new("git")
+        .args(["show", "--name-only", "--format=", "HEAD"])
+        .current_dir(&f.repo)
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&head_files.stdout).contains(".env"),
+        "{}",
+        String::from_utf8_lossy(&head_files.stdout)
+    );
+    // ... while naming the staged credential file is refused.
+    let err = run(
+        &reg,
+        "git_commit",
+        json!({"repo": r, "paths": [".env"], "message": "m"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+}
+
+#[tokio::test]
+async fn a_change_tells_the_embedder_before_and_after_and_a_refusal_runs_nothing() {
+    let f = fixture();
+    let policy = Arc::new(TestPolicy::default());
+    let reg = guarded(&f, policy.clone());
+    let r = repo_arg(&f);
+    std::fs::write(f.repo.join("a.txt"), "changed text\n").unwrap();
+    let v = run(
+        &reg,
+        "git_commit",
+        json!({"repo": r, "paths": ["a.txt"], "message": "m"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(v["checkpoint"], "cp-false", "{v}");
+    let events = policy.events.lock().unwrap().clone();
+    let begin = events
+        .iter()
+        .find(|e| e.starts_with("begin git_commit"))
+        .expect("begin");
+    assert!(
+        begin.contains("index") && begin.contains("HEAD") && begin.contains("main"),
+        "{begin}"
+    );
+    assert!(
+        !begin.ends_with(" 0"),
+        "the size of the file counts: {begin}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e.starts_with("dir ") && e.ends_with(" true")),
+        "mutating dirs are vetted as such"
+    );
+
+    // A switch reports the work tree it rewrote.
+    let v = run(
+        &reg,
+        "git_branch",
+        json!({"repo": r, "action": "create", "name": "feat", "switch": true}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(v["checkpoint"], "cp-true", "{v}");
+    // Listing is not a change.
+    let before = policy.events.lock().unwrap().len();
+    run(&reg, "git_branch", json!({"repo": r, "action": "list"}))
+        .await
+        .unwrap();
+    assert!(
+        !policy.events.lock().unwrap()[before..]
+            .iter()
+            .any(|e| e.starts_with("begin"))
+    );
+
+    // Over budget: the change does not run.
+    let reg = guarded(
+        &f,
+        Arc::new(TestPolicy {
+            over_budget: true,
+            ..TestPolicy::default()
+        }),
+    );
+    std::fs::write(f.repo.join("b.txt"), "more\n").unwrap();
+    let err = run(
+        &reg,
+        "git_commit",
+        json!({"repo": r, "paths": ["b.txt"], "message": "no"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    let log = run(&reg, "git_log", json!({"repo": r, "max_count": 1}))
+        .await
+        .unwrap();
+    assert_eq!(log["commits"][0]["subject"], "m");
+}
+
+#[tokio::test]
+async fn the_policy_vets_the_top_level_and_the_git_directory_of_every_call() {
+    let f = fixture();
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    // A repository whose git directory sits in a folder the policy protects, although it is
+    // inside the allowed root: `git init --separate-git-dir` leaves a `.git` file pointing there.
+    let work = f.root.join("sep");
+    let gitdir = f.root.join("blocked").join("sep.git");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(gitdir.parent().unwrap()).unwrap();
+    let out = std::process::Command::new("git")
+        .args(["init", "-q", "--separate-git-dir"])
+        .arg(&gitdir)
+        .arg(&work)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for tool in ["git_status", "git_log", "git_diff"] {
+        let err = run(&reg, tool, json!({"repo": work.display().to_string()}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(ref m) if m.contains("git directory")),
+            "{tool}: {err}"
+        );
+    }
+    // Without the policy the same repository is accepted: only the new rule refuses it.
+    assert!(
+        call(
+            &f,
+            "git_status",
+            json!({"repo": work.display().to_string()})
+        )
+        .await
+        .is_ok()
+    );
+    // A work tree configured outside the folder the call named is vetted as well.
+    let wt = f.root.join("blocked").join("tree");
+    std::fs::create_dir_all(&wt).unwrap();
+    git(&f.repo, &["config", "core.worktree", &sh_path(&wt)]);
+    let err = run(&reg, "git_status", json!({"repo": repo_arg(&f)}))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+}

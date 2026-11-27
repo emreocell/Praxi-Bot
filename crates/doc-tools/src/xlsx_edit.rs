@@ -29,6 +29,10 @@ use crate::ooxml::{self, attr, xml_text};
 use crate::xlsx::{col_letters, parse_cell, parse_range};
 
 const MAX_EDIT_CELLS: usize = 1_000_000;
+/// Longest text one cell may hold (Excel's own limit).
+const MAX_CELL_CHARS: usize = 32_767;
+/// Longest formula one cell may hold (Excel's own limit).
+const MAX_FORMULA_CHARS: usize = 8_192;
 const MAX_ROW: u32 = 1_048_576;
 const MAX_COL: u32 = 16_383;
 const DATE_FORMAT_ID: u32 = 14;
@@ -51,11 +55,12 @@ impl Cell {
             Value::Null => Self::Empty,
             Value::Bool(b) => Self::Bool(*b),
             Value::Number(n) => Self::Number(n.as_f64().unwrap_or(0.0)),
-            Value::String(s) => Self::Text(s.clone()),
+            Value::String(s) => Self::Text(limited(s, MAX_CELL_CHARS)?.to_owned()),
             Value::Array(_) => return Err(invalid("a cell cannot be an array")),
             Value::Object(o) => {
                 if let Some(f) = o.get("formula").and_then(Value::as_str) {
-                    Self::Formula(f.trim_start_matches('=').to_owned())
+                    let f = f.trim_start_matches('=');
+                    Self::Formula(limited(f, MAX_FORMULA_CHARS)?.to_owned())
                 } else if let Some(d) = o.get("date").and_then(Value::as_str) {
                     Self::Date(serial(d)?)
                 } else if let Some(d) = o.get("datetime").and_then(Value::as_str) {
@@ -70,6 +75,14 @@ impl Cell {
     fn is_date(&self) -> bool {
         matches!(self, Self::Date(_) | Self::DateTime(_))
     }
+}
+
+/// `s` itself when it has at most `max` characters, an error otherwise.
+fn limited(s: &str, max: usize) -> Result<&str, ToolError> {
+    if s.chars().count() > max {
+        return Err(invalid(format!("a cell holds more than {max} characters")));
+    }
+    Ok(s)
 }
 
 fn serial(text: &str) -> Result<f64, ToolError> {
@@ -318,6 +331,7 @@ impl SheetEditor<'_> {
             let ev = self.reader.read_event().map_err(|e| xml_err(&e))?;
             match ev {
                 Event::Eof => break,
+                Event::DocType(_) => return Err(ooxml::doctype_refused()),
                 Event::Empty(e)
                     if e.local_name().as_ref() == "dimension" && self.dimension.is_some() =>
                 {
@@ -398,6 +412,7 @@ fn sheet_extent(xml: &[u8]) -> Result<(u32, Option<String>), ToolError> {
     loop {
         match reader.read_event().map_err(|e| xml_err(&e))? {
             Event::Eof => break,
+            Event::DocType(_) => return Err(ooxml::doctype_refused()),
             Event::Start(e) | Event::Empty(e) => match e.local_name().as_ref() {
                 "row" => {
                     last = match attr(&e, "r") {
@@ -445,6 +460,7 @@ fn add_date_styles(xml: &[u8]) -> Result<(Vec<u8>, DateStyles), ToolError> {
     loop {
         match reader.read_event().map_err(|e| xml_err(&e))? {
             Event::Eof => break,
+            Event::DocType(_) => return Err(ooxml::doctype_refused()),
             Event::Start(e) => match e.local_name().as_ref() {
                 "cellXfs" => (in_xfs, found) = (true, true),
                 "xf" if in_xfs => count += 1,
@@ -482,6 +498,7 @@ fn add_date_styles(xml: &[u8]) -> Result<(Vec<u8>, DateStyles), ToolError> {
     loop {
         match reader.read_event().map_err(|e| xml_err(&e))? {
             Event::Eof => break,
+            Event::DocType(_) => return Err(ooxml::doctype_refused()),
             Event::Start(e) if e.local_name().as_ref() == "cellXfs" => {
                 if tag_name(&e).contains(':') {
                     return Err(unsupported());
@@ -522,6 +539,34 @@ fn add_date_styles(xml: &[u8]) -> Result<(Vec<u8>, DateStyles), ToolError> {
     ))
 }
 
+/// Package path of a workbook relationship `target`, which must name a plain part under
+/// `xl/`: relative to `xl/` or an absolute package path that starts with `/xl/`. Anything
+/// that could leave the package or name another part (`..`, `.` or empty segments, backslashes,
+/// `:` as in `http://` or `C:`) gives `None`.
+fn sheet_part(target: &str) -> Option<String> {
+    if target.contains(['\\', ':', '\0']) {
+        return None;
+    }
+    let (absolute, rest) = match target.strip_prefix('/') {
+        Some(rest) => (true, rest),
+        None => (false, target),
+    };
+    if rest
+        .split('/')
+        .any(|segment| matches!(segment, "" | "." | ".."))
+    {
+        return None;
+    }
+    let part = if absolute {
+        rest.to_owned()
+    } else {
+        format!("xl/{rest}")
+    };
+    part.get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("xl/"))
+        .then_some(part)
+}
+
 /// Name and package path of the worksheet to edit (the first sheet when `wanted` is `None`).
 fn resolve_sheet(
     zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
@@ -531,14 +576,20 @@ fn resolve_sheet(
         .ok_or_else(|| invalid("not a spreadsheet: xl/workbook.xml is missing"))?;
     let rels = ooxml::read_part(zip, "xl/_rels/workbook.xml.rels")?
         .ok_or_else(|| invalid("not a spreadsheet: workbook relationships are missing"))?;
+    // Id -> (target, whether it points outside the package).
     let mut targets = BTreeMap::new();
     let mut reader = Reader::from_reader(rels.as_slice());
     loop {
         match reader.read_event().map_err(|e| xml_err(&e))? {
             Event::Eof => break,
+            Event::DocType(_) => return Err(ooxml::doctype_refused()),
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == "Relationship" => {
                 if let (Some(id), Some(target)) = (attr(&e, "Id"), attr(&e, "Target")) {
-                    targets.insert(id, target);
+                    let external = attr(&e, "TargetMode")
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"));
+                    if targets.insert(id, (target, external)).is_some() {
+                        return Err(invalid("the workbook relationships repeat an Id"));
+                    }
                 }
             }
             _ => {}
@@ -549,6 +600,7 @@ fn resolve_sheet(
     loop {
         match reader.read_event().map_err(|e| xml_err(&e))? {
             Event::Eof => break,
+            Event::DocType(_) => return Err(ooxml::doctype_refused()),
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == "sheet" => {
                 if let (Some(name), Some(id)) = (attr(&e, "name"), attr(&e, "id")) {
                     sheets.push((name, id));
@@ -567,13 +619,14 @@ fn resolve_sheet(
             .first()
             .ok_or_else(|| exec("workbook has no sheets"))?,
     };
-    let target = targets
+    let (target, external) = targets
         .get(id)
         .ok_or_else(|| exec(format!("sheet '{name}' has no worksheet part")))?;
-    let part = match target.strip_prefix('/') {
-        Some(abs) => abs.to_owned(),
-        None => format!("xl/{target}"),
-    };
+    let part = if *external { None } else { sheet_part(target) }.ok_or_else(|| {
+        invalid(format!(
+            "sheet '{name}' points outside the workbook's own parts"
+        ))
+    })?;
     Ok((name.clone(), part))
 }
 
@@ -605,9 +658,7 @@ fn edit_workbook(
     let bytes = read_limited(cfg, path)?;
     crate::check_zip_limits(&bytes)?;
     let mut zip = ooxml::open(&bytes)?;
-    if zip.by_name("xl/vbaProject.bin").is_ok() {
-        return Err(invalid("workbooks with macros are never edited"));
-    }
+    ooxml::refuse_macros(&mut zip, "workbooks")?;
     let (sheet_name, part) = resolve_sheet(&mut zip, sheet)?;
     let xml = ooxml::read_part(&mut zip, &part)?
         .ok_or_else(|| exec(format!("worksheet part {part} is missing")))?;
@@ -672,6 +723,17 @@ fn edit_workbook(
     })
 }
 
+/// Refuse a request that names more than [`MAX_EDIT_CELLS`] cells (empty ones included)
+/// before any of them is turned into an edit.
+fn check_request_cells(cells: usize) -> Result<(), ToolError> {
+    if cells > MAX_EDIT_CELLS {
+        return Err(invalid(format!(
+            "{cells} cells exceeds the {MAX_EDIT_CELLS} cell limit"
+        )));
+    }
+    Ok(())
+}
+
 fn check_position(row0: u32, col0: u32) -> Result<(), ToolError> {
     if row0 >= MAX_ROW || col0 > MAX_COL {
         return Err(invalid(
@@ -725,6 +787,7 @@ pub fn run_append(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError
     if i.rows.iter().all(Vec::is_empty) {
         return Err(invalid("rows must hold at least one cell"));
     }
+    check_request_cells(i.rows.iter().map(Vec::len).sum())?;
     let applied = edit_workbook(cfg, &i.path, i.sheet.as_deref(), |last_row| {
         let mut edits = Edits::new();
         for (n, row) in i.rows.iter().enumerate() {
@@ -768,6 +831,7 @@ pub fn update_spec() -> ToolSpec {
 
 pub fn run_update(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> {
     let i: UpdateIn = parse(input)?;
+    check_request_cells(i.cells.len())?;
     let applied = edit_workbook(cfg, &i.path, i.sheet.as_deref(), |_| {
         let mut edits = Edits::new();
         for (key, v) in &i.cells {
@@ -993,8 +1057,10 @@ mod tests {
         use std::io::Write as _;
         let dir = tempfile::tempdir().unwrap();
         let p = fixture(dir.path());
-        // Give the fixture a calculation chain like Excel writes.
-        let mut zip = zip::ZipArchive::new(std::fs::File::open(&p).unwrap()).unwrap();
+        // Give the fixture a calculation chain like Excel writes. Read from memory: a handle
+        // left open on `p` makes the in-place replace below fail with "access denied" on Windows.
+        let mut zip =
+            zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(&p).unwrap())).unwrap();
         let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = zip::write::SimpleFileOptions::default();
         for n in 0..zip.len() {
@@ -1047,5 +1113,247 @@ mod tests {
         assert!(!part(&p, "xl/_rels/workbook.xml.rels").contains("calcChain"));
         let read = run_read(&cfg, json!({"path": p, "sheet": "Data"})).unwrap();
         assert_eq!(read.data["cells"][2][1], 9.0);
+    }
+
+    // ------------------------------------------------------------ hardening
+
+    use crate::ooxml::test_support::{repack, with_entry_named};
+
+    /// `bytes` with the text of part `name` changed by `change` (the part must exist).
+    fn edit_part(bytes: &[u8], name: &str, change: impl Fn(&str) -> String) -> Vec<u8> {
+        repack(bytes, |parts| {
+            let (_, body) = parts
+                .iter_mut()
+                .find(|(n, _)| n == name)
+                .unwrap_or_else(|| panic!("no part {name}"));
+            let new = change(std::str::from_utf8(body).unwrap());
+            assert_ne!(new.as_bytes(), body.as_slice(), "{name} was not changed");
+            *body = new.into_bytes();
+        })
+    }
+
+    /// Both edit tools refuse the package `bytes` with an error that mentions `expect`, and
+    /// the file on disk is still exactly `bytes`.
+    fn assert_refused(path: &str, bytes: &[u8], expect: &str) {
+        std::fs::write(path, bytes).unwrap();
+        let cfg = DocToolsConfig::default();
+        for err in [
+            run_append(&cfg, json!({"path": path, "rows": [["x"]]})).unwrap_err(),
+            run_update(&cfg, json!({"path": path, "cells": {"A1": "x"}})).unwrap_err(),
+        ] {
+            assert!(err.to_string().contains(expect), "{expect}: {err}");
+        }
+        assert_eq!(std::fs::read(path).unwrap(), bytes, "the file was changed");
+    }
+
+    #[test]
+    fn macro_packages_are_refused_in_any_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let original = std::fs::read(&p).unwrap();
+        for name in [
+            "xl/vbaProject.bin",
+            "xl/VBAProject.bin",
+            "xl/vbaProject1.bin",
+            "XL/VBAPROJECT.BIN",
+            "xl/_rels/vbaProject.bin.rels",
+        ] {
+            assert_refused(
+                &p,
+                &with_entry_named(&original, name),
+                "macros are never edited",
+            );
+        }
+        let main = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+        for ct in [
+            "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+            "application/vnd.ms-excel.sheet.MACROENABLED.main+xml",
+            "application/vnd.ms-excel.sheet.macro&#69;nabled.main+xml",
+        ] {
+            let bytes = edit_part(&original, "[Content_Types].xml", |t| t.replace(main, ct));
+            assert_refused(&p, &bytes, "macros are never edited");
+        }
+    }
+
+    #[test]
+    fn repeated_and_traversal_entries_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let original = std::fs::read(&p).unwrap();
+        for name in [
+            "xl/styles.xml",
+            "XL/Styles.xml",
+            "../evil.xml",
+            "xl/../evil.xml",
+            "/evil.xml",
+            "C:/evil.xml",
+            "..\\evil.xml",
+        ] {
+            assert_refused(&p, &with_entry_named(&original, name), "not an Office file");
+        }
+    }
+
+    #[test]
+    fn sheet_targets_must_be_plain_parts_under_xl() {
+        assert_eq!(
+            sheet_part("worksheets/sheet1.xml").as_deref(),
+            Some("xl/worksheets/sheet1.xml")
+        );
+        assert_eq!(
+            sheet_part("/xl/worksheets/sheet1.xml").as_deref(),
+            Some("xl/worksheets/sheet1.xml")
+        );
+        for bad in [
+            "",
+            "/",
+            "../../evil.xml",
+            "worksheets/../../docProps/core.xml",
+            "worksheets/./sheet1.xml",
+            "worksheets//sheet1.xml",
+            "C:\\x.xml",
+            "C:/x.xml",
+            "http://x/y.xml",
+            "file:///etc/passwd",
+            "worksheets\\sheet1.xml",
+            "/docProps/core.xml",
+            "/xl/../docProps/core.xml",
+            "/[Content_Types].xml",
+            "//host/share/x.xml",
+        ] {
+            assert_eq!(sheet_part(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_sheet_relationship_that_leaves_the_package_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let original = std::fs::read(&p).unwrap();
+        let local = "Target=\"worksheets/sheet1.xml\"";
+        for target in [
+            "Target=\"../../evil.xml\"",
+            "Target=\"C:\\x.xml\"",
+            "Target=\"http://x/y.xml\"",
+            "Target=\"/docProps/core.xml\"",
+            "Target=\"/xl/../docProps/core.xml\"",
+            "Target=\"worksheets\\sheet1.xml\"",
+            "Target=\"worksheets/sheet1.xml\" TargetMode=\"External\"",
+            "Target=\"worksheets/sheet1.xml\" TargetMode=\"external\"",
+        ] {
+            let bytes = edit_part(&original, "xl/_rels/workbook.xml.rels", |t| {
+                t.replace(local, target)
+            });
+            assert_refused(&p, &bytes, "outside the workbook");
+        }
+        // Two relationships with one Id are ambiguous, so the workbook is refused.
+        let bytes = edit_part(&original, "xl/_rels/workbook.xml.rels", |t| {
+            t.replace(
+                "</Relationships>",
+                "<Relationship Id=\"rId1\" Type=\"t\" Target=\"worksheets/sheet2.xml\"/></Relationships>",
+            )
+        });
+        assert_refused(&p, &bytes, "repeat an Id");
+        // An internal target written as an absolute package path still works.
+        let bytes = edit_part(&original, "xl/_rels/workbook.xml.rels", |t| {
+            t.replace(local, "Target=\"/xl/worksheets/sheet1.xml\"")
+        });
+        std::fs::write(&p, bytes).unwrap();
+        run_update(
+            &DocToolsConfig::default(),
+            json!({"path": p, "sheet": "Data", "cells": {"A1": "abs"}}),
+        )
+        .unwrap();
+        assert!(part(&p, "xl/worksheets/sheet1.xml").contains(">abs<"));
+    }
+
+    #[test]
+    fn a_doctype_is_never_copied_or_parsed_into_a_rewritten_part() {
+        let put = |xml: &str| match xml.find("?>") {
+            Some(i) => format!(
+                "{}<!DOCTYPE x [<!ENTITY e \"v\">]>{}",
+                &xml[..i + 2],
+                &xml[i + 2..]
+            ),
+            None => format!("<!DOCTYPE x [<!ENTITY e \"v\">]>{xml}"),
+        };
+        // The rewriters themselves.
+        let sheet =
+            br#"<!DOCTYPE x [<!ENTITY e "v">]><worksheet xmlns="x"><sheetData/></worksheet>"#;
+        let mut edits = Edits::new();
+        edits.entry(0).or_default().insert(0, Cell::Number(1.0));
+        let err = edit_sheet(sheet, edits, None, None).unwrap_err();
+        assert!(err.to_string().contains("DOCTYPE is not allowed"), "{err}");
+        let styles =
+            br#"<!DOCTYPE s><styleSheet xmlns="x"><cellXfs count="1"><xf/></cellXfs></styleSheet>"#;
+        let err = add_date_styles(styles).err().expect("a DOCTYPE is refused");
+        assert!(err.to_string().contains("DOCTYPE is not allowed"), "{err}");
+        // End to end: the package is refused and left alone.
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let original = std::fs::read(&p).unwrap();
+        for part_name in [
+            "xl/worksheets/sheet1.xml",
+            "xl/workbook.xml",
+            "xl/_rels/workbook.xml.rels",
+        ] {
+            let bytes = edit_part(&original, part_name, put);
+            assert_refused(&p, &bytes, "DOCTYPE is not allowed");
+        }
+        let bytes = edit_part(&original, "xl/styles.xml", put);
+        std::fs::write(&p, &bytes).unwrap();
+        let err = run_update(
+            &DocToolsConfig::default(),
+            json!({"path": p, "sheet": "Data", "cells": {"C9": {"date": "2024-12-24"}}}),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("DOCTYPE is not allowed"), "{err}");
+        assert_eq!(std::fs::read(&p).unwrap(), bytes, "the file was changed");
+    }
+
+    #[test]
+    fn oversized_cells_are_refused_and_the_limit_itself_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let cfg = DocToolsConfig::default();
+        let before = std::fs::read(&p).unwrap();
+        let long = "x".repeat(MAX_CELL_CHARS + 1);
+        let long_formula = format!("={}", "A".repeat(MAX_FORMULA_CHARS + 1));
+        for bad in [
+            run_append(&cfg, json!({"path": p, "rows": [["ok", long]]})),
+            run_append(
+                &cfg,
+                json!({"path": p, "rows": [[{"formula": long_formula}]]}),
+            ),
+            run_update(&cfg, json!({"path": p, "cells": {"A1": long}})),
+            run_update(
+                &cfg,
+                json!({"path": p, "cells": {"A1": {"formula": long_formula}}}),
+            ),
+        ] {
+            let err = bad.unwrap_err();
+            assert!(err.to_string().contains("characters"), "{err}");
+        }
+        assert_eq!(
+            std::fs::read(&p).unwrap(),
+            before,
+            "a refused edit changed the file"
+        );
+        // Characters count, not bytes: a full-length cell of two-byte characters is fine.
+        let full = "é".repeat(MAX_CELL_CHARS);
+        run_update(&cfg, json!({"path": p, "cells": {"A1": full}})).unwrap();
+        assert!(part(&p, "xl/worksheets/sheet1.xml").contains(&full));
+    }
+
+    #[test]
+    fn a_request_with_too_many_cells_is_refused_before_it_is_planned() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let before = std::fs::read(&p).unwrap();
+        // Empty cells count towards the limit: the request is what is bounded.
+        let rows = vec![vec![Value::Null; 1000]; 1001];
+        let err =
+            run_append(&DocToolsConfig::default(), json!({"path": p, "rows": rows})).unwrap_err();
+        assert!(err.to_string().contains("cell limit"), "{err}");
+        assert_eq!(std::fs::read(&p).unwrap(), before);
     }
 }

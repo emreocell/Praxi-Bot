@@ -319,7 +319,7 @@ fn build_agent_with_skills(
     tools.dynamic_desktop = dynamic_desktop;
     // On-device OCR for set-of-marks when the accessibility tree is weak. Only if the model
     // files are already on this computer; nothing is downloaded at start-up.
-    tools.ocr = builtin_tools::default_ocr();
+    tools.ocr = builtin_tools::default_ocr(storage.data_dir());
     // Documents (PDF, Word, Excel, PowerPoint, CSV, JSON) and git/process tools, under the same
     // per-bot file access rules as `fs_*`; the permission engine gates them by category and effect.
     tools.optional_tools = builtin_tools::OptionalTools {

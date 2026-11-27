@@ -65,6 +65,7 @@ fn insert_into_body(document: &[u8], insert: &str) -> Result<Vec<u8>, ToolError>
         let ev = reader.read_event().map_err(|e| xml_err(&e))?;
         match ev {
             Event::Eof => break,
+            Event::DocType(_) => return Err(ooxml::doctype_refused()),
             Event::Start(e) => {
                 if depth == 0 {
                     wordml = e.local_name().as_ref() == "document"
@@ -158,9 +159,7 @@ pub fn run_append(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError
     let bytes = read_limited(cfg, &i.path)?;
     crate::check_zip_limits(&bytes)?;
     let mut zip = ooxml::open(&bytes)?;
-    if zip.by_name("word/vbaProject.bin").is_ok() {
-        return Err(invalid("documents with macros are never edited"));
-    }
+    ooxml::refuse_macros(&mut zip, "documents")?;
     let document = ooxml::read_part(&mut zip, "word/document.xml")?
         .ok_or_else(|| invalid("not a Word document: word/document.xml is missing"))?;
     let styles = ooxml::read_part(&mut zip, "word/styles.xml")?;
@@ -332,6 +331,106 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("protected"));
+        assert_eq!(std::fs::read(&p).unwrap(), before);
+    }
+
+    // ------------------------------------------------------------ hardening
+
+    use crate::ooxml::test_support::{repack, with_entry_named, zip_of};
+
+    /// `run_append` refuses the package `bytes` with an error that mentions `expect`, and the
+    /// file on disk is still exactly `bytes`.
+    fn assert_refused(path: &str, bytes: &[u8], expect: &str) {
+        std::fs::write(path, bytes).unwrap();
+        let err = run_append(
+            &DocToolsConfig::default(),
+            json!({"path": path, "blocks": [{"type": "paragraph", "text": "x"}]}),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains(expect), "{expect}: {err}");
+        assert_eq!(std::fs::read(path).unwrap(), bytes, "the file was changed");
+    }
+
+    #[test]
+    fn macro_packages_are_refused_in_any_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let (p, original) = fixture(dir.path());
+        for name in [
+            "word/vbaProject.bin",
+            "word/VBAProject.bin",
+            "word/vbaProject1.bin",
+            "WORD/VBAPROJECT.BIN",
+            "word/_rels/vbaProject.bin.rels",
+        ] {
+            assert_refused(
+                &p,
+                &with_entry_named(&original, name),
+                "macros are never edited",
+            );
+        }
+        let main =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
+        for ct in [
+            "application/vnd.ms-word.document.macroEnabled.main+xml",
+            "application/vnd.ms-word.document.MACROENABLED.main+xml",
+            "application/vnd.ms-word.document.macro&#69;nabled.main+xml",
+        ] {
+            let bytes = repack(&original, |parts| {
+                let (_, body) = parts
+                    .iter_mut()
+                    .find(|(n, _)| n == "[Content_Types].xml")
+                    .unwrap();
+                let text = String::from_utf8(std::mem::take(body)).unwrap();
+                assert!(text.contains(main));
+                *body = text.replace(main, ct).into_bytes();
+            });
+            assert_refused(&p, &bytes, "macros are never edited");
+        }
+    }
+
+    #[test]
+    fn repeated_and_traversal_entries_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (p, original) = fixture(dir.path());
+        for name in [
+            "word/styles.xml",
+            "Word/Styles.xml",
+            "../evil.xml",
+            "word/../evil.xml",
+            "/evil.xml",
+            "C:/evil.xml",
+            "..\\evil.xml",
+        ] {
+            assert_refused(&p, &with_entry_named(&original, name), "not an Office file");
+        }
+    }
+
+    #[test]
+    fn a_doctype_in_the_document_is_never_copied() {
+        let doc = br#"<!DOCTYPE w:document [<!ENTITY e "v">]><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>"#;
+        let err = insert_into_body(doc, "<w:p/>").unwrap_err();
+        assert!(err.to_string().contains("DOCTYPE is not allowed"), "{err}");
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("doctype.docx").to_str().unwrap().to_owned();
+        let bytes = zip_of(&[("word/document.xml", doc)]);
+        assert_refused(&p, &bytes, "DOCTYPE is not allowed");
+    }
+
+    #[test]
+    fn oversized_text_is_refused_and_the_file_stays_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let (p, before) = fixture(dir.path());
+        let cfg = DocToolsConfig::default();
+        let long = "x".repeat(100_001);
+        let mut rows = vec![vec![String::new(); 1000]];
+        rows.extend((0..100).map(|_| Vec::new()));
+        for bad in [
+            json!({"path": p, "blocks": [{"type": "paragraph", "text": long}]}),
+            json!({"path": p, "blocks": [{"type": "table", "rows": [[long]]}]}),
+            json!({"path": p, "blocks": [{"type": "table", "rows": rows}]}),
+        ] {
+            assert!(run_append(&cfg, bad).is_err());
+        }
         assert_eq!(std::fs::read(&p).unwrap(), before);
     }
 }

@@ -5,14 +5,23 @@
 //! scope. Here every path an input names goes through the same checks as `fs_read` /
 //! `fs_write` (the bot's folders, credential and daemon-data denylists, symlink and UNC
 //! handling, other bots' workspaces), and the validated absolute path replaces the one the
-//! model wrote before the inner tool sees it. Tools that change a file also take an undo
-//! checkpoint first, honour the workspace write budget and mark the file in the provenance
-//! ledger when the run holds untrusted content, exactly as `fs_write` does.
+//! model wrote before the inner tool sees it. An output the model left out (`doc_convert`'s
+//! default file, `doc_preview`'s default folder) is named and checked like one it wrote.
+//! Tools that change a file also take an undo checkpoint first, check the workspace write
+//! budget against the real size of what they write, and mark the file in the provenance
+//! ledger when the run holds untrusted content or the file was made from an untrusted
+//! input, exactly as `fs_write` does.
 //!
 //! The git tools run inside the repository's own folder: the bot's folders when it has
 //! any, otherwise (with "This computer" access) the repository's top level, which must
 //! pass the same folder vetting as a workspace (never the home folder or a folder
-//! holding credentials). `git` is spawned directly, never through the shell.
+//! holding credentials). `git` is spawned directly, never through the shell. A
+//! [`RepoPolicy`] hands the git tools the rest of the `fs_*` rules: the repository's top
+//! level, git directory and common directory are vetted like any path, files `fs_read`
+//! refuses are left out of diffs, `git_show` and `git_status` and cannot be committed, and a
+//! commit or a branch change holds the same lock, budget, checkpoint and provenance rules
+//! as a file write. `process_list` shows every program on the computer, so it is only
+//! offered to bots with access to "This computer".
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -23,8 +32,9 @@ use serde_json::Value;
 use tool_registry::{ContentPart, Tool, ToolContext, ToolError, ToolOutput, ToolSpec};
 
 use super::{
-    Follow, ROOT_UNRESOLVED_MSG, Shared, blocking, check_daemon_write, check_write_budget, denied,
-    file_mutations, validate_mutation, validate_path, with_base_dir, workspace_refusal,
+    Follow, ROOT_UNRESOLVED_MSG, Shared, blocking, check_daemon_write, check_write_budget,
+    credential_blocked, denied, file_mutations, validate_mutation, validate_path, with_base_dir,
+    workspace_blocked, workspace_refusal,
 };
 
 /// How a tool uses a path field of its input.
@@ -54,12 +64,34 @@ fn fields_of(tool: &str) -> &'static [Field] {
     }
 }
 
+/// The output the tool picks itself when the input names none, as the inner tool would: next
+/// to the (already validated) source. `None` when the tool has no such default or the input
+/// is too odd for one (the inner tool then reports its own error).
+fn default_output(
+    tool: &str,
+    key: &str,
+    object: &serde_json::Map<String, Value>,
+    source: &Path,
+) -> Option<String> {
+    let source = source.to_string_lossy();
+    match (tool, key) {
+        ("doc_convert", "output_path") => {
+            let to = object.get("to")?.as_str()?.trim().trim_start_matches('.');
+            (!to.is_empty() && to.len() <= 8 && to.chars().all(|c| c.is_ascii_alphanumeric()))
+                .then(|| doc_tools::default_convert_output(&source, to))
+        }
+        ("doc_preview", "output_dir") => {
+            Some(doc_tools::default_preview_dir(&source)).filter(|d| !d.is_empty())
+        }
+        _ => None,
+    }
+}
+
 enum Backend {
-    /// A document tool with a fixed configuration.
-    Doc(Arc<dyn Tool>),
-    /// `doc_convert` / `doc_preview`: the workspace they write into and the input guard
-    /// belong to the calling bot, so the tool is built for each call.
-    Convert(&'static str, doc_tools::DocToolsConfig),
+    /// A document tool: the settings it starts from. The tool is built for each call, so its
+    /// write checks (daemon data, the bot's quota) and the conversion workspace belong to the
+    /// calling bot.
+    Doc(Box<doc_tools::DocToolsConfig>),
     /// A git tool: the allowed roots belong to the calling bot, so it is built for each call.
     Git(&'static str),
     /// `process_list`: no paths involved.
@@ -75,28 +107,14 @@ pub(super) struct GuardedTool {
 
 /// The document tools, guarded.
 pub(super) fn office_tools(shared: &Arc<Shared>) -> Vec<Arc<dyn Tool>> {
-    let data_dir = shared.data_dir.clone();
-    let cfg = doc_tools::DocToolsConfig {
-        // Defense in depth: the writers refuse the daemon data directory and native CLI
-        // configuration themselves, whatever path reaches them.
-        write_guard: Some(doc_tools::WriteGuard::new(move |path| {
-            check_daemon_write(&data_dir, path).map_err(|e| e.to_string())
-        })),
-        ..doc_tools::DocToolsConfig::default()
-    };
+    let cfg = Box::new(doc_tools::DocToolsConfig::default());
     doc_tools::tools(&cfg)
         .into_iter()
         .map(|tool| {
-            let spec = tool.spec().clone();
-            let backend = match spec.name.as_str() {
-                "doc_convert" => Backend::Convert("doc_convert", cfg.clone()),
-                "doc_preview" => Backend::Convert("doc_preview", cfg.clone()),
-                _ => Backend::Doc(tool),
-            };
             Arc::new(GuardedTool {
-                spec,
+                spec: tool.spec().clone(),
                 shared: Arc::clone(shared),
-                backend,
+                backend: Backend::Doc(cfg.clone()),
             }) as Arc<dyn Tool>
         })
         .collect()
@@ -147,21 +165,22 @@ struct Prepared {
     checkpoints: Vec<String>,
     /// Those files, for the provenance ledger.
     changed: Vec<PathBuf>,
+    /// The part of `changed` that is new content made from the input files (not an edit in place).
+    outputs: Vec<PathBuf>,
+    /// The files the tool reads.
+    inputs: Vec<PathBuf>,
 }
 
-/// Validate every path field of `input`, take undo checkpoints for what will change and swap
-/// the validated absolute paths into the input.
-fn prepare(
-    sh: &Shared,
-    run: &str,
-    tool: &str,
-    fields: &[Field],
-    mut input: Value,
-) -> Result<Prepared, ToolError> {
+/// Validate every path field of `input` (the output the tool would pick itself included),
+/// take undo checkpoints for what will change and swap the validated absolute paths into the
+/// input.
+fn prepare(sh: &Shared, run: &str, tool: &str, mut input: Value) -> Result<Prepared, ToolError> {
     let mut prepared = Prepared {
         input: Value::Null,
         checkpoints: Vec::new(),
         changed: Vec::new(),
+        outputs: Vec::new(),
+        inputs: Vec::new(),
     };
     // A malformed input is the inner tool's to report; nothing was validated or changed.
     let Some(object) = input.as_object_mut() else {
@@ -169,21 +188,34 @@ fn prepare(
         return Ok(prepared);
     };
     let mut resolved = Vec::new();
-    for (key, access) in fields {
-        let Some(raw) = object.get(*key).and_then(Value::as_str) else {
-            continue;
+    let mut source: Option<PathBuf> = None;
+    for (key, access) in fields_of(tool) {
+        let raw = match object.get(*key).and_then(Value::as_str) {
+            Some(raw) => raw.to_owned(),
+            // Left out: the tool writes to its default place, which is judged like any other.
+            None => match source
+                .as_deref()
+                .and_then(|src| default_output(tool, key, object, src))
+            {
+                Some(raw) => raw,
+                None => continue,
+            },
         };
         let follow = match access {
             Access::Read | Access::Edit => Follow::Content,
             Access::Create | Access::Folder => Follow::Write,
         };
-        let path = validate_path(sh, raw, follow)?;
+        let path = validate_path(sh, &raw, follow)?;
         if *access != Access::Read {
-            validate_mutation(sh, raw, &path)?;
-            // The size is not known before the tool runs; this catches a bot already over its limit.
+            validate_mutation(sh, &raw, &path)?;
+            // The size is not known before the tool runs; this catches a bot already over its
+            // limit. The writer checks again with the real size just before it writes.
             check_write_budget(sh, &path, 0)?;
+        } else if *key == "path" {
+            source = Some(path.clone());
+            prepared.inputs.push(path.clone());
         }
-        resolved.push((*key, *access, raw.to_owned(), path));
+        resolved.push((*key, *access, raw, path));
     }
     let undo = |prepared: &mut Prepared| {
         for id in prepared.checkpoints.drain(..) {
@@ -203,6 +235,9 @@ fn prepare(
         if access != Access::Read {
             prepared.changed.push(path.clone());
         }
+        if matches!(access, Access::Create | Access::Folder) {
+            prepared.outputs.push(path.clone());
+        }
         object.insert(
             key.to_owned(),
             Value::String(path.to_string_lossy().into_owned()),
@@ -212,7 +247,8 @@ fn prepare(
     Ok(prepared)
 }
 
-/// Seal the undo checkpoints of a finished call and mark what an untrusted run wrote.
+/// Seal the undo checkpoints of a finished call and mark what an untrusted run wrote, or what
+/// was made from an untrusted file.
 fn finish(
     sh: &Shared,
     ctx: &ToolContext,
@@ -233,10 +269,22 @@ fn finish(
     for id in &prepared.checkpoints {
         sh.record_checkpoint_after(id)?;
     }
-    if ctx.exposure_untrusted
-        && let Some(ledger) = sh.provenance.as_deref()
-    {
-        for path in &prepared.changed {
+    if let Some(ledger) = sh.provenance.as_deref() {
+        let ledger_ref: Option<&dyn crate::provenance::Provenance> = Some(ledger);
+        // A run that holds untrusted content marks everything it wrote; a clean run marks what
+        // it made from an untrusted file (a converted download is still the download).
+        let marked = if ctx.exposure_untrusted {
+            &prepared.changed
+        } else if prepared
+            .inputs
+            .iter()
+            .any(|p| crate::provenance::is_untrusted(ledger_ref, p))
+        {
+            &prepared.outputs
+        } else {
+            &prepared.changed[..0]
+        };
+        for path in marked {
             crate::provenance::mark_path(
                 ledger,
                 path,
@@ -253,8 +301,42 @@ fn finish(
     Ok(out)
 }
 
+/// The write check handed to the document writers: the daemon boundary, then the bot's write
+/// budget with the number of bytes the write really adds.
+fn write_guard(sh: &Arc<Shared>) -> doc_tools::WriteGuard {
+    let scope = std::panic::AssertUnwindSafe(Arc::clone(sh));
+    doc_tools::WriteGuard::sized(move |path, added| {
+        // Name the whole wrapper so the closure captures it, not the field.
+        let scope = &scope;
+        // Defense in depth: the writers refuse the daemon data directory and native CLI
+        // configuration themselves, whatever path reaches them.
+        check_daemon_write(&scope.0.data_dir, path).map_err(|e| e.to_string())?;
+        check_write_budget(&scope.0, Path::new(path), added).map_err(|e| e.to_string())
+    })
+}
+
+/// The read check handed to `doc_convert` / `doc_preview`: the same rule as `fs_read`.
+fn read_guard(sh: &Arc<Shared>) -> doc_tools::WriteGuard {
+    let scope = std::panic::AssertUnwindSafe(Arc::clone(sh));
+    doc_tools::WriteGuard::new(move |path| {
+        let scope = &scope;
+        validate_path(&scope.0, path, Follow::Content)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// A commit, or a branch change that creates or switches (it rewrites the work tree).
+fn git_mutates(tool: &str, input: &Value) -> bool {
+    match tool {
+        "git_commit" => true,
+        "git_branch" => input.get("action").and_then(Value::as_str) != Some("list"),
+        _ => false,
+    }
+}
+
 /// Roots the git tools may use and the validated repository path to hand them.
-fn git_target(sh: &Shared, tool: &str, input: &mut Value) -> Result<Vec<PathBuf>, ToolError> {
+fn git_target(sh: &Shared, mutates: bool, input: &mut Value) -> Result<Vec<PathBuf>, ToolError> {
     let Some(object) = input.as_object_mut() else {
         return Ok(Vec::new());
     };
@@ -268,11 +350,14 @@ fn git_target(sh: &Shared, tool: &str, input: &mut Value) -> Result<Vec<PathBuf>
             .into_owned(),
     };
     let repo = validate_path(sh, &wanted, Follow::Content)?;
-    if matches!(tool, "git_commit" | "git_branch") {
+    if mutates {
         validate_mutation(sh, &wanted, &repo)?;
     }
     let roots = if sh.allowed_roots.is_empty() {
-        // "This computer": the repository's top level must be a folder a bot may work in.
+        // "This computer": the repository's top level must be a folder a bot may work in. It is
+        // found by walking up, so it can be far above the folder the call named (a `.git` in
+        // the shared workspaces folder): vet it like a path of its own, which also refuses
+        // other bots' workspaces.
         let top = repo
             .ancestors()
             .find(|dir| dir.join(".git").exists())
@@ -280,6 +365,11 @@ fn git_target(sh: &Shared, tool: &str, input: &mut Value) -> Result<Vec<PathBuf>
             .to_path_buf();
         if let Some(why) = workspace_refusal(&top, &sh.data_dir) {
             return Err(denied(&format!("git tools cannot use this folder: {why}")));
+        }
+        let top_text = top.to_string_lossy().into_owned();
+        let top = validate_path(sh, &top_text, Follow::Content)?;
+        if mutates {
+            validate_mutation(sh, &top_text, &top)?;
         }
         vec![top]
     } else {
@@ -290,6 +380,103 @@ fn git_target(sh: &Shared, tool: &str, input: &mut Value) -> Result<Vec<PathBuf>
         Value::String(repo.to_string_lossy().into_owned()),
     );
     Ok(roots)
+}
+
+/// The `fs_*` rules, as the git tools see them for one call.
+struct RepoPolicy {
+    sh: Arc<Shared>,
+    run: String,
+    untrusted_run: bool,
+}
+
+impl std::fmt::Debug for RepoPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RepoPolicy")
+    }
+}
+
+impl dev_tools::GitPolicy for RepoPolicy {
+    fn check_dir(&self, dir: &Path, mutates: bool) -> Result<(), String> {
+        let raw = dir.to_string_lossy().into_owned();
+        let resolved = validate_path(&self.sh, &raw, Follow::Content).map_err(|e| e.to_string())?;
+        if mutates {
+            validate_mutation(&self.sh, &raw, &resolved).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn is_protected(&self, path: &Path) -> bool {
+        credential_blocked(&self.sh, path, path) || workspace_blocked(&self.sh, path)
+    }
+
+    fn begin_mutation(
+        &self,
+        op: &'static str,
+        repo: &Path,
+        control_files: &[PathBuf],
+        added_bytes: u64,
+    ) -> Result<Box<dyn dev_tools::MutationScope>, String> {
+        check_write_budget(&self.sh, repo, added_bytes).map_err(|e| e.to_string())?;
+        let checkpoint = if control_files.is_empty() {
+            None
+        } else {
+            let paths: Vec<(&Path, &Path)> = control_files
+                .iter()
+                .map(|p| (p.as_path(), p.as_path()))
+                .collect();
+            let (id, _note) = self
+                .sh
+                .checkpoint(&self.run, op, &paths)
+                .map_err(|e| e.to_string())?;
+            Some(id)
+        };
+        Ok(Box::new(RepoScope {
+            sh: Arc::clone(&self.sh),
+            checkpoint,
+            untrusted_run: self.untrusted_run,
+        }))
+    }
+}
+
+/// A commit or branch change in progress: its undo checkpoint and the provenance of what it
+/// rewrote.
+struct RepoScope {
+    sh: Arc<Shared>,
+    checkpoint: Option<String>,
+    untrusted_run: bool,
+}
+
+impl dev_tools::MutationScope for RepoScope {
+    fn finish(
+        self: Box<Self>,
+        ok: bool,
+        work_tree: Option<&Path>,
+    ) -> Result<Option<String>, String> {
+        // A switch in a run that holds untrusted content rewrote files from a repository the
+        // run may not trust: they are marked like what `fs_write` would have written.
+        if let (Some(tree), true, Some(ledger)) =
+            (work_tree, self.untrusted_run, self.sh.provenance.as_deref())
+        {
+            crate::provenance::mark_path(
+                ledger,
+                tree,
+                true,
+                "files switched by git in an untrusted run",
+            );
+        }
+        let Some(id) = &self.checkpoint else {
+            return Ok(None);
+        };
+        if !ok {
+            // git failed: nothing it was going to change was changed.
+            self.sh.checkpoints.discard(id);
+            return Ok(None);
+        }
+        self.sh
+            .record_checkpoint_after(id)
+            .map_err(|e| e.to_string())?;
+        Ok(Some(id.clone()))
+    }
 }
 
 #[async_trait]
@@ -305,46 +492,36 @@ impl Tool for GuardedTool {
         let name = self.spec.name.clone();
         let handle = tokio::runtime::Handle::current();
         match &self.backend {
-            Backend::Plain(tool) => tool.call(&ctx, input).await,
-            Backend::Doc(tool) => {
-                let tool = Arc::clone(tool);
+            Backend::Plain(tool) => {
+                // Every program on the computer, with the names other users chose: only for a bot
+                // that has this computer, never one confined to folders.
+                if !sh.allowed_roots.is_empty() {
+                    return Err(denied(
+                        "process_list shows every program on this computer, so it is only available to bots with access to \"This computer\"",
+                    ));
+                }
+                tool.call(&ctx, input).await
+            }
+            Backend::Doc(base_cfg) => {
+                let mut cfg = (**base_cfg).clone();
                 blocking(move || {
                     // Held from the checkpoint to the sealed result, like the file tools do,
                     // so a host restore never sees a half-finished change.
                     let lock = file_mutations(&sh.data_dir);
                     let _mutation = lock.read();
                     with_base_dir(base, || {
-                        let prepared = prepare(&sh, &ctx.run_id, &name, fields_of(&name), input)?;
-                        let result = handle.block_on(tool.call(&ctx, prepared.input.clone()));
-                        finish(&sh, &ctx, &prepared, result)
-                    })
-                })
-                .await
-            }
-            Backend::Convert(tool_name, base_cfg) => {
-                let (tool_name, mut cfg) = (*tool_name, base_cfg.clone());
-                blocking(move || {
-                    let lock = file_mutations(&sh.data_dir);
-                    let _mutation = lock.read();
-                    with_base_dir(base, || {
-                        let prepared = prepare(&sh, &ctx.run_id, &name, fields_of(&name), input)?;
-                        // Outputs stay in the bot's workspace (its first folder without one);
-                        // without either the converters refuse to run.
+                        let prepared = prepare(&sh, &ctx.run_id, &name, input)?;
+                        cfg.write_guard = Some(write_guard(&sh));
+                        // Converted outputs stay in the bot's workspace (its first folder without
+                        // one); without either the converters refuse to run.
                         cfg.convert.output_root = sh
                             .bot_workspace
                             .clone()
                             .or_else(|| sh.allowed_roots.first().cloned());
-                        let scope = std::panic::AssertUnwindSafe(Arc::clone(&sh));
-                        cfg.convert.read_guard = Some(doc_tools::WriteGuard::new(move |path| {
-                            // Name the whole wrapper so the closure captures it, not the field.
-                            let scope = &scope;
-                            validate_path(&scope.0, path, Follow::Content)
-                                .map(|_| ())
-                                .map_err(|e| e.to_string())
-                        }));
+                        cfg.convert.read_guard = Some(read_guard(&sh));
                         let tool = doc_tools::tools(&cfg)
                             .into_iter()
-                            .find(|t| t.spec().name == tool_name)
+                            .find(|t| t.spec().name == name)
                             .ok_or_else(|| ToolError::Execution("tool is not available".into()))?;
                         let result = handle.block_on(tool.call(&ctx, prepared.input.clone()));
                         finish(&sh, &ctx, &prepared, result)
@@ -354,23 +531,29 @@ impl Tool for GuardedTool {
             }
             Backend::Git(tool_name) => {
                 let tool_name = *tool_name;
-                let (input, roots) = blocking({
-                    let sh = Arc::clone(&sh);
-                    move || {
-                        with_base_dir(base, || {
-                            let mut input = input;
-                            let roots = git_target(&sh, tool_name, &mut input)?;
-                            Ok((input, roots))
-                        })
-                    }
+                let mutates = git_mutates(tool_name, &input);
+                blocking(move || {
+                    // A commit or branch change holds the lock the file tools hold while they
+                    // change something, so a host restore never sees it half done.
+                    let lock = file_mutations(&sh.data_dir);
+                    let _mutation = mutates.then(|| lock.read());
+                    with_base_dir(base, || {
+                        let mut input = input;
+                        let roots = git_target(&sh, mutates, &mut input)?;
+                        let policy = Arc::new(RepoPolicy {
+                            sh: Arc::clone(&sh),
+                            run: ctx.run_id.clone(),
+                            untrusted_run: ctx.exposure_untrusted,
+                        });
+                        let cfg = dev_tools::DevToolsConfig::new(roots).with_policy(policy);
+                        let tool = dev_tools::tools(&cfg)
+                            .into_iter()
+                            .find(|t| t.spec().name == tool_name)
+                            .ok_or_else(|| ToolError::Execution("tool is not available".into()))?;
+                        handle.block_on(tool.call(&ctx, input))
+                    })
                 })
-                .await?;
-                let cfg = dev_tools::DevToolsConfig::new(roots);
-                let tool = dev_tools::tools(&cfg)
-                    .into_iter()
-                    .find(|t| t.spec().name == tool_name)
-                    .ok_or_else(|| ToolError::Execution("tool is not available".into()))?;
-                tool.call(&ctx, input).await
+                .await
             }
         }
     }
@@ -746,7 +929,7 @@ mod tests {
         let work = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         for repo in [work.path(), outside.path()] {
-            git(repo, &["init", "-q"]);
+            init_repo(repo);
             fs::write(repo.join("a.txt"), "one\n").unwrap();
         }
         let folder_tools = tools_for(
@@ -789,14 +972,14 @@ mod tests {
         assert!(text(&out).contains("a.txt"), "{}", text(&out));
         let hidden = outside.path().join(".ssh").join("repo");
         fs::create_dir_all(&hidden).unwrap();
-        git(&hidden, &["init", "-q"]);
+        init_repo(&hidden);
         let err = tool(&computer, "git_status")
             .call(&ctx(), json!({"repo": hidden}))
             .await
             .unwrap_err();
         assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
         // The daemon's own data folder is never a repository a bot may commit to.
-        git(data.path(), &["init", "-q"]);
+        init_repo(data.path());
         fs::write(data.path().join("x"), "x").unwrap();
         assert!(
             tool(&computer, "git_commit")
@@ -831,5 +1014,494 @@ mod tests {
             "{err}"
         );
         assert!(!work.path().join("a.pdf").exists());
+    }
+
+    /// A scope source with a workspace layout and a write quota, which remembers what it was
+    /// asked to allow.
+    struct Provider {
+        scope: FsScope,
+        workspaces_root: Option<PathBuf>,
+        bot_workspace: Option<PathBuf>,
+        /// A write adding more bytes than this is refused.
+        quota: Option<u64>,
+        writes: parking_lot::Mutex<Vec<(PathBuf, u64)>>,
+    }
+
+    impl Provider {
+        fn new(scope: FsScope) -> Arc<Self> {
+            Arc::new(Self {
+                scope,
+                workspaces_root: None,
+                bot_workspace: None,
+                quota: None,
+                writes: parking_lot::Mutex::default(),
+            })
+        }
+
+        fn writes(&self) -> Vec<(PathBuf, u64)> {
+            self.writes.lock().clone()
+        }
+    }
+
+    impl FsAccessProvider for Provider {
+        fn scope(&self, _bot: Option<&str>) -> FsScope {
+            self.scope.clone()
+        }
+        fn workspaces_root(&self) -> Option<PathBuf> {
+            self.workspaces_root.clone()
+        }
+        fn bot_workspace(&self, _bot: Option<&str>) -> Option<PathBuf> {
+            self.bot_workspace.clone()
+        }
+        fn check_write(&self, _bot: Option<&str>, target: &Path, added: u64) -> Result<(), String> {
+            self.writes.lock().push((target.to_path_buf(), added));
+            match self.quota {
+                Some(q) if added > q => Err("the workspace is over its limit".into()),
+                _ => Ok(()),
+            }
+        }
+    }
+
+    fn tools_with(
+        data: &Path,
+        provider: &Arc<Provider>,
+        home: &Path,
+        ledger: Option<Arc<Ledger>>,
+    ) -> Vec<Arc<dyn Tool>> {
+        guarded_tools(
+            data,
+            &[],
+            &[],
+            Some(provider.clone() as Arc<dyn FsAccessProvider>),
+            Some(home.to_path_buf()),
+            ledger.map(|l| l as Arc<dyn crate::provenance::Provenance>),
+            ALL,
+        )
+    }
+
+    fn has_git() -> bool {
+        Command::new("git").arg("--version").output().is_ok()
+    }
+
+    /// A repository that can commit without a global git identity.
+    fn init_repo(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        git(dir, &["init", "-q", "-b", "main"]);
+        git(dir, &["config", "user.name", "t"]);
+        git(dir, &["config", "user.email", "t@example.com"]);
+        git(dir, &["config", "commit.gpgsign", "false"]);
+    }
+
+    const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    #[tokio::test]
+    async fn process_list_is_only_for_bots_with_this_computer_and_its_output_is_untrusted() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let folders = tools_for(
+            data.path(),
+            FsScope::Folders(vec![work.path().to_path_buf()]),
+            work.path(),
+            None,
+        );
+        let err = tool(&folders, "process_list")
+            .call(&ctx(), json!({"limit": 1}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        let computer = tools_for(data.path(), FsScope::Computer, work.path(), None);
+        assert!(
+            tool(&computer, "process_list")
+                .call(&ctx(), json!({"limit": 1}))
+                .await
+                .is_ok()
+        );
+        // Another user's program picks its own name: what the tool returns is untrusted text.
+        let class = tool(&computer, "process_list").spec().content;
+        assert!(class.ingests_untrusted && class.reads_private);
+    }
+
+    #[tokio::test]
+    async fn default_outputs_are_vetted_and_budgeted_like_named_ones() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let provider = Provider::new(FsScope::Folders(vec![work.path().to_path_buf()]));
+        let tools = tools_with(data.path(), &provider, work.path(), None);
+        let doc = work.path().join("offer.docx");
+        fs::write(&doc, b"PK not a real document").unwrap();
+        // No output_path / output_dir: the tool would write next to the source. That place is
+        // asked about before the converter starts (it then fails for its own reasons here).
+        let _ = tool(&tools, "doc_convert")
+            .call(&ctx(), json!({"path": doc, "to": "pdf"}))
+            .await;
+        let _ = tool(&tools, "doc_preview")
+            .call(&ctx(), json!({"path": doc}))
+            .await;
+        let asked: Vec<PathBuf> = provider.writes().into_iter().map(|(p, _)| p).collect();
+        assert!(
+            asked
+                .iter()
+                .any(|p| p.file_name().is_some_and(|n| n == "offer.pdf")),
+            "the default output file was not checked: {asked:?}"
+        );
+        assert!(
+            asked
+                .iter()
+                .any(|p| p.file_name() == work.path().file_name()),
+            "the default output folder was not checked: {asked:?}"
+        );
+        // A folder bot with its quota used up cannot make the default output either.
+        let mut full = Provider::new(FsScope::Folders(vec![work.path().to_path_buf()]));
+        Arc::get_mut(&mut full).unwrap().quota = Some(0);
+        let sheet = work.path().join("in.csv");
+        fs::write(&sheet, "a,b\n1,2\n").unwrap();
+        let tools = tools_with(data.path(), &full, work.path(), None);
+        let err = tool(&tools, "csv_transform")
+            .call(
+                &ctx(),
+                json!({"path": sheet, "ops": [{"op": "limit", "n": 10}], "output_path": work.path().join("out.csv")}),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("over its limit"),
+            "the real size is checked before the write: {err}"
+        );
+        assert!(!work.path().join("out.csv").exists());
+        assert!(
+            full.writes()
+                .iter()
+                .any(|(p, n)| p.ends_with("out.csv") && *n > 0),
+            "the quota check saw the real size: {:?}",
+            full.writes()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_output_made_from_an_untrusted_file_is_marked_even_in_a_clean_run() {
+        /// A ledger that trusts one folder (the test folders sit in the temp dir, which is
+        /// untrusted by rule) and remembers what was marked.
+        struct Trusting {
+            marks: parking_lot::Mutex<Vec<String>>,
+            folder: String,
+        }
+        impl crate::provenance::Provenance for Trusting {
+            fn is_marked(&self, name: &str) -> bool {
+                self.marks.lock().iter().any(|m| m == name)
+            }
+            fn mark(&self, name: &str, _tree: bool, _origin: &str) {
+                self.marks.lock().push(name.to_owned());
+            }
+            fn is_trusted_folder(&self, name: &str) -> bool {
+                name.starts_with(&self.folder)
+            }
+        }
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let ledger = Arc::new(Trusting {
+            marks: parking_lot::Mutex::default(),
+            folder: crate::provenance::identity(work.path()).unwrap(),
+        });
+        let provider = Provider::new(FsScope::Folders(vec![work.path().to_path_buf()]));
+        let tools = guarded_tools(
+            data.path(),
+            &[],
+            &[],
+            Some(provider.clone() as Arc<dyn FsAccessProvider>),
+            Some(work.path().to_path_buf()),
+            Some(ledger.clone() as Arc<dyn crate::provenance::Provenance>),
+            ALL,
+        );
+        let fetched = work.path().join("fetched.csv");
+        let own = work.path().join("own.csv");
+        fs::write(
+            &fetched, "a,b
+1,2
+",
+        )
+        .unwrap();
+        fs::write(
+            &own, "a,b
+3,4
+",
+        )
+        .unwrap();
+        // The ledger knows `fetched.csv` came from outside.
+        crate::provenance::mark_path(&*ledger, &fetched, false, "fetched");
+        let before = ledger.marks.lock().len();
+        let clean = ctx();
+        assert!(!clean.exposure_untrusted);
+        // A copy of the user's own file stays unmarked ...
+        tool(&tools, "csv_transform")
+            .call(
+                &clean,
+                json!({"path": own, "ops": [{"op": "limit", "n": 10}], "output_path": work.path().join("own-copy.csv")}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            ledger.marks.lock().len(),
+            before,
+            "an own file is not marked"
+        );
+        // ... what is made from the fetched one is the fetched content, whatever the run holds.
+        tool(&tools, "csv_transform")
+            .call(
+                &clean,
+                json!({"path": fetched, "ops": [{"op": "limit", "n": 10}], "output_path": work.path().join("fetched-copy.csv")}),
+            )
+            .await
+            .unwrap();
+        assert!(
+            ledger.marks.lock().iter().any(|m| Some(m)
+                == crate::provenance::identity(&work.path().join("fetched-copy.csv")).as_ref()),
+            "{:?}",
+            ledger.marks.lock()
+        );
+    }
+
+    #[tokio::test]
+    async fn git_tools_leave_out_credential_files_and_refuse_blanket_commits() {
+        if !has_git() {
+            return;
+        }
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        init_repo(work.path());
+        fs::write(work.path().join("a.txt"), "one\n").unwrap();
+        fs::write(work.path().join(".env"), "TOKEN=hunter2\n").unwrap();
+        git(work.path(), &["add", "-f", "a.txt", ".env"]);
+        git(work.path(), &["commit", "-q", "-m", "init"]);
+        for scope in [
+            FsScope::Folders(vec![work.path().to_path_buf()]),
+            FsScope::Computer,
+        ] {
+            let tools = tools_for(data.path(), scope.clone(), work.path(), None);
+            let call = |name: &'static str, input: Value| {
+                let tools = tools.clone();
+                async move { tool(&tools, name).call(&ctx(), input).await }
+            };
+            // The whole tree against the empty tree: the credential file is not in it.
+            for input in [
+                json!({"rev": EMPTY_TREE}),
+                json!({"rev": EMPTY_TREE, "paths": ["."]}),
+                json!({"rev": EMPTY_TREE, "stat": true}),
+            ] {
+                let out = call("git_diff", input).await.unwrap();
+                assert!(!text(&out).contains("hunter2"), "{scope:?}: {}", text(&out));
+                assert!(text(&out).contains("a.txt"), "{}", text(&out));
+            }
+            let out = call("git_show", json!({})).await.unwrap();
+            assert!(!text(&out).contains("hunter2"), "{scope:?}: {}", text(&out));
+            fs::write(work.path().join(".env"), "TOKEN=changed\n").unwrap();
+            fs::create_dir_all(work.path().join(".ssh")).unwrap();
+            fs::write(work.path().join(".ssh").join("id_rsa"), "KEY\n").unwrap();
+            let out = call("git_status", json!({})).await.unwrap();
+            assert!(
+                !text(&out).contains(".env") && !text(&out).contains(".ssh"),
+                "{scope:?}: {}",
+                text(&out)
+            );
+            let out = call("git_diff", json!({})).await.unwrap();
+            assert!(!text(&out).contains("changed"), "{scope:?}: {}", text(&out));
+            // Naming a protected file is refused; so is a commit that could include one.
+            let err = call("git_diff", json!({"paths": [".env"]}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+            for paths in [json!(["."]), json!([".env"]), json!(["a.txt", ".ssh"])] {
+                let err = call("git_commit", json!({"paths": paths, "message": "m"}))
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(
+                        err,
+                        ToolError::PermissionDenied(_) | ToolError::InvalidInput(_)
+                    ),
+                    "{scope:?} {paths}: {err}"
+                );
+            }
+            let log = call("git_log", json!({})).await.unwrap();
+            let ContentPart::Json { data: commits } = &log.content[0] else {
+                panic!("git_log returns JSON");
+            };
+            assert_eq!(commits["commits"].as_array().unwrap().len(), 1, "{scope:?}");
+            git(work.path(), &["checkout", "-q", "--", ".env"]);
+            let _ = fs::remove_dir_all(work.path().join(".ssh"));
+        }
+    }
+
+    #[tokio::test]
+    async fn git_refuses_a_repository_that_reaches_other_bots_workspaces_or_credential_folders() {
+        if !has_git() {
+            return;
+        }
+        let data = tempfile::tempdir().unwrap();
+        // A `.git` in the folder that holds every bot's workspace: a bot working in its own
+        // folder must not climb into it and see the others.
+        let root = tempfile::tempdir().unwrap();
+        init_repo(root.path());
+        let own = root.path().join("bot-a");
+        let other = root.path().join("bot-b");
+        fs::create_dir_all(&own).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("secret.txt"), "not yours\n").unwrap();
+        let mut shared = Provider::new(FsScope::Computer);
+        {
+            let p = Arc::get_mut(&mut shared).unwrap();
+            p.workspaces_root = Some(root.path().to_path_buf());
+            p.bot_workspace = Some(own.clone());
+        }
+        let tools = tools_with(data.path(), &shared, root.path(), None);
+        for input in [json!({}), json!({"repo": own})] {
+            for name in ["git_status", "git_diff", "git_log"] {
+                let err = tool(&tools, name)
+                    .call(&ctx(), input.clone())
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(err, ToolError::PermissionDenied(_)),
+                    "{name} {input}: {err}"
+                );
+            }
+        }
+
+        // "Folder only": a `.git` file or `core.worktree` that points into a credential folder
+        // inside the allowed folder is not accepted just because it is inside it.
+        let allowed = tempfile::tempdir().unwrap();
+        let provider = Provider::new(FsScope::Folders(vec![allowed.path().to_path_buf()]));
+        let tools = tools_with(data.path(), &provider, allowed.path(), None);
+        let sep = allowed.path().join("sep");
+        let gitdir = allowed.path().join(".ssh").join("sep.git");
+        fs::create_dir_all(&sep).unwrap();
+        fs::create_dir_all(gitdir.parent().unwrap()).unwrap();
+        let out = Command::new("git")
+            .args(["init", "-q", "--separate-git-dir"])
+            .arg(&gitdir)
+            .arg(&sep)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let err = tool(&tools, "git_status")
+            .call(&ctx(), json!({"repo": sep}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        let repo = allowed.path().join("repo");
+        init_repo(&repo);
+        let tree = allowed.path().join(".ssh").join("tree");
+        fs::create_dir_all(&tree).unwrap();
+        git(&repo, &["config", "core.worktree", &tree.to_string_lossy()]);
+        let err = tool(&tools, "git_status")
+            .call(&ctx(), json!({"repo": repo}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn git_commit_and_branch_changes_take_the_write_path() {
+        if !has_git() {
+            return;
+        }
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        init_repo(work.path());
+        fs::write(work.path().join("a.txt"), "one\n").unwrap();
+        git(work.path(), &["add", "a.txt"]);
+        git(work.path(), &["commit", "-q", "-m", "first"]);
+        let ledger = Arc::new(Ledger::default());
+        let provider = Provider::new(FsScope::Folders(vec![work.path().to_path_buf()]));
+        let tools = tools_with(data.path(), &provider, work.path(), Some(ledger.clone()));
+        let files = super::super::tools_scoped(
+            data.path(),
+            &[],
+            &[],
+            Some(provider.clone() as Arc<dyn FsAccessProvider>),
+            Some(work.path().to_path_buf()),
+            None,
+        );
+        let head = |dir: &Path| {
+            let out = Command::new("git")
+                .args(["log", "-1", "--format=%s"])
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+
+        // A commit is a write: the budget is asked, and the change can be undone.
+        fs::write(work.path().join("a.txt"), "two\n").unwrap();
+        let out = tool(&tools, "git_commit")
+            .call(&ctx(), json!({"paths": ["a.txt"], "message": "second"}))
+            .await
+            .unwrap();
+        let checkpoint = json_part_at(&out, 0)["checkpoint"]
+            .as_str()
+            .expect("a commit reports its undo checkpoint")
+            .to_owned();
+        assert_eq!(head(work.path()), "second");
+        assert!(
+            provider.writes().iter().any(|(_, n)| *n > 0),
+            "{:?}",
+            provider.writes()
+        );
+        tool(&files, "checkpoint_restore")
+            .call(&ctx(), json!({"id": checkpoint}))
+            .await
+            .unwrap();
+        assert_eq!(
+            head(work.path()),
+            "first",
+            "restoring the checkpoint undoes the commit"
+        );
+
+        // Over the quota: nothing is committed.
+        let mut full = Provider::new(FsScope::Folders(vec![work.path().to_path_buf()]));
+        Arc::get_mut(&mut full).unwrap().quota = Some(0);
+        let tight = tools_with(data.path(), &full, work.path(), None);
+        let err = tool(&tight, "git_commit")
+            .call(&ctx(), json!({"paths": ["a.txt"], "message": "third"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+        assert_eq!(head(work.path()), "first");
+
+        // A switch in a clean run leaves the ledger alone; in a run that holds untrusted
+        // content the files it rewrote are marked.
+        let marks = ledger.0.lock().len();
+        tool(&tools, "git_branch")
+            .call(
+                &ctx(),
+                json!({"action": "create", "name": "feat", "switch": true}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ledger.0.lock().len(), marks);
+        let mut untrusted = ctx();
+        untrusted.exposure_untrusted = true;
+        tool(&tools, "git_branch")
+            .call(&untrusted, json!({"action": "switch", "name": "main"}))
+            .await
+            .unwrap();
+        assert!(ledger.0.lock().len() > marks, "{:?}", ledger.0.lock());
+        // Listing is a read: no mark, no budget.
+        let marks = ledger.0.lock().len();
+        tool(&tools, "git_branch")
+            .call(&untrusted, json!({"action": "list"}))
+            .await
+            .unwrap();
+        assert_eq!(ledger.0.lock().len(), marks);
+    }
+
+    fn json_part_at(out: &ToolOutput, i: usize) -> Value {
+        match &out.content[i] {
+            ContentPart::Json { data } => data.clone(),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

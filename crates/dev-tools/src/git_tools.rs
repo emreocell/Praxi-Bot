@@ -1,7 +1,8 @@
 //! The six git tools.
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,13 +15,19 @@ use tool_registry::{
 };
 
 use crate::DevToolsConfig;
+use crate::filter::{filter_diff, filter_status};
 use crate::git::GitRunner;
 use crate::guard::{Workspace, check_branch_chars, check_paths, check_rev};
+use crate::policy::{GitPolicy, MutationScope};
 
 const DEFAULT_MAX_BYTES: usize = 200 * 1024;
 const MAX_MAX_BYTES: usize = 4 * 1024 * 1024;
 const MAX_LOG_COUNT: u32 = 200;
 const MAX_MESSAGE_BYTES: usize = 16 * 1024;
+/// Most bytes of a file listing read before a commit refuses to go on.
+const MAX_LISTING_BYTES: usize = 4 * 1024 * 1024;
+/// Most changed files a commit sizes one by one for the write budget.
+const MAX_SIZED_FILES: usize = 100_000;
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -37,6 +44,39 @@ struct GitTool {
     kind: Kind,
     ws: Workspace,
     git: GitRunner,
+    policy: Option<Arc<dyn GitPolicy>>,
+}
+
+/// A repository the call may work in: the folder git runs in and the places git reported.
+struct Repo {
+    /// Where git runs (`repo`); pathspecs are relative to it.
+    dir: PathBuf,
+    /// The work tree's top level: diff headers and status entries are relative to it.
+    top: PathBuf,
+    git_dir: PathBuf,
+    common_dir: PathBuf,
+}
+
+/// `rel` under `base` with the `.` parts dropped (`rel` was checked: no `..`, no root).
+fn join_rel(base: &Path, rel: &str) -> PathBuf {
+    let mut out = base.to_path_buf();
+    for c in Path::new(rel).components() {
+        if let Component::Normal(part) = c {
+            out.push(part);
+        }
+    }
+    out
+}
+
+/// Without the `\\?\` prefix `canonicalize` adds on Windows, so path rules see a normal path.
+fn plain(p: PathBuf) -> PathBuf {
+    let stripped = {
+        let text = p.to_string_lossy();
+        text.strip_prefix(r"\\?\")
+            .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+            .map(PathBuf::from)
+    };
+    stripped.unwrap_or(p)
 }
 
 fn parse<T: DeserializeOwned>(input: Value) -> Result<T, ToolError> {
@@ -157,6 +197,7 @@ pub(crate) fn tools(cfg: &DevToolsConfig) -> Vec<Arc<dyn Tool>> {
                 kind,
                 ws: ws.clone(),
                 git: git.clone(),
+                policy: cfg.policy.clone(),
             }) as Arc<dyn Tool>
         })
         .collect()
@@ -266,8 +307,8 @@ fn capped_text(mut text: String, cap: usize, hit_capture_limit: bool) -> String 
 
 impl GitTool {
     /// Resolve and validate the repository: inside the workspace, and so is
-    /// its top level. Returns the directory to run git in.
-    async fn repo_dir(&self, repo: Option<&str>) -> Result<PathBuf, ToolError> {
+    /// its top level. `mutates` is set for a commit or a branch change.
+    async fn repo_dir(&self, repo: Option<&str>, mutates: bool) -> Result<Repo, ToolError> {
         let dir = self.ws.resolve_dir(repo)?;
         let top = self
             .git
@@ -298,7 +339,9 @@ impl GitTool {
             ));
         };
         // Work tree, git dir and common dir must all be inside the allowed roots
-        // (a `.git` file or core.worktree can point anywhere).
+        // (a `.git` file or core.worktree can point anywhere), and the embedder's own rules
+        // (credential folders, other bots' workspaces) hold for each of them too.
+        let mut places = Vec::with_capacity(3);
         for (what, p) in [
             ("repository root", top),
             ("git directory", git_dir),
@@ -319,12 +362,115 @@ impl GitTool {
                     p.display()
                 )));
             }
+            let canon = plain(canon);
+            if let Some(policy) = &self.policy {
+                policy.check_dir(&canon, mutates).map_err(|why| {
+                    ToolError::PermissionDenied(format!("git cannot use the {what}: {why}"))
+                })?;
+            }
+            places.push(canon);
         }
-        Ok(dir)
+        let mut places = places.into_iter();
+        let (Some(top), Some(git_dir), Some(common_dir)) =
+            (places.next(), places.next(), places.next())
+        else {
+            return Err(ToolError::Execution(
+                "unexpected output from git rev-parse".into(),
+            ));
+        };
+        Ok(Repo {
+            dir,
+            top,
+            git_dir,
+            common_dir,
+        })
+    }
+
+    /// Is the repository-relative `rel` (as git prints it) hidden by the embedder's rules?
+    fn hidden(&self, repo: &Repo, rel: &str) -> bool {
+        self.policy
+            .as_ref()
+            .is_some_and(|p| p.is_protected(&join_rel(&repo.top, rel)))
+    }
+
+    /// Refuse a `paths` entry that names a protected file or folder, so the model is told why
+    /// instead of getting an empty answer. `paths` are relative to the folder git runs in.
+    fn vet_paths(&self, repo: &Repo, paths: &[String]) -> Result<(), ToolError> {
+        let Some(policy) = &self.policy else {
+            return Ok(());
+        };
+        for p in paths {
+            if policy.is_protected(&join_rel(&repo.dir, p)) {
+                return Err(ToolError::PermissionDenied(format!(
+                    "{p} is a protected path (credentials or tool settings): git tools do not read or change it"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Every endpoint of `rev` (a name, or `a..b` / `a...b`) must name a `kind` object
+    /// (`commit` or `tree`), so a blob id cannot be used to print a file that the diff filter
+    /// never sees a name for.
+    async fn require_object(&self, dir: &Path, rev: &str, kind: &str) -> Result<(), ToolError> {
+        for endpoint in rev.split("...").flat_map(|part| part.split("..")) {
+            let endpoint = endpoint.trim_start_matches('^');
+            if endpoint.is_empty() {
+                continue;
+            }
+            self.git
+                .run(
+                    dir,
+                    &[
+                        s("rev-parse"),
+                        s("--verify"),
+                        s("--quiet"),
+                        format!("{endpoint}^{{{kind}}}"),
+                    ],
+                    None,
+                    4096,
+                )
+                .await
+                .map_err(|_| invalid(format!("{endpoint:?} does not name a {kind}")))?;
+        }
+        Ok(())
+    }
+
+    /// Hand a change to the embedder (budget, undo checkpoint) before it runs.
+    fn begin(
+        &self,
+        op: &'static str,
+        repo: &Repo,
+        control_files: &[PathBuf],
+        added_bytes: u64,
+    ) -> Result<Option<Box<dyn MutationScope>>, ToolError> {
+        self.policy
+            .as_ref()
+            .map(|p| p.begin_mutation(op, &repo.top, control_files, added_bytes))
+            .transpose()
+            .map_err(ToolError::PermissionDenied)
+    }
+
+    /// Close what [`Self::begin`] opened; the checkpoint id, if any, goes into the result.
+    fn end(
+        scope: Option<Box<dyn MutationScope>>,
+        ok: bool,
+        work_tree: Option<&Path>,
+        out: &mut Value,
+    ) -> Result<(), ToolError> {
+        let Some(scope) = scope else {
+            return Ok(());
+        };
+        if let Some(checkpoint) = scope.finish(ok, work_tree).map_err(ToolError::Execution)?
+            && ok
+        {
+            out["checkpoint"] = json!(checkpoint);
+        }
+        Ok(())
     }
 
     async fn status(&self, ctx: &ToolContext, i: StatusIn) -> Result<ToolOutput, ToolError> {
-        let dir = self.repo_dir(i.repo.as_deref()).await?;
+        let repo = self.repo_dir(i.repo.as_deref(), false).await?;
         let untracked = if i.include_untracked.unwrap_or(true) {
             "--untracked-files=normal"
         } else {
@@ -334,7 +480,7 @@ impl GitTool {
         let out = self
             .git
             .run(
-                &dir,
+                &repo.dir,
                 &[
                     s("status"),
                     s("--porcelain=v1"),
@@ -345,11 +491,8 @@ impl GitTool {
                 cap,
             )
             .await?;
-        Ok(ToolOutput::text(capped_text(
-            out.stdout,
-            cap,
-            out.truncated,
-        )))
+        let shown = filter_status(&out.stdout, &|rel| self.hidden(&repo, rel)).into_text();
+        Ok(ToolOutput::text(capped_text(shown, cap, out.truncated)))
     }
 
     async fn diff(&self, ctx: &ToolContext, i: DiffIn) -> Result<ToolOutput, ToolError> {
@@ -360,18 +503,25 @@ impl GitTool {
                 return Err(invalid("use either rev or staged, not both"));
             }
         }
-        let dir = self.repo_dir(i.repo.as_deref()).await?;
+        let repo = self.repo_dir(i.repo.as_deref(), false).await?;
+        self.vet_paths(&repo, &i.paths)?;
+        if let Some(r) = &i.rev {
+            self.require_object(&repo.dir, r, "tree").await?;
+        }
+        let stat = i.stat == Some(true);
         let mut args = vec![
             s("diff"),
             s("--no-color"),
             s("--no-ext-diff"),
             s("--no-textconv"),
+            s("--no-renames"),
         ];
         if i.staged == Some(true) {
             args.push(s("--cached"));
         }
-        if i.stat == Some(true) {
-            args.push(s("--stat"));
+        if stat {
+            // Whole names, so the filter can tell which file a line is about.
+            args.push(s("--stat=4096,2048"));
         }
         if let Some(n) = i.context_lines {
             if n > 100 {
@@ -385,11 +535,12 @@ impl GitTool {
         args.push(s("--"));
         args.extend(i.paths);
         let cap = cap_for(ctx, i.max_bytes);
-        let out = self.git.run(&dir, &args, None, cap).await?;
-        let text = if out.stdout.is_empty() {
+        let out = self.git.run(&repo.dir, &args, None, cap).await?;
+        let shown = filter_diff(&out.stdout, stat, &|rel| self.hidden(&repo, rel)).into_text();
+        let text = if shown.is_empty() {
             "(no differences)".to_string()
         } else {
-            capped_text(out.stdout, cap, out.truncated)
+            capped_text(shown, cap, out.truncated)
         };
         Ok(ToolOutput::text(text))
     }
@@ -403,7 +554,9 @@ impl GitTool {
         if count == 0 || count > MAX_LOG_COUNT {
             return Err(invalid(format!("max_count must be 1..={MAX_LOG_COUNT}")));
         }
-        let dir = self.repo_dir(i.repo.as_deref()).await?;
+        let repo = self.repo_dir(i.repo.as_deref(), false).await?;
+        self.vet_paths(&repo, &i.paths)?;
+        let dir = repo.dir;
         let mut args = vec![
             s("log"),
             s("--no-color"),
@@ -443,7 +596,7 @@ impl GitTool {
     async fn branch(&self, i: BranchIn) -> Result<ToolOutput, ToolError> {
         match i.action {
             BranchAction::List => {
-                let dir = self.repo_dir(i.repo.as_deref()).await?;
+                let dir = self.repo_dir(i.repo.as_deref(), false).await?.dir;
                 let mut args = vec![
                     s("for-each-ref"),
                     s(
@@ -477,53 +630,134 @@ impl GitTool {
                     json!({"current": current, "branches": branches, "truncated": out.truncated}),
                 ))
             }
-            BranchAction::Create | BranchAction::Switch => {
-                let name = i
-                    .name
-                    .as_deref()
-                    .ok_or_else(|| invalid("name is required for create and switch"))?;
-                check_branch_chars(name)?;
-                if i.action == BranchAction::Switch
-                    && (i.start_point.is_some() || i.switch.is_some())
-                {
-                    return Err(invalid(
-                        "start_point and switch only apply to action=create",
-                    ));
+            BranchAction::Create | BranchAction::Switch => self.change_branch(i).await,
+        }
+    }
+
+    /// `create` and `switch`: a change, so the embedder is told before and after.
+    async fn change_branch(&self, i: BranchIn) -> Result<ToolOutput, ToolError> {
+        let name = i
+            .name
+            .as_deref()
+            .ok_or_else(|| invalid("name is required for create and switch"))?;
+        check_branch_chars(name)?;
+        if i.action == BranchAction::Switch && (i.start_point.is_some() || i.switch.is_some()) {
+            return Err(invalid(
+                "start_point and switch only apply to action=create",
+            ));
+        }
+        if let Some(r) = &i.start_point {
+            check_rev(r)?;
+        }
+        let repo = self.repo_dir(i.repo.as_deref(), true).await?;
+        let dir = &repo.dir;
+        self.git
+            .run(
+                dir,
+                &[s("check-ref-format"), s("--branch"), s(name)],
+                None,
+                4096,
+            )
+            .await
+            .map_err(|_| invalid(format!("invalid branch name: {name:?}")))?;
+        // A switch rewrites the work tree; git itself refuses to overwrite changes that are
+        // not committed, so nothing needs an undo copy: the embedder only marks the files.
+        let switches = i.action == BranchAction::Switch || i.switch == Some(true);
+        let tree = switches.then_some(repo.top.as_path());
+        let scope = self.begin("git_branch", &repo, &[], 0)?;
+        let result = async {
+            if i.action == BranchAction::Create {
+                let mut args = vec![s("branch"), s(name)];
+                if let Some(r) = i.start_point.clone() {
+                    args.push(r);
                 }
-                if let Some(r) = &i.start_point {
-                    check_rev(r)?;
-                }
-                let dir = self.repo_dir(i.repo.as_deref()).await?;
-                self.git
-                    .run(
-                        &dir,
-                        &[s("check-ref-format"), s("--branch"), s(name)],
-                        None,
-                        4096,
-                    )
-                    .await
-                    .map_err(|_| invalid(format!("invalid branch name: {name:?}")))?;
-                if i.action == BranchAction::Create {
-                    let mut args = vec![s("branch"), s(name)];
-                    if let Some(r) = i.start_point {
-                        args.push(r);
-                    }
-                    self.git.run(&dir, &args, None, 4096).await?;
-                    if i.switch == Some(true) {
-                        self.git
-                            .run(&dir, &[s("switch"), s(name)], None, 4096)
-                            .await?;
-                    }
-                    let switched = i.switch == Some(true);
-                    Ok(json_out(json!({"created": name, "switched": switched})))
-                } else {
+                self.git.run(dir, &args, None, 4096).await?;
+                if i.switch == Some(true) {
                     self.git
-                        .run(&dir, &[s("switch"), s(name)], None, 4096)
+                        .run(dir, &[s("switch"), s(name)], None, 4096)
                         .await?;
-                    Ok(json_out(json!({"switched_to": name})))
                 }
+                Ok(json!({"created": name, "switched": i.switch == Some(true)}))
+            } else {
+                self.git
+                    .run(dir, &[s("switch"), s(name)], None, 4096)
+                    .await?;
+                Ok(json!({"switched_to": name}))
             }
         }
+        .await;
+        let mut out = match result {
+            Ok(out) => out,
+            Err(e) => {
+                // The work tree may have changed before git failed: close the books anyway.
+                let _ = Self::end(scope, false, tree, &mut Value::Null);
+                return Err(e);
+            }
+        };
+        Self::end(scope, true, tree, &mut out)?;
+        Ok(json_out(out))
+    }
+
+    /// The files a commit of `paths` would record: changed in the work tree, new, deleted or
+    /// already staged, as paths relative to the top level.
+    async fn commit_candidates(
+        &self,
+        repo: &Repo,
+        paths: &[String],
+    ) -> Result<BTreeSet<String>, ToolError> {
+        let mut names = BTreeSet::new();
+        for fixed in [
+            &[
+                "ls-files",
+                "-z",
+                "--full-name",
+                "-m",
+                "-d",
+                "-o",
+                "--exclude-standard",
+                "--",
+            ][..],
+            &[
+                "diff",
+                "--cached",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--",
+            ][..],
+        ] {
+            let mut args: Vec<String> = fixed.iter().map(|a| s(a)).collect();
+            args.extend(paths.iter().cloned());
+            let out = self
+                .git
+                .run(&repo.dir, &args, None, MAX_LISTING_BYTES)
+                .await?;
+            if out.truncated {
+                return Err(invalid(
+                    "too many changed files under these paths; name fewer of them",
+                ));
+            }
+            names.extend(
+                out.stdout
+                    .split('\0')
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned),
+            );
+        }
+        Ok(names)
+    }
+
+    /// The git files a commit rewrites: the index, HEAD and the branch HEAD points at.
+    fn control_files(repo: &Repo) -> Vec<PathBuf> {
+        let mut files = vec![repo.git_dir.join("index"), repo.git_dir.join("HEAD")];
+        if let Ok(head) = std::fs::read_to_string(repo.git_dir.join("HEAD"))
+            && let Some(name) = head.trim().strip_prefix("ref: ")
+            && name.starts_with("refs/")
+            && !name.split('/').any(|part| part.is_empty() || part == "..")
+        {
+            files.push(join_rel(&repo.common_dir, name));
+        }
+        files
     }
 
     async fn commit(&self, i: CommitIn) -> Result<ToolOutput, ToolError> {
@@ -531,6 +765,15 @@ impl GitTool {
             return Err(invalid("paths must list at least one path to commit"));
         }
         check_paths(&i.paths)?;
+        if i.paths.iter().any(|p| {
+            Path::new(p)
+                .components()
+                .all(|c| matches!(c, Component::CurDir))
+        }) {
+            return Err(invalid(
+                "name the files or folders to commit; \".\" (the whole folder) is not accepted",
+            ));
+        }
         let message = i.message.trim();
         if message.is_empty() {
             return Err(invalid("message is empty"));
@@ -538,61 +781,92 @@ impl GitTool {
         if message.len() > MAX_MESSAGE_BYTES || message.contains('\0') {
             return Err(invalid("message is too long or contains NUL"));
         }
-        let dir = self.repo_dir(i.repo.as_deref()).await?;
-        let mut add = vec![s("add"), s("--")];
-        add.extend(i.paths.iter().cloned());
-        self.git.run(&dir, &add, None, 64 * 1024).await?;
-        let mut commit = vec![
-            s("commit"),
-            s("--no-verify"),
-            s("--no-gpg-sign"),
-            s("-F"),
-            s("-"),
-            s("--only"),
-            s("--"),
-        ];
-        commit.extend(i.paths);
-        self.git
-            .run(&dir, &commit, Some(message), 64 * 1024)
-            .await?;
-        let head = self
-            .git
-            .run(
-                &dir,
-                &[s("log"), s("-1"), s("--format=%H%x1f%s")],
-                None,
-                64 * 1024,
-            )
-            .await?;
+        let repo = self.repo_dir(i.repo.as_deref(), true).await?;
+        self.vet_paths(&repo, &i.paths)?;
+        // Look at what would be committed BEFORE anything is staged: a protected file inside a
+        // folder (or already staged) stops the whole commit, nothing changes.
+        let candidates = self.commit_candidates(&repo, &i.paths).await?;
+        let mut added: u64 = 0;
+        for (n, rel) in candidates.iter().enumerate() {
+            if self.hidden(&repo, rel) {
+                return Err(ToolError::PermissionDenied(format!(
+                    "{rel} is a protected file (credentials or tool settings) and is not committed; nothing was staged"
+                )));
+            }
+            if n < MAX_SIZED_FILES
+                && let Ok(meta) = std::fs::symlink_metadata(join_rel(&repo.top, rel))
+                && meta.is_file()
+            {
+                added = added.saturating_add(meta.len());
+            }
+        }
+        let scope = self.begin("git_commit", &repo, &Self::control_files(&repo), added)?;
+        let run = async {
+            let mut add = vec![s("add"), s("--")];
+            add.extend(i.paths.iter().cloned());
+            self.git.run(&repo.dir, &add, None, 64 * 1024).await?;
+            let mut commit = vec![
+                s("commit"),
+                s("--no-verify"),
+                s("--no-gpg-sign"),
+                s("-F"),
+                s("-"),
+                s("--only"),
+                s("--"),
+            ];
+            commit.extend(i.paths.iter().cloned());
+            self.git
+                .run(&repo.dir, &commit, Some(message), 64 * 1024)
+                .await?;
+            self.git
+                .run(
+                    &repo.dir,
+                    &[s("log"), s("-1"), s("--format=%H%x1f%s")],
+                    None,
+                    64 * 1024,
+                )
+                .await
+        }
+        .await;
+        let head = match run {
+            Ok(head) => head,
+            Err(e) => {
+                let _ = Self::end(scope, false, None, &mut Value::Null);
+                return Err(e);
+            }
+        };
         let line = head.stdout.trim();
         let (hash, subject) = line.split_once('\u{1f}').unwrap_or((line, ""));
-        Ok(json_out(json!({"commit": hash, "subject": subject})))
+        let mut out = json!({"commit": hash, "subject": subject});
+        Self::end(scope, true, None, &mut out)?;
+        Ok(json_out(out))
     }
 
     async fn show(&self, ctx: &ToolContext, i: ShowIn) -> Result<ToolOutput, ToolError> {
         check_paths(&i.paths)?;
         let rev = i.rev.unwrap_or_else(|| "HEAD".to_string());
         check_rev(&rev)?;
-        let dir = self.repo_dir(i.repo.as_deref()).await?;
+        let repo = self.repo_dir(i.repo.as_deref(), false).await?;
+        self.vet_paths(&repo, &i.paths)?;
+        self.require_object(&repo.dir, &rev, "commit").await?;
+        let stat = i.stat == Some(true);
         let mut args = vec![
             s("show"),
             s("--no-color"),
             s("--no-ext-diff"),
             s("--no-textconv"),
+            s("--no-renames"),
         ];
-        if i.stat == Some(true) {
-            args.push(s("--stat"));
+        if stat {
+            args.push(s("--stat=4096,2048"));
         }
         args.push(rev);
         args.push(s("--"));
         args.extend(i.paths);
         let cap = cap_for(ctx, i.max_bytes);
-        let out = self.git.run(&dir, &args, None, cap).await?;
-        Ok(ToolOutput::text(capped_text(
-            out.stdout,
-            cap,
-            out.truncated,
-        )))
+        let out = self.git.run(&repo.dir, &args, None, cap).await?;
+        let shown = filter_diff(&out.stdout, stat, &|rel| self.hidden(&repo, rel)).into_text();
+        Ok(ToolOutput::text(capped_text(shown, cap, out.truncated)))
     }
 }
 

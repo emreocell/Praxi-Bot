@@ -90,7 +90,7 @@ use tool_registry::{
 };
 
 pub use common::Reply;
-pub use convert::ConvertConfig;
+pub use convert::{ConvertConfig, default_convert_output, default_preview_dir};
 
 /// Extract an already-authorized PDF or DOCX snapshot without reopening a path.
 /// The caller owns path authorization and supplies a display label, never an
@@ -417,22 +417,39 @@ pub struct DocToolsConfig {
     pub convert: ConvertConfig,
 }
 
-type GuardFn = dyn Fn(&str) -> Result<(), String> + Send + Sync + std::panic::RefUnwindSafe;
+type GuardFn = dyn Fn(&str, u64) -> Result<(), String> + Send + Sync + std::panic::RefUnwindSafe;
 
 /// A path check supplied by the embedder; `Err` carries the refusal reason.
 #[derive(Clone)]
 pub struct WriteGuard(Arc<GuardFn>);
 
 impl WriteGuard {
-    /// Wrap a check.
+    /// Wrap a check of the path alone.
     pub fn new(
         check: impl Fn(&str) -> Result<(), String> + Send + Sync + std::panic::RefUnwindSafe + 'static,
+    ) -> Self {
+        Self(Arc::new(move |path, _bytes| check(path)))
+    }
+
+    /// Wrap a check that also sees how many bytes the write adds to the folder (the new size
+    /// less the size of the file it replaces, `0` for a read check), so a workspace quota is
+    /// judged against the real size and not only against what is already there.
+    pub fn sized(
+        check: impl Fn(&str, u64) -> Result<(), String>
+        + Send
+        + Sync
+        + std::panic::RefUnwindSafe
+        + 'static,
     ) -> Self {
         Self(Arc::new(check))
     }
 
     pub(crate) fn check(&self, path: &str) -> Result<(), String> {
-        (self.0)(path)
+        (self.0)(path, 0)
+    }
+
+    pub(crate) fn check_sized(&self, path: &str, added_bytes: u64) -> Result<(), String> {
+        (self.0)(path, added_bytes)
     }
 }
 

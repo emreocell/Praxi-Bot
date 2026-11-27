@@ -560,6 +560,19 @@ impl Shared {
             }
             return (d, None);
         }
+        // A commit (under the owner's identity) or a branch switch (it rewrites work tree files)
+        // after the run read untrusted content asks on every level but the owner's Full, where
+        // only money asks: the lane, a plain policy allow and a remembered grant sit below this.
+        // Like the egress gate, a standing "always" does not waive it.
+        if taint::git_mutation(name, input)
+            && ctx.profile.permissions.mode() != AutonomyMode::Full
+            && ctx.taint.lock().exposure.untrusted
+        {
+            if d == Decision::Allow {
+                d = Decision::ask();
+            }
+            return (d, None);
+        }
         // A read of the user's computer asks once per run and family, whatever
         // the mode, unless the owner remembered it for this bot and computer.
         let pc_read_pending = effect == Effect::Read

@@ -21,7 +21,8 @@
     "headings": [
       "Interactive terminal sessions",
       "Memory tools",
-      "Clock and calculator"
+      "Clock and calculator",
+      "Documents and code repositories"
     ],
     "summary": "Every bot has a small built-in scratchpad between runs: a plan for a long task, a checklist, facts it will need tomorrow. Tools: notes_read (list notes, read one, or search) and notes_write (replace,…"
   },

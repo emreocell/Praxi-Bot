@@ -86,12 +86,15 @@ pub fn run_read(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> 
     }
     let bytes = read_limited(cfg, &i.path)?;
     crate::check_zip_limits(&bytes)?;
+    let all = read_slides(&bytes)?;
+    // Ranges are clamped to the highest slide number the file really has, so a request such
+    // as `1-4294967295` selects the existing slides instead of expanding into billions.
+    let highest = all.iter().map(|(n, _)| *n).max().unwrap_or(0);
     let wanted = i
         .slides
         .as_deref()
-        .map(|spec| parse_ranges(spec, u32::MAX))
+        .map(|spec| parse_ranges(spec, highest))
         .transpose()?;
-    let all = read_slides(&bytes)?;
     let total = all.len();
     let picked: Vec<&(u32, String)> = all
         .iter()
@@ -163,6 +166,7 @@ fn slide_text(xml: &[u8]) -> Result<String, ToolError> {
             .map_err(|e| exec(format!("invalid slide xml: {e}")))?
         {
             Event::Eof => break,
+            Event::DocType(_) => return Err(crate::ooxml::doctype_refused()),
             Event::Start(e) if e.local_name().as_ref() == "t" => in_t = true,
             Event::End(e) => match e.local_name().as_ref() {
                 "t" => in_t = false,
@@ -252,5 +256,68 @@ mod tests {
         let wrong = dir.path().join("deck.ppt");
         std::fs::write(&wrong, deck(&[(1, "x")])).unwrap();
         assert!(run_read(&cfg, json!({"path": wrong})).is_err());
+    }
+
+    fn numbers(reply: &Reply) -> Vec<Value> {
+        reply.data["slides"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["number"].clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_huge_slide_range_returns_only_the_slides_that_exist() {
+        // `1-4294967295` used to expand into a 16 GiB vector and abort the daemon.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deck.pptx");
+        std::fs::write(&path, deck(&[(1, "Title"), (2, "Agenda"), (3, "Close")])).unwrap();
+        let cfg = DocToolsConfig::default();
+        let repeated = vec!["1-4294967295"; 500].join(",");
+        for (spec, expected) in [
+            ("1-4294967295", vec![json!(1), json!(2), json!(3)]),
+            (repeated.as_str(), vec![json!(1), json!(2), json!(3)]),
+            ("2-4294967295", vec![json!(2), json!(3)]),
+            ("4-4294967295", vec![]),
+        ] {
+            let r = run_read(&cfg, json!({"path": path, "slides": spec})).unwrap();
+            assert_eq!(numbers(&r), expected, "{spec}");
+            assert_eq!(r.data["slide_count"], 3);
+        }
+        // Slide numbers are file numbers: the clamp is the highest one, not the slide count.
+        let sparse = dir.path().join("sparse.pptx");
+        std::fs::write(&sparse, deck(&[(3, "Three"), (900, "Far")])).unwrap();
+        let r = run_read(&cfg, json!({"path": sparse, "slides": "1-4294967295"})).unwrap();
+        assert_eq!(numbers(&r), [json!(3), json!(900)]);
+        // A deck numbered past the selection cap is refused cleanly rather than expanded; one
+        // slide can still be asked for by number.
+        let far = dir.path().join("far.pptx");
+        std::fs::write(&far, deck(&[(1, "One"), (4_000_000_000, "Far")])).unwrap();
+        assert!(run_read(&cfg, json!({"path": far, "slides": "1-4294967295"})).is_err());
+        let r = run_read(&cfg, json!({"path": far, "slides": "4000000000"})).unwrap();
+        assert_eq!(numbers(&r), [json!(4_000_000_000_u32)]);
+    }
+
+    #[test]
+    fn a_doctype_in_a_slide_is_refused() {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(
+            "ppt/slides/slide1.xml",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        write!(
+            zip,
+            "<!DOCTYPE p:sld [<!ENTITY a \"b\">]><p:sld xmlns:a=\"a\" xmlns:p=\"p\"><a:p><a:r><a:t>x</a:t></a:r></a:p></p:sld>"
+        )
+        .unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+        let err = plain_text(&bytes, 10_000).unwrap_err();
+        assert!(err.to_string().contains("DOCTYPE is not allowed"), "{err}");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doctype.pptx");
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(run_read(&DocToolsConfig::default(), json!({"path": path})).is_err());
     }
 }

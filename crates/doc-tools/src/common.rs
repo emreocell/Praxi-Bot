@@ -91,10 +91,19 @@ pub(crate) fn write_file(
             cfg.max_output_bytes
         )));
     }
-    if let Some(guard) = &cfg.write_guard {
-        guard.check(path).map_err(exec)?;
-    }
     let p = Path::new(path);
+    if let Some(guard) = &cfg.write_guard {
+        // The path first (nothing is stat-ed before it is vetted), then what the write adds:
+        // its size less the file it replaces.
+        guard.check(path).map_err(exec)?;
+        let existing = std::fs::metadata(p)
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .map_or(0, |m| m.len());
+        guard
+            .check_sized(path, (bytes.len() as u64).saturating_sub(existing))
+            .map_err(exec)?;
+    }
     if p.is_dir() {
         return Err(exec(format!("{path} is a directory")));
     }
@@ -125,13 +134,18 @@ pub(crate) fn replace_file(
             cfg.max_output_bytes
         )));
     }
+    let p = Path::new(path);
     if let Some(guard) = &cfg.write_guard {
         guard.check(path).map_err(exec)?;
     }
-    let p = Path::new(path);
     let meta = std::fs::metadata(p).map_err(|e| exec(format!("cannot stat {path}: {e}")))?;
     if !meta.is_file() {
         return Err(exec(format!("{path} is not a file")));
+    }
+    if let Some(guard) = &cfg.write_guard {
+        guard
+            .check_sized(path, (bytes.len() as u64).saturating_sub(meta.len()))
+            .map_err(exec)?;
     }
     let dir = p
         .parent()
@@ -212,10 +226,15 @@ pub(crate) fn md_table(rows: &[Vec<String>], header: bool, max_rows: usize) -> S
     out
 }
 
+/// Most distinct items a range spec may select (after clamping to the caller's limit).
+pub(crate) const MAX_RANGE_ITEMS: u32 = 100_000;
+
 /// Parse a 1-based inclusive page spec such as `"1-3,7"` into a sorted,
-/// deduplicated list, clamping upper bounds to `limit`.
+/// deduplicated list, clamping upper bounds to `limit`. A selection of more than
+/// [`MAX_RANGE_ITEMS`] distinct items is an error: the spans are merged and counted before
+/// anything is expanded, so `1-4294967295` costs nothing.
 pub(crate) fn parse_ranges(spec: &str, limit: u32) -> Result<Vec<u32>, ToolError> {
-    let mut out = Vec::new();
+    let mut spans: Vec<(u32, u32)> = Vec::new();
     for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
         let (a, b) = match part.split_once('-') {
             Some((a, b)) => (a.trim(), b.trim()),
@@ -230,16 +249,80 @@ pub(crate) fn parse_ranges(spec: &str, limit: u32) -> Result<Vec<u32>, ToolError
         if a == 0 || b < a {
             return Err(invalid(format!("bad range '{part}'")));
         }
-        out.extend(a..=b.min(limit));
+        let b = b.min(limit);
+        if a <= b {
+            spans.push((a, b));
+        }
     }
-    out.sort_unstable();
-    out.dedup();
-    Ok(out)
+    spans.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::new();
+    for (a, b) in spans {
+        match merged.last_mut() {
+            Some((_, end)) if a <= end.saturating_add(1) => *end = (*end).max(b),
+            _ => merged.push((a, b)),
+        }
+    }
+    let total: u64 = merged.iter().map(|(a, b)| u64::from(b - a) + 1).sum();
+    if total > u64::from(MAX_RANGE_ITEMS) {
+        return Err(invalid(format!(
+            "the selection covers {total} items; ask for at most {MAX_RANGE_ITEMS} at a time"
+        )));
+    }
+    Ok(merged.into_iter().flat_map(|(a, b)| a..=b).collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A guard that remembers the sizes it was asked about and refuses writes over `limit`.
+    fn sized_guard(
+        limit: u64,
+    ) -> (
+        crate::WriteGuard,
+        std::sync::Arc<std::sync::Mutex<Vec<u64>>>,
+    ) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let guard = crate::WriteGuard::sized(move |_, added| {
+            log.lock().unwrap().push(added);
+            if added > limit {
+                return Err(format!("{added} bytes is over the {limit} byte limit"));
+            }
+            Ok(())
+        });
+        (guard, seen)
+    }
+
+    #[test]
+    fn writers_tell_the_guard_what_they_really_add_and_stop_when_it_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.bin");
+        let path = path.to_str().unwrap();
+        let (guard, seen) = sized_guard(100);
+        let cfg = DocToolsConfig {
+            write_guard: Some(guard),
+            ..DocToolsConfig::default()
+        };
+        // A new file adds all of its bytes; one that replaces another adds the difference, and
+        // a smaller replacement adds nothing.
+        write_file(&cfg, path, &[7; 100], false).unwrap();
+        write_file(&cfg, path, &[7; 250], true).unwrap_err();
+        write_file(&cfg, path, &[7; 120], true).unwrap();
+        replace_file(&cfg, path, &[7; 60]).unwrap();
+        let seen = seen.lock().unwrap().clone();
+        assert!(seen.contains(&100) && seen.contains(&20) && seen.contains(&150));
+        assert_eq!(seen.iter().max(), Some(&150), "{seen:?}");
+        // A refused write left the file as it was.
+        assert_eq!(std::fs::read(path).unwrap(), vec![7; 60]);
+        // A plain path guard still works and is never given a size.
+        let cfg = DocToolsConfig {
+            write_guard: Some(crate::WriteGuard::new(|_| Err("no".into()))),
+            ..DocToolsConfig::default()
+        };
+        assert!(write_file(&cfg, path, &[1; 10], true).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), vec![7; 60]);
+    }
 
     #[test]
     fn ranges_parse() {
@@ -247,6 +330,46 @@ mod tests {
         assert_eq!(parse_ranges("2-9", 4).unwrap(), vec![2, 3, 4]);
         assert!(parse_ranges("0", 5).is_err());
         assert!(parse_ranges("a", 5).is_err());
+    }
+
+    #[test]
+    fn a_huge_range_is_refused_not_expanded() {
+        // `1-4294967295` once expanded into a 16 GiB vector and aborted the process.
+        assert!(parse_ranges("1-4294967295", u32::MAX).is_err());
+        assert!(parse_ranges("1-200000", u32::MAX).is_err());
+        let max = MAX_RANGE_ITEMS as usize;
+        assert_eq!(
+            parse_ranges(&format!("1-{max}"), u32::MAX).unwrap().len(),
+            max
+        );
+        assert!(parse_ranges(&format!("1-{}", max + 1), u32::MAX).is_err());
+    }
+
+    #[test]
+    fn the_cap_counts_distinct_items_across_every_part_of_the_spec() {
+        // Disjoint parts add up; overlapping and repeated parts do not.
+        assert!(parse_ranges("1-60000,70000-130000", u32::MAX).is_err());
+        let repeated = vec!["1-4294967295"; 1000].join(",");
+        assert!(parse_ranges(&repeated, u32::MAX).is_err());
+        let same = vec!["1-100000"; 50_000].join(",");
+        assert_eq!(parse_ranges(&same, u32::MAX).unwrap().len(), 100_000);
+        assert_eq!(
+            parse_ranges("1-5,3-8,9", 100).unwrap(),
+            (1..=9).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn ranges_past_the_limit_select_nothing_without_expanding() {
+        let none = Vec::<u32>::new();
+        assert_eq!(parse_ranges("5-4294967295", 3).unwrap(), none);
+        assert_eq!(parse_ranges("4000000000-4294967295", 10).unwrap(), none);
+        assert_eq!(parse_ranges("1-4294967295", 4).unwrap(), vec![1, 2, 3, 4]);
+        assert_eq!(parse_ranges("1-5", 0).unwrap(), none);
+        // Still rejected as malformed, whatever the limit.
+        assert!(parse_ranges("0-5", u32::MAX).is_err());
+        assert!(parse_ranges("9-3", u32::MAX).is_err());
+        assert!(parse_ranges("1-x", u32::MAX).is_err());
     }
 
     #[test]

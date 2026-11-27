@@ -43,7 +43,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (width, height) = img.dimensions();
     println!("Loaded {image_path} ({width}x{height})");
 
-    let model_dir = OcrModelPaths::default_data_dir();
+    let model_dir = OcrModelPaths::default_data_dir()
+        .ok_or("no absolute per-user data directory for the OCR models")?;
     let engine_result = if download_models {
         println!(
             "Ensuring ocrs models are downloaded in {}...",

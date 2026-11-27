@@ -2646,10 +2646,20 @@
         "failed": "Auf dem Computer wurde nicht getippt",
         "running": "Tippt auf dem Computer"
       },
+      "doc_edit": {
+        "done": "Ein Dokument aktualisiert",
+        "failed": "Ein Dokument konnte nicht aktualisiert werden",
+        "running": "Aktualisiert ein Dokument"
+      },
       "doc_read": {
         "done": "Ein Dokument gelesen",
         "failed": "Ein Dokument konnte nicht gelesen werden",
         "running": "Liest ein Dokument"
+      },
+      "doc_write": {
+        "done": "Ein Dokument geschrieben",
+        "failed": "Ein Dokument konnte nicht geschrieben werden",
+        "running": "Schreibt ein Dokument"
       },
       "email_draft": {
         "done": "Eine E-Mail entworfen",
@@ -2710,6 +2720,16 @@
         "done": "Ein Werkzeug benutzt",
         "failed": "Werkzeug nicht benutzt",
         "running": "Benutzt ein Werkzeug"
+      },
+      "git_change": {
+        "done": "Ein Code-Repository geändert",
+        "failed": "Ein Code-Repository wurde nicht geändert",
+        "running": "Ändert ein Code-Repository"
+      },
+      "git_read": {
+        "done": "Ein Code-Repository angesehen",
+        "failed": "Ein Code-Repository konnte nicht angesehen werden",
+        "running": "Sieht sich ein Code-Repository an"
       },
       "knowledge_search": {
         "done": "Wissensquellen durchsucht",
