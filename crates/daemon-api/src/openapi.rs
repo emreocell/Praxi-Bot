@@ -803,6 +803,7 @@ impl Modify for Security {
         mcp::McpTransportKind,
         mcp::McpTransportObject,
         mcp::SetSecret,
+        mcp_import::BundleApproval,
         mcp_server::CreateMcpToken,
         mcp_server::ExportedMcpTool,
         mcp_server::McpCallInput,

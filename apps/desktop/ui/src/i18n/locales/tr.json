@@ -1054,7 +1054,7 @@
       "installDisabled": "Kapalı olarak kur",
       "installFailed": "Praxi sunucuyu kuramadı. Ayarları kontrol edip yeniden dene.",
       "installed": "{{name}} kuruldu ve şu anda kapalı. Yönet menüsünden etkinleştirebilirsin.",
-      "localAccess": "Program etkinleştirildiğinde demonun işletim sistemi izinleriyle dosyalara, cihazlara ve ağa erişebilir. Yukarıda listelenen tüm ortam değişkenlerini okuyabilir.",
+      "localAccess": "Program etkinleştirildiğinde Praxi’nin işletim sistemi izinleriyle çalışır. Dosyalara, cihazlara ve ağa erişebilir. Yukarıda listelenen ortam değişkenlerini okuyabilir.",
       "multiplePaths": "Sunucunun çalışacağı bilgisayardaki tam yolları her satıra bir tane gelecek şekilde gir.",
       "namespaceUnknown": "Yayıncı ad alanı doğrulaması bulunamadı",
       "namespaceVerified": "Yayıncı ad alanını kayıt defteri doğruladı",

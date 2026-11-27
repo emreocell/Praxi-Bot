@@ -18,8 +18,8 @@ function importError(error: unknown, fallback: "searchFailed" | "inspectFailed" 
   if (error instanceof ApiError) {
     if (error.status === 403) return "apps.imports.ownerRequired";
     if (error.status === 413) return "apps.imports.fileTooLarge";
-    if (error.code === "registry_changed") return "apps.imports.registryChanged";
-    if (error.code === "bundle_busy") return "apps.imports.bundleBusy";
+    if (error.code === "version_conflict") return "apps.imports.registryChanged";
+    if (error.code === "busy") return "apps.imports.bundleBusy";
     if (error.code === "conflict") return "apps.imports.alreadyInstalled";
   }
   return `apps.imports.${fallback}` as const;

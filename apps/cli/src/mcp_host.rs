@@ -467,7 +467,7 @@ impl McpHost {
         Ok(())
     }
 
-    fn publish_import(&self, cfg: McpServerConfig) -> Result<McpServerDto, McpControlError> {
+    fn publish_import(&self, cfg: &McpServerConfig) -> Result<McpServerDto, McpControlError> {
         let name = &cfg.id;
         if self.configs.lock().contains_key(name) {
             return Err(McpControlError::Conflict(format!(
@@ -483,7 +483,7 @@ impl McpHost {
             return Err(error);
         }
         self.announce(name);
-        Ok(self.dto(&cfg))
+        Ok(self.dto(cfg))
     }
 
     // Called with the sign-in and config mutation locks held. Keep a disabled
@@ -1137,7 +1137,7 @@ impl McpControl for McpHost {
                 &input.values.0,
                 &self.data_dir,
                 store,
-                |config| self.publish_import(config),
+                |config| self.publish_import(&config),
             )
         })
         .await
@@ -1158,7 +1158,7 @@ impl McpControl for McpHost {
                 .as_deref()
                 .ok_or_else(|| invalid("no MCP secret store is configured"))?;
             entry.install_with(source, &values.0, store, |config| {
-                self.publish_import(config)
+                self.publish_import(&config)
             })
         })
         .await
@@ -1710,9 +1710,9 @@ mod tests {
             .unwrap();
         host.remove(&installed.name).await.unwrap();
         host.remove(&registry_server.name).await.unwrap();
-        assert!(host.list().is_empty());
+        assert_eq!(host.list().len(), 0);
         assert!(!unpacked.exists());
-        assert!(store.list_names().unwrap().is_empty());
+        assert_eq!(store.list_names().unwrap(), Vec::<String>::new());
         host.shutdown().await;
     }
 

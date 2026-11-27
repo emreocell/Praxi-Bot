@@ -597,6 +597,33 @@ fn check_digest(actual: &str, expected: &str, message: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_manifest(manifest: &Manifest) -> Result<()> {
+    if manifest.compatibility.as_ref().is_some_and(|compat| {
+        !compat.platforms.is_empty() && !compat.platforms.iter().any(|p| p == current_platform())
+    }) {
+        return Err(err("this bundle does not support this operating system"));
+    }
+    if !matches!(
+        manifest.manifest_version.as_str(),
+        "0.1" | "0.2" | "0.3" | "0.4"
+    ) {
+        return Err(err("the bundle manifest version is unsupported"));
+    }
+    if manifest.version.len() > 128
+        || semver::Version::parse(&manifest.version).is_err()
+        || manifest.description.trim().is_empty()
+        || manifest
+            .author
+            .as_ref()
+            .is_none_or(|author| author.name.trim().is_empty())
+    {
+        return Err(err(
+            "the bundle manifest needs a valid version, description and author",
+        ));
+    }
+    Ok(())
+}
+
 fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<PreparedBundle<'a>> {
     if bytes.len() > MAX_BUNDLE_BYTES {
         return Err(err("the bundle is larger than 100 MB"));
@@ -611,23 +638,7 @@ fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<Prepar
     }
     let (zip, archive) = open_archive(zip_bytes)?;
     let m = archive.manifest;
-    if m.compatibility.as_ref().is_some_and(|c| {
-        !c.platforms.is_empty() && !c.platforms.iter().any(|p| p == current_platform())
-    }) {
-        return Err(err("this bundle does not support this operating system"));
-    }
-    if !matches!(m.manifest_version.as_str(), "0.1" | "0.2" | "0.3" | "0.4") {
-        return Err(err("the bundle manifest version is unsupported"));
-    }
-    if m.version.len() > 128
-        || semver::Version::parse(&m.version).is_err()
-        || m.description.trim().is_empty()
-        || m.author.as_ref().is_none_or(|a| a.name.trim().is_empty())
-    {
-        return Err(err(
-            "the bundle manifest needs a valid version, description and author",
-        ));
-    }
+    validate_manifest(&m)?;
     let id = id_from_name(&m.name)?;
     let (runtime, launch) = pick_launch(&m, &archive.paths)?;
     let args = launch.args.as_deref().unwrap_or_default();
@@ -1385,7 +1396,7 @@ mod tests {
             ("token".to_string(), "k2".to_string()),
         ]);
         assert!(install(&b, &sha256_hex(&b), &values, dir.path(), &store).is_err());
-        assert!(store.inner.list_names().unwrap().is_empty());
+        assert_eq!(store.inner.list_names().unwrap(), Vec::<String>::new());
         assert!(!dir.path().join("mcp/weather").exists());
     }
 
@@ -1504,18 +1515,19 @@ mod tests {
                 let McpTransport::Stdio { args, .. } = cfg.transport else {
                     panic!()
                 };
+                assert_eq!(args.len(), 3);
                 assert!(
                     args[1..]
                         .iter()
                         .zip(&paths)
                         .all(|(arg, path)| Path::new(arg) == path)
                 );
-                assert!(!store.list_names().unwrap().is_empty());
+                assert_ne!(store.list_names().unwrap(), Vec::<String>::new());
                 Err::<(), _>(McpError::Store("fixture configuration write failed".into()))
             },
         );
         assert!(result.is_err());
-        assert!(store.list_names().unwrap().is_empty());
+        assert_eq!(store.list_names().unwrap(), Vec::<String>::new());
         assert!(!dir.path().join("mcp/weather").exists());
     }
 }

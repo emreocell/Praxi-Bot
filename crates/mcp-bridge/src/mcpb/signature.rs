@@ -62,7 +62,7 @@ fn eocd_comment(bytes: &[u8], trailing: usize) -> Option<&[u8]> {
         .rev()
         .find_map(|(offset, record)| {
             let comment = &tail[offset + EOCD..];
-            (record.starts_with(b"PK\\x05\\x06")
+            (record.starts_with(b"PK\x05\x06")
                 && comment.len() + trailing
                     == usize::from(u16::from_le_bytes([record[20], record[21]])))
             .then_some(comment)

@@ -125,7 +125,7 @@ fn upload_slot() -> Result<tokio::sync::SemaphorePermit<'static>, ApiError> {
     BUNDLE_UPLOAD.try_acquire().map_err(|_| {
         ApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
-            "bundle_busy",
+            "busy",
             "another bundle is being processed",
         )
     })
@@ -134,7 +134,7 @@ fn upload_slot() -> Result<tokio::sync::SemaphorePermit<'static>, ApiError> {
 fn too_large() -> ApiError {
     ApiError::new(
         StatusCode::PAYLOAD_TOO_LARGE,
-        "bundle_too_large",
+        "payload_too_large",
         "bundle upload exceeds the size limit",
     )
 }
@@ -209,7 +209,7 @@ pub(crate) async fn install_registry(
 fn registry_changed() -> ApiError {
     ApiError::new(
         StatusCode::CONFLICT,
-        "registry_changed",
+        "version_conflict",
         "the approved registry version or source is no longer available",
     )
 }
@@ -257,7 +257,7 @@ pub(crate) async fn inspect_bundle(
     Ok(Json(card))
 }
 
-fn multipart_error(error: axum::extract::multipart::MultipartError) -> ApiError {
+fn multipart_error(error: &axum::extract::multipart::MultipartError) -> ApiError {
     if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
         too_large()
     } else {
@@ -267,7 +267,11 @@ fn multipart_error(error: axum::extract::multipart::MultipartError) -> ApiError 
 
 async fn read_part(mut field: Field<'_>, max: usize) -> Result<Vec<u8>, ApiError> {
     let mut bytes = Vec::new();
-    while let Some(chunk) = field.chunk().await.map_err(multipart_error)? {
+    while let Some(chunk) = field
+        .chunk()
+        .await
+        .map_err(|error| multipart_error(&error))?
+    {
         if chunk.len() > max - bytes.len() {
             return Err(too_large());
         }
@@ -286,15 +290,19 @@ pub(crate) async fn install_bundle(
     request: Request,
 ) -> Result<(StatusCode, Json<McpServerDto>), ApiError> {
     let host = mcp(&state)?;
-    let _slot = upload_slot()?;
+    let slot = upload_slot()?;
     let mut form = Multipart::from_request(request, &state)
         .await
         .map_err(|_| ApiError::bad_request("invalid bundle upload"))?;
     let (mut bundle, mut approval) = (None, None);
-    while let Some(field) = form.next_field().await.map_err(multipart_error)? {
+    while let Some(field) = form
+        .next_field()
+        .await
+        .map_err(|error| multipart_error(&error))?
+    {
         match field.name() {
             Some("bundle") if bundle.is_none() => {
-                bundle = Some(read_part(field, MAX_BUNDLE_BYTES).await?)
+                bundle = Some(read_part(field, MAX_BUNDLE_BYTES).await?);
             }
             Some("approval") if approval.is_none() => {
                 let bytes = Zeroizing::new(read_part(field, MAX_APPROVAL_BYTES).await?);
@@ -310,10 +318,17 @@ pub(crate) async fn install_bundle(
     }
     let bundle = bundle.ok_or_else(|| ApiError::bad_request("bundle file is missing"))?;
     let approval = approval.ok_or_else(|| ApiError::bad_request("bundle approval is missing"))?;
-    let server = audited(&state, &actor, "mcp.bundle_install", "bundle", async {
-        Ok(host.install_bundle(bundle, approval).await?)
+    // Once the complete approved upload arrives, keep its resource slot and
+    // audit scope through the write even if the browser disconnects.
+    let server = tokio::spawn(async move {
+        let _slot = slot;
+        audited(&state, &actor, "mcp.bundle_install", "bundle", async {
+            Ok(host.install_bundle(bundle, approval).await?)
+        })
+        .await
     })
-    .await?;
+    .await
+    .map_err(|_| ApiError::internal("bundle installation failed"))??;
     Ok((StatusCode::CREATED, Json(server)))
 }
 

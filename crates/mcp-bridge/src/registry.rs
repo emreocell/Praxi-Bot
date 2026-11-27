@@ -243,19 +243,23 @@ impl RegistryEntry {
     /// # Errors
     /// No supported source at this index, or an invalid launch configuration.
     pub fn preview(&self, index: usize) -> Result<RegistryPreview> {
-        let (source, config, needed) = self.launch(index)?;
+        let (config, needed) = self.launch(index)?;
+        let (command, args, url) = match config.transport {
+            McpTransport::Stdio { command, args, .. } => (Some(command), args, None),
+            McpTransport::Http { url, .. } => (None, Vec::new(), Some(url)),
+        };
         let approval = serde_json::to_vec(&(
             &self.name,
             &self.version,
             &self.publisher,
             self.namespace_verified,
-            source,
+            &self.description,
+            &command,
+            &args,
+            &url,
+            needed,
         ))
         .map_err(|_| err("cannot prepare this registry entry"))?;
-        let (command, args, url) = match config.transport {
-            McpTransport::Stdio { command, args, .. } => (Some(command), args, None),
-            McpTransport::Http { url, .. } => (None, Vec::new(), Some(url)),
-        };
         Ok(RegistryPreview {
             approval_sha256: sha256_hex(&approval),
             command,
@@ -265,7 +269,7 @@ impl RegistryEntry {
         })
     }
 
-    fn launch(&self, index: usize) -> Result<(&Source, McpServerConfig, &[Needed])> {
+    fn launch(&self, index: usize) -> Result<(McpServerConfig, &[Needed])> {
         if !self.active {
             return Err(err("the registry entry is no longer active"));
         }
@@ -279,7 +283,7 @@ impl RegistryEntry {
             check_stdio_package_pin(&id, command, args)?;
         }
         config.validate()?;
-        Ok((source, config, needs))
+        Ok((config, needs))
     }
 
     /// Build a server config for `sources[index]`.
@@ -310,7 +314,7 @@ impl RegistryEntry {
         secrets: &dyn SecretStore,
         publish: impl FnOnce(McpServerConfig) -> std::result::Result<T, E>,
     ) -> std::result::Result<T, E> {
-        let (_, mut config, needs) = self.launch(index)?;
+        let (mut config, needs) = self.launch(index)?;
         let is_header = matches!(config.transport, McpTransport::Http { .. });
         let namespace = new_secret_namespace();
         let mut pending = PendingSecrets::new();
@@ -803,6 +807,6 @@ mod tests {
             ("K2".to_string(), "b".to_string()),
         ]);
         assert!(list[0].to_config(0, &vals, &store).is_err());
-        assert!(store.inner.list_names().unwrap().is_empty());
+        assert_eq!(store.inner.list_names().unwrap(), Vec::<String>::new());
     }
 }
