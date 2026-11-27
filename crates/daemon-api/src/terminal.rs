@@ -644,9 +644,7 @@ fn open_session(
             "all terminal slots of this host are in use",
         ));
     }
-    let mut env = builtin_tools::shell::terminal_env();
-    env.push(("TERM".into(), "xterm-256color".into()));
-    env.push(("BOT_DATA_DIR".into(), s.data_dir().into_os_string()));
+    let env = session_env(builtin_tools::shell::terminal_env(), s.data_dir());
     // Start in HOME when the service has one (under the hardened unit `/home` is hidden), else
     // in the data dir, the one place the unit may write.
     let start_dir = std::env::var_os("HOME")
@@ -871,6 +869,42 @@ pub(crate) async fn close_route(
 }
 
 /// The host-side terminal routes (with their own small body limit).
+/// The environment of one terminal session: the shell's (`base`), the terminal type, the data
+/// folder, and the CLI folders on `PATH`.
+fn session_env(
+    mut base: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    data_dir: std::path::PathBuf,
+) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    base.push(("TERM".into(), "xterm-256color".into()));
+    base.push(("BOT_DATA_DIR".into(), data_dir.into_os_string()));
+    with_cli_install_dirs(&mut base);
+    base
+}
+
+/// The service user's CLI folders (`~/.local/bin`, the npm prefix, ...) on the terminal's `PATH`:
+/// detection finds a CLI there, so a command typed in this terminal must find it too. A server
+/// installed before the unit set a `PATH` of its own would otherwise answer "command not found"
+/// for a CLI the app lists as installed.
+fn with_cli_install_dirs(env: &mut Vec<(std::ffi::OsString, std::ffi::OsString)>) {
+    let Some(home) = env
+        .iter()
+        .find(|(k, _)| k == "HOME")
+        .map(|(_, v)| std::path::PathBuf::from(v))
+    else {
+        return;
+    };
+    let current = env.iter().position(|(k, _)| k == "PATH");
+    let path = current.map(|i| env[i].1.clone());
+    let Some(joined) = cli_provider::identity::path_with_install_dirs(path.as_deref(), &home)
+    else {
+        return;
+    };
+    match current {
+        Some(i) => env[i].1 = joined,
+        None => env.push(("PATH".into(), joined)),
+    }
+}
+
 pub(crate) fn routes() -> axum::Router<AppState> {
     use axum::routing::{get, post};
     axum::Router::new()
@@ -1078,6 +1112,27 @@ pub(crate) async fn host_close(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_terminal_finds_the_clis_the_service_user_installed() {
+        use std::ffi::OsString;
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".local/bin")).unwrap();
+        let env: Vec<(OsString, OsString)> = vec![
+            ("HOME".into(), home.path().into()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ];
+        let env = super::session_env(env, home.path().join("data"));
+        assert!(env.iter().any(|(k, _)| k == "TERM"));
+        let path = env.iter().find(|(k, _)| k == "PATH").unwrap().1.clone();
+        let dirs: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(dirs[0], std::path::PathBuf::from("/usr/bin"));
+        assert!(dirs.contains(&home.path().join(".local/bin")));
+        // No HOME, no change (nothing to look in).
+        let mut bare: Vec<(OsString, OsString)> = vec![("PATH".into(), "/bin".into())];
+        super::with_cli_install_dirs(&mut bare);
+        assert_eq!(bare[0].1, OsString::from("/bin"));
+    }
+
     use super::*;
 
     #[test]

@@ -11,6 +11,7 @@ mod channels_discord;
 mod channels_tests;
 mod chats_cmd;
 mod cli_artifacts;
+mod cli_cmd;
 mod client;
 mod commands;
 mod components_host;
@@ -185,6 +186,12 @@ enum Command {
     },
     /// Show recent redacted logs from this computer (also works while the daemon is stopped).
     Logs(logs_cmd::LogsCmd),
+    /// Coding CLIs (Claude Code, Codex, Antigravity, ...) of the user running this command:
+    /// status, install and sign-in. On a server run it as the service user: `sudo praxi cli ...`.
+    Cli {
+        #[command(subcommand)]
+        action: cli_cmd::CliAction,
+    },
     /// Manage stored secrets (values are never printed).
     Secrets {
         #[command(subcommand)]
@@ -891,6 +898,9 @@ fn run() -> Result<()> {
             return browser_cmd::run(action, &data_dir, cli.json, &mut std::io::stdout());
         }
         Command::Logs(c) => return logs_cmd::run(c, &data_dir),
+        Command::Cli { action } => {
+            return cli_cmd::run(action, &data_dir, cli.json, &mut std::io::stdout());
+        }
         Command::Backup { action } if !action.needs_secret_store() => {
             return backup_cmd::run(
                 action,
@@ -1047,6 +1057,7 @@ fn run() -> Result<()> {
         | Command::Host { .. }
         | Command::SelfUpdate(_)
         | Command::Logs(_)
+        | Command::Cli { .. }
         | Command::Doctor(_)
         | Command::Browser { .. }
         | Command::Serve { .. }

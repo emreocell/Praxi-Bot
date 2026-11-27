@@ -99,8 +99,11 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_resources(),
         check_telegram(env),
         core::check_unicode_path(env.data_dir),
-        core::check_cli_accounts(detected),
-        core::check_peer_link(env.data_dir, &core::LinkRuntime::Unknown),
+        core::check_cli_accounts(
+            detected,
+            &core::CliContext::current(&cli_provider::PathEnv::from_ambient(), env.data_dir),
+        ),
+        core::check_peer_link(env.data_dir, &live_link(env)),
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
         core::check_clock(
             std::time::SystemTime::now(),
@@ -620,6 +623,54 @@ fn check_peer_relay(env: &DoctorEnv<'_>) -> Check {
     }
 }
 
+/// The running daemon's paired devices and whether each is connected (`GET /v1/host`), so the
+/// link check can say more than "not verified". `Unknown` when no daemon answers.
+fn live_link(env: &DoctorEnv<'_>) -> core::LinkRuntime {
+    let addr = SocketAddr::from(([127, 0, 0, 1], env.port));
+    if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
+        return core::LinkRuntime::Unknown;
+    }
+    let ask = || -> Result<core::LinkRuntime> {
+        let token = daemon_api::read_token(env.data_dir)?;
+        let rt = crate::current_thread_runtime()?;
+        let status = rt.block_on(async {
+            let client =
+                crate::client::Client::new(&format!("http://127.0.0.1:{}", env.port), token);
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                client.request(reqwest::Method::GET, "/v1/host", None),
+            )
+            .await
+            .map_err(|_| "the daemon did not answer in time")?
+        })?;
+        Ok(link_from_status(&status, storage::now_ms()))
+    };
+    ask().unwrap_or(core::LinkRuntime::Unknown)
+}
+
+/// The link state in a `GET /v1/host` answer. No endpoint id = peer networking is off.
+fn link_from_status(status: &Value, now_ms: i64) -> core::LinkRuntime {
+    if status["endpoint_id"].as_str().is_none() {
+        return core::LinkRuntime::NetworkDisabled;
+    }
+    let peers = status["peers"].as_array().map_or_else(Vec::new, |list| {
+        list.iter()
+            .filter_map(|p| {
+                Some(core::LinkPeer {
+                    key: p["key"].as_str()?.to_owned(),
+                    role: p["role"].as_str().unwrap_or("device").to_owned(),
+                    name: p["name"].as_str().map(str::to_owned),
+                    connected: p["online"].as_bool().unwrap_or(false),
+                    last_seen_secs: p["last_seen_ms"]
+                        .as_i64()
+                        .map(|t| u64::try_from(now_ms.saturating_sub(t) / 1000).unwrap_or(0)),
+                })
+            })
+            .collect()
+    });
+    core::LinkRuntime::Network(peers)
+}
+
 fn check_local_models(data_dir: &Path) -> Check {
     let hw = provider_catalog::probe_hardware(data_dir);
     let advice = provider_catalog::recommend(&hw, &provider_catalog::catalog_candidates());
@@ -1125,6 +1176,33 @@ pub fn write_report(env: &DoctorEnv<'_>, checks: &[Check], path: &Path) -> Resul
 mod tests {
     use super::*;
     use provider_catalog::ProviderSettings;
+
+    #[test]
+    fn the_live_link_comes_from_the_daemons_host_answer() {
+        use serde_json::json;
+        let answer = json!({
+            "endpoint_id": "k",
+            "peers": [{"key": "abcdef0123456789", "name": "Praxi desktop", "role": "desktop",
+                       "online": false, "last_seen_ms": null, "admin": true}]
+        });
+        let core::LinkRuntime::Network(peers) = link_from_status(&answer, 10_000_000) else {
+            panic!("peer networking is on");
+        };
+        assert_eq!(peers.len(), 1);
+        assert!(!peers[0].connected);
+        assert_eq!(peers[0].name.as_deref(), Some("Praxi desktop"));
+        assert_eq!(peers[0].last_seen_secs, None, "never connected");
+        let seen = json!({"endpoint_id": "k", "peers": [{"key": "k1", "role": "phone",
+            "online": true, "last_seen_ms": 9_000_000}]});
+        let core::LinkRuntime::Network(peers) = link_from_status(&seen, 10_000_000) else {
+            panic!("peer networking is on");
+        };
+        assert_eq!(peers[0].last_seen_secs, Some(1000));
+        assert_eq!(
+            link_from_status(&json!({"endpoint_id": null, "peers": []}), 0),
+            core::LinkRuntime::NetworkDisabled
+        );
+    }
 
     #[test]
     fn host_display_check_names_the_first_missing_piece() {

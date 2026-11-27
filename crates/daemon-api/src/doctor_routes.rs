@@ -183,6 +183,7 @@ fn link_runtime(s: &AppState) -> LinkRuntime {
                     last_seen_secs: net.last_seen(&key).map(|t| t.elapsed().as_secs()),
                     key: d.id,
                     role: d.role.to_string(),
+                    name: Some(d.name),
                 })
             })
             .collect(),
@@ -327,10 +328,11 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         Box::new(move || doctor::check_providers_loaded(&d, &active)),
     );
     let det = detected.clone();
+    let cli_ctx = doctor::CliContext::current(s.detector().environment(), &data_dir);
     add(
         "cli_accounts",
         "cli accounts",
-        Box::new(move || doctor::check_cli_accounts(det.as_deref().map(Vec::as_slice))),
+        Box::new(move || doctor::check_cli_accounts(det.as_deref().map(Vec::as_slice), &cli_ctx)),
     );
     if has_catalog {
         let (d, app) = (data_dir.clone(), s.clone());

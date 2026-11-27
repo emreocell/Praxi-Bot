@@ -236,6 +236,8 @@ pub struct LinkPeer {
     pub key: String,
     /// Pairing role (`desktop`, `phone`, `node`, `host`).
     pub role: String,
+    /// The name the device was paired under (`Praxi desktop`), when known.
+    pub name: Option<String>,
     /// Connected right now.
     pub connected: bool,
     /// Seconds since the device was last heard from (`None` = never).
@@ -253,6 +255,16 @@ pub enum LinkRuntime {
     Network(Vec<LinkPeer>),
 }
 
+impl LinkPeer {
+    /// `Praxi desktop` when it has a name, else its role and the start of its key.
+    fn label(&self) -> String {
+        match self.name.as_deref().filter(|n| !n.trim().is_empty()) {
+            Some(name) => format!("\"{name}\""),
+            None => format!("{} {}", self.role, short_key(&self.key)),
+        }
+    }
+}
+
 fn ago(secs: Option<u64>) -> String {
     match secs {
         None => "never seen".into(),
@@ -262,8 +274,7 @@ fn ago(secs: Option<u64>) -> String {
     }
 }
 
-const NOT_VERIFIED_HINT: &str =
-    "open Settings > Diagnostics while the daemon runs, or run `bot host status`";
+const NOT_VERIFIED_HINT: &str = "start the daemon (`sudo systemctl start praxi` on a server), then run the check again; `bot host status` lists the paired devices";
 const NETWORK_OFF_HINT: &str = "start the daemon with peer networking enabled (`bot serve --peer`), or switch back to standalone";
 
 /// `peer link` of the always-on host: its endpoint must run.
@@ -289,14 +300,23 @@ fn host_link(config: &crate::host::HostConfig, live: &LinkRuntime) -> Check {
         ),
         LinkRuntime::Network(peers) => {
             let connected = peers.iter().filter(|p| p.connected).count();
-            Check::ok(
-                ID,
-                N,
-                format!(
-                    "{role}; {} paired device(s), {connected} connected",
-                    peers.len()
-                ),
-            )
+            let mut detail = format!(
+                "{role}; {} paired device(s), {connected} connected",
+                peers.len()
+            );
+            let away: Vec<String> = peers
+                .iter()
+                .filter(|p| !p.connected)
+                .map(|p| format!("{} ({})", p.label(), ago(p.last_seen_secs)))
+                .collect();
+            if !away.is_empty() {
+                // A paired desktop connects only while its app is open: not a fault of the server.
+                detail = format!(
+                    "{detail}; not connected: {}. Normal while the Praxi app on that device is closed; the server and its bots keep running without it",
+                    away.join(", ")
+                );
+            }
+            Check::ok(ID, N, detail)
         }
     }
 }
@@ -787,12 +807,77 @@ fn sign_in_command(engine: &str) -> &str {
     }
 }
 
+/// Who the coding CLIs run as on this machine, for the `cli accounts` check.
+#[derive(Debug, Clone, Default)]
+pub struct CliContext {
+    /// Account name of this process.
+    pub user: Option<String>,
+    /// Home folder that detection and CLI sign-ins use.
+    pub home: Option<String>,
+    /// This process is not the Praxi service user (see [`cli_provider::identity::wrong_user`]).
+    pub wrong_user: Option<cli_provider::identity::WrongUser>,
+    /// Start of a terminal command that runs a CLI step as the service user.
+    pub command: String,
+}
+
+impl CliContext {
+    /// The context of the running process, with the home folder of `env`.
+    #[must_use]
+    pub fn current(env: &cli_provider::PathEnv, data_dir: &Path) -> Self {
+        let who = cli_provider::identity::run_as(env);
+        Self {
+            command: cli_provider::identity::terminal_command(&who),
+            home: who.home.as_ref().map(|h| h.display().to_string()),
+            wrong_user: cli_provider::identity::wrong_user(data_dir),
+            user: who.user,
+        }
+    }
+
+    /// `as praxi (home /var/lib/praxi)`.
+    fn as_text(&self) -> String {
+        let user = self.user.as_deref().unwrap_or("this user");
+        match &self.home {
+            Some(home) => format!("as {user} (home {home})"),
+            None => format!("as {user}"),
+        }
+    }
+}
+
+/// The `cli accounts` result of a run as someone other than the service user: whatever it found
+/// belongs to that other user, so it must not read as a statement about Praxi.
+fn wrong_user_check(wrong: &cli_provider::identity::WrongUser, command: &str) -> Check {
+    Check::warn(
+        "cli_accounts",
+        "cli accounts",
+        format!(
+            "this check ran as {}, but Praxi runs as {}: coding CLIs installed or signed in as {} are not the ones Praxi uses, so this result says nothing about them",
+            wrong.me, wrong.owner, wrong.me
+        ),
+        format!(
+            "run it as {}: `sudo praxi doctor` (or open Settings > Diagnostics in the app); to set up a CLI as {}: `{command} login <name>`",
+            wrong.owner, wrong.owner
+        ),
+    )
+}
+
 /// `cli accounts`: coding CLIs found on this machine (subscription use, ADR
-/// 0028).  Optional: nothing found is neutral.
+/// 0028).  Optional: nothing found is neutral.  `ctx` names the account they
+/// were looked up as, and says so loudly when that is not the service user.
 #[must_use]
-pub fn check_cli_accounts(detected: Option<&[cli_provider::DetectedCli]>) -> Check {
+pub fn check_cli_accounts(
+    detected: Option<&[cli_provider::DetectedCli]>,
+    ctx: &CliContext,
+) -> Check {
     const ID: &str = "cli_accounts";
     const N: &str = "cli accounts";
+    let command = if ctx.command.is_empty() {
+        "bot cli"
+    } else {
+        ctx.command.as_str()
+    };
+    if let Some(wrong) = &ctx.wrong_user {
+        return wrong_user_check(wrong, command);
+    }
     let Some(detected) = detected else {
         return Check::warn(
             ID,
@@ -803,7 +888,14 @@ pub fn check_cli_accounts(detected: Option<&[cli_provider::DetectedCli]>) -> Che
     };
     let installed: Vec<_> = detected.iter().filter(|d| d.installed).collect();
     if installed.is_empty() {
-        return Check::skipped(ID, N, "no coding CLI installed (optional)");
+        return Check::skipped(
+            ID,
+            N,
+            format!(
+                "no coding CLI installed {} (optional); install one in the app (Settings > AI) or with `{command} install <name>`",
+                ctx.as_text()
+            ),
+        );
     }
     let mut ready = Vec::new();
     let mut signed_out = Vec::new();
@@ -811,45 +903,64 @@ pub fn check_cli_accounts(detected: Option<&[cli_provider::DetectedCli]>) -> Che
     let mut other = Vec::new();
     for d in installed {
         match d.auth {
-            cli_provider::AuthState::SignedOut => signed_out.push(d.display_name.clone()),
-            cli_provider::AuthState::SignedIn if d.runnable => ready.push(d.display_name.clone()),
-            cli_provider::AuthState::Unknown if d.runnable => {
-                unverified.push(d.display_name.clone());
-            }
-            _ => other.push(d.display_name.clone()),
+            cli_provider::AuthState::SignedOut => signed_out.push(d),
+            cli_provider::AuthState::SignedIn if d.runnable => ready.push(d),
+            cli_provider::AuthState::Unknown if d.runnable => unverified.push(d),
+            _ => other.push(d),
         }
     }
+    let names = |rows: &[&cli_provider::DetectedCli]| {
+        rows.iter()
+            .map(|d| d.display_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let mut parts = Vec::new();
     if !ready.is_empty() {
-        parts.push(format!("ready: {}", ready.join(", ")));
+        parts.push(format!("ready: {}", names(&ready)));
     }
     if !signed_out.is_empty() {
-        parts.push(format!("signed out: {}", signed_out.join(", ")));
+        parts.push(format!("signed out: {}", names(&signed_out)));
     }
     if !unverified.is_empty() {
-        parts.push(format!("sign-in not verified: {}", unverified.join(", ")));
+        // A sign-in file is evidence that someone signed in, not that the sign-in still works.
+        let (with_file, without): (Vec<_>, Vec<_>) = unverified
+            .iter()
+            .copied()
+            .partition(|d| d.detail.as_deref() == Some("auth_metadata_only"));
+        if !with_file.is_empty() {
+            parts.push(format!(
+                "sign-in file found, not verified: {}",
+                names(&with_file)
+            ));
+        }
+        if !without.is_empty() {
+            parts.push(format!("sign-in not verified: {}", names(&without)));
+        }
     }
     if !other.is_empty() {
-        parts.push(format!("detected only: {}", other.join(", ")));
+        parts.push(format!("detected only: {}", names(&other)));
     }
-    let detail = parts.join("; ");
+    let detail = format!("{} {}", parts.join("; "), ctx.as_text());
     if signed_out.is_empty() && unverified.is_empty() {
-        Check::ok(ID, N, detail)
-    } else if signed_out.is_empty() {
-        Check::warn(
-            ID,
-            N,
-            detail,
-            "the CLI did not report whether it is signed in: open a terminal, run it once and sign in if asked (e.g. `claude`, `codex login`)",
+        return Check::ok(ID, N, detail);
+    }
+    // Name the first CLI that needs a sign-in, so the fix is one command, as the right user.
+    let first = signed_out
+        .first()
+        .or(unverified.first())
+        .map_or("<name>", |d| d.id.as_str());
+    let hint = if signed_out.is_empty() {
+        format!(
+            "Praxi cannot tell whether {} is signed in; sign in once as the user Praxi runs as: `{command} login {first}`, or use \"Sign in\" next to it in Settings > AI",
+            names(&unverified)
         )
     } else {
-        Check::warn(
-            ID,
-            N,
-            detail,
-            "open a terminal and sign in to the CLI once (e.g. `claude`, `codex login`)",
+        format!(
+            "sign in as the user Praxi runs as: `{command} login {first}`, or use \"Sign in\" next to it in Settings > AI"
         )
-    }
+    };
+    Check::warn(ID, N, detail, hint)
 }
 
 /// `model catalog`: the catalog loads and knows the default model.

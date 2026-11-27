@@ -402,6 +402,41 @@
         ]
       }
     },
+    "/v1/admin/cli-environment": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "admin_cli_environment",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCliEnvironmentDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/default-provider": {
       "put": {
         "tags": [
@@ -20838,6 +20873,13 @@
           "name": {
             "type": "string"
           },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the CLI was found on the host (the program the app would run), when it is installed."
+          },
           "signed_in": {
             "type": [
               "boolean",
@@ -20850,6 +20892,46 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "AdminCliEnvironmentDto": {
+        "type": "object",
+        "description": "Who the host's coding CLIs run as, and where they live. Installs, sign-ins and checks all\nhappen as this account, whoever opened the terminal.",
+        "required": [
+          "is_root",
+          "search_dirs",
+          "terminal_command"
+        ],
+        "properties": {
+          "home": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its home folder, where CLIs keep their installs and sign-in files."
+          },
+          "is_root": {
+            "type": "boolean",
+            "description": "That account is the administrator: a CLI installed or signed in by anyone else is invisible."
+          },
+          "search_dirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Folders searched for coding CLIs that exist right now, in order."
+          },
+          "terminal_command": {
+            "type": "string",
+            "description": "Start of a terminal command that runs one CLI step as that account\n(`sudo praxi cli`), for a person who is logged in over SSH as somebody else."
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Account the service (and every CLI it starts) runs as; `null` when the system did not say."
           }
         }
       },

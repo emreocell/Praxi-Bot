@@ -470,6 +470,7 @@ fn link_peer(key: &str, connected: bool, last_seen_secs: Option<u64>) -> LinkPee
     LinkPeer {
         key: key.into(),
         role: "host".into(),
+        name: None,
         connected,
         last_seen_secs,
     }
@@ -528,26 +529,58 @@ fn peer_link_distinguishes_configured_from_connected() {
     ]));
     assert_eq!(c.status, Status::Ok);
     assert!(
-        c.detail.ends_with("2 paired device(s), 1 connected"),
+        c.detail.contains("2 paired device(s), 1 connected"),
         "{}",
         c.detail
     );
 }
 
 #[test]
+fn an_offline_desktop_on_a_server_is_named_and_called_normal() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("host.toml"), "mode = \"host\"\n").unwrap();
+    let mut desktop = link_peer("abcdef0123456789", false, None);
+    desktop.role = "desktop".into();
+    desktop.name = Some("Praxi desktop".into());
+    let c = check_peer_link(d.path(), &LinkRuntime::Network(vec![desktop]));
+    // Not a fault: the server runs without it. But it is named, with its state and the reason.
+    assert_eq!(c.status, Status::Ok);
+    assert!(
+        c.detail.contains("\"Praxi desktop\" (never seen)"),
+        "{}",
+        c.detail
+    );
+    assert!(c.detail.contains("keep running without it"), "{}", c.detail);
+    // Unknown live state tells a headless user the next step, not "open Settings".
+    let c = check_peer_link(d.path(), &LinkRuntime::Unknown);
+    assert!(
+        !c.hint.as_deref().unwrap().contains("Settings"),
+        "{:?}",
+        c.hint
+    );
+    assert!(c.hint.unwrap().contains("systemctl start praxi"));
+}
+
+#[test]
 fn cli_accounts_from_one_detection_result() {
     use cli_provider::AuthState::{SignedIn, SignedOut, Unknown};
     assert_eq!(
-        check_cli_accounts(Some(&[cli("claude", false, Unknown, false)])).status,
+        check_cli_accounts(Some(&[cli("claude", false, Unknown, false)]), &ctx()).status,
         Status::Skipped
     );
-    let c = check_cli_accounts(Some(&[
-        cli("claude", true, SignedIn, true),
-        cli("codex", true, Unknown, false),
-    ]));
+    let c = check_cli_accounts(
+        Some(&[
+            cli("claude", true, SignedIn, true),
+            cli("codex", true, Unknown, false),
+        ]),
+        &ctx(),
+    );
     assert_eq!(c.status, Status::Ok);
-    assert_eq!(c.detail, "ready: CLAUDE; detected only: CODEX");
-    let c = check_cli_accounts(Some(&[cli("claude", true, SignedOut, true)]));
+    assert_eq!(
+        c.detail,
+        "ready: CLAUDE; detected only: CODEX as praxi (home /var/lib/praxi)"
+    );
+    let c = check_cli_accounts(Some(&[cli("claude", true, SignedOut, true)]), &ctx());
     assert_eq!(c.status, Status::Warn);
     assert!(c.detail.contains("signed out: CLAUDE"));
 }
@@ -556,16 +589,67 @@ fn cli_accounts_from_one_detection_result() {
 fn unknown_or_unprobed_cli_sign_in_is_a_warning_not_ready() {
     use cli_provider::AuthState::Unknown;
     // Detection did not answer: not verified, with what to do.
-    let c = check_cli_accounts(None);
+    let c = check_cli_accounts(None, &ctx());
     assert_eq!(c.status, Status::Warn);
     assert!(c.detail.contains("not verified"), "{}", c.detail);
     assert!(c.hint.is_some());
     // Installed and runnable, but the auth output could not be read.
-    let c = check_cli_accounts(Some(&[cli("claude", true, Unknown, true)]));
+    let c = check_cli_accounts(Some(&[cli("claude", true, Unknown, true)]), &ctx());
     assert_eq!(c.status, Status::Warn, "{}", c.detail);
-    assert_eq!(c.detail, "sign-in not verified: CLAUDE");
+    assert_eq!(
+        c.detail,
+        "sign-in not verified: CLAUDE as praxi (home /var/lib/praxi)"
+    );
     assert!(!c.detail.contains("ready"), "{}", c.detail);
     assert!(c.hint.as_deref().unwrap().contains("sign in"));
+}
+
+fn ctx() -> CliContext {
+    CliContext {
+        user: Some("praxi".into()),
+        home: Some("/var/lib/praxi".into()),
+        wrong_user: None,
+        command: "sudo praxi cli".into(),
+    }
+}
+
+#[test]
+fn a_sign_in_fix_names_the_service_user_command_and_the_cli() {
+    use cli_provider::AuthState::{SignedOut, Unknown};
+    let c = check_cli_accounts(Some(&[cli("vibe", true, SignedOut, true)]), &ctx());
+    let hint = c.hint.unwrap();
+    assert!(hint.contains("`sudo praxi cli login vibe`"), "{hint}");
+    // A credential file is evidence of a sign-in, not proof: said so, with the same fix.
+    let mut agy = cli("agy", true, Unknown, true);
+    agy.detail = Some("auth_metadata_only".into());
+    let c = check_cli_accounts(Some(&[agy]), &ctx());
+    assert!(
+        c.detail
+            .starts_with("sign-in file found, not verified: AGY"),
+        "{}",
+        c.detail
+    );
+    assert!(c.hint.unwrap().contains("`sudo praxi cli login agy`"));
+}
+
+#[test]
+fn a_doctor_run_as_the_wrong_user_says_so_instead_of_reporting_for_that_user() {
+    use cli_provider::AuthState::SignedIn;
+    let mut wrong = ctx();
+    wrong.wrong_user = Some(cli_provider::identity::WrongUser {
+        me: "ubuntu".into(),
+        owner: "praxi".into(),
+    });
+    // Even a perfectly healthy-looking result for `ubuntu` must not read as healthy for Praxi.
+    let c = check_cli_accounts(Some(&[cli("claude", true, SignedIn, true)]), &wrong);
+    assert_eq!(c.status, Status::Warn);
+    assert!(
+        c.detail.contains("ran as ubuntu, but Praxi runs as praxi"),
+        "{}",
+        c.detail
+    );
+    assert!(!c.detail.contains("ready"), "{}", c.detail);
+    assert!(c.hint.unwrap().contains("sudo praxi doctor"));
 }
 
 fn write_providers(dir: &Path, settings: Vec<ProviderSettings>) {

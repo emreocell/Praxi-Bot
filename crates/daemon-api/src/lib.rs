@@ -139,6 +139,7 @@ pub use auth::{
     load_or_create_token, read_owner_key, read_token, token_path,
 };
 pub use calendar::{CalendarControl, CalendarControlError};
+pub use cli_login::record_cli_install_pin;
 pub use components::{ComponentControl, ComponentError};
 pub use composio::{ComposioControl, ComposioControlError};
 pub use control::{ControlConfig, ControlHub};

@@ -225,6 +225,26 @@ pub struct AdminCliEngineDto {
     /// The account the CLI says it is signed in as (an e-mail or user name), when it names one.
     pub account: Option<String>,
     pub docs_url: String,
+    /// Where the CLI was found on the host (the program the app would run), when it is installed.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// Who the host's coding CLIs run as, and where they live. Installs, sign-ins and checks all
+/// happen as this account, whoever opened the terminal.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AdminCliEnvironmentDto {
+    /// Account the service (and every CLI it starts) runs as; `null` when the system did not say.
+    pub user: Option<String>,
+    /// That account is the administrator: a CLI installed or signed in by anyone else is invisible.
+    pub is_root: bool,
+    /// Its home folder, where CLIs keep their installs and sign-in files.
+    pub home: Option<String>,
+    /// Folders searched for coding CLIs that exist right now, in order.
+    pub search_dirs: Vec<String>,
+    /// Start of a terminal command that runs one CLI step as that account
+    /// (`sudo praxi cli`), for a person who is logged in over SSH as somebody else.
+    pub terminal_command: String,
 }
 
 /// Add or update a provider. The key is write-only.
@@ -614,6 +634,11 @@ pub(crate) async fn cli_engines(
                     login_flow: crate::cli_login::flow_name(spec.id).into(),
                     account: row.account_label.clone(),
                     docs_url: spec.docs_url.into(),
+                    path: row
+                        .installed
+                        .then(|| cli_provider::search::find_engine(spec, detector.environment()))
+                        .flatten()
+                        .map(|p| p.display().to_string()),
                     id: row.id,
                     name: row.display_name,
                     installed: row.installed,
@@ -622,6 +647,33 @@ pub(crate) async fn cli_engines(
             })
             .collect(),
     ))
+}
+
+#[utoipa::path(get, operation_id = "admin_cli_environment", path = "/v1/admin/cli-environment", tag = "admin", security(("bearer" = [])),
+    responses((status = 200, body = AdminCliEnvironmentDto), (status = 403, body = crate::error::ErrorBody)))]
+pub(crate) async fn cli_environment(
+    State(s): State<AppState>,
+    peer: Option<Extension<PeerIdentity>>,
+    _gate: Gate,
+) -> Result<Json<AdminCliEnvironmentDto>, ApiError> {
+    require_admin(&s, peer.as_ref().map(|p| &p.0))?;
+    Ok(Json(cli_environment_of(s.detector().environment())))
+}
+
+fn cli_environment_of(env: &cli_provider::PathEnv) -> AdminCliEnvironmentDto {
+    let who = cli_provider::identity::run_as(env);
+    AdminCliEnvironmentDto {
+        terminal_command: cli_provider::identity::terminal_command(&who),
+        search_dirs: env
+            .path_dirs
+            .iter()
+            .filter(|d| d.is_dir())
+            .map(|d| d.display().to_string())
+            .collect(),
+        home: who.home.as_ref().map(|h| h.display().to_string()),
+        is_root: who.is_root,
+        user: who.user,
+    }
 }
 
 /// Progress of an install the owner's desktop started on this host.
@@ -885,6 +937,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/v1/admin/state", get(state))
         .route("/v1/admin/host-update", post(update_host))
         .route("/v1/admin/cli-engines", get(cli_engines))
+        .route("/v1/admin/cli-environment", get(cli_environment))
         .route(
             "/v1/admin/cli-engines/{id}/install",
             get(cli_engine_install_status).post(install_cli_engine),
