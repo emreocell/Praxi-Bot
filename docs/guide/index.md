@@ -102,6 +102,7 @@ Seven short pages in plain words. Read them in this order:
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |
 | Talk to your bots from Discord | [Discord](discord.md) |
+| Connect my e-mail and calendar step by step (Gmail, Outlook, iCloud, Yahoo, Fastmail, others) | [Connect my email and calendar](connect-email-calendar.md) |
 | Read, search, draft or send e-mails | [Email integration](email.md) |
 | Read and add calendar events | [Calendar (CalDAV)](calendar.md) |
 | Set up Home Assistant from the app, so a bot can read your entities and call services | [Home Assistant](home-assistant.md) |

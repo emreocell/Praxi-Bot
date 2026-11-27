@@ -248,6 +248,21 @@
     "summary": "Sohbet Bu bilgisayar'ı kullanıyorsa ve sahip anahtarı Botlarım bu bilgisayarı kullanabilsin açıksa,"
   },
   {
+    "doc": "tr/connect-email-calendar.md",
+    "title": "E-postamı ve takvimimi bağla",
+    "headings": [
+      "Kısaca",
+      "Hangi sağlayıcı neyi kullanır",
+      "Takvimler",
+      "Bot neleri yapabilir: önce okuma, göndermek ikinci bir onay",
+      "Gizli bilgiler nereye gider",
+      "Bir şey çalışmazsa",
+      "İptal etme ve bağlantıyı kesme",
+      "Komut satırı için"
+    ],
+    "summary": "Tek bir yönlendirmeli akış e-postanı ve takvimini bağlar. Adresini yazarsın; Praxi"
+  },
+  {
     "doc": "tr/connect-your-apps.md",
     "title": "Uygulamalarını bağla",
     "headings": [

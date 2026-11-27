@@ -7203,6 +7203,203 @@
         }
       }
     },
+    "connectMail": {
+      "address": {
+        "detected": "This looks like {{provider}}.",
+        "hint": "The address your bot should read, and the calendar that goes with it.",
+        "label": "Your email address",
+        "providerLabel": "Provider",
+        "unknownDomain": "We cannot tell who runs {{domain}}. If it is Google Workspace or Microsoft 365, pick that below. Otherwise leave it as Other."
+      },
+      "appPassword": {
+        "fastmail": {
+          "one": "Open the page below and choose New app password.",
+          "two": "Name it Praxi, allow Mail and Calendars, and copy the password. One password works for both."
+        },
+        "google": {
+          "one": "Turn on 2-Step Verification in your Google account if it is off, then open the page below.",
+          "two": "Name the password Praxi and copy the 16 letters it shows."
+        },
+        "hint": "Stored securely on this computer and never shown again. It is not your normal password, and you can delete it any time.",
+        "icloud": {
+          "one": "Open the page below and sign in with your Apple ID. Choose Sign-In and Security, then App-Specific Passwords.",
+          "two": "Click +, name it Praxi and copy the password it shows. One password works for mail and calendar."
+        },
+        "label": "App password",
+        "open": "Open the {{provider}} page",
+        "other": {
+          "one": "Ask your provider for an app password. Many list it under Security in your account.",
+          "two": "If it has none, your normal password may work. Paste it below."
+        },
+        "title": "Make an app password",
+        "yahoo": {
+          "one": "Open the page below, sign in and choose Generate app password.",
+          "two": "Name it Praxi and copy the password it shows."
+        }
+      },
+      "back": "Back",
+      "bot": {
+        "hint": "Only that bot sees this mail. You can change it later.",
+        "label": "Which bot may use this mailbox?"
+      },
+      "calendarNone": {
+        "yahoo": "Yahoo has no calendar connection Praxi can use, so only your mail is connected."
+      },
+      "calendarNote": "The bot can read your calendar. Adding or changing events follows the bot's access level, like sending mail.",
+      "calendarServer": {
+        "hint": "The CalDAV address your provider lists, like https://caldav.example.com/. Praxi finds your calendars from there.",
+        "label": "Calendar server address"
+      },
+      "card": {
+        "calendars_one": "{{count}} calendar",
+        "calendars_other": "{{count}} calendars",
+        "description": "One guided flow: type your address and Praxi picks the easiest way to connect your mail and calendar, tests it, and explains anything that fails.",
+        "disconnect": "Disconnect everything",
+        "disconnectFailed": "Could not remove: {{names}}. Remove them from the lists below.",
+        "disconnectHint": "This removes every mailbox, calendar and Google mail or calendar sign-in listed here, together with their saved passwords. Bots lose access at once. You can connect again later.",
+        "disconnectYes": "Yes, disconnect everything",
+        "disconnected_one": "Disconnected {{count}} connection.",
+        "disconnected_other": "Disconnected {{count}} connections.",
+        "googleApps_one": "{{count}} Google sign-in",
+        "googleApps_other": "{{count}} Google sign-ins",
+        "mailboxes_one": "{{count}} mailbox",
+        "mailboxes_other": "{{count}} mailboxes",
+        "none": "Nothing connected yet.",
+        "start": "Connect my email and calendar",
+        "title": "Connect my email and calendar"
+      },
+      "close": "Close",
+      "connect": "Connect",
+      "connectWhatWorks": "Connect what works",
+      "done": {
+        "access": "Open the {{provider}} access page",
+        "calendar_one": "{{count}} calendar is connected.",
+        "calendar_other": "{{count}} calendars are connected.",
+        "mail": "Mail is connected as {{name}}.",
+        "nothing": "Nothing was connected here. The sign-in happens in the Apps window.",
+        "partFailed": "One part could not be saved: {{message}}",
+        "readOnly": "Your bot can read and draft mail, but not send it. You can allow sending later in Settings, Mail.",
+        "revoke": "You can disconnect any time: remove it in Settings, Mail, or with Disconnect everything. To also take back the access at the provider, open its page below.",
+        "sendAsks": "Sending is on. You see each message first, unless the bot has Full access.",
+        "title": "All set",
+        "toolsOff": "{{name}} is not allowed to use mail yet.",
+        "turnOn": "Let {{name}} use mail"
+      },
+      "finish": "Finish",
+      "fix": {
+        "calendar": {
+          "auth": {
+            "fastmail": "Fastmail refused the calendar login. Make sure the app password allows Calendars.",
+            "icloud": "Apple refused the calendar login. Use the same app-specific password, and your Apple ID as the login name under More options.",
+            "other": "The calendar server refused the login. Check the login name and the app password."
+          },
+          "detail": "The server said: {{error}}",
+          "notFound": "The calendar server found no calendar at that address. Check the CalDAV address your provider lists.",
+          "other": "The calendar server did not accept the request. Check the address and the login.",
+          "redirect": "The calendar server sent us to another address, and Praxi does not follow that for your safety. Type the final calendar address your provider lists.",
+          "unreachable": "The calendar server could not be reached. Check your internet connection and the address, then try again."
+        },
+        "mail": {
+          "auth": {
+            "fastmail": "Fastmail refused the login. Make an app password that allows Mail, not your normal password.",
+            "google": "Google refused the login. Use a 16-letter app password, not your normal password. App passwords need 2-Step Verification, and a work account's admin can turn them off. In that case go back and choose Sign in with Google.",
+            "icloud": "Apple refused the login. Use an app-specific password made on your Apple account page, not your Apple ID password. If your Apple ID is not your iCloud address, type it under More options as the login name.",
+            "microsoft": "Microsoft no longer accepts passwords for mail. Go back and use Sign in with Microsoft.",
+            "other": "The server refused the login. Use an app password if your provider has them, and check the login name under More options.",
+            "yahoo": "Yahoo refused the login. Use an app password from Yahoo's security page, not your normal password, and paste it without spaces."
+          },
+          "protocol": "That server did not answer like a mail server. Try again in a moment.",
+          "protocolGuess": "That server did not answer like a mail server. Open More options and check the server names and ports your provider lists.",
+          "timeout": "The mail server did not answer in time. Try again in a moment.",
+          "tls": "The secure connection to the mail server failed. Try again in a moment.",
+          "tlsGuess": "The secure connection failed. Open More options and check the server names and ports your provider lists.",
+          "unreachable": "The mail server could not be reached. Check your internet connection and try again.",
+          "unreachableGuess": "We guessed the server names from your address and they do not answer. Open More options and type the server names your provider lists."
+        }
+      },
+      "google": {
+        "pathLabel": "How do you want to connect Google?",
+        "paths": {
+          "app_password": "App password",
+          "app_passwordHint": "Mail only. Needs 2-Step Verification, and a work account's admin may have turned app passwords off.",
+          "google_sign_in": "Sign in with Google (recommended)",
+          "google_sign_inHint": "Gmail and Calendar, read-only. You sign in in your browser; no password is shared."
+        }
+      },
+      "hints": {
+        "address": "Step 1 of 2. Nothing is changed until the test works.",
+        "done": "Done.",
+        "setup": "Step 2 of 2. Follow the steps, then test the connection."
+      },
+      "missing": {
+        "bot": "Pick which bot may use this mailbox to test the connection.",
+        "password": "Paste the app password above to test the connection.",
+        "server": "Type the calendar server address, or untick My calendar, to test the connection."
+      },
+      "more": {
+        "login": "Login name, if it is not your address",
+        "loginHint": "For iCloud this is your Apple ID.",
+        "title": "More options"
+      },
+      "next": "Next",
+      "providers": {
+        "fastmail": "Fastmail",
+        "google": "Gmail or Google Workspace",
+        "icloud": "iCloud",
+        "microsoft": "Outlook or Microsoft 365",
+        "other": "Other provider",
+        "yahoo": "Yahoo"
+      },
+      "result": {
+        "calendarBad": "Calendar does not work yet.",
+        "calendarOk_one": "Calendar works. Found {{count}} calendar.",
+        "calendarOk_other": "Calendar works. Found {{count}} calendars.",
+        "error": "Praxi could not run the test: {{message}}",
+        "mailBad": "Mail does not work yet.",
+        "mailOk": "Mail works. The server accepted the login.",
+        "mailReadNote": "Sending is not set up, which is fine while the bot only reads.",
+        "mailReadOk": "Reading mail works.",
+        "pick": "Which calendars should the bot see?",
+        "readOnlyOn": "The bot will only read and draft. It cannot send mail.",
+        "sendAsks": "The bot may send mail. You see each message first, unless the bot has Full access."
+      },
+      "saving": "Connecting…",
+      "send": {
+        "allow": "Also let the bot send mail",
+        "allowHint": "Each message is shown to you first, unless you gave that bot Full access.",
+        "label": "Sending",
+        "readOnly": "Read and draft only. The bot can read and search your mail and write drafts, but it cannot send anything."
+      },
+      "setup": {
+        "for": "Connecting {{address}} ({{provider}})."
+      },
+      "signIn": {
+        "check": "I am done, check",
+        "checking": "Checking…",
+        "google": {
+          "body": "Open the Apps window, choose Connect on Gmail and Calendar and sign in in your browser. Access is read-only. The first time, you make a small Google client for your own account; the steps are shown there.",
+          "connected": "Google is signed in.",
+          "notYet": "Not signed in yet. Finish the steps in the Apps window, then check again.",
+          "open": "Open Google sign-in",
+          "title": "Sign in with Google"
+        },
+        "microsoft": {
+          "body": "Microsoft no longer accepts app passwords for mail, so Outlook connects through Microsoft's own sign-in in the Praxi app hub. Open it, choose Outlook and approve in your browser.",
+          "connected": "Outlook is signed in.",
+          "notYet": "Outlook is not signed in yet. Finish the sign-in in the Apps window, then check again.",
+          "open": "Open Outlook sign-in",
+          "title": "Sign in with Microsoft"
+        }
+      },
+      "test": "Test connection",
+      "testing": "Testing…",
+      "title": "Connect my email and calendar",
+      "want": {
+        "calendar": "My calendar",
+        "mail": "My email",
+        "title": "What should the bot be able to see?"
+      }
+    },
     "data": {
       "category": {
         "backups": "Backups",

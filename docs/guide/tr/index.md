@@ -59,6 +59,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Praxi sunucusunu işletme](host-operations.md) | Kurulu sunucunun günlük işletimi: günlükler, yükseltme, geri alma, yedek ve eşleştirme. |
 | [Sunucu ekleme](servers.md) | Uygulamadan sunucu ekleme, tek komutla bağlama, güncelleme ve kaldırma. |
 | [Praxi'yi MCP sunucusu olarak kullanma](mcp-server.md) | Praxi botunu Claude Code, Cursor, VS Code gibi MCP istemcilerine açma. |
+| [E-postamı ve takvimimi bağla](connect-email-calendar.md) | Gmail, Outlook, iCloud, Yahoo, Fastmail ve diğerleri için adım adım e-posta ve takvim bağlama, canlı deneme, sade dille çözümler ve bağlantıyı kesme. |
 | [E-posta entegrasyonu](email.md) | Botlara e-posta okutma, aratma, taslak yazdırma ve onayla gönderme. |
 | [Model seçici bilgileri](model-catalog.md) | Model seçicideki adların ve önerilerin nereden geldiği ve katalog güncelleme. |
 | [Bilgi gömme kurulumu](knowledge-embeddings.md) | Bilgi aramasında uzak ve yerel gömme kurulumu, sahip onayı ve sınırlar. |

@@ -3,6 +3,7 @@ import { KeyRound } from "lucide-react";
 import { Button } from "ui";
 import { SettingRow } from "../../components/SettingsUi";
 import { openVault } from "../../lib/settingsLink";
+import { ConnectMailCard } from "./ConnectMailCard";
 import { EmailCard } from "./EmailCard";
 import { EmailChannelCard } from "./EmailChannelCard";
 import { MailGuardCard } from "./MailGuardCard";
@@ -11,6 +12,16 @@ import type { CardDef } from "./types";
 /** Cards of the "Apps & connections" mail/vault area. */
 export function mailCards(t: TFunction): CardDef[] {
   return [
+    {
+      id: "connect-mail",
+      section: "mail",
+      kind: "block",
+      title: t("settingsModal.connectMail.card.title"),
+      description: t("settingsModal.connectMail.card.description"),
+      keywords:
+        "connect email calendar guided setup wizard gmail google outlook microsoft icloud yahoo fastmail app password disconnect e-posta eposta takvim bağla bağlan kur sihirbaz postfach kalender verbinden einrichten",
+      node: <ConnectMailCard />
+    },
     {
       id: "vault",
       section: "mail",

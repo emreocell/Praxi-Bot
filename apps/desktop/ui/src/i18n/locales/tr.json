@@ -7203,6 +7203,203 @@
         }
       }
     },
+    "connectMail": {
+      "address": {
+        "detected": "Bu adres {{provider}} gibi görünüyor.",
+        "hint": "Botun okuyacağı adres ve ona bağlı takvim.",
+        "label": "E-posta adresin",
+        "providerLabel": "Sağlayıcı",
+        "unknownDomain": "{{domain}} alan adının kimde olduğunu anlayamadık. Google Workspace veya Microsoft 365 ise aşağıdan seç. Değilse \"Başka bir sağlayıcı\" kalsın."
+      },
+      "appPassword": {
+        "fastmail": {
+          "one": "Aşağıdaki sayfayı aç ve \"Yeni uygulama parolası\"nı seç.",
+          "two": "Adını Praxi koy, Posta ve Takvimler'e izin ver ve parolayı kopyala. Tek parola ikisi için de çalışır."
+        },
+        "google": {
+          "one": "Kapalıysa Google hesabında 2 adımlı doğrulamayı aç, sonra aşağıdaki sayfayı aç.",
+          "two": "Parolaya Praxi adını ver ve gösterilen 16 harfi kopyala."
+        },
+        "hint": "Bu bilgisayarda güvenli saklanır ve bir daha gösterilmez. Normal parolan değildir; istediğin zaman silebilirsin.",
+        "icloud": {
+          "one": "Aşağıdaki sayfayı aç ve Apple Kimliğinle giriş yap. Oturum Açma ve Güvenlik'i, sonra Uygulamaya Özel Parolalar'ı seç.",
+          "two": "+ düğmesine bas, adını Praxi koy ve gösterilen parolayı kopyala. Tek parola hem e-posta hem takvim için çalışır."
+        },
+        "label": "Uygulama parolası",
+        "open": "{{provider}} sayfasını aç",
+        "other": {
+          "one": "Sağlayıcından bir uygulama parolası iste. Çoğu, hesabındaki Güvenlik bölümünde listeler.",
+          "two": "Hiç yoksa normal parolan işe yarayabilir. Aşağıya yapıştır."
+        },
+        "title": "Bir uygulama parolası oluştur",
+        "yahoo": {
+          "one": "Aşağıdaki sayfayı aç, giriş yap ve \"Uygulama parolası oluştur\"u seç.",
+          "two": "Adını Praxi koy ve gösterilen parolayı kopyala."
+        }
+      },
+      "back": "Geri",
+      "bot": {
+        "hint": "Bu postayı yalnızca o bot görür. Sonra değiştirebilirsin.",
+        "label": "Bu posta kutusunu hangi bot kullanabilsin?"
+      },
+      "calendarNone": {
+        "yahoo": "Yahoo'nun Praxi'nin kullanabileceği bir takvim bağlantısı yok; yalnızca e-postan bağlanır."
+      },
+      "calendarNote": "Bot takvimini okuyabilir. Etkinlik eklemek veya değiştirmek, posta göndermek gibi botun erişim düzeyine bağlıdır.",
+      "calendarServer": {
+        "hint": "Sağlayıcının verdiği CalDAV adresi, örneğin https://caldav.example.com/. Praxi takvimlerini oradan bulur.",
+        "label": "Takvim sunucusu adresi"
+      },
+      "card": {
+        "calendars_one": "{{count}} takvim",
+        "calendars_other": "{{count}} takvim",
+        "description": "Tek bir yönlendirmeli akış: adresini yaz, Praxi e-posta ve takvimini bağlamanın en kolay yolunu seçsin, denesin ve bir şey ters giderse sade bir dille söylesin.",
+        "disconnect": "Hepsinin bağlantısını kes",
+        "disconnectFailed": "Kaldırılamadı: {{names}}. Aşağıdaki listelerden kaldır.",
+        "disconnectHint": "Burada listelenen tüm posta kutuları, takvimler ve Google posta/takvim girişleri, kayıtlı parolalarıyla birlikte kaldırılır. Botlar erişimi hemen kaybeder. Sonra yeniden bağlayabilirsin.",
+        "disconnectYes": "Evet, hepsinin bağlantısını kes",
+        "disconnected_one": "{{count}} bağlantı kesildi.",
+        "disconnected_other": "{{count}} bağlantı kesildi.",
+        "googleApps_one": "{{count}} Google girişi",
+        "googleApps_other": "{{count}} Google girişi",
+        "mailboxes_one": "{{count}} posta kutusu",
+        "mailboxes_other": "{{count}} posta kutusu",
+        "none": "Henüz bağlı bir şey yok.",
+        "start": "E-postamı ve takvimimi bağla",
+        "title": "E-postamı ve takvimimi bağla"
+      },
+      "close": "Kapat",
+      "connect": "Bağla",
+      "connectWhatWorks": "Çalışanı bağla",
+      "done": {
+        "access": "{{provider}} erişim sayfasını aç",
+        "calendar_one": "{{count}} takvim bağlandı.",
+        "calendar_other": "{{count}} takvim bağlandı.",
+        "mail": "E-posta {{name}} adıyla bağlandı.",
+        "nothing": "Burada bir şey bağlanmadı. Giriş Uygulamalar penceresinde yapılır.",
+        "partFailed": "Bir kısım kaydedilemedi: {{message}}",
+        "readOnly": "Botun postanı okuyabilir ve taslak yazabilir, ama gönderemez. Göndermeye sonra Ayarlar, Posta'dan izin verebilirsin.",
+        "revoke": "İstediğin zaman bağlantıyı kesebilirsin: Ayarlar, Posta'dan kaldır ya da \"Hepsinin bağlantısını kes\"i kullan. Sağlayıcıdaki erişimi de geri almak için aşağıdaki düğmeyle onun sayfasını aç.",
+        "sendAsks": "Gönderme açık. Botun Tam erişimi yoksa her mesajı önce sen görürsün.",
+        "title": "Hazır",
+        "toolsOff": "{{name}} henüz postayı kullanamıyor.",
+        "turnOn": "{{name}} postayı kullansın"
+      },
+      "finish": "Bitir",
+      "fix": {
+        "calendar": {
+          "auth": {
+            "fastmail": "Fastmail takvim girişini reddetti. Uygulama parolasının Takvimler'e izin verdiğinden emin ol.",
+            "icloud": "Apple takvim girişini reddetti. Aynı uygulamaya özel parolayı kullan ve \"Daha fazla seçenek\" altında kullanıcı adı olarak Apple Kimliğini yaz.",
+            "other": "Takvim sunucusu girişi reddetti. Kullanıcı adını ve uygulama parolasını kontrol et."
+          },
+          "detail": "Sunucu şunu söyledi: {{error}}",
+          "notFound": "Takvim sunucusu bu adreste takvim bulamadı. Sağlayıcının verdiği CalDAV adresini kontrol et.",
+          "other": "Takvim sunucusu isteği kabul etmedi. Adresi ve girişi kontrol et.",
+          "redirect": "Takvim sunucusu bizi başka bir adrese yönlendirdi; Praxi güvenliğin için bunu izlemez. Sağlayıcının verdiği son takvim adresini yaz.",
+          "unreachable": "Takvim sunucusuna ulaşılamadı. İnternet bağlantını ve adresi kontrol edip yeniden dene."
+        },
+        "mail": {
+          "auth": {
+            "fastmail": "Fastmail girişi reddetti. Normal parolanı değil, Posta'ya izin veren bir uygulama parolası oluştur.",
+            "google": "Google girişi reddetti. Normal parolanı değil, 16 harfli bir uygulama parolası kullan. Uygulama parolaları 2 adımlı doğrulama ister, iş hesaplarında yönetici bunları kapatmış olabilir. O durumda geri dönüp \"Google ile giriş yap\"ı seç.",
+            "icloud": "Apple girişi reddetti. Apple Kimliği parolanı değil, Apple hesap sayfanda oluşturduğun uygulamaya özel parolayı kullan. Apple Kimliğin iCloud adresin değilse, \"Daha fazla seçenek\" altında kullanıcı adı olarak yaz.",
+            "microsoft": "Microsoft artık e-posta için parola kabul etmiyor. Geri dön ve \"Microsoft ile giriş yap\"ı kullan.",
+            "other": "Sunucu girişi reddetti. Sağlayıcında varsa uygulama parolası kullan ve \"Daha fazla seçenek\" altındaki kullanıcı adını kontrol et.",
+            "yahoo": "Yahoo girişi reddetti. Normal parolanı değil, Yahoo güvenlik sayfasından aldığın uygulama parolasını boşluksuz yapıştır."
+          },
+          "protocol": "Bu sunucu bir posta sunucusu gibi yanıt vermedi. Biraz sonra yeniden dene.",
+          "protocolGuess": "Bu sunucu bir posta sunucusu gibi yanıt vermedi. \"Daha fazla seçenek\"i aç ve sağlayıcının verdiği sunucu adlarını ve bağlantı noktalarını kontrol et.",
+          "timeout": "Posta sunucusu zamanında yanıt vermedi. Biraz sonra yeniden dene.",
+          "tls": "Posta sunucusuyla güvenli bağlantı kurulamadı. Biraz sonra yeniden dene.",
+          "tlsGuess": "Güvenli bağlantı kurulamadı. \"Daha fazla seçenek\"i aç ve sağlayıcının verdiği sunucu adlarını ve bağlantı noktalarını kontrol et.",
+          "unreachable": "Posta sunucusuna ulaşılamadı. İnternet bağlantını kontrol edip yeniden dene.",
+          "unreachableGuess": "Sunucu adlarını adresinden tahmin ettik ve yanıt vermiyorlar. \"Daha fazla seçenek\"i aç ve sağlayıcının verdiği sunucu adlarını yaz."
+        }
+      },
+      "google": {
+        "pathLabel": "Google'ı nasıl bağlamak istersin?",
+        "paths": {
+          "app_password": "Uygulama parolası",
+          "app_passwordHint": "Yalnızca e-posta. 2 adımlı doğrulama gerekir; iş hesaplarında yönetici uygulama parolalarını kapatmış olabilir.",
+          "google_sign_in": "Google ile giriş yap (önerilir)",
+          "google_sign_inHint": "Gmail ve Takvim, yalnızca okuma. Tarayıcında giriş yaparsın; hiçbir parola paylaşılmaz."
+        }
+      },
+      "hints": {
+        "address": "Adım 1 / 2. Deneme başarılı olmadan hiçbir şey değişmez.",
+        "done": "Tamam.",
+        "setup": "Adım 2 / 2. Adımları uygula, sonra bağlantıyı dene."
+      },
+      "missing": {
+        "bot": "Bağlantıyı denemek için bu posta kutusunu hangi botun kullanacağını seç.",
+        "password": "Bağlantıyı denemek için yukarıya uygulama parolasını yapıştır.",
+        "server": "Bağlantıyı denemek için takvim sunucusu adresini yaz ya da \"Takvimim\"in işaretini kaldır."
+      },
+      "more": {
+        "login": "Adresin değilse kullanıcı adı",
+        "loginHint": "iCloud'da bu Apple Kimliğindir.",
+        "title": "Daha fazla seçenek"
+      },
+      "next": "İleri",
+      "providers": {
+        "fastmail": "Fastmail",
+        "google": "Gmail veya Google Workspace",
+        "icloud": "iCloud",
+        "microsoft": "Outlook veya Microsoft 365",
+        "other": "Başka bir sağlayıcı",
+        "yahoo": "Yahoo"
+      },
+      "result": {
+        "calendarBad": "Takvim henüz çalışmıyor.",
+        "calendarOk_one": "Takvim çalışıyor. {{count}} takvim bulundu.",
+        "calendarOk_other": "Takvim çalışıyor. {{count}} takvim bulundu.",
+        "error": "Praxi denemeyi çalıştıramadı: {{message}}",
+        "mailBad": "E-posta henüz çalışmıyor.",
+        "mailOk": "E-posta çalışıyor. Sunucu girişi kabul etti.",
+        "mailReadNote": "Gönderme kurulu değil; bot yalnızca okuyorsa sorun değil.",
+        "mailReadOk": "E-posta okuma çalışıyor.",
+        "pick": "Bot hangi takvimleri görsün?",
+        "readOnlyOn": "Bot yalnızca okuyacak ve taslak yazacak. Posta gönderemez.",
+        "sendAsks": "Bot posta gönderebilir. Botun Tam erişimi yoksa her mesajı önce sen görürsün."
+      },
+      "saving": "Bağlanıyor…",
+      "send": {
+        "allow": "Bot posta da gönderebilsin",
+        "allowHint": "Botun Tam erişimi yoksa her mesaj önce sana gösterilir.",
+        "label": "Gönderme",
+        "readOnly": "Yalnızca okuma ve taslak. Bot postanı okuyabilir, arayabilir ve taslak yazabilir; ama hiçbir şey gönderemez."
+      },
+      "setup": {
+        "for": "{{address}} ({{provider}}) bağlanıyor."
+      },
+      "signIn": {
+        "check": "Bitirdim, kontrol et",
+        "checking": "Kontrol ediliyor…",
+        "google": {
+          "body": "Uygulamalar penceresini aç, Gmail ve Takvim için Bağla'ya bas ve tarayıcında giriş yap. Erişim yalnızca okumadır. İlk seferde kendi hesabın için küçük bir Google istemcisi oluşturursun; adımlar orada gösterilir.",
+          "connected": "Google girişi yapıldı.",
+          "notYet": "Henüz giriş yapılmadı. Uygulamalar penceresindeki adımları bitir, sonra yeniden kontrol et.",
+          "open": "Google girişini aç",
+          "title": "Google ile giriş yap"
+        },
+        "microsoft": {
+          "body": "Microsoft artık e-posta için uygulama parolası kabul etmiyor; bu yüzden Outlook, Praxi uygulama merkezindeki Microsoft girişiyle bağlanır. Aç, Outlook'u seç ve tarayıcında onayla.",
+          "connected": "Outlook girişi yapıldı.",
+          "notYet": "Outlook girişi henüz yapılmadı. Uygulamalar penceresinde girişi bitir, sonra yeniden kontrol et.",
+          "open": "Outlook girişini aç",
+          "title": "Microsoft ile giriş yap"
+        }
+      },
+      "test": "Bağlantıyı dene",
+      "testing": "Deneniyor…",
+      "title": "E-postamı ve takvimimi bağla",
+      "want": {
+        "calendar": "Takvimim",
+        "mail": "E-postam",
+        "title": "Bot neleri görebilsin?"
+      }
+    },
     "data": {
       "category": {
         "backups": "Yedekler",

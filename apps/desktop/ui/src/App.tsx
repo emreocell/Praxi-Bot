@@ -170,7 +170,7 @@ import { MyBotsView } from "./views/MyBotsView";
 import { nativePauseAction } from "./lib/myBots";
 import { SettingsModal, type SettingsTargetRequest } from "./views/SettingsModal";
 import { VaultModal } from "./views/VaultModal";
-import { OPEN_SETTINGS_EVENT, OPEN_VAULT_EVENT, type SettingsTarget } from "./lib/settingsLink";
+import { type AppsStart, OPEN_APPS_EVENT, OPEN_SETTINGS_EVENT, OPEN_VAULT_EVENT, type SettingsTarget } from "./lib/settingsLink";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
 import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
 import type { BotEditorSection } from "./lib/botEditor";
@@ -308,6 +308,16 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     setSettingsOpen(page);
   }, []);
   const [appsOpen, setAppsOpen] = useState(false);
+  // The guided mail flow sends the owner to the Apps window for the sign-in step (it stays on top of Settings).
+  const [appsStart, setAppsStart] = useState<AppsStart | null>(null);
+  useEffect(() => {
+    const open = (e: Event) => {
+      setAppsStart((e as CustomEvent<AppsStart>).detail ?? null);
+      setAppsOpen(true);
+    };
+    window.addEventListener(OPEN_APPS_EVENT, open);
+    return () => window.removeEventListener(OPEN_APPS_EVENT, open);
+  }, []);
   // "Start from a goal": the recipe dialog stays open under the screen a fix opens (answers are kept)
   // and checks again once that screen closes.
   const [recipeOpen, setRecipeOpen] = useState(false);
@@ -1753,7 +1763,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
           }
         }}
       />
-      <AppsModal open={appsOpen} onClose={() => setAppsOpen(false)} />
+      <AppsModal open={appsOpen} start={appsStart} onClose={() => { setAppsOpen(false); setAppsStart(null); }} />
       <VaultModal
         open={vaultOpen}
         onClose={() => setVaultOpen(false)}

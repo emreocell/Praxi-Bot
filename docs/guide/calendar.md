@@ -7,6 +7,9 @@ like any other tool.
 
 ## Set it up
 
+For mail and calendar together, the guided flow
+[Connect my email and calendar](connect-email-calendar.md) does the steps below for you.
+
 Open **Settings > Mail & web > Calendar**:
 
 1. Pick your service (iCloud, Fastmail, Nextcloud, Google or Other). The address is filled in for you.

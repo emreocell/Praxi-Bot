@@ -252,6 +252,21 @@
     "summary": "Bots can work in apps on your Windows PC when the chat uses This computer and"
   },
   {
+    "doc": "connect-email-calendar.md",
+    "title": "Connect my email and calendar",
+    "headings": [
+      "The short version",
+      "What each provider uses",
+      "Calendars",
+      "What the bot may do: read first, sending is a second opt-in",
+      "Where the secrets go",
+      "When something does not work",
+      "Revoke and disconnect",
+      "Notes for the command line"
+    ],
+    "summary": "One guided flow connects your mail and your calendar. You type your address, Praxi"
+  },
+  {
     "doc": "connect-your-apps.md",
     "title": "Connect your apps",
     "headings": [

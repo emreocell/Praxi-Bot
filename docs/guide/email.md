@@ -75,6 +75,10 @@ A bot is only offered the email tools when at least one account is usable by it
 
 ## Managing accounts without editing files
 
+New to this? **Settings → Connections → Mail and web → Connect my email and calendar**
+walks you through it (provider detection, app password link, live test, plain-words
+fixes): see [Connect my email and calendar](connect-email-calendar.md).
+
 With the daemon running you can add, change, test and remove accounts from
 **Settings, Mail** in the desktop app, or from the command line:
 

@@ -20,6 +20,19 @@ export function openVault(): void {
   window.dispatchEvent(new Event(OPEN_VAULT_EVENT));
 }
 
+export const OPEN_APPS_EVENT = "praxi:open-apps";
+
+/** Where the Apps window opens: on the Advanced list (Google apps) and/or with the search filled in. */
+export interface AppsStart {
+  advanced?: boolean;
+  query?: string;
+}
+
+/** Opens the Apps window on top of whatever is open (the guided mail flow uses it for the sign-in step). */
+export function openApps(start: AppsStart = {}): void {
+  window.dispatchEvent(new CustomEvent<AppsStart>(OPEN_APPS_EVENT, { detail: start }));
+}
+
 let pending: SettingsTarget | null = null;
 
 /** Opens Settings on the target's page, scrolls the card into view, flashes it, and focuses the field. */
