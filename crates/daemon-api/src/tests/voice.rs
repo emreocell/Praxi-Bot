@@ -288,6 +288,8 @@ async fn local_only_reaches_the_host_and_dictation_on_device_is_not_for_peers() 
     // The owner on this computer still dictates.
     let r = call(&t, Method::POST, "/v1/voice/transcribe", Some(body)).await;
     assert_eq!(r.status, StatusCode::OK);
+}
+
 /// The open response is an event stream; this reads it one `data:` event at a time.
 struct Events(axum::body::Body, String);
 
