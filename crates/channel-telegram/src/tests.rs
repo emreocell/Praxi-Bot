@@ -1990,6 +1990,214 @@ async fn a_pasted_secret_is_cut_out_before_the_daemon_and_the_owner_is_told() {
     );
 }
 
+/// Assembled at run time so no secret-shaped literal sits in the source.
+fn pasted_key() -> String {
+    format!("{}{}", "sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34")
+}
+
+/// The redaction happens before the inbox is written: the file on disk (every
+/// record of it), the daemon, Telegram and a raw `receive` consumer only ever
+/// hold the redacted text.
+#[tokio::test]
+async fn a_pasted_secret_never_reaches_the_inbox_file_the_daemon_or_a_raw_consumer() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let key = pasted_key();
+    mock_updates(
+        &server,
+        json!([
+            text_update(
+                1,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                &format!("deploy with {key} please")
+            ),
+            text_update(2, PAIRED_USER_ID, TEST_CHAT_ID, &format!("  {key}\n")),
+            text_update(
+                3,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "card 4111 1111 1111 1111 exp 12/29"
+            ),
+            // A stranger's message is cut too: the inbox file keeps it as well.
+            text_update(4, 5150, 5150, &format!("hello {key}")),
+        ]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    let dir = tempfile::tempdir().unwrap();
+    let channel =
+        TelegramChannel::new(durable_config(&server, dir.path()), daemon.clone()).unwrap();
+
+    // A consumer of the raw Channel API gets the redacted text, not the original.
+    let mut raw = channel.receive().await.unwrap();
+    let mut seen = Vec::new();
+    while let Some(m) = futures::StreamExt::next(&mut raw).await {
+        if let IncomingKind::Text(t) = m.kind {
+            seen.push((m.update_id, t, m.secret_cut));
+        }
+    }
+    assert_eq!(
+        seen,
+        [
+            (1, "deploy with [REDACTED] please".to_owned(), Some(false)),
+            (2, "  [REDACTED]\n".to_owned(), Some(true)),
+            (3, "card [REDACTED] exp 12/29".to_owned(), Some(false)),
+            (4, "hello [REDACTED]".to_owned(), Some(false)),
+        ]
+    );
+
+    channel.poll_once().await.unwrap();
+    // The whole file, as bytes: no record anywhere holds a fragment of a value.
+    let file = std::fs::read_to_string(dir.path().join("telegram-inbox.jsonl")).unwrap();
+    for fragment in ["Ab12Cd34", "Mn34", "4111", "1111"] {
+        assert!(!file.contains(fragment), "inbox file holds {fragment}");
+    }
+    let records = inbox_records(dir.path());
+    let first = |id: i64| records.iter().find(|r| r["update_id"] == id).unwrap();
+    assert_eq!(
+        first(1)["payload"]["message"]["text"],
+        "deploy with [REDACTED] please"
+    );
+    assert_eq!(first(1)["payload"]["secret_cut"], false);
+    assert_eq!(first(2)["payload"]["secret_cut"], true);
+
+    // What the daemon was sent, and what Telegram was sent, equals the redacted text.
+    assert_eq!(
+        daemon
+            .sent_messages
+            .lock()
+            .iter()
+            .map(|(_, t)| t.clone())
+            .collect::<Vec<_>>(),
+        ["deploy with [REDACTED] please", "card [REDACTED] exp 12/29"]
+    );
+    let said = sent_texts(&server.received_requests().await.unwrap());
+    assert!(
+        said.iter()
+            .all(|t| !t.contains("Ab12Cd34") && !t.contains("4111")),
+        "{said:?}"
+    );
+    assert_eq!(said.iter().filter(|t| t.starts_with("🔒")).count(), 3);
+}
+
+/// A retry after a failed delivery sends the same redacted text again and does
+/// not tell the owner a second time.
+#[tokio::test]
+async fn a_retried_message_stays_redacted_and_the_owner_is_told_once() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let key = pasted_key();
+    mock_updates(
+        &server,
+        json!([text_update(
+            1,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            &format!("deploy with {key} please")
+        )]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    daemon.send_failures.lock().insert(
+        "deploy with [REDACTED] please".into(),
+        VecDeque::from([crate::TelegramError::Daemon(
+            "temporarily unavailable".into(),
+        )]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let channel =
+        TelegramChannel::new(durable_config(&server, dir.path()), daemon.clone()).unwrap();
+    assert!(channel.poll_once().await.is_err());
+    channel.advance_retry_clock(Duration::from_secs(2));
+    channel.poll_once().await.unwrap();
+
+    assert_eq!(
+        *daemon.send_attempts.lock(),
+        [
+            "deploy with [REDACTED] please",
+            "deploy with [REDACTED] please"
+        ]
+    );
+    assert_eq!(daemon.sent_messages.lock().len(), 1);
+    let said = sent_texts(&server.received_requests().await.unwrap());
+    assert_eq!(
+        said.iter().filter(|t| t.starts_with("🔒")).count(),
+        1,
+        "{said:?}"
+    );
+    let file = std::fs::read_to_string(dir.path().join("telegram-inbox.jsonl")).unwrap();
+    assert!(!file.contains("Ab12Cd34"));
+}
+
+/// A message that is nothing but a secret is told once and never forwarded,
+/// however often the poll comes round again.
+#[tokio::test]
+async fn a_message_that_is_only_a_secret_is_told_once_and_never_forwarded() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    mock_updates(
+        &server,
+        json!([text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, &pasted_key())]),
+    )
+    .await;
+    let daemon = one_bot_daemon();
+    let dir = tempfile::tempdir().unwrap();
+    let channel =
+        TelegramChannel::new(durable_config(&server, dir.path()), daemon.clone()).unwrap();
+    channel.poll_once().await.unwrap();
+    channel.advance_retry_clock(Duration::from_secs(2));
+    channel.poll_once().await.unwrap();
+    assert!(daemon.sent_messages.lock().is_empty());
+    assert!(daemon.send_attempts.lock().is_empty());
+    let said = sent_texts(&server.received_requests().await.unwrap());
+    assert_eq!(
+        said.iter()
+            .filter(|t| t.contains("did not pass it on"))
+            .count(),
+        1
+    );
+}
+
+/// The flag that says "a secret was cut" is set by this bridge only.
+#[test]
+fn a_secret_cut_flag_that_arrives_with_an_update_is_never_trusted() {
+    let mut v = text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "hello there");
+    v["secret_cut"] = json!(true);
+    let mut u = update(v);
+    assert_eq!(u.secret_cut, Some(true));
+    u.cut_secrets();
+    assert_eq!(u.secret_cut, None);
+    assert_eq!(u.message.unwrap().text.as_deref(), Some("hello there"));
+}
+
+/// A spoken secret is cut out of the transcript before the echo, so Telegram
+/// does not keep it as text either.
+#[tokio::test]
+async fn a_spoken_secret_is_cut_before_the_echo_and_before_the_daemon() {
+    let server = voice_note_server().await;
+    let (channel, daemon) = voice_channel(&server, Some("my password is Tr0ub4dor&3 ok"));
+    channel.handle_update(voice_update(1, 3)).await.unwrap();
+    assert_eq!(
+        daemon.sent_messages.lock()[0].1,
+        "my password is [REDACTED] ok"
+    );
+    let said = sent_texts(&server.received_requests().await.unwrap());
+    assert_eq!(said[0], "🎤 my password is [REDACTED] ok");
+    assert!(said.iter().all(|t| !t.contains("Tr0ub4dor")), "{said:?}");
+    assert!(said[1].starts_with("🔒") && said[1].contains("cut that part out"));
+
+    // Nothing but a secret: heard, told, not passed on.
+    let server = voice_note_server().await;
+    let (channel, daemon) = voice_channel(&server, Some(&pasted_key()));
+    channel.handle_update(voice_update(2, 3)).await.unwrap();
+    assert!(daemon.sent_messages.lock().is_empty());
+    let said = sent_texts(&server.received_requests().await.unwrap());
+    assert_eq!(said[0], "🎤 [REDACTED]");
+    assert!(said[1].contains("did not pass it on"), "{said:?}");
+    assert!(said.iter().all(|t| !t.contains("Ab12Cd34")));
+}
+
 // ---------------------------------------------------------------------------
 // F04 fix wave
 // ---------------------------------------------------------------------------
@@ -4889,6 +5097,38 @@ mod owner_notices {
         // Nothing to press: an approval is never decided from a notice.
         assert!(en.get("reply_markup").is_none_or(Value::is_null));
         assert!(!en_text.contains("Approve"));
+    }
+
+    #[tokio::test]
+    async fn a_secret_in_an_answer_is_cut_before_the_daemon_takes_it() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        channel.push_notice(&blocked(&["a.com"])).await;
+        // Same chat id as user id: a private chat.
+        channel
+            .handle_update(update(text_update(
+                1,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                &format!("/answer {}", pasted_key()),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(
+            *daemon.notice_answers.lock(),
+            vec![(
+                NOTICE_ID.to_owned(),
+                vec![Reply {
+                    key: "a.com".into(),
+                    answer: Some("[REDACTED]".into())
+                }]
+            )]
+        );
+        let said = sent_texts(&server.received_requests().await.unwrap());
+        assert!(said.iter().all(|t| !t.contains("Ab12Cd34")), "{said:?}");
+        assert!(said.iter().any(|t| t.starts_with("🔒")));
     }
 
     #[tokio::test]

@@ -383,6 +383,12 @@ impl Inbox {
         })
     }
 
+    /// The owner has been told a secret was cut out of this update's text: forget it, so a
+    /// retry of the update does not tell them again.
+    pub(crate) fn secret_notified(&self, id: i64) -> Result<()> {
+        self.change(id, |entry| entry.payload.secret_cut = None)
+    }
+
     pub(crate) fn done(&self, id: i64) -> Result<()> {
         self.change(id, |entry| entry.state = InboxState::Done)
     }
@@ -427,6 +433,7 @@ mod tests {
             update_id: id,
             message: None,
             callback_query: None,
+            secret_cut: None,
         }
     }
 

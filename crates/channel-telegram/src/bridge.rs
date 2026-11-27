@@ -534,6 +534,17 @@ fn approval_markup(
     InlineKeyboardMarkup::from_rows(vec![row])
 }
 
+/// A spoken transcript, trimmed, with a pasted secret cut out. The flag is
+/// `Some(only_secrets)` when one was. It takes the original by value so no copy of it
+/// stays in the caller.
+#[allow(clippy::needless_pass_by_value)] // by value on purpose: the original is dropped here
+fn cut_secrets(text: String) -> (String, Option<bool>) {
+    match screen_inbound(text.trim()) {
+        Some(screened) => (screened.text, Some(screened.only_secrets)),
+        None => (text.trim().to_owned(), None),
+    }
+}
+
 /// The text after `/answer` (or `/answer@bot`), if `text` is that command.
 fn answer_arg(text: &str) -> Option<&str> {
     let t = text.trim();
@@ -776,7 +787,15 @@ impl TelegramChannel {
     }
 
     /// Take durable ownership of the entire batch before acknowledging any update.
-    fn handle_updates(&self, updates: &[Update]) -> Result<usize> {
+    ///
+    /// This is the one place a pasted secret is cut out of a text message: the owner cannot be
+    /// offered the "keep it out of the chat" card here, so BEFORE the inbox file is written (and
+    /// before `receive` hands anything on) the text becomes its redacted form. Everything after
+    /// this point (inbox, daemon, history, logs, retries) only ever sees the redacted text.
+    fn handle_updates(&self, updates: &mut [Update]) -> Result<usize> {
+        for update in updates.iter_mut() {
+            update.cut_secrets();
+        }
         self.inner.inbox.enqueue(updates, self.inbox_now_ms())?;
         let saved = if let Some(id) = updates.iter().map(|u| u.update_id).max() {
             self.advance_offset(id)
@@ -959,7 +978,7 @@ impl TelegramChannel {
                 result = self.inner.bot_api.get_updates(offset, self.inner.config.poll_timeout_secs) => result,
             };
             let result = match polled {
-                Ok(updates) => self.handle_updates(&updates),
+                Ok(mut updates) => self.handle_updates(&mut updates),
                 Err(error) => Err(error),
             };
             match result {
@@ -1195,9 +1214,9 @@ impl TelegramChannel {
                 },
             )
         };
-        let updates = self.inner.bot_api.get_updates(offset, timeout).await?;
+        let mut updates = self.inner.bot_api.get_updates(offset, timeout).await?;
         let count = updates.len();
-        let mut first_error = self.handle_updates(&updates).err();
+        let mut first_error = self.handle_updates(&mut updates).err();
         for priority in [true, false] {
             if let Err(error) = self.process_pending(priority).await {
                 first_error.get_or_insert(error);
@@ -1214,8 +1233,8 @@ impl TelegramChannel {
     ///
     /// # Errors
     /// Returns an error for an inbox/offset write or Telegram/daemon API failure.
-    pub async fn handle_update(&self, update: Update) -> Result<()> {
-        self.handle_updates(&[update])?;
+    pub async fn handle_update(&self, mut update: Update) -> Result<()> {
+        self.handle_updates(std::slice::from_mut(&mut update))?;
         let mut first_error = None;
         for priority in [true, false] {
             if let Err(error) = self.process_pending(priority).await {
@@ -1396,6 +1415,18 @@ impl TelegramChannel {
         Ok(msg.message_id)
     }
 
+    /// Tell the owner, without the value, that a secret was cut out of their message
+    /// (`whole`: nothing else was left, so nothing was passed on).
+    async fn tell_secret_cut(&self, chat_id: i64, whole: bool) -> Result<()> {
+        self.send_redacted(
+            chat_id,
+            &Message::SecretRemoved { whole }.render(self.language(chat_id)),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     pub(crate) async fn handle_incoming(&self, msg: IncomingMessage) -> Result<()> {
         let chat_id = msg.chat.0;
         let user_id = msg.user_id;
@@ -1437,6 +1468,17 @@ impl TelegramChannel {
         let forwarded = msg.forwarded;
         match msg.kind {
             IncomingKind::Text(text) => {
+                // `text` is already redacted (see `handle_updates`); only the owner's notice is left.
+                if let Some(whole) = msg.secret_cut {
+                    self.tell_secret_cut(chat_id, whole).await?;
+                    if whole {
+                        // Nothing is left to pass on, and a retry must not forward the bare marker.
+                        self.inner.inbox.delivered(msg.update_id, None)?;
+                        return Ok(());
+                    }
+                    // Told once: a retry of this update must not tell again.
+                    self.inner.inbox.secret_notified(msg.update_id)?;
+                }
                 if let Some(arg) = answer_arg(&text) {
                     return self
                         .handle_answer_command(chat_id, user_id, forwarded, arg)
@@ -1545,7 +1587,7 @@ impl TelegramChannel {
                 return Ok(());
             }
         };
-        let text = match self
+        let transcript = match self
             .inner
             .api_client
             .transcribe_voice(audio, "audio/ogg")
@@ -1562,7 +1604,9 @@ impl TelegramChannel {
                 return Ok(());
             }
         };
-        let text = text.trim();
+        // The transcript is consumed here: from now on only the redacted text exists, the
+        // echo below included (Telegram would otherwise keep a spoken secret as text).
+        let (text, cut) = cut_secrets(transcript);
         if text.is_empty() {
             say(Message::VoiceEmpty).await?;
             return Ok(());
@@ -1570,11 +1614,18 @@ impl TelegramChannel {
         // What was heard, so the owner can correct a mistake before anything happens.
         self.send_redacted(chat_id, &format!("🎤 {text}"), None)
             .await?;
+        if let Some(whole) = cut {
+            self.tell_secret_cut(chat_id, whole).await?;
+            if whole {
+                self.inner.inbox.delivered(update_id, None)?;
+                return Ok(());
+            }
+        }
         // A spoken sentence is never a slash command (/stop, /use ...): those must be typed.
         let text = if text.starts_with('/') {
             format!("🎤 {text}")
         } else {
-            text.to_owned()
+            text
         };
         self.handle_paired_text(chat_id, &text, update_id).await
     }
@@ -1626,30 +1677,6 @@ impl TelegramChannel {
         {
             return self.forward_user_message(chat_id, trimmed, update_id).await;
         }
-
-        // The owner cannot be offered the "keep it out of the chat" card here, so a pasted
-        // secret is cut out before it reaches the model, the history or the logs, and the
-        // owner is told. Voice transcripts arrive through this function too.
-        let screened = screen_inbound(trimmed);
-        let trimmed = match &screened {
-            Some(s) => {
-                self.send_redacted(
-                    chat_id,
-                    &Message::SecretRemoved {
-                        whole: s.only_secrets,
-                    }
-                    .render(self.language(chat_id)),
-                    None,
-                )
-                .await?;
-                if s.only_secrets {
-                    self.inner.inbox.delivered(update_id, None)?;
-                    return Ok(());
-                }
-                s.text.as_str()
-            }
-            None => trimmed,
-        };
 
         // If the chat has a pending `ask_user` question, free text answers it.
         let pending_q = self
@@ -2555,14 +2582,15 @@ impl TelegramChannel {
             let rt = self.inner.runtime.lock();
             rt.next_offset
         };
-        let updates = self
+        let mut updates = self
             .inner
             .bot_api
             .get_updates(offset, self.inner.config.poll_timeout_secs)
             .await?;
         // The raw Channel API has no consumer acknowledgement. Retain these
         // records in the inbox so the bridge can recover them after a restart.
-        self.handle_updates(&updates)?;
+        // The texts are redacted by now: the consumer never sees a pasted secret.
+        self.handle_updates(&mut updates)?;
         let items: Vec<_> = updates
             .into_iter()
             .filter_map(Update::into_incoming)

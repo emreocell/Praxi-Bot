@@ -592,6 +592,7 @@ async fn a_pasted_secret_is_cut_out_before_the_daemon_and_the_owner_is_told() {
     let notice = said.iter().find(|t| t.starts_with("🔒")).expect("a notice");
     assert!(notice.contains("cut that part out"), "{notice}");
     assert!(said.iter().all(|t| !t.contains("Ab12Cd34")), "{said:?}");
+    assert!(!all_request_bodies(&h.rest).await.contains("Ab12Cd34"));
 
     // Nothing but a key: nothing reaches the daemon, the owner still hears why.
     h.gw.message("3", OWNER, dm, &format!("  {key}\n"));
@@ -604,6 +605,50 @@ async fn a_pasted_secret_is_cut_out_before_the_daemon_and_the_owner_is_told() {
         "{last}"
     );
     assert!(!last.contains("Ab12Cd34"));
+    h.channel.shutdown().await;
+}
+
+/// Every request body the REST server got, as text: nothing the bot ever sent may hold a secret.
+async fn all_request_bodies(server: &MockServer) -> String {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[tokio::test]
+async fn a_secret_in_a_command_argument_is_cut_before_the_command_runs() {
+    let h = harness(FakeDaemon::new(vec![], false)).await;
+    pair_owner(&h).await;
+    let key = format!("{}{}", "sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+    let dm = (None, "777");
+
+    // `!use <key>` looks a bot up by that name: the lookup sees the cut text, not the key.
+    h.gw.message("2", OWNER, dm, &format!("!use {key}"));
+    let s = wait_sent(&h.rest, 3).await;
+    let said: Vec<&str> = s.iter().filter_map(|m| m["content"].as_str()).collect();
+    assert!(said.iter().any(|t| t.starts_with("🔒")), "{said:?}");
+    assert!(h.daemon.sent.lock().is_empty());
+    assert!(!all_request_bodies(&h.rest).await.contains("Ab12Cd34"));
+    h.channel.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_secret_from_a_stranger_is_neither_forwarded_nor_echoed() {
+    let h = harness(FakeDaemon::new(vec![], false)).await;
+    pair_owner(&h).await;
+    let key = format!("{}{}", "sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+    h.gw.message("2", "99", (None, "778"), &format!("hello {key}"));
+    settle().await;
+    assert!(h.daemon.sent.lock().is_empty());
+    let bodies = all_request_bodies(&h.rest).await;
+    assert!(!bodies.contains("Ab12Cd34"), "{bodies}");
+    // The stranger is not told about secrets (that notice is the owner's).
+    assert!(!bodies.contains("🔒"), "{bodies}");
     h.channel.shutdown().await;
 }
 
@@ -1101,6 +1146,31 @@ mod owner_notices {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(h.daemon.notice_retries.lock().len(), 1);
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_secret_in_an_answer_is_cut_before_the_daemon_takes_it() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        pair_owner(&h).await;
+        push(&h, blocked(&["a.com"]));
+        wait_sent(&h.rest, 2).await;
+        let key = format!("{}{}", "sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+        say(&h, "2", &format!("/answer {key}"));
+        let s = wait_sent(&h.rest, 4).await;
+        assert_eq!(
+            *h.daemon.notice_answers.lock(),
+            vec![(
+                NOTICE_ID.to_owned(),
+                vec![Reply {
+                    key: "a.com".into(),
+                    answer: Some("[REDACTED]".into())
+                }]
+            )]
+        );
+        let said: Vec<&str> = s.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(said.iter().any(|t| t.starts_with("🔒")), "{said:?}");
+        assert!(!all_request_bodies(&h.rest).await.contains("Ab12Cd34"));
         h.channel.shutdown().await;
     }
 

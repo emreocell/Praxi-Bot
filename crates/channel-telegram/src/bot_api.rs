@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 use reqwest::Client;
-use secret_store::{REDACTED, SecretValue};
+use secret_store::{REDACTED, SecretValue, screen_inbound};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -65,9 +65,29 @@ pub struct Update {
     /// New incoming callback query from an inline keyboard button.
     #[serde(default)]
     pub callback_query: Option<CallbackQuery>,
+    /// Set by [`Update::cut_secrets`] and nowhere else: a pasted secret was cut out of
+    /// `message.text` before this update was stored (`true`: nothing else was left).
+    /// The owner is told once the message is handled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_cut: Option<bool>,
 }
 
 impl Update {
+    /// Cut a pasted secret out of the text of this update. Call it BEFORE the update is
+    /// written to the inbox, handed to a consumer or logged: from then on only the
+    /// redacted text exists.
+    pub(crate) fn cut_secrets(&mut self) {
+        // A value that arrived with the update is never trusted.
+        self.secret_cut = None;
+        let Some(text) = self.message.as_mut().and_then(|m| m.text.as_mut()) else {
+            return;
+        };
+        if let Some(screened) = screen_inbound(text) {
+            self.secret_cut = Some(screened.only_secrets);
+            *text = screened.text;
+        }
+    }
+
     /// Convert this Telegram update into a channel-agnostic [`IncomingMessage`], if supported.
     #[must_use]
     pub fn into_incoming(self) -> Option<IncomingMessage> {
@@ -96,6 +116,7 @@ impl Update {
                 language_code: from.language_code,
                 message_id: Some(msg.message_id),
                 forwarded,
+                secret_cut: self.secret_cut,
                 kind,
             });
         }
@@ -117,6 +138,7 @@ impl Update {
                 language_code: cb.from.language_code,
                 message_id,
                 forwarded: false,
+                secret_cut: None,
                 kind: IncomingKind::Callback {
                     query_id: cb.id,
                     data,

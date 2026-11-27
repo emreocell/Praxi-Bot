@@ -55,6 +55,10 @@ pub struct IncomingMessage {
     /// The message was forwarded from somewhere else: its text is not the sender's own.
     #[serde(default)]
     pub forwarded: bool,
+    /// A pasted secret was cut out of the text before it was stored (`true`: nothing else
+    /// was left). The owner still has to be told.
+    #[serde(default)]
+    pub secret_cut: Option<bool>,
     /// Message content or callback payload.
     pub kind: IncomingKind,
 }

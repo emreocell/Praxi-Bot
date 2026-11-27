@@ -236,6 +236,15 @@ impl std::fmt::Debug for DiscordChannel {
     }
 }
 
+/// An inbound text with a pasted secret cut out. The flag is `Some(only_secrets)` when one was.
+/// It takes the original by value so no copy of it stays in the caller.
+fn cut_secrets(text: String) -> (String, Option<bool>) {
+    match screen_inbound(&text) {
+        Some(screened) => (screened.text, Some(screened.only_secrets)),
+        None => (text, None),
+    }
+}
+
 /// Split `!cmd arg` / `/cmd arg`.
 fn parse_command(text: &str) -> Option<(String, &str)> {
     let t = text.trim();
@@ -594,7 +603,12 @@ impl Inner {
         }
         match ev.kind {
             IncomingKind::Text(t) => {
-                self.on_text(&ev.chat, &ev.sender.id, &t, &ev.event_id)
+                // The owner cannot be offered the "keep it out of the chat" card here, so a pasted
+                // secret is cut out before anything else sees the message (a command argument, the
+                // daemon, the history, a log). The original is consumed here: only the redacted
+                // text goes on, and the owner is told in `on_text`.
+                let (text, cut) = cut_secrets(t);
+                self.on_text(&ev.chat, &ev.sender.id, &text, cut, &ev.event_id)
                     .await;
             }
             IncomingKind::Unsupported(label) => {
@@ -674,7 +688,14 @@ impl Inner {
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn on_text(self: &Arc<Self>, chat: &ChatRef, sender: &str, text: &str, event_id: &str) {
+    async fn on_text(
+        self: &Arc<Self>,
+        chat: &ChatRef,
+        sender: &str,
+        text: &str,
+        cut: Option<bool>,
+        event_id: &str,
+    ) {
         let Some(parts) = parse_chat(chat) else {
             return;
         };
@@ -728,6 +749,14 @@ impl Inner {
             }
             None => return,
         }
+        // `text` is already redacted (see `dispatch`); the owner is told, without the value.
+        if let Some(whole) = cut {
+            self.say(chat, &Msg::SecretRemoved { whole }.render(lang))
+                .await;
+            if whole {
+                return;
+            }
+        }
 
         if let Some((cmd, arg)) = command {
             match cmd.as_str() {
@@ -780,27 +809,6 @@ impl Inner {
             self.say(chat, &Msg::TooLong.render(lang)).await;
             return;
         }
-        // The owner cannot be offered the "keep it out of the chat" card here, so a pasted
-        // secret is cut out before it reaches the model, the history or the logs, and the
-        // owner is told.
-        let screened = screen_inbound(text);
-        let text = match &screened {
-            Some(s) => {
-                self.say(
-                    chat,
-                    &Msg::SecretRemoved {
-                        whole: s.only_secrets,
-                    }
-                    .render(lang),
-                )
-                .await;
-                if s.only_secrets {
-                    return;
-                }
-                s.text.as_str()
-            }
-            None => text,
-        };
         if let Err(e) = self.forward(chat, parts.channel_id, text, event_id).await {
             self.fail(chat, &e).await;
         }
