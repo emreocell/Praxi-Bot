@@ -721,6 +721,33 @@ pub fn summarize_test_output(tool: &str, text: &str) -> McpTestResult {
 /// persistence (`<data dir>/mcp.toml`, written atomically) and the catalog.
 #[async_trait]
 pub trait McpControl: Send + Sync {
+    /// Install the exact bundle approved by the owner and leave it disabled.
+    ///
+    /// # Errors
+    /// Invalid approval, bundle or settings, or a persistence failure.
+    async fn install_bundle(
+        self: std::sync::Arc<Self>,
+        _bundle: Vec<u8>,
+        _input: crate::mcp_import::BundleApproval,
+    ) -> Result<McpServerDto, McpControlError> {
+        Err(McpControlError::Invalid(
+            "MCP bundle installs are unavailable".into(),
+        ))
+    }
+
+    /// Install a registry source revalidated against the owner's approval.
+    /// # Errors
+    /// Invalid settings, a name conflict, or a persistence failure.
+    async fn install_registry(
+        self: std::sync::Arc<Self>,
+        _entry: mcp_bridge::registry::RegistryEntry,
+        _source: usize,
+        _values: crate::mcp_import::ImportValues,
+    ) -> Result<McpServerDto, McpControlError> {
+        Err(McpControlError::Invalid(
+            "MCP registry installs are unavailable".into(),
+        ))
+    }
     /// Start sign-in only for an explicit user action. Never exposed as a tool.
     /// # Errors
     /// Unknown server, unsupported transport or discovery/policy failure.

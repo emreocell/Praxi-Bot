@@ -25,6 +25,7 @@ import { isLocalBaseUrl } from "../lib/liveViewState";
 import { GoogleApps } from "./GoogleApps";
 import { McpSampleTest } from "./McpSampleTest";
 import { McpSignInPanel } from "./McpSignInPanel";
+import { McpImportPanel } from "./McpImportPanel";
 import { mcpErrorHintKey } from "../lib/mcpError";
 import {
   ALL_CATEGORIES,
@@ -236,6 +237,7 @@ function ConnectedCell({
   busy,
   signingIn,
   onReconnect,
+  onEnable,
   onApproveChange,
   onSignIn,
   onCancelSignIn,
@@ -256,6 +258,7 @@ function ConnectedCell({
   onChooseFolder: (folder: string) => void;
   signingIn: boolean;
   onReconnect: () => void;
+  onEnable: () => void;
   onApproveChange: (tool: string, hash: string) => void;
   onSignIn: () => void;
   onCancelSignIn: () => void;
@@ -304,11 +307,11 @@ function ConnectedCell({
   const [baseline, setBaseline] = useState<BotScope>(() => botScope(server));
   const access = botAccessLabels(server, bots, t("apps.access.deletedBot"));
   const tone = statusTone(server.status);
-  const needsReconnect =
+  const needsReconnect = server.enabled && (
     needsSignIn ||
     server.status === "error" ||
     server.status === "disconnected" ||
-    server.status === "quarantined";
+    server.status === "quarantined");
   const users = bots.filter((b) => access.all || server.bots?.includes(b.id));
   const usedBy = access.all
     ? t("apps.botsAll")
@@ -359,7 +362,7 @@ function ConnectedCell({
         {broken ? null : (
           <span className={`${styles.state} ${styles[signingIn ? "tone_busy" : `tone_${tone}`]}`}>
             {tone === "ok" && !signingIn ? <Check aria-hidden="true" /> : <span className={styles.dot} aria-hidden="true" />}
-            {signingIn ? t("apps.composio.waiting") : t(`apps.status.${server.status}`)}
+            {signingIn ? t("apps.composio.waiting") : !server.enabled ? t("apps.imports.disabled") : t(`apps.status.${server.status}`)}
           </span>
         )}
         {broken ? (
@@ -375,7 +378,7 @@ function ConnectedCell({
         ) : null}
         <button
           type="button"
-          className={`${styles.manage} ${needsReconnect ? styles.manageShown : ""}`}
+          className={`${styles.manage} ${needsReconnect || !server.enabled ? styles.manageShown : ""}`}
           aria-expanded={open}
           aria-controls={panelId}
           data-testid={`mcp-manage-${server.name}`}
@@ -416,7 +419,7 @@ function ConnectedCell({
           <McpToolList server={server} client={client} busy={busy} onChange={onSaveTools} />
           <ConnectionTestButton
             testId={`mcp-connection-test-${server.name}`}
-            disabled={busy || !client}
+            disabled={busy || !client || !server.enabled}
             run={() =>
               client
                 ? client.testConnection("mcp", { name: server.name })
@@ -462,6 +465,11 @@ function ConnectedCell({
             <McpSampleTest client={client} name={server.name} disabled={busy || server.status !== "connected"} />
           ) : null}
           <div className={styles.actions}>
+            {!server.enabled ? (
+              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onEnable}>
+                {t("apps.imports.enable")}
+              </Button>
+            ) : null}
             {needsReconnect && !needsSignIn ? (
               <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
                 {t("apps.reconnect")}
@@ -1193,6 +1201,12 @@ function AppsDialog({
           await reload();
         })
       }
+      onEnable={() =>
+        void run(s.name, async () => {
+          await client?.updateMcpServer(s.name, { enabled: true });
+          await reload();
+        })
+      }
       onApproveChange={(tool, hash) =>
         void run(s.name, async () => {
           try {
@@ -1371,6 +1385,10 @@ function AppsDialog({
             />
           ) : advanced ? (
             <>
+            {open && client ? <McpImportPanel key={client.baseUrl} client={client} onInstalled={(server) => {
+              toast.show(t("apps.imports.installed", { name: server.name }), "success");
+              void reload();
+            }} /> : null}
             <h3 className={styles.sectionLabel}>{t("apps.advanced.title")}</h3>
             <CustomServerForm
               existing={servers.map((s) => s.name)}

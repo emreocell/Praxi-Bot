@@ -70,7 +70,9 @@ pub use catalog::{
     CatalogAuth, CatalogEntry, CatalogInstall, RequiredFolder, RequiredSecret, builtin_catalog,
     check_declared_auth, check_stdio_package_pin,
 };
-pub use config::{McpConfigStore, McpServerConfig, McpTransport, OAuthConfig, TomlFileStore};
+pub use config::{
+    McpConfigStore, McpImport, McpServerConfig, McpTransport, OAuthConfig, TomlFileStore,
+};
 pub use diagnostics::ExternalRedactor;
 pub use error::{McpError, McpErrorKind, Result, runtime_install_hint};
 pub use manager::{Backoff, McpManager, McpPolicy, McpServerHandle, ServerSnapshot, ServerStatus};

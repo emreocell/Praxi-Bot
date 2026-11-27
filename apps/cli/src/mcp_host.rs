@@ -19,6 +19,7 @@ use daemon_api::mcp::{
     McpRequiredSecretDto, McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpTestResult,
     McpToolChangeDto, McpToolDto, McpTransportInput, McpTransportKind, McpTransportObject,
 };
+use daemon_api::mcp_import::{BundleApproval, ImportValues};
 use daemon_api::{McpControl, McpControlError};
 use mcp_bridge::{
     CatalogEntry, McpConfigStore, McpError, McpErrorKind, McpManager, McpPolicy, McpServerConfig,
@@ -78,6 +79,7 @@ pub struct McpHost {
     manager: McpManager,
     registry: ToolRegistry,
     store: TomlFileStore,
+    data_dir: std::path::PathBuf,
     catalog: Vec<CatalogEntry>,
     /// Default folder offered for filesystem servers (never a protected one).
     folder_suggestion: Option<String>,
@@ -202,6 +204,7 @@ impl McpHost {
             manager,
             registry,
             store,
+            data_dir: data_dir.to_owned(),
             catalog,
             folder_suggestion,
             root_guard: guard,
@@ -416,17 +419,21 @@ impl McpHost {
 
     /// Whether a configured server still refers to the secret `reference`
     /// (as its OAuth client secret, a header or an environment variable).
-    fn secret_in_use(&self, reference: &str) -> bool {
-        self.configs.lock().values().any(|c| {
-            c.oauth
-                .as_ref()
-                .and_then(|o| o.client_secret_ref.as_deref())
-                == Some(reference)
-                || c.secret_headers
-                    .values()
-                    .chain(c.secret_env.values())
-                    .any(|v| v.contains(reference))
-        })
+    fn secret_in_use(&self, reference: &str, except: Option<&str>) -> bool {
+        self.configs
+            .lock()
+            .values()
+            .filter(|c| Some(c.id.as_str()) != except)
+            .any(|c| {
+                c.oauth
+                    .as_ref()
+                    .and_then(|o| o.client_secret_ref.as_deref())
+                    == Some(reference)
+                    || c.secret_headers
+                        .values()
+                        .chain(c.secret_env.values())
+                        .any(|v| v.contains(reference))
+            })
     }
 
     fn check_http(&self, name: &str) -> Result<(), McpControlError> {
@@ -457,6 +464,84 @@ impl McpHost {
         let list: Vec<McpServerConfig> = next.values().cloned().collect();
         self.store.save(&list).map_err(map_err)?;
         *configs = next;
+        Ok(())
+    }
+
+    fn publish_import(&self, cfg: McpServerConfig) -> Result<McpServerDto, McpControlError> {
+        let name = &cfg.id;
+        if self.configs.lock().contains_key(name) {
+            return Err(McpControlError::Conflict(format!(
+                "mcp server {name} already exists"
+            )));
+        }
+        self.manager.register_server(cfg.clone()).map_err(map_err)?;
+        if let Err(error) = self.persist(|configs| {
+            configs.insert(name.clone(), cfg.clone());
+        }) {
+            // Only disabled imports reach this branch, so no process needs closing.
+            let _ = self.manager.detach_server(name);
+            return Err(error);
+        }
+        self.announce(name);
+        Ok(self.dto(&cfg))
+    }
+
+    // Called with the sign-in and config mutation locks held. Keep a disabled
+    // config available for retry until all owned resources are removed.
+    async fn remove_import(
+        &self,
+        cfg: &McpServerConfig,
+        import: &mcp_bridge::McpImport,
+    ) -> Result<(), McpControlError> {
+        let name = &cfg.id;
+        if cfg.enabled {
+            self.persist(|configs| {
+                let mut disabled = cfg.clone();
+                disabled.enabled = false;
+                configs.insert(name.clone(), disabled);
+            })?;
+        }
+        match self.manager.detach_server(name) {
+            Ok(server) => server.close().await,
+            Err(McpError::UnknownServer(_)) => {}
+            Err(error) => return Err(map_err(error)),
+        }
+        self.connecting.lock().remove(name);
+        self.notify_changed(name);
+
+        let mut references: Vec<_> = import
+            .secrets
+            .iter()
+            .filter(|reference| {
+                import_secret_reference(reference) && !self.secret_in_use(reference, Some(name))
+            })
+            .cloned()
+            .collect();
+        if import.bundle_sha256.is_none() {
+            references.extend([
+                mcp_bridge::oauth::registered_client_name(name),
+                mcp_bridge::oauth::credential_name(name),
+            ]);
+        }
+        if let Some(store) = &self.secrets {
+            for reference in references {
+                store.delete(&reference).map_err(|_| {
+                    McpControlError::Internal("could not delete an imported MCP credential".into())
+                })?;
+            }
+        } else if !import.secrets.is_empty() {
+            return Err(McpControlError::Internal(
+                "the imported MCP secret store is unavailable".into(),
+            ));
+        }
+        if import.bundle_sha256.is_some() {
+            mcp_bridge::mcpb::remove_files(&self.data_dir, name).map_err(map_err)?;
+        }
+        self.persist(|configs| {
+            configs.remove(name);
+        })?;
+        self.manager.forget_tool_pins(name);
+        self.forget(name);
         Ok(())
     }
 
@@ -634,12 +719,16 @@ fn category_name(c: PermissionCategory) -> String {
 }
 
 fn map_err(e: McpError) -> McpControlError {
-    match e {
-        McpError::Config(m) => McpControlError::Invalid(m),
-        McpError::UnknownServer(n) => McpControlError::NotFound(format!("mcp server {n}")),
-        e @ McpError::ToolChangedAgain { .. } => McpControlError::ToolChangedAgain(e.to_string()),
-        other => McpControlError::Internal(other.to_string()),
-    }
+    e.into()
+}
+
+fn import_secret_reference(reference: &str) -> bool {
+    reference
+        .strip_prefix("mcp/import-")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(id, index)| {
+            uuid::Uuid::parse_str(id).is_ok() && index.parse::<usize>().is_ok()
+        })
 }
 
 /// Abort `name`'s flow and wait until its task is gone: afterwards it can
@@ -946,6 +1035,7 @@ fn to_config(name: &str, input: McpServerInput) -> Result<McpServerConfig, McpCo
         ),
     };
     let cfg = McpServerConfig {
+        import: None,
         oauth: input.oauth.map(|c| mcp_bridge::OAuthConfig {
             client_id: c.client_id,
             client_secret_ref: c.client_secret_ref,
@@ -1029,6 +1119,51 @@ fn catalog_dto(e: &CatalogEntry, suggestion: Option<&str>) -> Option<McpCatalogE
 
 #[async_trait]
 impl McpControl for McpHost {
+    async fn install_bundle(
+        self: Arc<Self>,
+        bundle: Vec<u8>,
+        input: BundleApproval,
+    ) -> Result<McpServerDto, McpControlError> {
+        tokio::task::spawn_blocking(move || {
+            let _op = self.ops.blocking_lock();
+            self.check_writable()?;
+            let store = self
+                .secrets
+                .as_deref()
+                .ok_or_else(|| invalid("no MCP secret store is configured"))?;
+            mcp_bridge::mcpb::install_with(
+                &bundle,
+                &input.approval_sha256,
+                &input.values.0,
+                &self.data_dir,
+                store,
+                |config| self.publish_import(config),
+            )
+        })
+        .await
+        .map_err(|_| McpControlError::Internal("bundle install failed".into()))?
+    }
+
+    async fn install_registry(
+        self: Arc<Self>,
+        entry: mcp_bridge::registry::RegistryEntry,
+        source: usize,
+        values: ImportValues,
+    ) -> Result<McpServerDto, McpControlError> {
+        tokio::task::spawn_blocking(move || {
+            let _op = self.ops.blocking_lock();
+            self.check_writable()?;
+            let store = self
+                .secrets
+                .as_deref()
+                .ok_or_else(|| invalid("no MCP secret store is configured"))?;
+            entry.install_with(source, &values.0, store, |config| {
+                self.publish_import(config)
+            })
+        })
+        .await
+        .map_err(|_| McpControlError::Internal("registry install failed".into()))?
+    }
     fn redact(&self, text: &str) -> String {
         self.redactor
             .as_ref()
@@ -1338,7 +1473,10 @@ impl McpControl for McpHost {
         let old = {
             let _op = self.ops.lock().await;
             self.check_writable()?;
-            self.config_of(name)?;
+            let cfg = self.config_of(name)?;
+            if let Some(import) = &cfg.import {
+                return self.remove_import(&cfg, import).await;
+            }
             self.persist(|m| {
                 m.remove(name);
             })?;
@@ -1370,7 +1508,7 @@ impl McpControl for McpHost {
         // Under the operations lock, so a server added at the same time cannot
         // point at the secret between the check and the delete.
         let _op = self.ops.lock().await;
-        if self.secret_in_use(&reference) || !forgettable_client_secret(&reference) {
+        if self.secret_in_use(&reference, None) || !forgettable_client_secret(&reference) {
             return Ok(());
         }
         let deleted = tokio::task::spawn_blocking(move || store.delete(&reference)).await;
@@ -1500,6 +1638,82 @@ mod tests {
 
     fn open(dir: &Path) -> Arc<McpHost> {
         McpHost::start_with_policy(dir, ToolRegistry::new(), None, None, None, fast_policy())
+    }
+
+    #[tokio::test]
+    async fn imports_stay_disabled_across_restart_and_uninstall_cleans_owned_resources() {
+        const BUNDLE: &[u8] =
+            include_bytes!("../../../crates/mcp-bridge/tests/fixtures/weather.mcpb");
+        const REGISTRY: &[u8] =
+            include_bytes!("../../../crates/mcp-bridge/tests/fixtures/registry-search.json");
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(secret_store::MemoryStore::new());
+        let start = || {
+            McpHost::start_with_policy(
+                dir.path(),
+                ToolRegistry::new(),
+                Some(store.clone()),
+                None,
+                None,
+                fast_policy(),
+            )
+        };
+        let host = start();
+        let installed = host
+            .clone()
+            .install_bundle(
+                BUNDLE.to_vec(),
+                BundleApproval {
+                    approval_sha256: mcp_bridge::mcpb::inspect(BUNDLE).unwrap().sha256,
+                    values: ImportValues(BTreeMap::from([("key".into(), "fixture-input".into())])),
+                },
+            )
+            .await
+            .unwrap();
+        let registry = mcp_bridge::registry::parse_search(REGISTRY)
+            .unwrap()
+            .remove(0);
+        let registry_server = host
+            .clone()
+            .install_registry(
+                registry,
+                0,
+                ImportValues(BTreeMap::from([(
+                    "WEATHER_KEY".into(),
+                    "another-fixture-input".into(),
+                )])),
+            )
+            .await
+            .unwrap();
+        for server in [&installed, &registry_server] {
+            assert!(!server.enabled && server.tool_count == 0);
+            assert!(!host.reconnect(&server.name).await.unwrap().enabled);
+        }
+        let config = std::fs::read_to_string(dir.path().join(MCP_FILE)).unwrap();
+        assert!(!config.contains("fixture-input"));
+        let unpacked = dir.path().join("mcp/fixture-weather");
+        assert!(unpacked.join("server/index.js").is_file());
+        assert_eq!(store.list_names().unwrap().len(), 2);
+        host.shutdown().await;
+        drop(host);
+
+        let host = start();
+        assert_eq!(host.list().len(), 2);
+        assert!(
+            host.list()
+                .iter()
+                .all(|server| !server.enabled && server.tool_count == 0)
+        );
+        // An edited environment mapping doesn't orphan the original secret.
+        host.update(&installed.name, json!({"secret_env": {}}))
+            .await
+            .unwrap();
+        host.remove(&installed.name).await.unwrap();
+        host.remove(&registry_server.name).await.unwrap();
+        assert!(host.list().is_empty());
+        assert!(!unpacked.exists());
+        assert!(store.list_names().unwrap().is_empty());
+        host.shutdown().await;
     }
 
     #[tokio::test]

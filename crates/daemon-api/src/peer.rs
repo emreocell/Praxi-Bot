@@ -463,6 +463,9 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     if under(check_path, "/v1/connection-test") {
         return Some("connection tests spend this host's stored keys and are an owner action");
     }
+    if under(check_path, "/v1/mcp/import") {
+        return Some("MCP imports are managed by the owner of this host");
+    }
     if check_path == "/v1/mcp-server" || check_path.starts_with("/v1/mcp-server/") {
         return Some("the MCP server facade is host-local and requires scoped credentials");
     }

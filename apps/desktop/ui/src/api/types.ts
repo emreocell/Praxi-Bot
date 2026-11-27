@@ -516,6 +516,10 @@ export type McpAuthState = S["McpAuthState"];
 export type McpAuthStart = S["McpAuthStart"];
 export type McpTestResult = S["McpTestResult"];
 export type McpServer = S["McpServerDto"];
+export type McpBundleInspection = S["Inspection"];
+export type McpRegistryResult = S["RegistryResult"];
+export type McpRegistrySource = S["RegistryPreview"];
+export type McpRegistryApproval = S["RegistryApproval"];
 /** Body of `POST /v1/mcp/servers`. */
 export type McpServerConfig = S["McpServerInput"] & { name: string };
 /** Body of `PUT /v1/mcp/servers/{name}` (every field optional). */

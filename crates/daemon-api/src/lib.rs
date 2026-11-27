@@ -62,6 +62,7 @@ mod local_install;
 mod local_models;
 mod logs;
 pub mod mcp;
+pub mod mcp_import;
 mod mcp_routes;
 pub mod mcp_server;
 pub mod memory;
@@ -1977,6 +1978,20 @@ fn api_routes() -> Router<AppState> {
             post(m::logout_mcp_auth),
         )
         .route("/v1/mcp/catalog", get(m::mcp_catalog))
+        .route(
+            "/v1/mcp/import/registry",
+            get(mcp_import::search_registry).post(mcp_import::install_registry),
+        )
+        .route(
+            "/v1/mcp/import/bundle/inspect",
+            post(mcp_import::inspect_bundle),
+        )
+        .route(
+            "/v1/mcp/import/bundle",
+            post(mcp_import::install_bundle).layer(axum::extract::DefaultBodyLimit::max(
+                mcp_import::MAX_INSTALL_BODY,
+            )),
+        )
         .route("/v1/components", get(crate::components::list_components))
         .route("/v1/components/{id}", get(crate::components::get_component))
         .route(

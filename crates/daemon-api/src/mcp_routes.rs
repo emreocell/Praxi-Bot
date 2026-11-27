@@ -35,7 +35,7 @@ impl From<McpControlError> for ApiError {
     }
 }
 
-fn mcp(s: &AppState) -> Result<Arc<dyn McpControl>, ApiError> {
+pub(crate) fn mcp(s: &AppState) -> Result<Arc<dyn McpControl>, ApiError> {
     s.mcp()
         .ok_or_else(|| ApiError::unavailable("MCP management is not available in this daemon"))
 }

@@ -47,6 +47,7 @@ use crate::knowledge_settings;
 use crate::knowledge_watch;
 use crate::live_view;
 use crate::mcp;
+use crate::mcp_import;
 use crate::mcp_routes;
 use crate::mcp_server;
 use crate::memory;
@@ -282,6 +283,10 @@ impl Modify for Security {
         live_view::terminals,
         live_view::thumbnail,
         live_view::update_session,
+        mcp_import::inspect_bundle,
+        mcp_import::install_bundle,
+        mcp_import::install_registry,
+        mcp_import::search_registry,
         mcp_routes::cancel_mcp_auth,
         mcp_routes::complete_mcp_auth,
         mcp_routes::approve_mcp_tool_changes,

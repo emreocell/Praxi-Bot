@@ -341,6 +341,63 @@ async fn mcp_routes_need_the_bearer_token() {
 }
 
 #[tokio::test]
+async fn mcp_imports_require_owner_even_to_search_or_preview() {
+    let (t, _) = with_mcp();
+    let auth = format!("Bearer {TOKEN}");
+    for (method, path) in [
+        (Method::GET, "/v1/mcp/import/registry?q=weather"),
+        (Method::HEAD, "/v1/mcp/import/registry?q=weather"),
+        (Method::POST, "/v1/mcp/import/registry"),
+        (Method::POST, "/v1/mcp/import/bundle/inspect"),
+        (Method::POST, "/v1/mcp/import/bundle"),
+    ] {
+        let denied = send(
+            &t.app,
+            method,
+            path,
+            None,
+            &[("authorization", &auth), ("x-test-token-only", "1")],
+        )
+        .await;
+        assert_eq!(denied.status, StatusCode::FORBIDDEN, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn owner_can_inspect_an_uploaded_bundle_without_installing_it() {
+    use axum::{body::Body, http::Request};
+    use http_body_util::BodyExt as _;
+    use tower::ServiceExt as _;
+
+    let (t, _) = with_mcp();
+    let bytes = include_bytes!("../../../mcp-bridge/tests/fixtures/weather.mcpb");
+    let hash = mcp_bridge::mcpb::sha256_hex(bytes);
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!(
+            "/v1/mcp/import/bundle/inspect?expected_sha256={hash}"
+        ))
+        .header("host", "127.0.0.1:47821")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header(crate::owner::OWNER_HEADER, super::OWNER_KEY)
+        .header("content-type", "application/octet-stream")
+        .body(Body::from(bytes.as_slice()))
+        .unwrap();
+    let response = t.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let card: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(card["sha256"], hash);
+    assert_eq!(card["checksum_verified"], true);
+    assert_eq!(card["command"], "node");
+    assert_eq!(card["env_names"], json!(["WEATHER_KEY"]));
+    assert_eq!(
+        call(&t, Method::GET, "/v1/mcp/servers", None).await.json(),
+        json!([])
+    );
+}
+
+#[tokio::test]
 async fn without_an_embedder_the_routes_answer_503() {
     let t = setup();
     for (m, p) in [

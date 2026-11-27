@@ -32,12 +32,13 @@ embedding-hub = { path = "../embedding-hub", version = "0.1.0" }
 async-trait.workspace = true
 builtin-tools = { path = "../builtin-tools", version = "0.1.0" }
 memory-store = { path = "../memory-store", version = "0.1.0" }
+mcp-bridge = { path = "../mcp-bridge", version = "0.1.0", features = ["openapi"] }
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 chrono-tz = "0.10"
 desktop-api = { path = "../desktop-api", version = "0.1.0" }
 cli-provider.workspace = true
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "multipart"] }
 futures.workspace = true
 fs4 = "1"
 getrandom = "0.3"

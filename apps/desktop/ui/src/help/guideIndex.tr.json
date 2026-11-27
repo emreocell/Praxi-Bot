@@ -626,6 +626,7 @@
     "doc": "tr/mcp-servers.md",
     "title": "MCP sunucuları",
     "headings": [
+      "Resmî MCP Kayıt Defteri’nden veya bir paketten içe aktar",
       "Bir sunucu neye dönüşür",
       "mcp.toml",
       "Daemon başka bir bilgisayarda çalışırken giriş"

@@ -18,6 +18,43 @@ values with `POST /v1/secrets/{name}` (write-only).
 `PUT /v1/mcp/servers/{name}` merges into the stored server. A field you leave
 out keeps its previous value. `bots: null` means every bot.
 
+## Import from the official MCP Registry or a bundle
+
+Open **Apps → MCP servers** as the owner of the computer that will run the
+server. A desktop with administration rights on a paired host can also import
+there. Select **Official MCP Registry** and enter a server name to search the
+public registry. Praxi sends the search text when you submit it. The results
+show the publishing namespace and whether the registry verified control of it.
+Namespace verification establishes who can publish an entry. Review the server
+itself before granting it access.
+
+Select **Review installation** next to a launch option. The card shows the
+exact executable and separate arguments or the HTTPS endpoint, along with the
+environment variables or headers it receives. Praxi supports pinned npm and
+PyPI packages and supported streamable HTTPS endpoints. Some entries require
+other installers, custom runtime arguments, or templated values. These launch
+options are unavailable. The exact registry version and launch are checked
+again when you confirm.
+
+For a local file, select **Open a .mcpb file**. If the publisher provides a
+SHA-256 for the whole file, enter it before selecting **Inspect bundle**. The
+review shows the SHA-256, signature status, runtime, manifest tools, and any
+configuration paths the program receives. An embedded signature is checked
+against its signer certificate. Publisher trust requires a separate decision.
+Verification uses Crypt32 on Windows and an installed OpenSSL with CMS support
+on Linux or macOS. Praxi refuses invalid signatures, mismatched checksums,
+unsafe archive paths, symlinks, and archives over the size or file-count
+limits. A paired host's upload limit can be lower than the local 100 MiB limit.
+
+After reviewing the access, select **Install disabled**. No server process or
+remote MCP session starts during import. Environment and header values are
+saved in the secret store. Use **Manage → Enable server** when you are ready
+to start it. A local program can access files, devices, and the network with
+the daemon's operating system permissions. A remote server receives its
+configured headers and the data passed to its tools. To uninstall, select
+**Manage → Disconnect**. Praxi removes its configuration, extracted bundle
+files, and the credentials created by the import that no other server uses.
+
 ## What a server becomes
 
 - **Two transports:** a local program spoken to over stdin/stdout (`stdio`), or a

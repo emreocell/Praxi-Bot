@@ -636,6 +636,7 @@
     "doc": "mcp-servers.md",
     "title": "MCP servers",
     "headings": [
+      "Import from the official MCP Registry or a bundle",
       "What a server becomes",
       "mcp.toml",
       "Signing in when the daemon runs on another computer"
