@@ -89,6 +89,11 @@ impl MailProbe for OwnInboxProbe {
         let plan = WaitPlan {
             timeout: Duration::ZERO,
             max_age: Duration::from_millis(waited_ms) + MAIL_SLACK,
+            // The wait's own start (less the slack) is its watermark: an earlier mail is not it.
+            since: Some(
+                (req.registered_at_ms / 1000)
+                    - i64::try_from(MAIL_SLACK.as_secs()).unwrap_or(i64::MAX),
+            ),
             first_pause: Duration::from_secs(1),
             max_pause: Duration::from_secs(1),
         };
