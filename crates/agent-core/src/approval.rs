@@ -125,6 +125,22 @@ pub(crate) const REDIRECTED_REASON: &str = "denied: the owner wrote a new messag
 pub(crate) const MISSION_APPROVAL_WAIT: std::time::Duration =
     std::time::Duration::from_secs(5 * 60);
 
+/// How long a mission session waits for one approval card: the configured schedule wait, but
+/// never longer than [`MISSION_APPROVAL_WAIT`]. A zero setting means "no limit", so it gets the
+/// mission wait too, never an instant park (`min(0, ..)` would deny every card at once).
+pub(crate) fn mission_approval_wait(configured: std::time::Duration) -> std::time::Duration {
+    if configured.is_zero() {
+        MISSION_APPROVAL_WAIT
+    } else {
+        configured.min(MISSION_APPROVAL_WAIT)
+    }
+}
+
+/// What identifies "the same call" for a parked approval: the tool and the card's summary.
+fn park_key(name: &str, summary: &str) -> String {
+    format!("{name}\u{1f}{summary}")
+}
+
 /// How a wait for the user ended.
 enum Waited {
     Verdict(Result<Verdict, oneshot::error::RecvError>),
@@ -2082,9 +2098,7 @@ impl Shared {
         // An approval in a mission blocks the one item it belongs to, not the whole mission.
         let park = park_item && ctx.initiator == InitiatorKind::Mission;
         let limit = if park {
-            self.cfg
-                .schedule_approval_timeout
-                .min(MISSION_APPROVAL_WAIT)
+            mission_approval_wait(self.cfg.schedule_approval_timeout)
         } else {
             self.cfg.schedule_approval_timeout
         };
@@ -2558,6 +2572,23 @@ impl Shared {
                 );
             }
         }
+        // A mission item whose approval nobody gave in time was parked: the same call again is
+        // refused here, without a second card (the model would otherwise retry it every turn and
+        // fill the owner's screen with the same question).
+        let park_key_of_call = park_key(name, &summary);
+        if ctx.initiator == InitiatorKind::Mission
+            && ctx.parked_calls.lock().contains(&park_key_of_call)
+        {
+            self.audit(
+                ctx,
+                "system",
+                "approval.repeat_refused",
+                &json!({"tool": name}),
+            );
+            return Err(Some(format!(
+                "{name} was already asked about in this session and nobody approved it in time; it will not be asked again. Move on to the next open item; the owner can allow it and release the item."
+            )));
+        }
         let summary_for_park = truncate_utf8(&summary, 160).to_owned();
         let (approval_id, mut guard, rx) = self.park(
             ctx,
@@ -2613,6 +2644,7 @@ impl Shared {
                         reason: Some(EXPIRED_REASON.into()),
                     }),
                 );
+                ctx.parked_calls.lock().insert(park_key_of_call);
                 return Err(Some(self.park_item_for_approval(
                     ctx,
                     name,

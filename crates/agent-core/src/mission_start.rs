@@ -35,6 +35,11 @@ const MAX_GOAL_CHARS: usize = 4_000;
 const MAX_CONTEXT_CHARS: usize = 400;
 /// Active missions one bot may have next to each other.
 const MAX_ACTIVE_MISSIONS: usize = 3;
+/// Largest "done when" count the model may name: a ledger holds at most
+/// [`missions::model::MAX_ITEMS`] (500) items, so a bigger target could never be reached.
+const MAX_TARGET_DONE: u32 = 500;
+/// Longest item kind label, in characters (the ledger's own limit).
+const MAX_KIND_CHARS: usize = 40;
 
 /// The `mission_create` tool. It reads the run through [`Shared`], so it holds it weakly.
 pub(crate) struct MissionCreateTool {
@@ -87,6 +92,41 @@ struct ItemIn {
     title: String,
     #[serde(default)]
     kind: Option<String>,
+}
+
+impl ItemIn {
+    /// A ledger item from what the model wrote: trimmed, key / title / kind clipped to the
+    /// ledger's limits, empty or control-character text refused.
+    fn into_new_item(self) -> Result<missions::NewItem, ToolError> {
+        let field = |what: &str, s: &str, max: usize| -> Result<String, ToolError> {
+            let s = s.trim();
+            if s.is_empty() {
+                return Err(ToolError::InvalidInput(format!(
+                    "an item's {what} is empty"
+                )));
+            }
+            if s.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
+                return Err(ToolError::InvalidInput(format!(
+                    "an item's {what} contains control characters"
+                )));
+            }
+            Ok(missions::model::clip(s, max))
+        };
+        Ok(missions::NewItem {
+            key: field("key", &self.key, missions::model::MAX_KEY_CHARS)?,
+            title: field("title", &self.title, missions::model::MAX_TITLE_CHARS)?,
+            kind: match self
+                .kind
+                .as_deref()
+                .map(str::trim)
+                .filter(|k| !k.is_empty())
+            {
+                Some(k) => field("kind", k, MAX_KIND_CHARS)?,
+                None => "task".to_owned(),
+            },
+            payload: None,
+        })
+    }
 }
 
 #[async_trait]
@@ -159,41 +199,51 @@ impl Shared {
                 || missions::model::clip(&goal, 60),
                 |t| missions::model::clip(t, 80),
             );
-        let items: Vec<missions::NewItem> = input
-            .items
-            .into_iter()
-            .map(|i| missions::NewItem {
-                key: i.key,
-                kind: i
-                    .kind
-                    .filter(|k| !k.trim().is_empty())
-                    .unwrap_or_else(|| "task".into()),
-                title: i.title,
-                payload: None,
-            })
-            .collect();
-        if items.len() > missions::model::MAX_ITEMS_PER_CALL {
+        if input.items.len() > missions::model::MAX_ITEMS_PER_CALL {
             return Err(ToolError::InvalidInput(format!(
                 "name at most {} items; later sessions plan the rest",
                 missions::model::MAX_ITEMS_PER_CALL
             )));
         }
+        // Everything the model typed is checked before the mission's chat is opened, so a bad
+        // item leaves nothing behind.
+        let target_done = match input.target_done {
+            Some(n) if n > MAX_TARGET_DONE => {
+                return Err(ToolError::InvalidInput(format!(
+                    "target_done is at most {MAX_TARGET_DONE}; leave it out when every item has to be finished"
+                )));
+            }
+            other => other.filter(|n| *n > 0),
+        };
+        let items = input
+            .items
+            .into_iter()
+            .map(ItemIn::into_new_item)
+            .collect::<Result<Vec<_>, _>>()?;
         let chat = self.open_mission_chat(ctx, &title, &goal)?;
-        let mission = store
-            .create(
-                &missions::NewMission {
-                    user_id: ctx.user_id.to_string(),
-                    bot_id: ctx.bot_id.to_string(),
-                    chat_id: chat.to_string(),
-                    title,
-                    goal_text: goal,
-                    target_done: input.target_done.filter(|n| *n > 0),
-                    budgets: missions::Budgets::default(),
-                    items,
-                },
-                storage::now_ms(),
-            )
-            .map_err(|e| ToolError::Execution(e.to_string()))?;
+        // The cap is checked again inside the store's write transaction: the check above is
+        // only for a friendly answer, two calls at once could both pass it.
+        let mission = match store.create_capped(
+            &missions::NewMission {
+                user_id: ctx.user_id.to_string(),
+                bot_id: ctx.bot_id.to_string(),
+                chat_id: chat.to_string(),
+                title,
+                goal_text: goal,
+                target_done,
+                budgets: missions::Budgets::default(),
+                items,
+            },
+            storage::now_ms(),
+            Some(MAX_ACTIVE_MISSIONS),
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                // No mission took the chat: do not leave an empty "Mission: ..." chat behind.
+                let _ = self.storage.delete_chat(chat);
+                return Err(ToolError::Execution(e.to_string()));
+            }
+        };
         if let Some(line) = input
             .context
             .as_deref()
@@ -223,17 +273,27 @@ impl Shared {
     }
 
     /// The goal: the owner's own message that started the run, as stored. Never text the model
-    /// wrote.
+    /// wrote. Fails closed: the first stored user message of the run has to be recorded as the
+    /// owner's (typed in the app, or from their paired Telegram chat) and not written after
+    /// untrusted content; anything else (an imported, peer, mail or webhook message, a missing
+    /// or untagged source) is refused.
     fn owner_goal(&self, ctx: &RunCtx) -> Result<String, ToolError> {
-        let goal = self
+        let not_owner = || {
+            ToolError::Execution(
+                "the owner's message is not available as a goal; ask the owner to start the mission with the Start a mission button".into(),
+            )
+        };
+        let (text, source, untrusted) = self
             .storage
-            .run_user_message_texts(ctx.run_id)
+            .run_first_user_message(ctx.run_id)
             .map_err(|e| ToolError::Execution(e.to_string()))?
-            .into_iter()
-            .next()
-            .map(|g| g.trim().to_owned())
+            .ok_or_else(not_owner)?;
+        if !goal_origin_ok(&source, untrusted) {
+            return Err(not_owner());
+        }
+        let goal = Some(text.trim().to_owned())
             .filter(|g| !g.is_empty())
-            .ok_or_else(|| ToolError::Execution("the owner's message is not available".into()))?;
+            .ok_or_else(not_owner)?;
         if goal.chars().count() > MAX_GOAL_CHARS {
             return Err(ToolError::Execution(format!(
                 "the owner's message is longer than {MAX_GOAL_CHARS} characters; ask them to shorten it or to use the Start a mission button"
@@ -318,4 +378,11 @@ impl Shared {
             .map_err(store_err)?;
         Ok(chat.id)
     }
+}
+
+/// Whether a stored user message may become a mission's goal: recorded as the owner's own
+/// (typed in the app, or from their paired Telegram chat) and not written after untrusted
+/// content. Any other source, including an empty (untagged) one, is refused.
+pub(crate) fn goal_origin_ok(source: &str, exposure_untrusted: bool) -> bool {
+    !exposure_untrusted && matches!(source, "owner" | "telegram_owner")
 }

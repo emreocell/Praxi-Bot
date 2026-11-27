@@ -88,7 +88,8 @@ bot's permissions, then answer the item to retry it, or skip it.
 A long item may take more than one session: when the step limit cuts a session
 while an item is half done, that does not count as a failed attempt. An item is
 given up, with the reason, only when the bot ends three sessions itself with it
-still unfinished, or when it eats four whole sessions without being settled.
+still unfinished, or when it eats four whole sessions (cut by the step limit, or
+interrupted by a crash, a restart or an error) without being settled.
 
 ## When a mission stops
 

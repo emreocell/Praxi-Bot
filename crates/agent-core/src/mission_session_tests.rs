@@ -485,6 +485,71 @@ async fn an_approval_with_no_single_doing_item_tells_the_model_to_park_it_itself
     assert_eq!(pay.count.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn the_same_call_after_a_parked_approval_is_refused_without_a_new_card() {
+    let w = world(&["a.example", "b.example"]);
+    let pay = Arc::new(with_class(
+        "pay",
+        tool_registry::Effect::Destructive,
+        PermissionCategory::Money,
+        tool_registry::ContentClass::none(),
+        "paid",
+    ));
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
+        calls(&[("c1", "pay", json!({"amount": 5}))]),
+        // The model tries the very same payment again, and a third time.
+        calls(&[("c2", "pay", json!({"amount": 5}))]),
+        calls(&[("c3", "pay", json!({"amount": 5}))]),
+        text("moving on"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.schedule_approval_timeout = std::time::Duration::from_millis(100);
+    let lp = make_loop(
+        &w.env.storage,
+        w.env.bot,
+        &fake,
+        &[t(&pay)],
+        profile(FULL),
+        config,
+    );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    lp.enable_missions(&w.store, &clock);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(pay.count.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let audit = w.env.storage.list_audit(w.env.user).unwrap();
+    let count = |action: &str| audit.iter().filter(|a| a.action == action).count();
+    assert_eq!(count("approval.parked"), 1, "one card only");
+    assert_eq!(count("approval.repeat_refused"), 2);
+    let tools = crate::tests::tool_messages(&without_ledger(fake.request(3)));
+    assert!(
+        tools.iter().any(|t| t.contains("will not be asked again")),
+        "{tools:?}"
+    );
+}
+
+#[test]
+fn a_zero_schedule_wait_gives_a_mission_the_mission_wait_not_an_instant_park() {
+    use crate::approval::{MISSION_APPROVAL_WAIT, mission_approval_wait};
+    use std::time::Duration;
+    assert_eq!(mission_approval_wait(Duration::ZERO), MISSION_APPROVAL_WAIT);
+    assert_eq!(
+        mission_approval_wait(Duration::from_secs(30 * 60)),
+        MISSION_APPROVAL_WAIT
+    );
+    assert_eq!(
+        mission_approval_wait(Duration::from_secs(10)),
+        Duration::from_secs(10)
+    );
+}
+
 struct SecretTool(tool_registry::ToolSpec);
 
 #[async_trait]

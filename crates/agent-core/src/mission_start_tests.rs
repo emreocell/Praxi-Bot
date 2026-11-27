@@ -331,3 +331,107 @@ async fn a_bot_cannot_pile_up_missions() {
         "{answer:?}"
     );
 }
+
+#[test]
+fn only_an_untainted_owner_message_can_be_a_goal() {
+    use crate::mission_start::goal_origin_ok;
+    assert!(goal_origin_ok("owner", false));
+    assert!(goal_origin_ok("telegram_owner", false));
+    assert!(
+        !goal_origin_ok("owner", true),
+        "written after untrusted content"
+    );
+    for other in [
+        "",
+        "imported",
+        "peer_admin",
+        "telegram",
+        "mission_brief",
+        "webhook",
+    ] {
+        assert!(!goal_origin_ok(other, false), "{other:?}");
+    }
+}
+
+#[tokio::test]
+async fn the_goal_is_read_from_the_runs_first_stored_user_message_with_its_source() {
+    let w = world();
+    let fake = Fake::new(vec![text("hi")]);
+    let lp = lp(&w, &fake, FULL, &[], true);
+    let run = owner_turn(&w, &lp, OWNER_SAYS);
+    assert_eq!(finished(&lp, run).await, RunState::Succeeded);
+    let (text, source, untrusted) = w
+        .env
+        .storage
+        .run_first_user_message(run)
+        .unwrap()
+        .expect("the owner's message");
+    assert_eq!(
+        (text.as_str(), source.as_str(), untrusted),
+        (OWNER_SAYS, "owner", false)
+    );
+}
+
+#[tokio::test]
+async fn a_huge_target_or_bad_items_are_refused_and_leave_nothing_behind() {
+    let w = world();
+    let chats_before = w.env.storage.list_chats(w.env.user).unwrap().len();
+    let fake = Fake::new(vec![
+        create_call("c1", json!({"target_done": 4_000_000_000_u64})),
+        create_call("c2", json!({"items": [{"key": "  ", "title": "x"}]})),
+        create_call("c3", json!({"items": [{"key": "a", "title": ""}]})),
+        create_call("c4", json!({"items": [{"key": "a\u{0}b", "title": "x"}]})),
+        text("giving up"),
+    ]);
+    let lp = lp(&w, &fake, FULL, &[], true);
+    let run = owner_turn(&w, &lp, OWNER_SAYS);
+    assert_eq!(finished(&lp, run).await, RunState::Succeeded);
+    assert_eq!(w.store.list(&w.env.user.to_string()).unwrap().len(), 0);
+    assert_eq!(
+        w.env.storage.list_chats(w.env.user).unwrap().len(),
+        chats_before,
+        "no empty mission chat"
+    );
+    let first = tool_messages(&without_ledger(fake.request(1)));
+    assert!(
+        first.iter().any(|a| a.contains("target_done is at most")),
+        "{first:?}"
+    );
+    let last = tool_messages(&without_ledger(fake.request(4)));
+    assert!(
+        last.iter().any(|a| a.contains("control characters")),
+        "{last:?}"
+    );
+}
+
+#[tokio::test]
+async fn item_text_is_clipped_to_the_ledger_limits_and_the_target_is_kept() {
+    let w = world();
+    let fake = Fake::new(vec![
+        create_call(
+            "c1",
+            json!({
+                "target_done": 500,
+                "items": [{
+                    "key": "k".repeat(500),
+                    "title": "t".repeat(2_000),
+                    "kind": "x".repeat(300)
+                }]
+            }),
+        ),
+        text("started"),
+    ]);
+    let lp = lp(&w, &fake, FULL, &[], true);
+    let run = owner_turn(&w, &lp, OWNER_SAYS);
+    assert_eq!(finished(&lp, run).await, RunState::Succeeded);
+    let m = &w.store.list(&w.env.user.to_string()).unwrap()[0];
+    assert_eq!(m.target_done, Some(500));
+    let items = w.store.items(&m.id, None).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].key.chars().count(), missions::model::MAX_KEY_CHARS);
+    assert_eq!(
+        items[0].title.chars().count(),
+        missions::model::MAX_TITLE_CHARS
+    );
+    assert_eq!(items[0].kind.chars().count(), 40);
+}
