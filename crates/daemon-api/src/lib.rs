@@ -88,6 +88,8 @@ pub mod calendar;
 mod calendar_routes;
 mod data_routes;
 mod embeddings_routes;
+pub mod homeassistant;
+mod homeassistant_routes;
 mod incoming_webhook;
 mod page_reader_routes;
 mod routes;
@@ -147,6 +149,7 @@ pub use doctor_routes::{DoctorHost, DoctorReport, RepairResult};
 pub use email::{EmailControl, EmailControlError};
 pub use email_channel::EmailChannelControl;
 pub use error::ApiError;
+pub use homeassistant::{HomeAssistantControl, HomeAssistantControlError};
 pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
 pub use policy::{PolicyLoadError, load_policy, validate_policy};
@@ -325,6 +328,8 @@ struct Inner {
     email_tests: Arc<tokio::sync::Semaphore>,
     /// Calendar account management (see [`AppState::set_calendar`]).
     calendar: OnceLock<Arc<dyn CalendarControl>>,
+    /// Home Assistant setup (see [`AppState::set_homeassistant`]).
+    homeassistant: OnceLock<Arc<dyn HomeAssistantControl>>,
     /// Web search settings management (see [`AppState::set_web`]).
     web: OnceLock<Arc<dyn WebControl>>,
     /// Dictation (speech-to-text) management (see [`AppState::set_voice`]).
@@ -537,6 +542,7 @@ impl AppState {
             email_channel: OnceLock::new(),
             email_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
             calendar: OnceLock::new(),
+            homeassistant: OnceLock::new(),
             web: OnceLock::new(),
             voice: OnceLock::new(),
             skills: OnceLock::new(),
@@ -708,6 +714,12 @@ impl AppState {
         let _ = self.0.calendar.set(calendar);
     }
 
+    /// Enable `/v1/homeassistant*` with the embedder Home Assistant manager (call once,
+    /// before serving; a second call is ignored).
+    pub fn set_homeassistant(&self, homeassistant: Arc<dyn HomeAssistantControl>) {
+        let _ = self.0.homeassistant.set(homeassistant);
+    }
+
     /// Enable `/v1/web/search*` with the embedder web-search manager (call once,
     /// before [`serve`]; a second call is ignored).
     pub fn set_web(&self, web: Arc<dyn WebControl>) {
@@ -811,6 +823,10 @@ impl AppState {
 
     pub(crate) fn calendar(&self) -> Option<Arc<dyn CalendarControl>> {
         self.0.calendar.get().cloned()
+    }
+
+    pub(crate) fn homeassistant(&self) -> Option<Arc<dyn HomeAssistantControl>> {
+        self.0.homeassistant.get().cloned()
     }
 
     pub(crate) fn web(&self) -> Option<Arc<dyn WebControl>> {
@@ -1349,6 +1365,7 @@ fn api_routes() -> Router<AppState> {
     use composio_routes as c;
     use email_routes as e;
     use fill_routes as f;
+    use homeassistant_routes as ha;
     use live_view as v;
     use mcp_routes as m;
     use routes as r;
@@ -2039,6 +2056,17 @@ fn api_routes() -> Router<AppState> {
             axum::routing::put(cal::update_calendar_account).delete(cal::delete_calendar_account),
         )
         .route("/v1/calendar/test", post(cal::test_calendar))
+        .route(
+            "/v1/homeassistant",
+            get(ha::get_homeassistant)
+                .put(ha::put_homeassistant)
+                .delete(ha::delete_homeassistant),
+        )
+        .route(
+            "/v1/homeassistant/bots",
+            axum::routing::put(ha::put_homeassistant_bots),
+        )
+        .route("/v1/homeassistant/test", post(ha::test_homeassistant))
         .route(
             "/v1/connection-test/provider",
             post(connection_test::test_provider),

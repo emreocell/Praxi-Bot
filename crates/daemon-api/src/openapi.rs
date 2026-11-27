@@ -30,6 +30,8 @@ use crate::favicon;
 use crate::file_access;
 use crate::fill_routes;
 use crate::handover_routes;
+use crate::homeassistant;
+use crate::homeassistant_routes;
 use crate::host;
 use crate::host_admin;
 use crate::host_copy;
@@ -462,6 +464,11 @@ impl Modify for Security {
         calendar_routes::update_calendar_account,
         calendar_routes::delete_calendar_account,
         calendar_routes::test_calendar,
+        homeassistant_routes::get_homeassistant,
+        homeassistant_routes::put_homeassistant,
+        homeassistant_routes::put_homeassistant_bots,
+        homeassistant_routes::delete_homeassistant,
+        homeassistant_routes::test_homeassistant,
         web_routes::get_web_search,
         web_routes::test_web_search,
         web_routes::update_web_search,
@@ -916,6 +923,12 @@ impl Modify for Security {
         calendar::CalendarTestInput,
         calendar::CalendarFoundDto,
         calendar::CalendarTestReport,
+        homeassistant::HomeAssistantDto,
+        homeassistant::HomeAssistantInput,
+        homeassistant::HomeAssistantSaved,
+        homeassistant::HomeAssistantBotsInput,
+        homeassistant::HomeAssistantTestInput,
+        homeassistant::HomeAssistantTestReport,
         web::WebSearchConfigDto,
         web::WebSearchConfigInput,
         web::WebSearchTestInput,
@@ -970,6 +983,7 @@ impl Modify for Security {
         (name = "view"),
         (name = "voice"),
         (name = "calendar"),
+        (name = "homeassistant"),
         (name = "web"),
         (name = "workspaces"),
         (name = "connection-test"),

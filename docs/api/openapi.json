@@ -11288,6 +11288,355 @@
         }
       }
     },
+    "/v1/homeassistant": {
+      "get": {
+        "tags": [
+          "homeassistant"
+        ],
+        "summary": "The saved Home Assistant setup: the address, whether a token is stored (never the token), the\nowner's list of services bots may call without a card, and which bots may use it. Owner only.",
+        "operationId": "get_homeassistant",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "owner key required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Home Assistant setup is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "homeassistant"
+        ],
+        "summary": "Check the hub (`GET /api/`, then count its entities), and only then save it. The `token` goes to\nthe secret store (never to `homeassistant.toml`, never returned). Takes effect for the next\ntool call, no restart needed. Without `token` the stored one is kept, but only when the address\nis unchanged. Owner only.",
+        "operationId": "put_homeassistant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HomeAssistantInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantSaved"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad token or list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "owner key required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid address, or the hub refused the token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many tests running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Home Assistant setup is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "homeassistant"
+        ],
+        "summary": "Remove the setup and its stored token. The `ha_*` tools disappear from every bot at once.\nOwner only.",
+        "operationId": "delete_homeassistant",
+        "responses": {
+          "204": {
+            "description": "removed"
+          },
+          "403": {
+            "description": "owner key required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Home Assistant is not set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Home Assistant setup is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/homeassistant/bots": {
+      "put": {
+        "tags": [
+          "homeassistant"
+        ],
+        "summary": "Choose which bots may use Home Assistant. `bots: null` = every bot, `[]` = none. Owner only.",
+        "operationId": "put_homeassistant_bots",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HomeAssistantBotsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "too many bots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "owner key required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Home Assistant is not set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Home Assistant setup is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/homeassistant/test": {
+      "post": {
+        "tags": [
+          "homeassistant"
+        ],
+        "summary": "Try the saved hub (an empty body), or an address and token that are not saved yet (`url` and\n`token`), and count its entities. A hub that cannot be reached or refuses the token answers `200`\nwith `ok: false` and a plain message. The daemon only ever dials the address given here or the\nsaved one. At most two connection tests run at once (`429`). Owner only.",
+        "operationId": "test_homeassistant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HomeAssistantTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantTestReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "owner key required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "nothing saved to test",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "an address needs a token, and the other way round",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many tests running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Home Assistant setup is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/host": {
       "get": {
         "tags": [
@@ -27516,6 +27865,165 @@
           }
         }
       },
+      "HomeAssistantBotsInput": {
+        "type": "object",
+        "description": "Body of `PUT /v1/homeassistant/bots`.",
+        "required": [
+          "bots"
+        ],
+        "properties": {
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The bots that may use Home Assistant; `null` = every bot, an empty list = none.\nThe field must be present: an empty body or a misspelled name is refused instead of\nsilently granting every bot."
+          }
+        },
+        "additionalProperties": false
+      },
+      "HomeAssistantDto": {
+        "type": "object",
+        "description": "The saved Home Assistant setup (non-secret fields only).",
+        "required": [
+          "configured",
+          "token_set",
+          "trusted_services"
+        ],
+        "properties": {
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The bots that may use Home Assistant; `null` = every bot, an empty list = none."
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "Whether a hub is set up at all."
+          },
+          "token_set": {
+            "type": "boolean",
+            "description": "Whether an access token is stored (never returned)."
+          },
+          "trusted_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Services (`cover.open_cover`) bots may call without a card even though they open,\nunlock or disarm something."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address of the hub (`null` when not set up)."
+          }
+        }
+      },
+      "HomeAssistantInput": {
+        "type": "object",
+        "description": "Body of `PUT /v1/homeassistant`: the address and token are checked against the hub before\nanything is saved.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Long-lived access token, **write-only**. Required the first time and whenever the address\nchanges; omitted otherwise it keeps the stored one."
+          },
+          "trusted_services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Services bots may call without a card even though they open, unlock or disarm something:\nexact `domain.service` names. Empty = none."
+          },
+          "url": {
+            "type": "string",
+            "description": "Address of the hub, e.g. `http://homeassistant.local:8123`."
+          }
+        }
+      },
+      "HomeAssistantSaved": {
+        "type": "object",
+        "description": "Result of `PUT /v1/homeassistant`.",
+        "required": [
+          "settings",
+          "entities"
+        ],
+        "properties": {
+          "entities": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many entities the hub reported when it was checked.",
+            "minimum": 0
+          },
+          "settings": {
+            "$ref": "#/components/schemas/HomeAssistantDto",
+            "description": "What is saved now."
+          }
+        }
+      },
+      "HomeAssistantTestInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/homeassistant/test`: the saved hub (an empty body), or an address and\ntoken that are not saved yet (`url` with `token`). Never a mix: the stored token is only\never sent to the saved address.",
+        "properties": {
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Access token, **write-only**, used once."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address to try."
+          }
+        }
+      },
+      "HomeAssistantTestReport": {
+        "type": "object",
+        "description": "Result of `POST /v1/homeassistant/test`.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "entities": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many entities the hub reports (`null` when the test failed).",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong, in plain words (`null` on success)."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "`true` when the hub was reachable and accepted the token."
+          }
+        }
+      },
       "HomeDto": {
         "type": "object",
         "description": "`GET /v1/hosts/home`: the host adopted as the bots' home, if any.",
@@ -39421,6 +39929,9 @@
     },
     {
       "name": "calendar"
+    },
+    {
+      "name": "homeassistant"
     },
     {
       "name": "web"

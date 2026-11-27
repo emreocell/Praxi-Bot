@@ -299,7 +299,12 @@ fn host_mode_desktop_denial(method: &Method, check_path: &str) -> Option<&'stati
     if (under("/v1/mcp") || under("/v1/skills") || is_bot_skills_path(check_path)) && mutating {
         return Some("tool servers and skills are managed on the host itself");
     }
-    if (under("/v1/email") || under("/v1/web/search") || under("/v1/calendar")) && mutating {
+    if (under("/v1/email")
+        || under("/v1/web/search")
+        || under("/v1/calendar")
+        || under("/v1/homeassistant"))
+        && mutating
+    {
         return Some("account credentials are managed on the host itself");
     }
     // The dictation key and endpoint: audio could be redirected to another service.

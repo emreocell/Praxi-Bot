@@ -349,6 +349,14 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/calendar/accounts/{}"),
     ("DELETE", "/v1/calendar/accounts/{}"),
     ("POST", "/v1/calendar/test"),
+    // Home Assistant: the address and the long-lived token decide what a bot can do to the
+    // owner's home; a test dials an address the caller names. Reads included (the address).
+    ("GET", "/v1/homeassistant"),
+    ("HEAD", "/v1/homeassistant"),
+    ("PUT", "/v1/homeassistant"),
+    ("DELETE", "/v1/homeassistant"),
+    ("PUT", "/v1/homeassistant/bots"),
+    ("POST", "/v1/homeassistant/test"),
     ("PUT", "/v1/web/search"),
     // a probe spends the stored search keys (or the owner-typed SearXNG address) on a query the
     // caller chooses: a token holder must not run it

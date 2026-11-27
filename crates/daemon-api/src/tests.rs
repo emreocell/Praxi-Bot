@@ -38,6 +38,7 @@ mod email;
 mod email_channel;
 mod embeddings;
 mod fill_secrets;
+mod homeassistant;
 mod host;
 mod host_admin;
 mod host_slice;
