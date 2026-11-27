@@ -56,7 +56,7 @@ fn lp(
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     // The five session tools; `mission_create` comes with them but is not counted.
     assert_eq!(
-        lp.enable_missions(&w.store, &clock),
+        lp.enable_missions(&w.store, &clock, None),
         missions::tools::MISSION_TOOL_NAMES.len()
     );
     lp
