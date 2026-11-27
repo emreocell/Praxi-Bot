@@ -126,9 +126,28 @@ This is vendor trademark artwork, not CC0. Google Antigravity is a trademark
 of Google LLC. No affiliation or endorsement is implied. Source/provenance:
 `apps/desktop/ui/src/assets/brands/antigravity.svg` and the dated audit above.
 
-Neutral initials for Groq and Together AI contain no vendor artwork. Groq is
-a trademark of Groq LLC and/or its affiliates. Praxi-Bot is not affiliated
-with or endorsed by Groq LLC.
+The llama.cpp icon is from [ggml-org/llama-brand](https://github.com/ggml-org/llama-brand)
+(`logo/svg/icon/icon-light.svg`, commit 9e91eb16, retrieved 2026-11-27). The
+repository licenses its logo assets under CC BY-NC 4.0 and, in
+[BRAND-USAGE.md](https://github.com/ggml-org/llama-brand/blob/master/BRAND-USAGE.md),
+additionally permits commercial reproduction and redistribution of the marks,
+including rescaling and monochrome rendering, to identify or refer to llama.cpp.
+The path is rescaled from 600 to 24 units and drawn in one colour; the shape is
+unchanged. Source/provenance: `apps/desktop/ui/src/assets/brands/llamacpp.svg`.
+
+The Tavily, Firecrawl, Context7 and Exa marks come from each vendor's own brand
+page ([Tavily](https://tavily.com/brand), [Firecrawl](https://www.firecrawl.dev/brand),
+[Context7](https://context7.com/brand), [Exa](https://exa.ai/brand), all checked
+2026-11-27) and the Kiro and Qoder marks from each vendor's own site icon
+(checked 2026-11-26). Each is reduced to one path in a 24-unit box with the
+shape unchanged; files in `apps/desktop/ui/src/assets/brands/`. These are vendor
+trademark artwork, not CC0, shown only to identify the integration; no
+endorsement is implied. Terms and the licence status of each are in
+`docs/design/brand-icons.md`.
+
+Neutral initials for Groq, Together AI and Playwright and the neutral glyph for
+Goose contain no vendor artwork. Groq is a trademark of Groq LLC and/or its
+affiliates. Praxi-Bot is not affiliated with or endorsed by Groq LLC.
 
 OpenAI's blossom path is vendored from Simple Icons 15.0.0 (CC0):
 https://github.com/simple-icons/simple-icons/blob/15.0.0/icons/openai.svg
