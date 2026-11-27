@@ -1188,6 +1188,12 @@
   color: var(--color-text);
 }
 
+/* Bare wallpaper behind the header has no plate: the muted ink drops below 4.5:1 on a light theme, so use the
+   full ink there. */
+:global(:root[data-veil="on"]) .back {
+  color: var(--color-text);
+}
+
 /* Hidden until it has the keyboard focus: the first Tab stop after the transcript. */
 .skipToComposer {
   position: sticky;

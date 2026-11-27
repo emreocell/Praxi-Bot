@@ -52,7 +52,7 @@
   width: var(--size-avatar-sm);
   height: var(--size-avatar-sm);
   border-radius: var(--radius-pill);
-  background: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 35%, var(--color-surface-elevated)));
+  background: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 65%, var(--color-surface-elevated-opaque)));
   color: var(--color-accent-contrast);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);

@@ -119,7 +119,9 @@ const collectText = () => {
     // Text covered by a dialog or popover is not on screen: the element under the middle of the run must be its own.
     const hit = document.elementFromPoint((x0 + x1) / 2, (y0 + y1) / 2);
     if (!hit || !(el.contains(hit) || hit.contains(el))) continue;
-    const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(cs.color);
+    // `color-mix()` and friends compute to `color(srgb 0.1 0.2 0.3 / 0.5)` (channels 0..1), plain colours to rgb(a)().
+    const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(cs.color)
+      ?? /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/.exec(cs.color)?.map((v, i) => (i >= 1 && i <= 3 ? String(+v * 255) : v));
     if (!m) continue;
     const cls = typeof el.className === 'string' ? el.className.split(/\s+/)[0] : '';
     runs.push({ text: text.slice(0, 48), box: [x0, y0, x1, y1].map(Math.round), fg: [+m[1], +m[2], +m[3]],

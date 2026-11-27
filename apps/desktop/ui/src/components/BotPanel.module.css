@@ -238,7 +238,7 @@
 
 .chip[data-tone="guarded"] {
   background-color: color-mix(in srgb, var(--color-success) 14%, transparent);
-  color: var(--color-success);
+  color: color-mix(in srgb, var(--color-success) 75%, var(--color-text));
 }
 
 .chip[data-tone="open"] {

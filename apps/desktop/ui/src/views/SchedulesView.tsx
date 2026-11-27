@@ -324,6 +324,7 @@ export function SchedulesView({
               <Button
                 size="sm"
                 variant={viewMode === "list" ? "secondary" : "ghost"}
+                className={styles.headerGhost}
                 aria-pressed={viewMode === "list"}
                 data-testid="schedules-view-list"
                 onClick={() => setViewMode("list")}
@@ -334,6 +335,7 @@ export function SchedulesView({
               <Button
                 size="sm"
                 variant={viewMode === "calendar" ? "secondary" : "ghost"}
+                className={styles.headerGhost}
                 aria-pressed={viewMode === "calendar"}
                 data-testid="schedules-view-calendar"
                 onClick={() => setViewMode("calendar")}
@@ -342,7 +344,7 @@ export function SchedulesView({
                 {t("schedules.viewCalendar")}
               </Button>
             </div>
-            <Button size="sm" variant="ghost" onClick={() => void load()}>
+            <Button size="sm" variant="ghost" className={styles.headerGhost} onClick={() => void load()}>
               <RefreshCw />
               {t("schedules.refresh")}
             </Button>
@@ -1011,6 +1013,7 @@ function ScheduleCalendar({
                           <Button
                             size="sm"
                             variant="ghost"
+                            className={styles.cardGhost}
                             onClick={() => onOpenChat(o.entry.chat_id!)}
                           >
                             <ArrowUpRight />
