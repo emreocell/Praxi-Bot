@@ -102,6 +102,7 @@ async fn doctor_lists_typed_checks_without_side_effects() {
         "providers",
         "providers_loaded",
         "cli_accounts",
+        "node_runtime",
         "browser",
         "desktop_automation",
         "capabilities",
@@ -123,6 +124,17 @@ async fn doctor_lists_typed_checks_without_side_effects() {
     );
     // Sealed PATH in the test setup: no coding CLI installed, which is neutral.
     assert_eq!(get("cli_accounts")["status"], "skipped");
+    // The sealed PATH has no Node.js either; the test machine is not an installer-managed server, so
+    // that is neutral too (and the row names what it looked for).
+    assert_eq!(get("node_runtime")["title"], "node / npm");
+    assert!(
+        get("node_runtime")["detail"]
+            .as_str()
+            .unwrap()
+            .contains("node: not found; npm: not found"),
+        "{}",
+        get("node_runtime")
+    );
     assert_eq!(get("peer_link")["status"], "skipped");
     // No embedder host: no browser restart offered (a computer with no browser at all is
     // offered the install instead, which depends on the machine running the test).
