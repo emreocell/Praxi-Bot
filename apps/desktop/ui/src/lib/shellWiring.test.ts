@@ -52,7 +52,7 @@ test("the stored rail width is only read where the fit or an explicit resize nee
 test("the Search button opens the message search overlay, not an in-rail field", () => {
   assert.match(app, /import \{ MessageSearch \} from "\.\/components\/MessageSearch";/);
   assert.match(app, /data-testid="message-search-button" onClick=\{\(\) => setSearchOpen\(true\)\}/);
-  assert.match(app, /\{searchOpen \? <MessageSearch seed=\{searchSeed\} onClose=\{\(\) => setSearchOpen\(false\)\} onOpenChat=\{openChat\} \/> : null\}/);
+  assert.match(app, /\{searchOpen \? <MessageSearch seed=\{searchSeed\} onClose=\{\(\) => setSearchOpen\(false\)\} onOpenChat=\{openChat\} onOpenBot=\{goToBot\} \/> : null\}/);
   assert.doesNotMatch(app, /botSearch|searchPlan|filterBots/);
 });
 

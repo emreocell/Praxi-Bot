@@ -919,3 +919,83 @@
   filter: grayscale(0.6);
   pointer-events: none;
 }
+
+/* Bot status on the avatar's lower corner: working (green, breathing), needs you (amber), idle (grey).
+   The ring keeps it apart from the character on every rail surface. */
+.avatarWrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.statusDot {
+  position: absolute;
+  right: calc(var(--space-half) * -1);
+  bottom: calc(var(--space-half) * -1);
+  width: calc(var(--size-status-dot) + var(--space-half));
+  height: calc(var(--size-status-dot) + var(--space-half));
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 0 var(--size-border-thick) var(--color-surface);
+  background-color: var(--color-text-faint);
+}
+
+.statusDot[data-status="working"] {
+  background-color: var(--color-success);
+  animation: statusBreathe 1.8s var(--motion-easing-standard) infinite;
+}
+
+.statusDot[data-status="needsYou"] {
+  background-color: var(--color-warning);
+}
+
+@keyframes statusBreathe {
+  50% {
+    box-shadow:
+      0 0 0 var(--size-border-thick) var(--color-surface),
+      0 0 0 calc(var(--size-border-thick) * 2.5) color-mix(in srgb, var(--color-success) 35%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusDot[data-status="working"] {
+    animation: none;
+  }
+}
+
+/* "+ New bot" at the end of the list: a compact row, quieter than a bot, its icon in the avatar column. */
+.rail .newBotRow {
+  min-height: var(--size-control-lg);
+  padding-block: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.newBotIcon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--size-avatar-md);
+  height: calc(var(--size-avatar-md) * 0.75);
+  border: var(--size-border) dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+}
+
+.newBotIcon > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.newBotText {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.rail .newBotRow:hover .newBotIcon,
+.rail .newBotRow:focus-visible .newBotIcon {
+  border-color: var(--color-accent-text);
+  color: var(--color-accent-text);
+}
+
+.rail .newBotRow:hover {
+  color: var(--color-text);
+}

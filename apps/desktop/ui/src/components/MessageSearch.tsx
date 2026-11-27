@@ -1,4 +1,4 @@
-import { Clock, FileText, Link2, RefreshCw, Search, TriangleAlert, X } from "lucide-react";
+import { Clock, FileText, Link2, MessageSquare, RefreshCw, Search, TriangleAlert, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -10,6 +10,7 @@ import { botView } from "../lib/botProfile";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { isTabStop, returnFocusTarget, trapTarget } from "../lib/focusTrap";
 import { type HumanError, humanError } from "../lib/humanError";
+import { quickFind } from "../lib/quickFind";
 import { appInert } from "../lib/inertStack";
 import { layerStack } from "../lib/modalStack";
 import {
@@ -33,24 +34,30 @@ const DEBOUNCE_MS = 250;
 
 type Row =
   | { kind: "recent"; id: string; term: string }
+  | { kind: "bot"; id: string; botId: string }
+  | { kind: "chat"; id: string; chatId: string }
   | { kind: "hit"; id: string; chatId: string; messageId: string };
 
 /**
- * Search the message history of every bot, WhatsApp-style. A centred overlay (like the command
+ * Search bots and chats by name (instant, from the lists in memory), then the message history of
+ * every bot, WhatsApp-style. A centred overlay (like the command
  * palette) rather than a bar in the sidebar: results need room, the rail can be one icon wide.
  */
 export function MessageSearch({
   onClose,
   onOpenChat,
+  onOpenBot,
   seed
 }: {
   /** A phrase sent from a right-click menu: it is filled in and searched at once. */
   seed?: SearchRequest | null;
   onClose: () => void;
   onOpenChat: (chatId: string, messageId?: string) => void;
+  /** Open a bot found by name (its latest chat or landing page). */
+  onOpenBot?: (botId: string) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const { client, bots } = useDaemon();
+  const { client, bots, chats } = useDaemon();
   const uid = useId();
   const [query, setQuery] = useState(seed?.query ?? "");
   const [filters, setFilters] = useState<SearchFilters>(NO_FILTERS);
@@ -130,13 +137,22 @@ export function MessageSearch({
   }, [term, filters, client]);
 
   const hits = useMemo(() => page?.results ?? [], [page]);
+  const found = useMemo(
+    () => quickFind(bots.map((b) => ({ id: b.id, name: botView(b).name })), chats, term),
+    [bots, chats, term]
+  );
+  const foundAny = found.bots.length + found.chats.length > 0;
   const groups = useMemo(() => groupHistoryHits(hits), [hits]);
   const rows: Row[] = useMemo(
     () =>
       term
-        ? hits.map((h) => ({ kind: "hit", id: `${uid}-${h.message_id}`, chatId: h.chat_id, messageId: h.message_id }))
+        ? [
+            ...found.bots.map((b): Row => ({ kind: "bot", id: `${uid}-b${b.id}`, botId: b.id })),
+            ...found.chats.map((c): Row => ({ kind: "chat", id: `${uid}-c${c.id}`, chatId: c.id })),
+            ...hits.map((h): Row => ({ kind: "hit", id: `${uid}-${h.message_id}`, chatId: h.chat_id, messageId: h.message_id }))
+          ]
         : recent.map((r, i) => ({ kind: "recent", id: `${uid}-r${i}`, term: r })),
-    [term, hits, recent, uid]
+    [term, hits, recent, uid, found]
   );
   const at = rows.length === 0 ? -1 : Math.min(cursor, rows.length - 1);
 
@@ -154,7 +170,9 @@ export function MessageSearch({
     setRecent(next);
     saveRecent(next);
     onClose();
-    onOpenChat(row.chatId, row.messageId);
+    if (row.kind === "bot") onOpenBot?.(row.botId);
+    else if (row.kind === "chat") onOpenChat(row.chatId);
+    else onOpenChat(row.chatId, row.messageId);
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -188,7 +206,8 @@ export function MessageSearch({
   const patch = (p: Partial<SearchFilters>) => setFilters((f) => ({ ...f, ...p }));
   const botFor = (id: string) => bots.find((b) => b.id === id);
   const now = nowRef.current;
-  const showEmpty = term !== "" && !busy && !error && page !== null && hits.length === 0;
+  const showEmpty = term !== "" && !busy && !error && page !== null && hits.length === 0 && !foundAny;
+  const rowAt = (id: string) => rows.findIndex((r) => r.id === id);
   const more = page?.next_offset;
 
   return createPortal(
@@ -251,6 +270,42 @@ export function MessageSearch({
                 </li>
               ) : null)}
             </>
+          ) : null}
+          {term && found.bots.length > 0 ? (
+            <>
+              <li role="presentation" className={styles.heading}><span>{t("messageSearch.sectionBots")}</span></li>
+              {found.bots.map((b) => {
+                const id = `${uid}-b${b.id}`;
+                const i = rowAt(id);
+                const bot = botFor(b.id);
+                return (
+                  <li key={id} id={id} role="option" aria-selected={i === at} className={styles.row} data-active={i === at ? "true" : undefined} data-testid="search-bot-row" onMouseMove={() => setCursor(i)} onClick={() => open(rows[i])}>
+                    {bot ? <BotAvatar bot={botView(bot)} size="xs" decorative /> : null}
+                    <span className={styles.recentTerm}>{b.name}</span>
+                  </li>
+                );
+              })}
+            </>
+          ) : null}
+          {term && found.chats.length > 0 ? (
+            <>
+              <li role="presentation" className={styles.heading}><span>{t("messageSearch.sectionChats")}</span></li>
+              {found.chats.map((c) => {
+                const id = `${uid}-c${c.id}`;
+                const i = rowAt(id);
+                const bot = botFor(c.bot_id);
+                return (
+                  <li key={id} id={id} role="option" aria-selected={i === at} className={styles.row} data-active={i === at ? "true" : undefined} data-testid="search-chat-row" onMouseMove={() => setCursor(i)} onClick={() => open(rows[i])}>
+                    <MessageSquare aria-hidden="true" className={styles.rowIcon} />
+                    <span className={styles.recentTerm}>{chatTitleLabel(c.title, t("botPanel.untitled"))}</span>
+                    {bot ? <span className={styles.date}>{botView(bot).name}</span> : null}
+                  </li>
+                );
+              })}
+            </>
+          ) : null}
+          {term && foundAny && groups.length > 0 ? (
+            <li role="presentation" className={styles.heading}><span>{t("messageSearch.sectionMessages")}</span></li>
           ) : null}
           {term ? groups.map((group) => {
             const bot = botFor(group[0].bot_id);

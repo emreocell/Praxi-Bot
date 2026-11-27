@@ -60,6 +60,7 @@ import {
 import { useMcp } from "./state/useMcp";
 import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { MessageSearch } from "./components/MessageSearch";
+import { botDotStatus, railNavIndex } from "./lib/railNav";
 import { HealthIndicator } from "./components/HealthIndicator";
 import { ServiceBanner } from "./components/ServiceBanner";
 import { ServiceStateProvider } from "./state/ServiceState";
@@ -1377,10 +1378,24 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
           </SidebarHeader>
           <SidebarSection>
             <span className={styles.srOnly} role="status" aria-live="polite">{orderNote}</span>
-            <div ref={reorder.containerRef} className={styles.botList} data-stale={homeStale ? "true" : undefined}>
-            {needs.length > 0 ? <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "needs"} title={t("sidebar.needsYou")} aria-label={mini ? t("sidebar.needsYouCount", { count: needs.length }) : undefined} onClick={openNeeds}><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
-            {notifyHistory.length > 0 || route.kind === "notifications" ? <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "notifications"} title={t("sidebar.notifications")} aria-label={mini && notifyActionCount > 0 ? t("sidebar.notificationsCount", { count: notifyActionCount }) : mini ? t("sidebar.notifications") : undefined} onClick={() => go({ kind: "notifications" })} data-testid="sidebar-notifications"><BellRing /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.notifications")}</span>{notifyActionCount > 0 ? <span className={styles.notifyBadge} data-testid="notify-history-badge" aria-label={t("sidebar.notificationsCount", { count: notifyActionCount })}>{notifyActionCount}</span> : null}</SidebarItem> : null}
-            <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "schedules"} title={t("sidebar.schedules")} aria-label={mini ? t("sidebar.schedules") : undefined} onClick={() => go({ kind: "schedules" })} data-testid="sidebar-schedules"><CalendarClock /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.schedules")}</span></SidebarItem>
+            <div
+              ref={reorder.containerRef}
+              className={styles.botList}
+              data-stale={homeStale ? "true" : undefined}
+              onKeyDown={(e) => {
+                // Up / Down / Home / End move between the rail's rows (the reorder grip keeps its own arrows).
+                const row = e.target as HTMLElement;
+                if (!row.matches("[data-rail-nav]") || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+                const rows = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-rail-nav]")];
+                const next = railNavIndex(rows.indexOf(row), rows.length, e.key);
+                if (next === null) return;
+                e.preventDefault();
+                rows[next]?.focus();
+              }}
+            >
+            {needs.length > 0 ? <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "needs"} title={t("sidebar.needsYou")} aria-label={mini ? t("sidebar.needsYouCount", { count: needs.length }) : undefined} onClick={openNeeds} data-rail-nav><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
+            {notifyHistory.length > 0 || route.kind === "notifications" ? <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "notifications"} title={t("sidebar.notifications")} aria-label={mini && notifyActionCount > 0 ? t("sidebar.notificationsCount", { count: notifyActionCount }) : mini ? t("sidebar.notifications") : undefined} onClick={() => go({ kind: "notifications" })} data-testid="sidebar-notifications" data-rail-nav><BellRing /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.notifications")}</span>{notifyActionCount > 0 ? <span className={styles.notifyBadge} data-testid="notify-history-badge" aria-label={t("sidebar.notificationsCount", { count: notifyActionCount })}>{notifyActionCount}</span> : null}</SidebarItem> : null}
+            <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "schedules"} title={t("sidebar.schedules")} aria-label={mini ? t("sidebar.schedules") : undefined} onClick={() => go({ kind: "schedules" })} data-testid="sidebar-schedules" data-rail-nav><CalendarClock /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.schedules")}</span></SidebarItem>
             {bots.map((bot) => {
               const view = botView(bot);
               const latest = botChats(chats, bot.id).find((c) => !c.archived);
@@ -1388,6 +1403,8 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
               const live = runs.find(r => r.bot_id === bot.id && isProcessingRunState(r.state));
               const state = needs.some(n => n.botId === bot.id) || live?.state === "waiting_approval" ? "waiting-approval" : live ? "working" : isMockMode() ? config.bot?.state : "idle";
               const avatarState = state === "thinking" || state === "working" || state === "waiting-approval" || state === "error" ? state : "idle";
+              const dot = botDotStatus(avatarState);
+              const dotLabel = t(`sidebar.status.${dot}`);
               const index = botIds.indexOf(bot.id);
               const canReorder = true;
               const drag = reorder.drag;
@@ -1403,14 +1420,29 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                 onSettings: () => openBotDialog(bot.id, "edit")
               }));
               return <div key={bot.id} onContextMenu={rowMenu.onContextMenu} onKeyDown={rowMenu.onKeyDown} className={styles.botRow} data-dragging={drag?.id === bot.id ? "true" : undefined} data-drop={dropEdge} {...(canReorder ? reorder.rowProps(bot.id) : { "data-bot-id": bot.id })}>
-                <SidebarItem className={styles.railItem} active={routeBotId === bot.id} title={view.name} aria-label={mini ? view.name : undefined} onClick={() => goToBot(bot.id)}>
-                  <BotAvatar bot={view} size="md" state={avatarState} decorative />
+                <SidebarItem className={styles.railItem} active={routeBotId === bot.id} title={`${view.name} · ${dotLabel}`} aria-label={mini ? `${view.name}, ${dotLabel}` : undefined} onClick={() => goToBot(bot.id)} data-rail-nav data-status={dot}>
+                  <span className={styles.avatarWrap}>
+                    <BotAvatar bot={view} size="md" state={avatarState} decorative />
+                    <span className={styles.statusDot} data-status={dot} aria-hidden="true" data-testid="bot-status-dot" />
+                  </span>
+                  <span className={styles.srOnly}>{dotLabel}</span>
                   <div className={`${styles.botMeta} ${styles.railText}`}><span className={styles.botName}><span className={styles.botNameText}>{view.name}</span>{index === 0 && botIds.length > 1 ? <span className={styles.mainMark} role="img" title={t("sidebar.mainBotHint")} aria-label={t("sidebar.mainBotHint")}><Star aria-hidden="true" /></span> : null}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? chatTitleLabel(latest?.title, t("bots.newChat"))}</span></div>
                   {unreadBots.has(bot.id) ? <span className={styles.unreadDot} role="img" aria-label={t("sidebar.unreadBot")} data-testid="bot-unread" /> : null}
                 </SidebarItem>
                 {canReorder && !mini && botIds.length > 1 ? <button type="button" className={styles.grip} aria-label={t("sidebar.reorderBot", { name: view.name })} title={t("sidebar.reorderHint")} {...reorder.gripProps(bot.id)}><GripVertical aria-hidden="true" /></button> : null}
               </div>;
             })}
+            <SidebarItem
+              className={`${styles.railItem} ${styles.newBotRow}`}
+              title={t("sidebar.newBot")}
+              aria-label={mini ? t("sidebar.newBot") : undefined}
+              onClick={() => setNewBotOpen(true)}
+              data-rail-nav
+              data-testid="sidebar-new-bot"
+            >
+              <span className={styles.newBotIcon} aria-hidden="true"><Plus /></span>
+              <span className={`${styles.newBotText} ${styles.railText}`}>{t("sidebar.newBot")}</span>
+            </SidebarItem>
             {botMenu.menu}
             </div>
           </SidebarSection>
@@ -1660,7 +1692,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         onHelp={() => setHelpOpen(true)}
         onSearch={() => setSearchOpen(true)}
       />
-      {searchOpen ? <MessageSearch seed={searchSeed} onClose={() => setSearchOpen(false)} onOpenChat={openChat} /> : null}
+      {searchOpen ? <MessageSearch seed={searchSeed} onClose={() => setSearchOpen(false)} onOpenChat={openChat} onOpenBot={goToBot} /> : null}
       <SettingsModal
         open={settingsOpen !== null}
         initialSection={settingsOpen ?? "general"}

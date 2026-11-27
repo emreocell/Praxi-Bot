@@ -264,7 +264,7 @@
 
 .date {
   flex-shrink: 0;
-  color: var(--color-text-faint);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   white-space: nowrap;
 }
