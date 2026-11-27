@@ -200,14 +200,14 @@ mod tests {
             [sock("93.184.216.34", 443)]
         );
         // A name that resolves only to the cloud metadata service leaves nothing to connect to.
-        assert!(
+        assert_eq!(
             allowed_addrs(
                 policy.as_ref(),
                 "evil.example",
                 false,
                 [sock("169.254.169.254", 443)]
-            )
-            .is_empty()
+            ),
+            []
         );
         // A name that resolves to the daemon's own port.
         assert!(

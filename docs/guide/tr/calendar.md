@@ -17,7 +17,8 @@ oluşturabilir ve insanları davet edebilir. Her çağrı, diğer araçlar gibi 
 
 Parola gizli bilgi deposuna gider; hiçbir dosyaya yazılmaz ve bir daha gösterilmez. Araçlar bir sonraki
 çağrıdan itibaren çalışır, yeniden başlatmak gerekmez. Bir takvimi yanındaki çöp kutusu simgesiyle
-kaldırabilirsin; saklanan parolası da silinir.
+kaldırabilirsin; Ayarlar'ın kaydettiği parola da silinir (`calendar.toml` içinde elle verdiğin bir gizli bilgi
+başvurusuna dokunulmaz, çünkü başka bir şey onu kullanıyor olabilir).
 
 Google, takvimler için uygulama parolalarını yalnızca bazı hesaplarda kabul eder. Bir Google hesabında
 deneme başarısız olursa muhtemel neden budur.
@@ -33,20 +34,37 @@ bilgi deposu başvurusu olarak `password`, örneğin `calendar/home/password`); 
 | `calendar_free_busy` | okuma | Tüm (ya da adı verilen) takvimlerde boş zamanlar, istenirse çalışma saatleri içinde. Okunamayan bir takvimi gizlemez, bildirir. |
 | `calendar_create_event` | yazma | Etkinlik ekler; istenirse yinelenen (`recurrence`, bir RRULE) ve `attendees` ile. |
 | `calendar_update_event` | yazma | Etkinliği yeniden adlandırır ya da taşır; yerini, notlarını, tekrar kuralını veya katılımcıları değiştirir. Yalnızca verdiğin alanlar değişir. |
-| `calendar_delete_event` | yıkıcı | `uid` ile bir etkinliği siler; her zaman sorar. |
+| `calendar_delete_event` | yıkıcı | `uid` ile bir etkinliği siler. Geri alınamaz; bu yüzden alt izin düzeyleri önce sorar. Etkinliği sen düzenliyorsan ve sunucu katılımcılar için iptal gönderiyorsa, onlar bilgilendirilir. |
 
 Tarihler `YYYY-MM-DD` (tam gün) ya da saat farkıyla RFC 3339 biçimindedir.
 
 ### Davetler
 
-Katılımcı eklemek, katılımcısı olan bir etkinliği değiştirmek ya da birini çıkarmak, izin düzeyin ne olursa
-olsun önce her zaman sana sorar. Takvim sunucusu CalDAV zamanlamasını destekliyorsa davetleri kendisi
-gönderir. Desteklemiyorsa bot, e-posta hesabın üzerinden `.ics` ekli bir e-posta gönderir (Ayarlar >
-Posta ve web > E-posta bölümünden bir hesap kur). Katılımcısı olmayan bir etkinlik kimseyi bilgilendirmez.
+Katılımcı eklemek, katılımcısı olan bir etkinliği değiştirmek (herhangi bir değişiklik, bir not bile:
+sunucu herkese haber verir) ya da etkinliği silmek başka insanlara posta gönderir; bu yüzden e-posta
+göndermekle aynı onay adımından geçer. Alt izin düzeyleri önce sana sorar; **Tam erişim** güvenilen bir
+çalışmanın geçmesine izin verir (para harcamadan önce yine sorar). Her biri denetim kaydına yazılır.
+
+Takvim sunucusu CalDAV zamanlamasını destekliyorsa davetleri kendisi gönderir. Desteklemiyorsa bot,
+e-posta hesabın üzerinden `.ics` ekli bir e-posta gönderir (Ayarlar > Posta ve web > E-posta bölümünden
+bir hesap kur). Katılımcısı olmayan bir etkinlik kimseyi bilgilendirmez. Giden posta kuralların her iki
+durumda da geçerlidir ve hiçbir şey yazılmadan önce uygulanır: engelleme listendeki bir adres ya da günlük
+sınırın aşılması değişikliği durdurur; gönderim günlüğü her daveti, gönderen botla birlikte gösterir.
 
 ## Güvenlik
 
-- URL `https` olmalıdır (düz `http` yalnızca geri döngü adresleri için: `localhost`, `::1` ya da `127.*`; örneğin bir test sunucusu).
+- URL `https` olmalıdır (düz `http` yalnızca bu bilgisayar için: `localhost`, bir `*.localhost` adı ya da
+  `127.0.0.1` veya `::1` gibi bir geri döngü adresi; örneğin bir test sunucusu).
+- Bulut meta veri ve bağlantı-yerel (link-local) aralığındaki adreslere (örneğin `169.254.169.254`) ve
+  daemon'un kendi portuna, hangi ad oraya çıkarsa çıksın, asla bağlanılmaz. Kendi ağın serbesttir; bu
+  yüzden evdeki bir sunucudaki takvim çalışır.
+- Bir sunucu, daemon'u yalnızca senin yazdığın sunucu üzerindeki başka bir takvim adresine yönlendirebilir
+  (takvimlerini kendi sunucuları arasında dağıtan iCloud bunların arasında geçebilir). Bunun dışındaki
+  her şey, adresin içinde bir giriş bilgisi, başka bir port ya da şema reddedilir.
+- Bir sunucu yanıtı en çok 4 MB okunur ve bir liste 10.000 etkinlikte durur; kötü niyetli bir sunucu
+  belleği ya da zamanı tüketemez.
+- Kaydedilen parola yalnızca kaydedildiği adrese ve kullanıcı adına gönderilir. Bunlardan birini
+  değiştirmek parolayı yeniden yazmak demektir.
 - Yönlendirmeler asla izlenmez, böylece parola başka bir sunucuya gönderilemez.
 - Sunucunun verdiği bir bağlantı, yalnızca yapılandırılmış takvimin içinde kalıyorsa değiştirmek ya da silmek için kullanılır.
 - Modele dönen takvim metni güvenilmeyen veri olarak işaretlenir; onu okumuş bir çalışma, web sayfası ya da e-posta

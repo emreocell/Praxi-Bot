@@ -355,14 +355,17 @@ fn connector(port: u16) -> Arc<CalendarConnector> {
 /// `(to, subject, method, ics)` of one mail.
 type Mail = (Vec<String>, String, String, String);
 
+/// `(bot, to, subject)` of one mail the calendar server delivered by itself.
+type ServerMail = (Option<String>, Vec<String>, String);
+
 /// A mailer that records what it is asked and can refuse an address (the owner's mail rules).
 #[derive(Default)]
 struct Outbox {
     mails: Mutex<Vec<Mail>>,
     /// `(bot, to)` of every rules check.
     checked: Mutex<Vec<(Option<String>, Vec<String>)>>,
-    /// `(bot, to, subject)` of every mail the calendar server delivered by itself.
-    server: Mutex<Vec<(Option<String>, Vec<String>, String)>>,
+    /// Every mail the calendar server delivered by itself.
+    server: Mutex<Vec<ServerMail>>,
     /// An address the rules refuse.
     refuse: Mutex<Option<String>>,
 }
@@ -1329,7 +1332,7 @@ async fn an_address_the_mail_rules_refuse_stops_the_event_before_it_is_written()
             "scheduling={scheduling}"
         );
         assert_eq!(puts(&f), 0, "nothing is sent to the server: {scheduling}");
-        assert!(out.sent().is_empty());
+        assert_eq!(out.sent(), vec![]);
         assert_eq!(
             out.checked.lock().unwrap()[0].0.as_deref(),
             Some("bot-7"),
@@ -1357,10 +1360,10 @@ async fn an_address_the_mail_rules_refuse_stops_the_event_before_it_is_written()
                     "Invitation: Sync".to_owned()
                 )]
             );
-            assert!(out.sent().is_empty());
+            assert_eq!(out.sent(), vec![]);
         } else {
             assert_eq!(made["invitations"]["method"], "email");
-            assert!(server.is_empty());
+            assert_eq!(server, vec![]);
             assert_eq!(out.sent().len(), 1);
         }
     }
@@ -1639,16 +1642,21 @@ async fn the_daemons_own_port_is_never_dialled_and_nothing_is_sent_there() {
     // Another port of this machine (a Radicale next door) is still a calendar.
     let mut other = account("home", f.port, "/cal");
     other.url = "http://127.0.0.1:5232/cal".into();
-    assert!(conn.replace_accounts(vec![other], &st).is_empty());
+    assert_eq!(
+        conn.replace_accounts(vec![other], &st),
+        Vec::<String>::new()
+    );
     assert_eq!(conn.names(), ["home"]);
-    assert!(
-        f.requests.lock().unwrap().is_empty(),
-        "not one request reached the protected port: {:?}",
-        f.requests.lock().unwrap()
+    let requests = f.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        0,
+        "not one request reached the protected port: {requests:?}"
     );
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // a table of cases, one group per line of reasoning
 async fn a_discovery_link_stays_on_the_configured_host() {
     let st = store(&[]);
     let client = |url: &str| {
@@ -1746,6 +1754,13 @@ async fn a_discovery_link_stays_on_the_configured_host() {
         (
             "https://dav.example.com/dav/",
             "https://p42-caldav.icloud.com/",
+            false,
+        ),
+        // a shared user-content domain is not "the same service": Google's calendar host
+        // stays put, and another host of that domain is not trusted with the password
+        (
+            "https://apidata.googleusercontent.com/caldav/v2/",
+            "https://n-abc-script.googleusercontent.com/",
             false,
         ),
         // never into metadata space, whatever the host says
@@ -1870,13 +1885,15 @@ async fn a_response_is_read_up_to_the_cap_and_no_further() {
 
 #[tokio::test]
 async fn an_answer_that_expands_to_too_many_events_is_refused_not_listed() {
-    let mut ics = String::from("BEGIN:VCALENDAR\r\n");
-    for i in 0..10_500 {
-        ics.push_str(&format!(
-            "BEGIN:VEVENT\r\nUID:e{i}\r\nDTSTART:20261120T090000Z\r\nDTEND:20261120T100000Z\r\nEND:VEVENT\r\n"
-        ));
-    }
-    ics.push_str("END:VCALENDAR\r\n");
+    let events: String = (0..10_500)
+        .map(|i| {
+            format!(
+                "BEGIN:VEVENT\r\nUID:e{i}\r\nDTSTART:20261120T090000Z\r\nDTEND:20261120T100000Z\r\nEND:VEVENT\r\n"
+            )
+        })
+        .collect::<Vec<_>>()
+        .concat();
+    let ics = format!("BEGIN:VCALENDAR\r\n{events}END:VCALENDAR\r\n");
     let xml = format!(
         "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:response><d:href>/cal/a.ics</d:href><d:propstat><d:prop><c:calendar-data>{ics}</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>"
     );

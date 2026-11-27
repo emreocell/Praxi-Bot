@@ -18,7 +18,8 @@ Open **Settings > Mail & web > Calendar**:
 
 The password goes to the secret store; it is never written to a file and never shown
 again. The tools work from the next call, with no restart. Remove a calendar with the
-bin icon next to it, which also deletes its stored password.
+bin icon next to it, which also deletes the password Settings saved for it (a secret
+you referenced by hand in `calendar.toml` is left alone: something else may use it).
 
 Google only accepts app passwords for calendars on some accounts. If the test fails
 for a Google account, that is the likely reason.

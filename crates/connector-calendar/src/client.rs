@@ -29,8 +29,11 @@ const MAX_RULE_WORK: u64 = 20_000_000;
 const MAX_UID: usize = 255;
 /// Services whose calendars live on several hosts of one domain (iCloud keeps them on
 /// `pNN-caldav.icloud.com`). A discovery link may move between hosts of the same one of
-/// these; for every other server it must stay on the host that was configured.
-const PROVIDER_DOMAINS: [&str; 3] = ["icloud.com", "fastmail.com", "googleusercontent.com"];
+/// these; for every other server it must stay on the host that was configured. Only
+/// domains the provider alone controls belong here: not a shared user-content domain
+/// (Google's calendars live on one host, `apidata.googleusercontent.com`, which the
+/// same-host rule already covers).
+const PROVIDER_DOMAINS: [&str; 2] = ["icloud.com", "fastmail.com"];
 
 /// One calendar the agent can use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -425,6 +425,48 @@ async fn a_saved_account_is_tested_with_its_own_password_at_its_own_address_only
 }
 
 #[tokio::test]
+async fn testing_a_saved_account_obeys_the_address_policy_too() {
+    // A hand-written entry that points at the daemon's own API: the connector refuses it at
+    // load, and the connection test must not be a way around that.
+    let dir = tempfile::tempdir().unwrap();
+    let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+    store.set("calendar/loop/password", PW).unwrap();
+    std::fs::write(
+        dir.path().join(CALENDAR_FILE),
+        format!(
+            r#"
+[[calendar]]
+name = "loop"
+url = "http://127.0.0.1:{DAEMON_PORT}/v1/"
+username = "me@example.com"
+password = "calendar/loop/password"
+"#
+        ),
+    )
+    .unwrap();
+    let host = start_calendar(
+        dir.path(),
+        &ToolRegistry::new(),
+        Some(&store),
+        None,
+        DAEMON_PORT,
+    )
+    .unwrap();
+    assert!(host.connector().names().is_empty());
+    let refused = host
+        .test(CalendarTestInput {
+            name: Some("loop".into()),
+            ..CalendarTestInput::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(refused, CalendarControlError::Invalid(_)),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
 async fn an_unreadable_calendar_file_is_never_overwritten() {
     let r = rig();
     let d = dav().await;

@@ -1312,7 +1312,7 @@ mod tests {
         // ... and any other address is fine: an invitation carries no opt-out line, so that
         // is not a warning for it (and asks for no footer) ...
         let ok = g.check_invite("work", &one("bob@example.com"));
-        assert!(ok.warnings.is_empty());
+        assert_eq!(ok.warnings, vec![]);
         assert!(ok.footer.is_none() && ok.legal_notice.is_none());
         // ... while an ordinary mail without the line still warns, as it always did.
         assert_eq!(
@@ -1331,16 +1331,15 @@ mod tests {
             vec!["daily_limit"]
         );
         // Another account's count is its own.
-        assert!(
-            g.check_invite("calendar", &one("c@x.io"))
-                .warnings
-                .is_empty()
-        );
+        assert_eq!(g.check_invite("calendar", &one("c@x.io")).warnings, vec![]);
         // An update or a cancellation goes to people who were just invited: that is not a
         // repeat to hold back, while the plain check still flags it.
-        assert!(g.check_invite("work", &one("a@x.io")).codes() == vec!["daily_limit"]);
+        assert_eq!(
+            g.check_invite("work", &one("a@x.io")).codes(),
+            vec!["daily_limit"]
+        );
         g.set_settings(GuardSettings::default()).unwrap();
-        assert!(g.check_invite("work", &one("a@x.io")).warnings.is_empty());
+        assert_eq!(g.check_invite("work", &one("a@x.io")).warnings, vec![]);
         assert_eq!(
             g.check(&facts(&one("a@x.io"), true)).codes(),
             vec!["same_recipient"]

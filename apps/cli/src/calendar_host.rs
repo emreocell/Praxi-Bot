@@ -574,8 +574,12 @@ impl CalendarControl for CalendarHost {
                     .into_iter()
                     .find(|a| &a.name == name)
                     .ok_or_else(|| CalendarControlError::NotFound(format!("calendar {name}")))?;
-                CalendarClient::new(account, Arc::clone(&self.secrets))
-                    .map_err(|e| invalid(e.to_string()))?
+                CalendarClient::with_policy(
+                    account,
+                    Arc::clone(&self.secrets),
+                    Arc::clone(&self.policy),
+                )
+                .map_err(|e| invalid(e.to_string()))?
             }
             (None, Some(url)) => {
                 let (Some(user), Some(password)) = (&input.username, &input.password) else {

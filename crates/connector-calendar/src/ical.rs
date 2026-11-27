@@ -466,29 +466,23 @@ impl Budget {
 
     /// Room for one more event?
     pub(crate) fn take_event(&mut self) -> bool {
-        match self.events.checked_sub(1) {
-            Some(left) => {
-                self.events = left;
-                true
-            }
-            None => {
-                self.exhausted = true;
-                false
-            }
+        if let Some(left) = self.events.checked_sub(1) {
+            self.events = left;
+            true
+        } else {
+            self.exhausted = true;
+            false
         }
     }
 
     /// Pay for `steps` of rule walking; `false` when the budget is gone.
     pub(crate) fn spend(&mut self, steps: u64) -> bool {
-        match self.work.checked_sub(steps) {
-            Some(left) => {
-                self.work = left;
-                true
-            }
-            None => {
-                self.exhausted = true;
-                false
-            }
+        if let Some(left) = self.work.checked_sub(steps) {
+            self.work = left;
+            true
+        } else {
+            self.exhausted = true;
+            false
         }
     }
 }
@@ -1250,13 +1244,15 @@ mod unit {
 
     #[test]
     fn a_document_cannot_expand_past_its_event_budget() {
-        let mut ics = String::from("BEGIN:VCALENDAR\n");
-        for i in 0..50 {
-            ics.push_str(&format!(
-                "BEGIN:VEVENT\nUID:e{i}\nDTSTART:20261120T090000Z\nDTEND:20261120T100000Z\nEND:VEVENT\n"
-            ));
-        }
-        ics.push_str("END:VCALENDAR\n");
+        let events: String = (0..50)
+            .map(|i| {
+                format!(
+                    "BEGIN:VEVENT\nUID:e{i}\nDTSTART:20261120T090000Z\nDTEND:20261120T100000Z\nEND:VEVENT\n"
+                )
+            })
+            .collect::<Vec<_>>()
+            .concat();
+        let ics = format!("BEGIN:VCALENDAR\n{events}END:VCALENDAR\n");
         let from: DateTime<Utc> = "2026-11-01T00:00:00Z".parse().unwrap();
         let to: DateTime<Utc> = "2026-12-01T00:00:00Z".parse().unwrap();
         let mut budget = Budget::new(20, 1_000);
@@ -1265,7 +1261,7 @@ mod unit {
         assert!(budget.exhausted());
         // One budget is shared by the documents of one answer.
         let more = events_in_range(&ics, from, to, &mut budget);
-        assert!(more.is_empty());
+        assert_eq!(more, Vec::new());
         // A roomy budget is not touched.
         let mut roomy = Budget::new(100, 1_000);
         assert_eq!(events_in_range(&ics, from, to, &mut roomy).len(), 50);

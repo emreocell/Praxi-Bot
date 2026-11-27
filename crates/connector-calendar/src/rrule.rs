@@ -165,7 +165,13 @@ pub fn parse(rule: &str) -> Result<Rule, String> {
     if r.freq == Freq::Yearly && !r.by_day.is_empty() {
         r.expandable = false;
     }
-    // A repeated value must not repeat the work (or the occurrence).
+    dedup_values(&mut r);
+    never_matches(&r)?;
+    Ok(r)
+}
+
+/// A repeated value must not repeat the work (or the occurrence).
+fn dedup_values(r: &mut Rule) {
     let mut seen = Vec::new();
     r.by_day.retain(|d| {
         let new = !seen.contains(d);
@@ -178,8 +184,6 @@ pub fn parse(rule: &str) -> Result<Rule, String> {
     r.by_month_day.dedup();
     r.by_month.sort_unstable();
     r.by_month.dedup();
-    never_matches(&r)?;
-    Ok(r)
 }
 
 /// Longest each month can be (February 29 counts).
