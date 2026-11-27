@@ -43,6 +43,11 @@ function commit(next: HistoryEntry[]): void {
   listeners.forEach((l) => l());
 }
 
+/** The entries as they are now (for code that must not add one twice). */
+export function getNotificationHistory(): HistoryEntry[] {
+  return load();
+}
+
 export function recordNotification(entry: HistoryEntry): void {
   commit(addEntry(load(), entry, Date.now()));
 }

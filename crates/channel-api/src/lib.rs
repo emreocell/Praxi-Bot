@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub mod approval;
 pub mod conformance;
 mod error;
+pub mod notice;
 pub mod pairing;
 pub use error::{ChannelError, Result};
 

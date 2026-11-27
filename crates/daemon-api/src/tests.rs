@@ -52,6 +52,7 @@ mod mission_long_run;
 mod missions;
 mod model_catalog;
 mod offline_schedule;
+mod owner_notices;
 mod peer_knowledge;
 mod peer_owner;
 mod profile_share;

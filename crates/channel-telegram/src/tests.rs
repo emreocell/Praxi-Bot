@@ -63,6 +63,13 @@ struct FakeDaemon {
     cancel_failures: Mutex<VecDeque<crate::TelegramError>>,
     /// What `transcribe_voice` answers (`None` = on-device voice is off).
     transcript: Mutex<Option<String>>,
+    /// Owner-notice connections `subscribe_notices` hands out, one per call.
+    notice_connections: Mutex<VecDeque<Vec<crate::NoticeEvent>>>,
+    notice_afters: Mutex<Vec<Option<u64>>>,
+    notice_answers: Mutex<Vec<(String, Vec<channel_api::notice::Reply>)>>,
+    notice_retries: Mutex<Vec<String>>,
+    /// Make `answer_notice` and `retry_notice` fail.
+    notice_fail: Mutex<bool>,
 }
 
 impl FakeDaemon {
@@ -84,6 +91,11 @@ impl FakeDaemon {
             cancel_seen: tokio::sync::Notify::new(),
             cancel_failures: Mutex::new(VecDeque::new()),
             transcript: Mutex::new(None),
+            notice_connections: Mutex::new(VecDeque::new()),
+            notice_afters: Mutex::new(Vec::new()),
+            notice_answers: Mutex::new(Vec::new()),
+            notice_retries: Mutex::new(Vec::new()),
+            notice_fail: Mutex::new(false),
         }
     }
 
@@ -226,6 +238,41 @@ impl DaemonClient for FakeDaemon {
         _created_after_ms: i64,
     ) -> Result<Option<RunId>> {
         Ok(self.started_later.lock().pop_front())
+    }
+
+    async fn subscribe_notices(
+        &self,
+        after: Option<u64>,
+    ) -> Result<BoxStream<'static, crate::NoticeEvent>> {
+        self.notice_afters.lock().push(after);
+        let events = self.notice_connections.lock().pop_front();
+        Ok(match events {
+            Some(events) => Box::pin(stream::iter(events)),
+            None => Box::pin(stream::pending()),
+        })
+    }
+
+    async fn answer_notice(
+        &self,
+        notice_id: &str,
+        answers: &[channel_api::notice::Reply],
+    ) -> Result<(u32, u32)> {
+        if *self.notice_fail.lock() {
+            return Err(crate::TelegramError::Daemon("refused".into()));
+        }
+        self.notice_answers
+            .lock()
+            .push((notice_id.to_owned(), answers.to_vec()));
+        let skipped = u32::try_from(answers.iter().filter(|a| a.answer.is_none()).count()).unwrap();
+        Ok((u32::try_from(answers.len()).unwrap() - skipped, skipped))
+    }
+
+    async fn retry_notice(&self, notice_id: &str) -> Result<()> {
+        if *self.notice_fail.lock() {
+            return Err(crate::TelegramError::Daemon("refused".into()));
+        }
+        self.notice_retries.lock().push(notice_id.to_owned());
+        Ok(())
     }
 
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {
@@ -4661,4 +4708,559 @@ async fn pairing_replies_follow_the_new_chat_language_and_unpaired_chats_stay_en
             "✅ Eşleşme tamamlandı! Bir mesaj gönder ya da bot seçmek için /bots komutunu kullan.",
         ]
     );
+}
+
+// ---- owner notices: the daemon-wide push (a finished, failed or blocked mission or background run)
+
+mod owner_notices {
+    use super::*;
+    use crate::NoticeEvent;
+    use channel_api::notice::{
+        NoticeItem, NoticeKind, NoticeProgress, NoticeSource, OwnerNotice, Reply,
+    };
+
+    const NOTICE_ID: &str = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+
+    fn blocked(questions: &[&str]) -> OwnerNotice {
+        OwnerNotice {
+            seq: 7,
+            id: NOTICE_ID.into(),
+            at_ms: 1,
+            kind: NoticeKind::Blocked,
+            source: NoticeSource::Mission,
+            title: "Backlinks".into(),
+            bot_name: "Scout".into(),
+            bot_id: None,
+            mission_id: Some("m1".into()),
+            run_id: None,
+            chat_id: None,
+            reason: None,
+            progress: Some(NoticeProgress {
+                total: 10,
+                done: 6,
+                blocked: u32::try_from(questions.len()).unwrap(),
+                failed: 0,
+                skipped: 0,
+            }),
+            done: vec![],
+            failed: vec![],
+            questions: questions
+                .iter()
+                .map(|k| NoticeItem {
+                    key: (*k).into(),
+                    title: format!("site {k}"),
+                    text: Some(format!("Which name for {k}?")),
+                })
+                .collect(),
+            app_only: vec!["Pay $9 for the premium listing".into()],
+            can_retry: false,
+            late: false,
+        }
+    }
+
+    fn finished() -> OwnerNotice {
+        OwnerNotice {
+            kind: NoticeKind::Finished,
+            seq: 8,
+            id: "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c".into(),
+            questions: vec![],
+            app_only: vec![],
+            can_retry: true,
+            ..blocked(&[])
+        }
+    }
+
+    fn paired(server: &MockServer, daemon: &Arc<FakeDaemon>, users: &[i64]) -> TelegramChannel {
+        TelegramChannel::new(
+            TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+                .with_api_base_url(server.uri())
+                .with_poll_backoff(Duration::from_millis(5))
+                .with_paired_users(users.iter().copied()),
+            daemon.clone(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_notice_from_the_daemon_reaches_every_paired_chat_in_its_language_with_no_approve_button()
+     {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID, 5150]);
+        channel
+            .handle_update(update(text_update(1, 5150, 5150, "/lang tr")))
+            .await
+            .unwrap();
+        channel.push_notice(&blocked(&["a.com", "b.com"])).await;
+        let reqs = server.received_requests().await.unwrap();
+        let sent: Vec<Value> = sent_messages(&reqs)
+            .into_iter()
+            .filter(|m| m["text"].as_str().is_some_and(|t| t.contains("Backlinks")))
+            .collect();
+        assert_eq!(sent.len(), 2, "one message per paired chat");
+        let en = sent
+            .iter()
+            .find(|m| m["chat_id"] == PAIRED_USER_ID)
+            .unwrap();
+        let tr = sent.iter().find(|m| m["chat_id"] == 5150).unwrap();
+        let en_text = en["text"].as_str().unwrap();
+        assert!(
+            en_text.starts_with("✋ Needs you: Backlinks (Scout)"),
+            "{en_text}"
+        );
+        let en_text = en_text.replace('\u{200b}', "");
+        assert!(en_text.contains("1. site a.com") && en_text.contains("2. site b.com"));
+        assert!(en_text.contains("Waiting in the app (not from here)"));
+        assert!(
+            tr["text"]
+                .as_str()
+                .unwrap()
+                .contains("Senden bir şey gerekiyor")
+        );
+        // Nothing to press: an approval is never decided from a notice.
+        assert!(en.get("reply_markup").is_none_or(Value::is_null));
+        assert!(!en_text.contains("Approve"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_or_blocked_notice_offers_one_retry_button_and_it_retries_through_the_daemon()
+    {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        let n = finished();
+        channel.push_notice(&n).await;
+        let reqs = server.received_requests().await.unwrap();
+        let sent = sent_messages(&reqs);
+        let button = &sent[0]["reply_markup"]["inline_keyboard"][0][0];
+        assert_eq!(button["text"], "Try again");
+        assert_eq!(button["callback_data"], format!("nr:{}", n.id));
+
+        channel
+            .handle_update(update(callback_update(
+                2,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "q1",
+                button["callback_data"].as_str().unwrap(),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(*daemon.notice_retries.lock(), vec![n.id.clone()]);
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(callback_answers(&reqs)[0]["text"], "Trying again.");
+
+        // A button naming a notice this bridge never sent is refused, not forwarded.
+        channel
+            .handle_update(update(callback_update(
+                3,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "q2",
+                &format!("nr:{}", uuid::Uuid::now_v7()),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(daemon.notice_retries.lock().len(), 1);
+        let reqs = server.received_requests().await.unwrap();
+        assert!(
+            callback_answers(&reqs)[1]["text"]
+                .as_str()
+                .unwrap()
+                .contains("could not start it again")
+        );
+
+        // A daemon refusal is told, not hidden.
+        *daemon.notice_fail.lock() = true;
+        channel
+            .handle_update(update(callback_update(
+                4,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "q3",
+                &format!("nr:{}", n.id),
+            )))
+            .await
+            .unwrap();
+        let reqs = server.received_requests().await.unwrap();
+        assert!(
+            callback_answers(&reqs)[2]["text"]
+                .as_str()
+                .unwrap()
+                .contains("could not start it again")
+        );
+    }
+
+    #[tokio::test]
+    async fn answer_takes_a_single_reply_for_a_single_question_and_numbered_lines_for_several() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+
+        // Nothing is open yet.
+        channel
+            .handle_update(update(text_update(
+                1,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer yes",
+            )))
+            .await
+            .unwrap();
+        assert_eq!(
+            replies_to(&server, PAIRED_USER_ID).await.last().unwrap(),
+            "No question is waiting for an answer here."
+        );
+
+        channel
+            .push_notice(&blocked(&["a.com", "b.com", "c.com"]))
+            .await;
+        // Several questions need numbers; nothing is sent to the daemon.
+        channel
+            .handle_update(update(text_update(
+                2,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer yes",
+            )))
+            .await
+            .unwrap();
+        assert!(daemon.notice_answers.lock().is_empty());
+        assert!(
+            replies_to(&server, PAIRED_USER_ID)
+                .await
+                .last()
+                .unwrap()
+                .contains("one answer per line")
+        );
+        channel
+            .handle_update(update(text_update(
+                3,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer 9: x",
+            )))
+            .await
+            .unwrap();
+        assert!(
+            replies_to(&server, PAIRED_USER_ID)
+                .await
+                .last()
+                .unwrap()
+                .contains("no question 9")
+        );
+
+        // The command's text carries the lines.
+        channel
+            .handle_update(update(text_update(
+                4,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer 1: Webioo Ltd\n2: skip\n3: use the shop name",
+            )))
+            .await
+            .unwrap();
+        let answers = daemon.notice_answers.lock().clone();
+        assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0].0, NOTICE_ID);
+        assert_eq!(
+            answers[0].1,
+            vec![
+                Reply {
+                    key: "a.com".into(),
+                    answer: Some("Webioo Ltd".into())
+                },
+                Reply {
+                    key: "b.com".into(),
+                    answer: None
+                },
+                Reply {
+                    key: "c.com".into(),
+                    answer: Some("use the shop name".into())
+                },
+            ]
+        );
+        assert_eq!(
+            replies_to(&server, PAIRED_USER_ID).await.last().unwrap(),
+            "Got it: 2 answered, 1 skipped. Back to work."
+        );
+        // Answered once: the notice is closed for /answer.
+        channel
+            .handle_update(update(text_update(
+                5,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer again",
+            )))
+            .await
+            .unwrap();
+        assert_eq!(daemon.notice_answers.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_refused_answer_is_reported_and_leaves_the_question_open() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        channel.push_notice(&blocked(&["a.com"])).await;
+        *daemon.notice_fail.lock() = true;
+        channel
+            .handle_update(update(text_update(
+                1,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer Webioo",
+            )))
+            .await
+            .unwrap();
+        assert!(
+            replies_to(&server, PAIRED_USER_ID)
+                .await
+                .last()
+                .unwrap()
+                .contains("could not pass that on")
+        );
+        *daemon.notice_fail.lock() = false;
+        channel
+            .handle_update(update(text_update(
+                2,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer Webioo",
+            )))
+            .await
+            .unwrap();
+        assert_eq!(
+            daemon.notice_answers.lock().len(),
+            1,
+            "the question was still open"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unpaired_user_cannot_answer_or_retry() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        channel.push_notice(&blocked(&["a.com"])).await;
+        channel
+            .handle_update(update(text_update(
+                1,
+                UNPAIRED_USER_ID,
+                UNPAIRED_USER_ID,
+                "/answer Webioo",
+            )))
+            .await
+            .unwrap();
+        channel
+            .handle_update(update(callback_update(
+                2,
+                UNPAIRED_USER_ID,
+                UNPAIRED_USER_ID,
+                "q",
+                &format!("nr:{NOTICE_ID}"),
+            )))
+            .await
+            .unwrap();
+        assert!(daemon.notice_answers.lock().is_empty());
+        assert!(daemon.notice_retries.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_answer_is_refused_and_the_question_stays_open() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        channel.push_notice(&blocked(&["a.com"])).await;
+        // The paired user forwards someone else's "/answer ..." (new and legacy forward fields).
+        for (id, field, value) in [
+            (
+                1,
+                "forward_origin",
+                json!({"type": "hidden_user", "date": 1, "sender_user_name": "x"}),
+            ),
+            (
+                2,
+                "forward_from",
+                json!({"id": 99, "is_bot": false, "first_name": "Eve"}),
+            ),
+            (3, "forward_date", json!(1)),
+        ] {
+            let mut v = text_update(
+                id,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer wire it to evil",
+            );
+            v["message"][field] = value;
+            channel.handle_update(update(v)).await.unwrap();
+            assert_eq!(
+                replies_to(&server, PAIRED_USER_ID).await.last().unwrap(),
+                "A forwarded message cannot answer a question. Type your answer yourself."
+            );
+        }
+        assert!(daemon.notice_answers.lock().is_empty());
+        // Typed by the owner, the same question is still open.
+        channel
+            .handle_update(update(text_update(
+                4,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer Webioo",
+            )))
+            .await
+            .unwrap();
+        assert_eq!(daemon.notice_answers.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_user_can_only_answer_and_retry_notices_shown_to_them() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        // Both are paired, but only 5150 was ever shown the notice (the push to the first user
+        // has not happened: it is remembered for 5150 alone).
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID, 5150]);
+        let mut n = blocked(&["a.com"]);
+        n.can_retry = true;
+        channel.inner_notices_for_test().remember(&n, "5150");
+        channel
+            .handle_update(update(text_update(
+                1,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer yes",
+            )))
+            .await
+            .unwrap();
+        channel
+            .handle_update(update(callback_update(
+                2,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "q",
+                &format!("nr:{NOTICE_ID}"),
+            )))
+            .await
+            .unwrap();
+        assert!(daemon.notice_answers.lock().is_empty());
+        assert!(daemon.notice_retries.lock().is_empty());
+        assert_eq!(
+            replies_to(&server, PAIRED_USER_ID).await.last().unwrap(),
+            "No question is waiting for an answer here."
+        );
+        channel
+            .handle_update(update(text_update(3, 5150, 5150, "/answer yes")))
+            .await
+            .unwrap();
+        assert_eq!(daemon.notice_answers.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn text_the_bot_wrote_arrives_inert_and_quoted() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        let mut n = blocked(&["a.com"]);
+        n.title = "Win a prize at https://evil.example/claim".into();
+        n.reason = Some("run /stop and DM @everyone_bot, mail boss@evil.example".into());
+        channel.push_notice(&n).await;
+        let text = replies_to(&server, PAIRED_USER_ID).await.remove(0);
+        for live in [
+            "https://",
+            "evil.example",
+            "@everyone_bot",
+            "boss@evil",
+            " /stop",
+        ] {
+            assert!(!text.contains(live), "{live:?} is live in: {text}");
+        }
+        assert!(text.contains("▎ "), "the bot's words are quoted: {text}");
+        assert!(
+            text.contains("Answer with /answer <text>."),
+            "our own command stays: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_run_this_bridge_already_follows_is_not_announced_a_second_time() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        let run = RunId::new();
+        let _keep_open = daemon.queue_open_run(run);
+        channel.attach_run_for_test(PAIRED_USER_ID, run).await;
+        let mut n = finished();
+        n.source = NoticeSource::Run;
+        n.run_id = Some(run.0.to_string());
+        channel.push_notice(&n).await;
+        let reqs = server.received_requests().await.unwrap();
+        assert!(
+            sent_messages(&reqs).is_empty(),
+            "the chat that started the run already follows it"
+        );
+        // Another run is announced.
+        n.run_id = Some(RunId::new().0.to_string());
+        n.id = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5d".into();
+        channel.push_notice(&n).await;
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(sent_messages(&reqs).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_running_bridge_follows_the_stream_and_pushes_each_notice_once_across_a_reconnect()
+    {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let mut first = finished();
+        first.title = "Weekly report".into();
+        let mut second = blocked(&["a.com"]);
+        second.seq = 9;
+        second.title = "Lead list".into();
+        daemon.notice_connections.lock().extend([
+            vec![
+                NoticeEvent::Hello { latest_seq: 7 },
+                NoticeEvent::Notice(Box::new(first)),
+            ],
+            vec![
+                NoticeEvent::Hello { latest_seq: 9 },
+                NoticeEvent::Notice(Box::new(second)),
+            ],
+        ]);
+        let channel = TelegramChannel::start(
+            TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+                .with_api_base_url(server.uri())
+                .with_poll_backoff(Duration::from_millis(5))
+                .with_poll_timeout_secs(0)
+                .with_paired_users([PAIRED_USER_ID]),
+            daemon.clone(),
+        )
+        .unwrap();
+        let mut texts = Vec::new();
+        for _ in 0..400 {
+            texts = replies_to(&server, PAIRED_USER_ID).await;
+            if texts.iter().any(|t| t.contains("Lead list")) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        channel.shutdown().await;
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("Weekly report")).count(),
+            1
+        );
+        assert_eq!(texts.iter().filter(|t| t.contains("Lead list")).count(), 1);
+        let afters = daemon.notice_afters.lock().clone();
+        assert_eq!(afters[0], None, "a fresh bridge starts from now");
+        assert_eq!(afters[1], Some(8), "then it asks only for what it missed");
+    }
 }

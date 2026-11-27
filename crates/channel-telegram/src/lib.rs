@@ -37,6 +37,7 @@ pub mod daemon_client;
 pub mod error;
 mod inbox;
 mod messages;
+pub mod notices;
 pub mod pairing;
 
 #[cfg(test)]
@@ -55,10 +56,12 @@ pub use channel_trait::{
 };
 pub use daemon_client::{
     ApiClient, ApprovalDecision, ApprovalScope, BotSummary, ChatSummary, DaemonClient,
-    DaemonStatus, DeliveryKind, HttpDaemonClient, SendOutcome, format_approval_callback,
-    format_question_callback, parse_approval_callback, parse_question_callback,
+    DaemonStatus, DeliveryKind, HttpDaemonClient, NoticeEvent, SendOutcome,
+    format_approval_callback, format_question_callback, parse_approval_callback,
+    parse_question_callback,
 };
 pub use error::{Result, TelegramError};
+pub use notices::{NoticeBook, follow_notices};
 pub use pairing::{
     MAX_PAIR_ATTEMPTS, PAIR_CODE_TTL, PairAttempt, PairingStore, REFUSAL_COOLDOWN,
     TELEGRAM_BOT_TOKEN_SECRET, UNPAIRED_REFUSAL_TEXT, load_bot_token, store_bot_token,

@@ -15071,6 +15071,310 @@
         ]
       }
     },
+    "/v1/owner-notices": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The notices of the last while, oldest first (the app's notification panel).",
+        "operationId": "list_notices",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Only notices with a larger seq",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OwnerNotice"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/owner-notices/settings": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The owner's push settings.",
+        "operationId": "get_notice_settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerNotifySettings"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Change what is pushed to Telegram, Discord and other channels, and the quiet hours (owner\nonly).",
+        "operationId": "put_notice_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnerNotifySettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerNotifySettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/owner-notices/stream": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "The pushed notices as server-sent events (`event: notice`, one JSON `OwnerNotice` per event),\nfor the Telegram and Discord bridges. `after` replays the pushed notices missed since that\n`seq`; without it the stream starts with what is new from now on. A `hello` event first says\nthe newest pushed `seq`.",
+        "operationId": "stream_notices",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Replay pushed notices with a larger seq",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/event-stream": {}
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/owner-notices/{id}/answers": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Answer the questions of a blocked notice from a chat (owner only). A blocked mission's\nanswers release its items and run it again; a background run's question is answered the way\nthe app's question card does. Never an approval, and never a one-time code.",
+        "operationId": "answer_notice",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Notice id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoticeAnswersInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoticeAnswersDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/owner-notices/{id}/retry": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Try again: resume a blocked mission, or retry the failed occurrence of a scheduled task\n(owner only). The daemon resolves the target from the notice; a chat never names one.",
+        "operationId": "retry_notice",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Notice id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "started"
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/peer/link": {
       "get": {
         "tags": [
@@ -32973,6 +33277,130 @@
           "shift"
         ]
       },
+      "NoticeAnswersDto": {
+        "type": "object",
+        "description": "How many questions an answer took.",
+        "required": [
+          "answered",
+          "skipped"
+        ],
+        "properties": {
+          "answered": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Questions that went back to the bot.",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Questions skipped.",
+            "minimum": 0
+          }
+        }
+      },
+      "NoticeAnswersInput": {
+        "type": "object",
+        "description": "What the owner answers to the questions of one notice.",
+        "required": [
+          "answers"
+        ],
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MissionAnswerInput"
+            },
+            "description": "One entry per answered or skipped question, by the question's `key`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "NoticeItem": {
+        "type": "object",
+        "description": "One line of a notice: an item or question, in the bot's own words.",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Item key (a mission item) or tool call id (a question of a run): what an answer names."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The question, the result or the reason."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short title."
+          }
+        }
+      },
+      "NoticeKind": {
+        "type": "string",
+        "description": "What happened.",
+        "enum": [
+          "finished",
+          "failed",
+          "blocked",
+          "progress"
+        ]
+      },
+      "NoticeProgress": {
+        "type": "object",
+        "description": "Headline numbers of a mission.",
+        "required": [
+          "total",
+          "done",
+          "blocked",
+          "failed",
+          "skipped"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Waiting for the owner.",
+            "minimum": 0
+          },
+          "done": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Finished.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Given up.",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Skipped.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32",
+            "description": "All items.",
+            "minimum": 0
+          }
+        }
+      },
+      "NoticeSource": {
+        "type": "string",
+        "description": "Where the work ran.",
+        "enum": [
+          "mission",
+          "run"
+        ]
+      },
       "OpenTerminalInput": {
         "type": "object",
         "required": [
@@ -33016,6 +33444,172 @@
             "description": "Skill version string."
           }
         }
+      },
+      "OwnerNotice": {
+        "type": "object",
+        "description": "An owner notice as the daemon serves it.",
+        "required": [
+          "id",
+          "at_ms",
+          "kind",
+          "source",
+          "title"
+        ],
+        "properties": {
+          "app_only": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Things that wait for the owner in the app only (an approval, a one-time code)."
+          },
+          "at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it happened, Unix ms."
+          },
+          "bot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The bot's id."
+          },
+          "bot_name": {
+            "type": "string",
+            "description": "The bot's name."
+          },
+          "can_retry": {
+            "type": "boolean",
+            "description": "The daemon can retry or resume this (`POST /v1/owner-notices/{id}/retry`)."
+          },
+          "chat_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The chat the work ran in."
+          },
+          "done": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoticeItem"
+            },
+            "description": "What the run said at its end (a background run), or a few finished items."
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoticeItem"
+            },
+            "description": "Items given up, with the last error."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable id (what a retry or an answer names)."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NoticeKind",
+            "description": "What happened."
+          },
+          "late": {
+            "type": "boolean",
+            "description": "Held back by quiet hours and delivered now."
+          },
+          "mission_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The mission (for a mission notice)."
+          },
+          "progress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NoticeProgress",
+                "description": "Mission numbers."
+              }
+            ]
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoticeItem"
+            },
+            "description": "Questions the owner can answer from the chat."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it ended or blocked."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The run (for a run notice)."
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Position in the daemon's push log (strictly increasing); a bridge that reconnects asks\nfor everything `after` the last one it saw.",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/NoticeSource",
+            "description": "Where the work ran."
+          },
+          "title": {
+            "type": "string",
+            "description": "Mission title, or what the scheduled run was."
+          }
+        }
+      },
+      "OwnerNotifySettings": {
+        "type": "object",
+        "description": "What the owner wants to be told about on Telegram, Discord and other channels.",
+        "required": [
+          "finished",
+          "failed",
+          "blocked",
+          "progress"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "boolean",
+            "description": "One needs the owner (questions, approvals in the app)."
+          },
+          "failed": {
+            "type": "boolean",
+            "description": "One failed."
+          },
+          "finished": {
+            "type": "boolean",
+            "description": "A mission or background run finished."
+          },
+          "progress": {
+            "type": "boolean",
+            "description": "A mission passed a milestone (25%, 50%, 75%)."
+          },
+          "quiet_hours": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/QuietWindow",
+                "description": "No pushes inside this window; they arrive when it ends."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "PackAction": {
         "type": "string",
@@ -33728,6 +34322,28 @@
           }
         },
         "additionalProperties": false
+      },
+      "QuietWindow": {
+        "type": "object",
+        "description": "A daily window (`HH:MM` to `HH:MM`, may cross midnight) in which nothing is pushed.",
+        "required": [
+          "start",
+          "end"
+        ],
+        "properties": {
+          "end": {
+            "type": "string",
+            "description": "End, `HH:MM`."
+          },
+          "start": {
+            "type": "string",
+            "description": "Start, `HH:MM`."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA zone (`Europe/Istanbul`); empty means this computer's zone."
+          }
+        }
       },
       "Reason": {
         "type": "string",
@@ -38501,6 +39117,9 @@
     },
     {
       "name": "missions"
+    },
+    {
+      "name": "notifications"
     },
     {
       "name": "secrets"

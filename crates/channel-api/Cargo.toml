@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+# `utoipa::ToSchema` for the owner-notice wire types (the daemon's OpenAPI document).
+openapi = ["dep:utoipa"]
+
 [lints]
 workspace = true
 
@@ -16,6 +20,7 @@ futures-core = { version = "0.3", default-features = false, features = ["alloc"]
 futures-util.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+utoipa = { version = "5", optional = true }
 
 [dev-dependencies]
 tokio.workspace = true

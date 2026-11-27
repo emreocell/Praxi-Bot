@@ -52,6 +52,9 @@ pub struct IncomingMessage {
     pub language_code: Option<String>,
     /// Message id (for text messages).
     pub message_id: Option<i64>,
+    /// The message was forwarded from somewhere else: its text is not the sender's own.
+    #[serde(default)]
+    pub forwarded: bool,
     /// Message content or callback payload.
     pub kind: IncomingKind,
 }

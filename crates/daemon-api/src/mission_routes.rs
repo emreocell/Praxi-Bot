@@ -574,6 +574,27 @@ pub(crate) async fn create_mission(
     Ok(Json(detail(&s, &m)?))
 }
 
+fn check_full_for_resume(s: &AppState, m: &Mission) -> Result<(), ApiError> {
+    if s.agent().bot_is_full(BotId(uuid_of(&m.bot_id))) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "the bot is no longer on the Full level; set it back before resuming",
+        ))
+    }
+}
+
+/// Resume a paused or blocked mission for the owner (the owner-notice "try again" goes through
+/// here; the caller already checked the owner key).
+pub(crate) fn resume_for_owner(s: &AppState, id: Uuid) -> Result<(), ApiError> {
+    let m = mission_of_user(s, id)?;
+    let sup = s.mission_supervisor()?;
+    check_full_for_resume(s, &m)?;
+    sup.resume(&m.id).map_err(store_err)?;
+    audit(s, "mission.resume", &m.id, &json!({"via": "owner_notice"}));
+    Ok(())
+}
+
 async fn control(
     s: &AppState,
     headers: &HeaderMap,
@@ -586,11 +607,7 @@ async fn control(
     let after = match what {
         "pause" => sup.pause(&m.id),
         "resume" => {
-            if !s.agent().bot_is_full(BotId(uuid_of(&m.bot_id))) {
-                return Err(ApiError::bad_request(
-                    "the bot is no longer on the Full level; set it back before resuming",
-                ));
-            }
+            check_full_for_resume(s, &m)?;
             sup.resume(&m.id)
         }
         _ => sup.cancel(&m.id).await,
@@ -654,7 +671,17 @@ pub(crate) async fn answer_mission(
     ApiJson(input): ApiJson<MissionAnswersInput>,
 ) -> Result<Json<MissionAnswersDto>, ApiError> {
     s.require_owner(&headers)?;
-    let m = mission_of_user(&s, id)?;
+    apply_answers(&s, id, &input).map(Json)
+}
+
+/// The answers of `POST /v1/missions/{id}/answers`, for the callers that already checked the
+/// owner (that route, and the owner-notice route a Telegram or Discord reply goes through).
+pub(crate) fn apply_answers(
+    s: &AppState,
+    id: Uuid,
+    input: &MissionAnswersInput,
+) -> Result<MissionAnswersDto, ApiError> {
+    let m = mission_of_user(s, id)?;
     // An ended mission is history: its ledger no longer changes.
     if m.state.is_terminal() {
         return Err(ApiError::conflict(format!(
@@ -731,12 +758,12 @@ pub(crate) async fn answer_mission(
         sup.resume(&m.id).map_err(store_err)?;
     }
     audit(
-        &s,
+        s,
         "mission.answers",
         &m.id,
         &json!({"released": released, "skipped": skipped}),
     );
-    Ok(Json(MissionAnswersDto { released, skipped }))
+    Ok(MissionAnswersDto { released, skipped })
 }
 
 impl AppState {

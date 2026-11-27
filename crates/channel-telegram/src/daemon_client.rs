@@ -6,6 +6,7 @@ use std::fmt;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use channel_api::notice::{OwnerNotice, Reply};
 use futures::stream::BoxStream;
 use futures_util::StreamExt;
 use protocol::{BotId, ChatId, Envelope, Event, RunId, ToolCallId};
@@ -169,6 +170,45 @@ pub trait DaemonClient: Send + Sync {
     ) -> Result<Option<RunId>> {
         Ok(None)
     }
+
+    /// `GET /v1/owner-notices/stream`: what the daemon pushes to the owner on its own (a
+    /// finished, failed or blocked mission or background run). `after` replays what was missed
+    /// since that `seq`. The default never produces an event.
+    async fn subscribe_notices(
+        &self,
+        _after: Option<u64>,
+    ) -> Result<BoxStream<'static, NoticeEvent>> {
+        Ok(Box::pin(futures::stream::pending()))
+    }
+
+    /// `POST /v1/owner-notices/{id}/answers`: answer (or skip, `answer: None`) the questions of a
+    /// blocked notice. Returns `(answered, skipped)`. Approvals cannot be decided this way.
+    async fn answer_notice(&self, _notice_id: &str, _answers: &[Reply]) -> Result<(u32, u32)> {
+        Err(TelegramError::Daemon(
+            "answering a notice is not supported by this client".to_owned(),
+        ))
+    }
+
+    /// `POST /v1/owner-notices/{id}/retry`: try a failed or blocked notice again.
+    async fn retry_notice(&self, _notice_id: &str) -> Result<()> {
+        Err(TelegramError::Daemon(
+            "retrying a notice is not supported by this client".to_owned(),
+        ))
+    }
+}
+
+/// One event of the daemon's owner-notice stream (`GET /v1/owner-notices/stream`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum NoticeEvent {
+    /// First event of every connection: the newest pushed `seq`.
+    Hello {
+        /// Newest pushed notice, 0 when there is none.
+        latest_seq: u64,
+    },
+    /// A notice to push.
+    Notice(Box<OwnerNotice>),
+    /// This reader fell behind and may have missed notices; reconnect with `after`.
+    Lagged,
 }
 
 /// Alias for [`DaemonClient`] matching `TelegramChannel::start(config, api_client)`.
@@ -320,6 +360,27 @@ impl SseBuffer {
             i += 1;
         }
         None
+    }
+}
+
+/// The notice-stream event of one SSE block (`hello`, `notice`, `lagged`); others are ignored.
+fn notice_event(block: &str) -> Option<NoticeEvent> {
+    let name = block
+        .lines()
+        .find_map(|l| l.strip_prefix("event:"))
+        .map(str::trim)?;
+    match name {
+        "lagged" => Some(NoticeEvent::Lagged),
+        "hello" => {
+            let v: Value = serde_json::from_str(&sse_data(block)?).ok()?;
+            Some(NoticeEvent::Hello {
+                latest_seq: v["latest_seq"].as_u64().unwrap_or(0),
+            })
+        }
+        "notice" => serde_json::from_str::<OwnerNotice>(&sse_data(block)?)
+            .ok()
+            .map(|n| NoticeEvent::Notice(Box::new(n))),
+        _ => None,
     }
 }
 
@@ -485,6 +546,82 @@ impl DaemonClient for HttpDaemonClient {
             }
         }
         Ok(best.map(|(_, id)| id))
+    }
+
+    async fn subscribe_notices(
+        &self,
+        after: Option<u64>,
+    ) -> Result<BoxStream<'static, NoticeEvent>> {
+        let query = after.map_or_else(String::new, |a| format!("?after={a}"));
+        let mut rb = self
+            .http
+            .get(format!("{}/v1/owner-notices/stream{query}", self.base_url))
+            .bearer_auth(self.token.expose());
+        if let Some(key) = &self.owner_key {
+            rb = rb.header("x-praxi-owner-key", key.expose());
+        }
+        let resp = rb
+            .send()
+            .await
+            .map_err(|e| TelegramError::Daemon(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(TelegramError::Daemon(format!(
+                "notice stream failed with {}",
+                resp.status()
+            )));
+        }
+        let stream = futures::stream::unfold(
+            (resp.bytes_stream(), SseBuffer::default()),
+            |(mut bytes, mut buf)| async move {
+                loop {
+                    if let Some(block) = buf.next_block() {
+                        if let Some(ev) = notice_event(&block) {
+                            return Some((ev, (bytes, buf)));
+                        }
+                        continue;
+                    }
+                    if buf.overflowed() {
+                        return None;
+                    }
+                    match bytes.next().await {
+                        Some(Ok(chunk)) => buf.push(&chunk),
+                        _ => return None,
+                    }
+                }
+            },
+        )
+        .fuse();
+        Ok(Box::pin(stream))
+    }
+
+    async fn answer_notice(&self, notice_id: &str, answers: &[Reply]) -> Result<(u32, u32)> {
+        let body = json!({
+            "answers": answers.iter().map(|r| json!({
+                "key": r.key,
+                "answer": r.answer.clone().unwrap_or_default(),
+                "skip": r.answer.is_none(),
+            })).collect::<Vec<_>>()
+        });
+        let v = self
+            .request(
+                Method::POST,
+                &format!("/v1/owner-notices/{notice_id}/answers"),
+                Some(body),
+            )
+            .await?;
+        let n = |k: &str| u32::try_from(v[k].as_u64().unwrap_or(0)).unwrap_or(0);
+        Ok((n("answered"), n("skipped")))
+    }
+
+    async fn retry_notice(&self, notice_id: &str) -> Result<()> {
+        let _ = self
+            .request(
+                Method::POST,
+                &format!("/v1/owner-notices/{notice_id}/retry"),
+                None,
+            )
+            .await?;
+        Ok(())
     }
 
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {

@@ -4001,6 +4001,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/owner-notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The notices of the last while, oldest first (the app's notification panel). */
+        get: operations["list_notices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/owner-notices/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The owner's push settings. */
+        get: operations["get_notice_settings"];
+        /**
+         * Change what is pushed to Telegram, Discord and other channels, and the quiet hours (owner
+         *     only).
+         */
+        put: operations["put_notice_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/owner-notices/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The pushed notices as server-sent events (`event: notice`, one JSON `OwnerNotice` per event),
+         *     for the Telegram and Discord bridges. `after` replays the pushed notices missed since that
+         *     `seq`; without it the stream starts with what is new from now on. A `hello` event first says
+         *     the newest pushed `seq`.
+         */
+        get: operations["stream_notices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/owner-notices/{id}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer the questions of a blocked notice from a chat (owner only). A blocked mission's
+         *     answers release its items and run it again; a background run's question is answered the way
+         *     the app's question card does. Never an approval, and never a one-time code.
+         */
+        post: operations["answer_notice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/owner-notices/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try again: resume a blocked mission, or retry the failed occurrence of a scheduled task
+         *     (owner only). The daemon resolves the target from the notice; a chat never names one.
+         */
+        post: operations["retry_notice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/peer/link": {
         parameters: {
             query?: never;
@@ -10373,6 +10474,71 @@ export interface components {
         };
         /** @enum {string} */
         Modifier: "alt" | "ctrl" | "meta" | "shift";
+        /** @description How many questions an answer took. */
+        NoticeAnswersDto: {
+            /**
+             * Format: int32
+             * @description Questions that went back to the bot.
+             */
+            answered: number;
+            /**
+             * Format: int32
+             * @description Questions skipped.
+             */
+            skipped: number;
+        };
+        /** @description What the owner answers to the questions of one notice. */
+        NoticeAnswersInput: {
+            /** @description One entry per answered or skipped question, by the question's `key`. */
+            answers: components["schemas"]["MissionAnswerInput"][];
+        };
+        /** @description One line of a notice: an item or question, in the bot's own words. */
+        NoticeItem: {
+            /** @description Item key (a mission item) or tool call id (a question of a run): what an answer names. */
+            key: string;
+            /** @description The question, the result or the reason. */
+            text?: string | null;
+            /** @description Short title. */
+            title?: string;
+        };
+        /**
+         * @description What happened.
+         * @enum {string}
+         */
+        NoticeKind: "finished" | "failed" | "blocked" | "progress";
+        /** @description Headline numbers of a mission. */
+        NoticeProgress: {
+            /**
+             * Format: int32
+             * @description Waiting for the owner.
+             */
+            blocked: number;
+            /**
+             * Format: int32
+             * @description Finished.
+             */
+            done: number;
+            /**
+             * Format: int32
+             * @description Given up.
+             */
+            failed: number;
+            /**
+             * Format: int32
+             * @description Skipped.
+             */
+            skipped: number;
+            /**
+             * Format: int32
+             * @description All items.
+             */
+            total: number;
+        };
+        /**
+         * @description Where the work ran.
+         * @enum {string}
+         */
+        NoticeSource: "mission" | "run";
         OpenTerminalInput: {
             /** Format: int32 */
             cols: number;
@@ -10387,6 +10553,65 @@ export interface components {
             name: string;
             /** @description Skill version string. */
             version: string;
+        };
+        /** @description An owner notice as the daemon serves it. */
+        OwnerNotice: {
+            /** @description Things that wait for the owner in the app only (an approval, a one-time code). */
+            app_only?: string[];
+            /**
+             * Format: int64
+             * @description When it happened, Unix ms.
+             */
+            at_ms: number;
+            /** @description The bot's id. */
+            bot_id?: string | null;
+            /** @description The bot's name. */
+            bot_name?: string;
+            /** @description The daemon can retry or resume this (`POST /v1/owner-notices/{id}/retry`). */
+            can_retry?: boolean;
+            /** @description The chat the work ran in. */
+            chat_id?: string | null;
+            /** @description What the run said at its end (a background run), or a few finished items. */
+            done?: components["schemas"]["NoticeItem"][];
+            /** @description Items given up, with the last error. */
+            failed?: components["schemas"]["NoticeItem"][];
+            /** @description Stable id (what a retry or an answer names). */
+            id: string;
+            /** @description What happened. */
+            kind: components["schemas"]["NoticeKind"];
+            /** @description Held back by quiet hours and delivered now. */
+            late?: boolean;
+            /** @description The mission (for a mission notice). */
+            mission_id?: string | null;
+            progress?: null | components["schemas"]["NoticeProgress"];
+            /** @description Questions the owner can answer from the chat. */
+            questions?: components["schemas"]["NoticeItem"][];
+            /** @description Why it ended or blocked. */
+            reason?: string | null;
+            /** @description The run (for a run notice). */
+            run_id?: string | null;
+            /**
+             * Format: int64
+             * @description Position in the daemon's push log (strictly increasing); a bridge that reconnects asks
+             *     for everything `after` the last one it saw.
+             */
+            seq?: number;
+            /** @description Where the work ran. */
+            source: components["schemas"]["NoticeSource"];
+            /** @description Mission title, or what the scheduled run was. */
+            title: string;
+        };
+        /** @description What the owner wants to be told about on Telegram, Discord and other channels. */
+        OwnerNotifySettings: {
+            /** @description One needs the owner (questions, approvals in the app). */
+            blocked: boolean;
+            /** @description One failed. */
+            failed: boolean;
+            /** @description A mission or background run finished. */
+            finished: boolean;
+            /** @description A mission passed a milestone (25%, 50%, 75%). */
+            progress: boolean;
+            quiet_hours?: null | components["schemas"]["QuietWindow"];
         };
         /**
          * @description What the owner wants done with the chosen packs.
@@ -10700,6 +10925,15 @@ export interface components {
         PutPageReaderInput: {
             /** @description `off`, `auto` or `always`. */
             mode: string;
+        };
+        /** @description A daily window (`HH:MM` to `HH:MM`, may cross midnight) in which nothing is pushed. */
+        QuietWindow: {
+            /** @description End, `HH:MM`. */
+            end: string;
+            /** @description Start, `HH:MM`. */
+            start: string;
+            /** @description IANA zone (`Europe/Istanbul`); empty means this computer's zone. */
+            timezone?: string;
         };
         /** @enum {string} */
         Reason: "browser_idle" | "viewer_idle" | "time_limit" | "remote_node_live_view" | "unsupported" | "unavailable" | "expired" | "revoked" | "disconnected" | "stale" | "geometry_changed" | "refresh_pending" | "frame_budget_exceeded" | "drain_timeout" | "audit_failed" | "reset_failed" | "partial_injection" | "rate_limited" | "restart" | "persistence_failed" | "local_override";
@@ -22518,6 +22752,211 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MissionDetailDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_notices: {
+        parameters: {
+            query?: {
+                /** @description Only notices with a larger seq */
+                after?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerNotice"][];
+                };
+            };
+        };
+    };
+    get_notice_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerNotifySettings"];
+                };
+            };
+        };
+    };
+    put_notice_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnerNotifySettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerNotifySettings"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    stream_notices: {
+        parameters: {
+            query?: {
+                /** @description Replay pushed notices with a larger seq */
+                after?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+        };
+    };
+    answer_notice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Notice id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoticeAnswersInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoticeAnswersDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    retry_notice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Notice id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             404: {

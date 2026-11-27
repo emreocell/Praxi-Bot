@@ -153,6 +153,13 @@ At the end (and whenever it blocks) the mission posts a short report in its own
 chat: what was done, what is blocked and why, what was given up, and the
 decisions the bot made.
 
+The same digest is **pushed to you**: it appears in the app's notifications panel
+and, if you paired Telegram or Discord, arrives there too, with every open
+question in one message that you can answer from the chat. See
+[Telegram](telegram.md#when-a-bot-reports-back-on-its-own) for what is pushed, the
+quiet hours, and why approvals (anything involving money) always stay in the app.
+A short progress note at 25%, 50% and 75% is available but off by default.
+
 ## Limits of this first version
 
 Missions are delivered in waves (see the [design](../design/missions-adr.md)).
@@ -162,8 +169,7 @@ waking by a timer, a mail in the bot's own inbox or a webhook, the
 report, pause/resume/stop, restart recovery and the Activity
 panel. What does **not** exist yet: a recurring ("every weekday") wake, a wake
 when a helper bot finishes, mail reply classification (bounce, STOP), a separate permission scope per mission, mail pacing and
-opt-out handling for outreach, sub-missions for helper bots and push reports to
-Telegram. A mission session is **not** your own typing, because its first
+opt-out handling for outreach and sub-missions for helper bots. A mission session is **not** your own typing, because its first
 message is built from a list that earlier sessions filled with text from web
 pages and mails. It runs as its own kind (`mission`): that text never counts as
 your words (the sites you named, the URLs you typed), it never reaches your own

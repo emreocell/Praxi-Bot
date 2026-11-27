@@ -143,6 +143,16 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/missions/{}/resume"),
     ("POST", "/v1/missions/{}/cancel"),
     ("POST", "/v1/missions/{}/answers"),
+    // owner notices: the digest of a mission or background run (titles, the bot's own reasons,
+    // its questions), what is pushed to the owner's channels, and the answers given from a chat
+    ("GET", "/v1/owner-notices"),
+    ("HEAD", "/v1/owner-notices"),
+    // (`GET /v1/owner-notices/stream` never ends, so its handler checks the owner key itself)
+    ("GET", "/v1/owner-notices/settings"),
+    ("HEAD", "/v1/owner-notices/settings"),
+    ("PUT", "/v1/owner-notices/settings"),
+    ("POST", "/v1/owner-notices/{}/answers"),
+    ("POST", "/v1/owner-notices/{}/retry"),
     // per-bot spending limits: a bot or token holder must not lift its own cap
     ("PUT", "/v1/bots/{}/spend-limits"),
     // how outside text reaches a bot (the quarantined page reader): a bot must not switch off

@@ -4,6 +4,7 @@ import { MoreInfo } from "../components/ChoiceList";
 import { SettingsCard } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
 import { type QuietHours } from "../lib/quietHours";
+import { ChannelNotifySettings } from "./ChannelNotifySettings";
 import type { AppSettings } from "../store/settingsStore";
 import styles from "./NotificationSettings.module.css";
 
@@ -67,6 +68,11 @@ export function NotificationSettings({
     >
       <div className={styles.group}>{NOTIFY_TOGGLES.map(row)}</div>
       <div className={styles.group}>{row("notifyPrivate")}</div>
+      <div className={styles.group} data-testid="channel-notify-block">
+        <h3 className={styles.subHeading}>{t("settings.channelNotify.title")}</h3>
+        <p className={formStyles.hint}>{t("settings.channelNotify.description")}</p>
+        <ChannelNotifySettings />
+      </div>
       <div className={styles.group} data-testid="quiet-hours">
         <h3 className={styles.subHeading}>{t("settings.quiet.title")}</h3>
         <label className={styles.row}>

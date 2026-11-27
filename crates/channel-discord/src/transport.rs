@@ -151,6 +151,19 @@ fn components(buttons: &[Vec<InlineButton>], redactor: &Redactor) -> Option<Valu
     Some(Value::Array(rows))
 }
 
+impl DiscordTransport {
+    /// The private chat with `user_id` (opened on first use).
+    ///
+    /// # Errors
+    /// Invalid user id, network or API errors.
+    pub async fn open_dm(&self, user_id: &str) -> crate::error::Result<ChatRef> {
+        self.rest
+            .open_dm(user_id)
+            .await
+            .map(|id| gateway::dm_chat(&id))
+    }
+}
+
 #[async_trait]
 impl Channel for DiscordTransport {
     async fn receive(&self) -> channel_api::Result<BoxStream<'static, IncomingMessage>> {

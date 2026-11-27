@@ -77,6 +77,7 @@ impl Update {
             if !is_private_chat_with(&msg.chat, &from) {
                 return None;
             }
+            let forwarded = msg.media.is_forwarded();
             let kind = match (msg.text, msg.media.voice_note(), msg.media.label()) {
                 (Some(text), _, _) => IncomingKind::Text(text),
                 (None, Some((file_id, duration_secs)), _) => IncomingKind::Voice {
@@ -94,6 +95,7 @@ impl Update {
                 username,
                 language_code: from.language_code,
                 message_id: Some(msg.message_id),
+                forwarded,
                 kind,
             });
         }
@@ -114,6 +116,7 @@ impl Update {
                 username,
                 language_code: cb.from.language_code,
                 message_id,
+                forwarded: false,
                 kind: IncomingKind::Callback {
                     query_id: cb.id,
                     data,
@@ -164,9 +167,23 @@ pub struct TgMedia {
     document: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sticker: Option<serde_json::Value>,
+    /// Set on a forwarded message (`forward_origin`; the older fields are kept for servers that
+    /// still send them): the text is someone else's, only the forwarder is the sender.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    forward_origin: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    forward_date: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    forward_from: Option<serde_json::Value>,
 }
 
 impl TgMedia {
+    /// Whether the message was forwarded from somewhere else.
+    #[must_use]
+    pub fn is_forwarded(&self) -> bool {
+        self.forward_origin.is_some() || self.forward_date.is_some() || self.forward_from.is_some()
+    }
+
     /// `file_id` and announced length (seconds) of a voice note, if this is one.
     #[must_use]
     pub fn voice_note(&self) -> Option<(String, u32)> {

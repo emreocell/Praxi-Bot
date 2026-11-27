@@ -276,6 +276,7 @@
       "Connect it (about 5 minutes)",
       "Who can talk to the bot",
       "In the chat",
+      "When a bot reports back on its own",
       "Approvals",
       "Messages and attachments",
       "Good to know"
@@ -818,6 +819,7 @@
     "title": "Telegram",
     "headings": [
       "In the chat",
+      "When a bot reports back on its own",
       "Language",
       "Good to know"
     ],

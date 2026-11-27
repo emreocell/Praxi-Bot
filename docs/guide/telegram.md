@@ -22,6 +22,7 @@ Then open your bot in Telegram and send `/pair 123456` (your code).
 | `/bots` | Lists your bots |
 | `/use <bot name or id>` | Chooses the bot this chat talks to |
 | `/stop` | Stops the current run |
+| `/answer <text>` | Answers the questions in the latest "needs you" message (see below) |
 | `/status` | Shows status |
 | `/lang tr` or `/lang en` | Sets this chat's language to Turkish or English (`/lang` alone shows the current one) |
 | anything else | Sent to the selected bot as a message |
@@ -29,6 +30,45 @@ Then open your bot in Telegram and send `/pair 123456` (your code).
 When a bot needs approval or asks a question, you get a message with buttons. The
 run waits until you tap one (or, for scheduled runs, until the 30-minute timeout
 pauses it).
+
+## When a bot reports back on its own
+
+You do not have to be in the chat for your bots to reach you. The daemon watches
+your **missions** and your **scheduled and background tasks** and sends your paired chat a
+short message when something needs your attention:
+
+- **Finished:** a few lines on what was done, with the counts.
+- **Failed:** the reason, and a **Try again** button (for a scheduled task it runs
+  that occurrence again; for a mission that stopped on a limit it continues it).
+- **Needs you:** every open question in **one** message, numbered. Answer them
+  right there:
+  - one question: `/answer Webioo Ltd` (write `/answer skip` to skip it);
+  - several: one numbered line each, for example `/answer 1: Webioo Ltd`, then
+    `2: skip` and `3: use the shop name` on the next lines.
+- **Progress** (off by default): a short note at 25%, 50% and 75% of a mission.
+
+Work you start from this chat reports in this chat as before; these messages are
+for work that runs without you. A task that runs often is announced at most once
+every 15 minutes (a failure, every 5), so a schedule that fires every minute cannot
+flood your phone.
+
+**Money and approvals stay in the app.** A purchase, a one-time code or any other
+approval is listed as "waiting in the app", with no button here. The chat can only
+answer questions and say "try again"; it can never approve anything.
+
+**What is in a message is not trusted.** Titles, reasons, results and questions come from
+the bot, and through it from web pages. They are shown as quoted lines with links,
+mentions, commands and formatting made harmless, so a page cannot put a live link or a
+`/command` button into your chat. What a task said after it read private data (mail,
+files, accounts) is not sent here at all: the message says to open the app. Only you,
+typing in your own chat, can answer or retry; a forwarded message cannot.
+
+In **Settings > Notifications > Telegram, Discord and other channels** you choose
+which of these you want (finished, failed and needs-you are on; progress is off) and
+set **quiet hours**. Messages that arrive during quiet hours wait and are sent when
+the window ends, marked as held back; a progress note that was missed is dropped.
+The same digests appear in the app's notifications panel. The settings live on the
+daemon, so they also apply when it runs on a server and the app is closed.
 
 ## Language
 
