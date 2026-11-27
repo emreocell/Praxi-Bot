@@ -217,6 +217,12 @@
   animation: none;
 }
 
+/* The card takes the Enter / Esc keys only while it has the focus (the global ring shows it); in the
+   dock the ring sits inside the edge, where the dock's own scroll box would clip it. */
+.approvalDock:focus-visible {
+  outline-offset: calc(-1 * var(--size-border-thick));
+}
+
 .approvalTopRow {
   display: flex;
   align-items: flex-start;

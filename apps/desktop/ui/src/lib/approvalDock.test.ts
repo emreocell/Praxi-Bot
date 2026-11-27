@@ -146,8 +146,9 @@ test("the card shows how much the call can change: a calm chip to look, a red on
   assert.ok(del.includes("Deletes"), "and carries the tier chip");
 });
 
-const page_body = { tagName: "BODY", closest: () => null };
-const enter = { key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, target: page_body };
+// The card itself has the focus (a node that is its own `[data-approval-card]`).
+const focusedCard = { tagName: "DIV", closest: (sel: string): unknown => (sel === "[data-approval-card]" ? focusedCard : null) };
+const enter = { key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, target: focusedCard };
 const escape = { ...enter, key: "Escape" };
 /** What the Enter key does for a card once it is armed (the card on screen at keypress time). */
 const enterOn = (card: ApprovalCardProps["tool"]) => approvalKeyAction(enter, { armed: true, canAllow: enterMayAllow(card) });
@@ -204,4 +205,49 @@ test("the Enter hint follows the same rule as the key, and the keys are bound to
     assert.equal(html.includes("approval-key-allow"), enterMayAllow(card), name);
     assert.ok(html.includes("approval-key-deny"), `${name}: Esc denies every card`);
   }
+});
+
+const keyed = (over: Partial<ApprovalCardProps>, name = "browser_navigate", input: unknown = { url: "https://webioo.com.tr" }, details?: unknown) =>
+  renderToStaticMarkup(
+    createElement(ApprovalCard, {
+      tool: { ...tool("z1", name, input), details } as ApprovalCardProps["tool"],
+      variant: "dock",
+      keyboard: true,
+      onDecide: async () => {},
+      ...over
+    })
+  );
+
+test("the card the keys answer is a focus stop of its own: no other card is, and nothing is auto-focused", () => {
+  const on = keyed({});
+  assert.match(on, /<div[^>]*data-approval-card=""/, "the key rules find the card");
+  assert.match(on, /<div[^>]*tabindex="0"[^>]*data-approval-card=""|<div[^>]*data-approval-card=""[^>]*tabindex="0"/, "the card can be reached with Tab");
+  const off = keyed({ keyboard: false });
+  assert.doesNotMatch(off, /<div[^>]*data-approval-card=""[^>]*tabindex|<div[^>]*tabindex="[^"]*"[^>]*data-approval-card=""/, "a card that answers no keys takes no focus stop");
+  // The keys are handled on the card (so only while the focus is inside it), not on the window,
+  // and neither the card nor Allow is focused for the person.
+  const source = readFileSync(new URL("../components/ChatCards.tsx", import.meta.url), "utf8");
+  const approval = source.slice(source.indexOf("export function ApprovalCard("));
+  assert.doesNotMatch(approval, /autoFocus|\.focus\(\)/);
+  assert.doesNotMatch(approval, /window\.addEventListener\("keydown"/);
+  assert.match(approval, /onKeyDown=\{onKeyDown\}/);
+  const dock = readFileSync(new URL("../components/ApprovalDock.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(dock, /autoFocus|\.focus\(\)/);
+});
+
+test("a card that cannot be answered shows no key it would not obey", () => {
+  const expired = keyed({ expiresAtMs: Date.now() - 5000 });
+  assert.ok(!expired.includes("aria-keyshortcuts"), "an expired card: neither Enter nor Esc");
+  assert.ok(!expired.includes("<kbd"));
+  const review = keyed({}, "http_request", { url: "https://x.example" }, {
+    kind: "egress",
+    host: "x.example",
+    payload: "secret",
+    review_full_payload: true
+  });
+  assert.ok(!review.includes("approval-key-allow") && !review.includes('aria-keyshortcuts="Enter"'), "a payload still to review: no Enter");
+  assert.ok(review.includes("approval-key-deny"), "Deny is still enabled, so Esc stays");
+  const unrenderable = keyed({}, "app_action", {}, { kind: "app_action" });
+  assert.ok(!unrenderable.includes("approval-key-allow") && !unrenderable.includes('aria-keyshortcuts="Enter"'), "a card that cannot be drawn: no Enter");
+  assert.match(unrenderable, /<button[^>]*disabled=""[^>]*>Allow once/, "and its Allow is disabled");
 });
