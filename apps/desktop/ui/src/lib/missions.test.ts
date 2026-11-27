@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Mission, MissionItem } from "../api/types.ts";
+import type { Mission, MissionItem, MissionWait } from "../api/types.ts";
 import {
   buildAnswers,
   currentItem,
+  isActiveMission,
   itemLabel,
   missionForChat,
   missionNote,
@@ -13,7 +14,10 @@ import {
   missionHeadline,
   missionsToShow,
   progressPercent,
-  shouldPoll
+  shouldPoll,
+  waitingItems,
+  waitLine,
+  whenText
 } from "./missions.ts";
 
 function mission(id: string, state: string, extra: Partial<Mission> = {}): Mission {
@@ -25,7 +29,7 @@ function mission(id: string, state: string, extra: Partial<Mission> = {}): Missi
     goal: "goal",
     state,
     state_reason: null,
-    progress: { total: 15, done: 7, blocked: 2, todo: 6, doing: 0, failed: 0, skipped: 0, left: 6 },
+    progress: { total: 15, done: 7, blocked: 2, waiting: 0, todo: 6, doing: 0, failed: 0, skipped: 0, left: 6 },
     target_done: null,
     sessions: 3,
     model_steps: 120,
@@ -54,8 +58,8 @@ test("progress percentage rounds, clamps and survives an empty ledger", () => {
 });
 
 test("the three numbers are the daemon's, without overlap", () => {
-  assert.deepEqual(missionCounts({ done: 7, blocked: 2, left: 6 }), { done: 7, blocked: 2, left: 6 });
-  assert.deepEqual(missionCounts({ done: 0, blocked: 0, left: 0 }), { done: 0, blocked: 0, left: 0 });
+  assert.deepEqual(missionCounts({ done: 7, blocked: 2, waiting: 1, left: 6 }), { done: 7, blocked: 2, waiting: 1, left: 6 });
+  assert.deepEqual(missionCounts({ done: 0, blocked: 0, waiting: 0, left: 0 }), { done: 0, blocked: 0, waiting: 0, left: 0 });
 });
 
 test("the block shows every active mission and only the newest finished one", () => {
@@ -129,7 +133,7 @@ test("the chip and the headline follow the state", () => {
     missionHeadline(mission("a", "blocked", { progress: { ...mission("x", "running").progress, blocked: 0 } })).key,
     "missions.headline.stuck"
   );
-  assert.deepEqual(missionHeadline(mission("a", "done")).values, { done: 7, blocked: 2, left: 6, total: 15 });
+  assert.deepEqual(missionHeadline(mission("a", "done")).values, { done: 7, blocked: 2, waiting: 0, left: 6, total: 15 });
   assert.equal(missionHeadline(mission("a", "cancelled")).key, "missions.headline.stopped");
 });
 
@@ -166,4 +170,63 @@ test("the note says the owner can leave while it runs, answer while it waits, no
   assert.equal(missionNote({ state: "paused" }), "paused");
   assert.equal(missionNote({ state: "done" }), null);
   assert.equal(missionNote({ state: "cancelled" }), null);
+});
+
+test("a mission that waits for a wake is active, polled and has its own chip and headline", () => {
+  const waiting = mission("w", "waiting", { progress: { ...mission("x", "running").progress, waiting: 3, left: 0 } });
+  assert.equal(isActiveMission(waiting), true);
+  assert.equal(shouldPoll([waiting], true), true);
+  assert.equal(missionChip("waiting"), "waiting");
+  const h = missionHeadline(waiting);
+  assert.equal(h.key, "missions.headline.waiting");
+  assert.equal(h.values.waiting, 3);
+  assert.deepEqual(
+    missionsToShow([waiting, mission("d", "done", { finished_at_ms: 1, updated_at_ms: 1 })]).map((m) => m.id),
+    ["w", "d"]
+  );
+});
+
+function wait(extra: Partial<MissionWait>): MissionWait {
+  return {
+    kind: "mail",
+    from_domain: null,
+    subject_contains: null,
+    keyword: null,
+    webhook_name: null,
+    due_at_ms: Date.UTC(2026, 10, 27, 14, 0),
+    reason: "verification mail",
+    ...extra
+  };
+}
+
+test("a wait reads as what it waits for, with the time it ends", () => {
+  const now = Date.UTC(2026, 10, 27, 9, 0);
+  const at = (w: MissionWait) => waitLine(w, now, "en");
+  assert.equal(at(wait({ kind: "after" })).key, "missions.waiting.after");
+  const from = at(wait({ from_domain: "example.com", subject_contains: "verify" }));
+  assert.equal(from.key, "missions.waiting.mailFrom");
+  assert.equal(from.values.from, "example.com");
+  assert.equal(at(wait({ subject_contains: "verify" })).key, "missions.waiting.mailSubject");
+  const text = at(wait({ keyword: "confirm" }));
+  assert.equal(text.key, "missions.waiting.mailText");
+  assert.equal(text.values.text, "confirm");
+  const hook = at(wait({ kind: "webhook", webhook_name: "Orders" }));
+  assert.equal(hook.key, "missions.waiting.webhook");
+  assert.equal(hook.values.name, "Orders");
+  assert.ok(hook.values.when.length > 0);
+});
+
+test("a moment today shows the time only, another day shows the date too", () => {
+  const now = Date.UTC(2026, 10, 27, 9, 0);
+  const sameDay = whenText(now + 60_000, now, "en");
+  const later = whenText(now + 3 * 86_400_000, now, "en");
+  assert.ok(later.length > sameDay.length, `${later} vs ${sameDay}`);
+});
+
+test("only waiting items are listed as waiting", () => {
+  const it = (key: string, status: string) => ({ key, status }) as MissionItem;
+  assert.deepEqual(
+    waitingItems([it("a", "todo"), it("b", "waiting"), it("c", "blocked")]).map((i) => i.key),
+    ["b"]
+  );
 });

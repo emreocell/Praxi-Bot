@@ -8,6 +8,7 @@
 .chip { display: inline-flex; flex: none; align-items: center; gap: var(--space-1); padding: var(--space-half) var(--space-2); border-radius: var(--radius-pill); background-color: var(--color-surface-active); color: var(--color-text-secondary); font-size: var(--font-size-2xs); white-space: nowrap; }
 .chip > svg { width: var(--font-size-xs); height: var(--font-size-xs); }
 .chip[data-chip="running"], .chip[data-chip="done"] { color: var(--color-success); }
+.chip[data-chip="waiting"] { color: var(--color-accent); }
 .chip[data-chip="needsYou"], .chip[data-chip="paused"] { background-color: var(--color-warning-subtle); color: var(--color-warning); }
 .chip[data-chip="failed"] { background-color: var(--color-danger-subtle); color: var(--color-danger); }
 .headline, .meta, .hint { margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
@@ -15,6 +16,7 @@
 .meta { font-size: var(--font-size-2xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .bar { display: flex; height: var(--space-1); overflow: hidden; border-radius: var(--radius-pill); background-color: var(--color-surface-active); }
 .barDone { width: calc(var(--share) * 1%); background-color: var(--color-success); }
+.barWaiting { width: calc(var(--share) * 1%); background-color: var(--color-accent); }
 .barBlocked { width: calc(var(--share) * 1%); background-color: var(--color-warning); }
 /* "● 7 done  ● 2 need you  ● 6 left": one line under the bar, the dots in the bar's colours. */
 .counts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
@@ -22,6 +24,7 @@
 .count::after { content: ""; flex: none; width: var(--space-1); height: var(--space-1); margin-inline-end: var(--space-half); border-radius: 50%; background-color: var(--color-text-faint); }
 .count[data-kind="done"]::after { background-color: var(--color-success); }
 .count[data-kind="blocked"]::after { background-color: var(--color-warning); }
+.count[data-kind="waiting"]::after { background-color: var(--color-accent); }
 .count dt { color: var(--color-text-muted); }
 .count dd { margin: var(--space-0); font-weight: var(--font-weight-medium); color: var(--color-text); font-variant-numeric: tabular-nums; }
 /* "Now: Register on india.dev" and the sentence on what the owner can do. */
@@ -55,6 +58,9 @@
 .field { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text); }
 /* The questions: a calm card with a warning edge (a full warning fill made every word shout). */
 .needs { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: var(--size-border) solid var(--color-border); border-inline-start: var(--space-1) solid var(--color-warning); border-radius: var(--radius-md); background-color: var(--color-surface); }
+.waits { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-md); background-color: var(--color-surface); }
+.waitsTitle { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0); font-size: var(--font-size-ui); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); }
+.waitsTitle > svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }
 .needsTitle { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0); font-size: var(--font-size-ui); font-weight: var(--font-weight-medium); color: var(--color-warning); }
 .needsTitle > svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }
 .needsList { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-0); padding: var(--space-0); list-style: none; }

@@ -3,14 +3,14 @@
  * the progress numbers, and the one request that answers every blocked item at once. The daemon
  * has no event for missions, so the block polls while something can still change.
  */
-import type { Mission, MissionItem } from "../api/types.ts";
+import type { Mission, MissionItem, MissionWait } from "../api/types.ts";
 
-/** How often the Activity tab asks for the missions while one is running, paused or blocked. */
+/** How often the Activity tab asks for the missions while one is running, waiting, paused or blocked. */
 export const MISSION_POLL_MS = 5_000;
 
-/** Running, paused or blocked: the mission can still change. */
+/** Running, waiting for a wake, paused or blocked: the mission can still change. */
 export function isActiveMission(m: Pick<Mission, "state">): boolean {
-  return m.state === "running" || m.state === "paused" || m.state === "blocked";
+  return m.state === "running" || m.state === "waiting" || m.state === "paused" || m.state === "blocked";
 }
 
 /** Share of the ledger that is done, 0 to 100 (0 while the bot has not listed any item yet). */
@@ -22,16 +22,17 @@ export function progressPercent(p: { done: number; total: number }): number {
 }
 
 /**
- * The three numbers the owner reads: done, blocked on them, and left for the bot. The daemon sends
- * them without overlap (`left` is what the bot still has to work on), so they add up to the ledger
- * minus the items given up or skipped.
+ * The numbers the owner reads: done, blocked on them, waiting for a timer, a mail or a webhook,
+ * and left for the bot. The daemon sends them without overlap (`left` is what the bot still has to
+ * work on), so they add up to the ledger minus the items given up or skipped.
  */
-export function missionCounts(p: { done: number; blocked: number; left: number }): {
+export function missionCounts(p: { done: number; blocked: number; waiting: number; left: number }): {
   done: number;
   blocked: number;
+  waiting: number;
   left: number;
 } {
-  return { done: p.done, blocked: p.blocked, left: p.left };
+  return { done: p.done, blocked: p.blocked, waiting: p.waiting, left: p.left };
 }
 
 /** Newest first by the last change. */
@@ -54,11 +55,12 @@ export function shouldPoll(all: readonly Mission[], visible: boolean): boolean {
 }
 
 /** The chip's word for a mission state; "blocked" reads as "needs you". */
-export type MissionChip = "running" | "paused" | "needsYou" | "done" | "failed" | "stopped";
+export type MissionChip = "running" | "waiting" | "paused" | "needsYou" | "done" | "failed" | "stopped";
 
 export function missionChip(state: string): MissionChip {
   switch (state) {
     case "running":
+    case "waiting":
     case "paused":
     case "done":
     case "failed":
@@ -72,12 +74,14 @@ export function missionChip(state: string): MissionChip {
 
 /** One line under the title: an i18n key (under `missions.headline`) and its counts. */
 export function missionHeadline(m: Mission): { key: string; values: Record<string, number> } {
-  const { done, blocked, left } = missionCounts(m.progress);
+  const { done, blocked, waiting, left } = missionCounts(m.progress);
   const total = m.progress.total;
-  const values = { done, blocked, left, total };
+  const values = { done, blocked, waiting, left, total };
   switch (m.state) {
     case "running":
       return { key: total === 0 ? "missions.headline.planning" : "missions.headline.running", values };
+    case "waiting":
+      return { key: "missions.headline.waiting", values };
     case "paused":
       return { key: "missions.headline.paused", values };
     case "blocked":
@@ -89,6 +93,52 @@ export function missionHeadline(m: Mission): { key: string; values: Record<strin
     default:
       return { key: "missions.headline.stopped", values };
   }
+}
+
+/** A moment as the owner reads it: only the time of day when it is today, the date too otherwise. */
+export function whenText(ms: number, now: number, locale: string): string {
+  const at = new Date(ms);
+  const today = at.toDateString() === new Date(now).toDateString();
+  return at.toLocaleString(locale, today ? { timeStyle: "short" } : { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** The first thing a mail wait looks at, as an i18n key (under `missions.waiting`) and its values. */
+function mailWhat(w: MissionWait): { key: string; values: Record<string, string> } {
+  if (w.from_domain) {
+    return { key: "missions.waiting.mailFrom", values: { from: w.from_domain } };
+  }
+  if (w.subject_contains) {
+    return { key: "missions.waiting.mailSubject", values: { text: w.subject_contains } };
+  }
+  return { key: "missions.waiting.mailText", values: { text: w.keyword ?? "" } };
+}
+
+/**
+ * What a waiting item waits for, as one i18n key (under `missions.waiting`) and its values:
+ * "waiting until 14:00", "waiting for mail from example.com (gives up 15:30)". A timer ends at
+ * `due_at_ms`; a mail or webhook wait gives up then and the item is parked for the owner.
+ */
+export function waitLine(
+  w: MissionWait,
+  now: number,
+  locale: string
+): { key: string; values: Record<string, string> } {
+  const when = whenText(w.due_at_ms, now, locale);
+  switch (w.kind) {
+    case "after":
+      return { key: "missions.waiting.after", values: { when } };
+    case "webhook":
+      return { key: "missions.waiting.webhook", values: { name: w.webhook_name ?? "", when } };
+    default: {
+      const what = mailWhat(w);
+      return { key: what.key, values: { ...what.values, when } };
+    }
+  }
+}
+
+/** The items that wait for a wake, in ledger order. */
+export function waitingItems(items: readonly MissionItem[]): MissionItem[] {
+  return items.filter((i) => i.status === "waiting");
 }
 
 /** What the owner has typed for one blocked item; an entry exists once they touched the item. */

@@ -151,6 +151,7 @@ export type ClearCacheResult = S["ClearCacheDto"];
 export type BotSpendLimits = S["BotSpendLimitsDto"];
 export type Mission = S["MissionDto"];
 export type MissionItem = S["MissionItemDto"];
+export type MissionWait = S["MissionWaitDto"];
 export type MissionDetail = S["MissionDetailDto"];
 export type MissionDigest = S["MissionDigestDto"];
 export type MissionProgress = S["MissionProgressDto"];

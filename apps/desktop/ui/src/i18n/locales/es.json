@@ -5194,12 +5194,14 @@
       "needsYou": "Te necesita",
       "paused": "En pausa",
       "running": "En marcha",
-      "stopped": "Detenida"
+      "stopped": "Detenida",
+      "waiting": "Waiting"
     },
     "counts": {
       "blocked": "te necesitan",
       "done": "hechas",
-      "left": "pendientes"
+      "left": "pendientes",
+      "waiting": "waiting"
     },
     "digest": {
       "blocked": "Siguen esperándote",
@@ -5225,7 +5227,8 @@
       "planning": "Preparando la lista de tareas…",
       "running": "{{done}} de {{total}} hechas, trabajando en el resto",
       "stopped": "Detenida: {{done}} de {{total}} hechas",
-      "stuck": "El bot se detuvo y te está esperando"
+      "stuck": "El bot se detuvo y te está esperando",
+      "waiting": "{{done}} of {{total}} done, {{waiting}} waiting for something to happen"
     },
     "modelCalls": "{{count}} llamadas al modelo",
     "modelCalls_one": "{{count}} llamada al modelo",
@@ -5292,7 +5295,18 @@
     "stopConfirm": "¿Detener esta misión definitivamente?",
     "stopNo": "Que siga",
     "stopYes": "Sí, detener",
-    "title": "Misiones"
+    "title": "Misiones",
+    "waiting": {
+      "after": "Waiting until {{when}}",
+      "giveUp": "Gives up at {{when}}, then the item is parked for you.",
+      "mailFrom": "Waiting for a mail from {{from}}",
+      "mailSubject": "Waiting for a mail with “{{text}}” in the subject",
+      "mailText": "Waiting for a mail containing “{{text}}”",
+      "title": "Waiting ({{count}})",
+      "title_one": "Waiting ({{count}})",
+      "title_other": "Waiting ({{count}})",
+      "webhook": "Waiting for the webhook “{{name}}”"
+    }
   },
   "modelPicker": {
     "addEngines": "Añadir una CLI de programación",

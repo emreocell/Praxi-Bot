@@ -35,6 +35,7 @@ function item(key: string, status: MissionItem["status"], at: number, extra: Par
     blocked_reason: null,
     needs_live_owner: false,
     owner_answer: null,
+    waiting_for: [],
     updated_at_ms: at,
     ...extra
   };
@@ -47,6 +48,7 @@ function progressOf(items: readonly MissionItem[]): MissionProgress {
     total: items.length,
     done: n("done"),
     blocked,
+    waiting: n("waiting"),
     todo,
     doing,
     failed: n("failed"),
@@ -70,6 +72,28 @@ export class MockMissions {
         return item(key, "blocked", at, {
           blocked_reason: "The site wants the 6-digit code it sent to your phone.",
           needs_live_owner: true
+        });
+      }
+      if (i === 10) {
+        return item(key, "waiting", at, {
+          waiting_for: [
+            {
+              kind: "mail",
+              from_domain: key,
+              subject_contains: null,
+              keyword: null,
+              webhook_name: null,
+              due_at_ms: now + 45 * MIN,
+              reason: "Waiting for the verification mail after the sign-up form."
+            }
+          ]
+        });
+      }
+      if (i === 11) {
+        return item(key, "waiting", at, {
+          waiting_for: [
+            { kind: "after", from_domain: null, subject_contains: null, keyword: null, webhook_name: null, due_at_ms: now + 3 * 60 * MIN, reason: "The site reviews new accounts after a few hours." }
+          ]
         });
       }
       return item(key, i === 9 ? "doing" : "todo", at);
@@ -153,7 +177,7 @@ export class MockMissions {
 
   list(botId: string | undefined, state: string | undefined): Mission[] {
     return this.missions
-      .filter((m) => (!botId || m.bot_id === botId) && (state !== "active" || ["running", "paused", "blocked"].includes(m.state)))
+      .filter((m) => (!botId || m.bot_id === botId) && (state !== "active" || ["running", "waiting", "paused", "blocked"].includes(m.state)))
       .map((m) => this.detail(m).mission)
       .sort((a, b) => b.updated_at_ms - a.updated_at_ms);
   }

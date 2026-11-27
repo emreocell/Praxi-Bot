@@ -5194,12 +5194,14 @@
       "needsYou": "Sana ihtiyacı var",
       "paused": "Duraklatıldı",
       "running": "Çalışıyor",
-      "stopped": "Durduruldu"
+      "stopped": "Durduruldu",
+      "waiting": "Bekliyor"
     },
     "counts": {
       "blocked": "seni bekliyor",
       "done": "bitti",
-      "left": "kalan"
+      "left": "kalan",
+      "waiting": "bekleyen"
     },
     "digest": {
       "blocked": "Hâlâ seni bekleyenler",
@@ -5225,7 +5227,8 @@
       "planning": "Yapılacakların listesini çıkarıyor…",
       "running": "{{total}} işin {{done}} tanesi bitti, gerisi üzerinde çalışıyor",
       "stopped": "Durduruldu: {{total}} işin {{done}} tanesi tamamlandı",
-      "stuck": "Bot durdu ve seni bekliyor"
+      "stuck": "Bot durdu ve seni bekliyor",
+      "waiting": "{{total}} işin {{done}} tanesi bitti, {{waiting}} tanesi bir şeyin olmasını bekliyor"
     },
     "modelCalls": "{{count}} model çağrısı",
     "modelCalls_one": "{{count}} model çağrısı",
@@ -5292,7 +5295,18 @@
     "stopConfirm": "Bu görev tamamen durdurulsun mu?",
     "stopNo": "Devam etsin",
     "stopYes": "Evet, durdur",
-    "title": "Görevler"
+    "title": "Görevler",
+    "waiting": {
+      "after": "{{when}} olana kadar bekliyor",
+      "giveUp": "{{when}} zamanına kadar gelmezse vazgeçer; iş sana bırakılır.",
+      "mailFrom": "{{from}} adresinden gelecek bir postayı bekliyor",
+      "mailSubject": "Konusunda “{{text}}” geçen bir postayı bekliyor",
+      "mailText": "İçinde “{{text}}” geçen bir postayı bekliyor",
+      "title": "Bekleyenler ({{count}})",
+      "title_one": "Bekleyenler ({{count}})",
+      "title_other": "Bekleyenler ({{count}})",
+      "webhook": "“{{name}}” webhook’unun çağrılmasını bekliyor"
+    }
   },
   "modelPicker": {
     "addEngines": "Kodlama CLI'ı ekle",

@@ -1,4 +1,4 @@
-import { CircleCheck, Clock, DoorOpen, Pause, Play, Rocket, ShieldAlert, Square, TriangleAlert } from "lucide-react";
+import { CircleCheck, Clock, DoorOpen, Hourglass, Pause, Play, Rocket, ShieldAlert, Square, TriangleAlert } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type ApiClient, ApiError } from "../api/client";
@@ -18,19 +18,22 @@ import {
   missionsToShow,
   type MissionChip,
   progressPercent,
-  shouldPoll
+  shouldPoll,
+  waitingItems,
+  waitLine
 } from "../lib/missions";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./MissionBlock.module.css";
 
 export interface MissionView {
   mission: Mission;
-  /** The ledger's blocked items and digest; fetched for missions that have blocked items or ended. */
+  /** The ledger's blocked and waiting items and digest; fetched for missions that have blocked or waiting items or ended. */
   detail: MissionDetail | null;
 }
 
 export const CHIP_ICONS: Record<MissionChip, typeof Rocket> = {
   running: Rocket,
+  waiting: Hourglass,
   paused: Pause,
   needsYou: ShieldAlert,
   done: CircleCheck,
@@ -74,7 +77,7 @@ function useMissions(botId: string, visible: boolean) {
         const next = await Promise.all(
           shown.map(async (mission): Promise<MissionView> => {
             // A running mission's ledger says what it works on now; a quiet paused one needs nothing.
-            if (mission.progress.blocked === 0 && mission.state === "paused") {
+            if (mission.progress.blocked === 0 && mission.progress.waiting === 0 && mission.state === "paused") {
               return { mission, detail: null };
             }
             const hit = details.current.get(mission.id);
@@ -242,6 +245,7 @@ function MissionCard({
   const ChipIcon = CHIP_ICONS[chip];
   const live = isActiveMission(m);
   const blocked = detail?.blocked ?? [];
+  const waiting = waitingItems(detail?.items ?? []);
   const when = (ms: number) => new Date(ms).toLocaleString(i18n.language, { dateStyle: "medium", timeStyle: "short" });
   return (
     <article className={styles.card} aria-labelledby={titleId} data-testid="mission-card" data-state={m.state}>
@@ -277,7 +281,7 @@ function MissionCard({
               <Play aria-hidden="true" />
               {t("missions.resume")}
             </button>
-          ) : m.state === "running" ? (
+          ) : m.state === "running" || m.state === "waiting" ? (
             <button type="button" className={styles.secondary} disabled={busy} onClick={() => void onSteer("pause")}>
               <Pause aria-hidden="true" />
               {t("missions.pause")}
@@ -306,6 +310,7 @@ function MissionCard({
           )}
         </div>
       ) : null}
+      {live && waiting.length > 0 ? <WaitingFor items={waiting} /> : null}
       {live && blocked.length > 0 ? <NeedsYou items={blocked} busy={busy} onSend={onAnswer} /> : null}
       {!live && detail?.digest ? <Digest digest={detail.digest} /> : null}
     </article>
@@ -331,6 +336,7 @@ export function MissionProgress({ mission: m }: { mission: Mission }) {
         aria-valuenow={pct}
       >
         <span className={styles.barDone} style={{ "--share": pctOf(counts.done) } as CSSProperties} />
+        <span className={styles.barWaiting} style={{ "--share": pctOf(counts.waiting) } as CSSProperties} />
         <span className={styles.barBlocked} style={{ "--share": pctOf(counts.blocked) } as CSSProperties} />
       </div>
       <dl className={styles.counts}>
@@ -338,6 +344,12 @@ export function MissionProgress({ mission: m }: { mission: Mission }) {
           <dt>{t("missions.counts.done")}</dt>
           <dd>{counts.done}</dd>
         </div>
+        {counts.waiting > 0 ? (
+          <div className={styles.count} data-kind="waiting">
+            <dt>{t("missions.counts.waiting")}</dt>
+            <dd>{counts.waiting}</dd>
+          </div>
+        ) : null}
         {counts.blocked > 0 ? (
           <div className={styles.count} data-kind="blocked">
             <dt>{t("missions.counts.blocked")}</dt>
@@ -381,6 +393,44 @@ export function MissionNow({ mission: m, items }: { mission: Mission; items: rea
         </p>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The items parked on a wake: "waiting for mail from example.com", "waiting until 14:00". The bot's
+ * own reason is shown as plain text; nothing here can be answered, the runtime wakes the item.
+ */
+function WaitingFor({ items }: { items: readonly MissionItem[] }) {
+  const { t, i18n } = useTranslation();
+  const id = useId();
+  const now = Date.now();
+  return (
+    <section className={styles.waits} aria-labelledby={`${id}-title`} data-testid="mission-waiting">
+      <h4 className={styles.waitsTitle} id={`${id}-title`}>
+        <Hourglass aria-hidden="true" />
+        {t("missions.waiting.title", { count: items.length })}
+      </h4>
+      <ul className={styles.needsList}>
+        {items.map((it) => (
+          <li key={it.key} className={styles.needsItem} data-testid="mission-waiting-item">
+            <p className={styles.itemTitle}>
+              <b>{it.key}</b>
+              {it.title && it.title !== it.key ? <span> · {it.title}</span> : null}
+            </p>
+            {it.waiting_for.map((w) => {
+              const line = waitLine(w, now, i18n.language);
+              return (
+                <p key={`${w.kind}-${w.due_at_ms}`} className={styles.itemReason} data-testid="mission-wait-line">
+                  {t(line.key, line.values)}
+                  {w.kind !== "after" ? <span className={styles.hint}> {t("missions.waiting.giveUp", { when: line.values.when })}</span> : null}
+                </p>
+              );
+            })}
+            {it.waiting_for[0]?.reason ? <p className={styles.hint}>{it.waiting_for[0].reason}</p> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

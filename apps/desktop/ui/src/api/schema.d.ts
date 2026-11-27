@@ -8588,7 +8588,10 @@ export interface components {
              * @description Run that was started.
              */
             run_id?: string | null;
-            /** @description Always `accepted`. */
+            /**
+             * @description `accepted` (a run started), `queued` (the schedule that owns the webhook runs it) or
+             *     `mission_woken` (a mission was waiting for this call and continues; no separate run).
+             */
             status: string;
             /**
              * Format: uuid
@@ -10012,7 +10015,10 @@ export interface components {
              * @description Start (ms since epoch).
              */
             started_at_ms: number;
-            /** @description `running`, `paused`, `blocked`, `done`, `failed` or `cancelled`. */
+            /**
+             * @description `running`, `waiting` (every open item waits for a timer, a mail or a webhook), `paused`,
+             *     `blocked`, `done`, `failed` or `cancelled`.
+             */
             state: string;
             /** @description Why it is paused, blocked or failed. */
             state_reason?: string | null;
@@ -10053,7 +10059,7 @@ export interface components {
             owner_answer?: string | null;
             /** @description What was achieved (evidence), when done. */
             result?: string | null;
-            /** @description `todo`, `doing`, `done`, `blocked`, `failed` or `skipped`. */
+            /** @description `todo`, `doing`, `done`, `blocked`, `waiting`, `failed` or `skipped`. */
             status: string;
             /** @description What to do, one line. */
             title: string;
@@ -10062,6 +10068,8 @@ export interface components {
              * @description Last change (ms since epoch).
              */
             updated_at_ms: number;
+            /** @description What a `waiting` item waits for (usually one entry; the first to happen wakes it). */
+            waiting_for: components["schemas"]["MissionWaitDto"][];
         };
         /**
          * @description Counts of a mission's ledger items. `done`, `blocked` and `left` are the three headline
@@ -10090,7 +10098,8 @@ export interface components {
             failed: number;
             /**
              * Format: int32
-             * @description Still for the bot to work on: `todo + doing` (blocked items are counted in `blocked`).
+             * @description Still for the bot to work on: `todo + doing` (blocked and waiting items are counted in
+             *     `blocked` and `waiting`).
              */
             left: number;
             /**
@@ -10108,6 +10117,35 @@ export interface components {
              * @description All items.
              */
             total: number;
+            /**
+             * Format: int32
+             * @description Parked on a wake: a timer, a mail or a webhook (`mission_wait`).
+             */
+            waiting: number;
+        };
+        /**
+         * @description What a `waiting` item waits for. The mail filter and the webhook name are the bot's own
+         *     words or the owner's, shown as plain text.
+         */
+        MissionWaitDto: {
+            /**
+             * Format: int64
+             * @description A timer: when it fires. A mail or webhook wait: when it gives up and the item is
+             *     parked for the owner (ms since epoch).
+             */
+            due_at_ms: number;
+            /** @description Mail: the sender's domain. */
+            from_domain?: string | null;
+            /** @description Mail: text the subject or body contains. */
+            keyword?: string | null;
+            /** @description `after` (a timer), `mail` (in the bot's own inbox) or `webhook`. */
+            kind: string;
+            /** @description Why the bot waits. */
+            reason: string;
+            /** @description Mail: text the subject contains. */
+            subject_contains?: string | null;
+            /** @description Webhook: its name. */
+            webhook_name?: string | null;
         };
         /**
          * @description What to do when the chat already has a running turn.
