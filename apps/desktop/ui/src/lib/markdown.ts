@@ -5,10 +5,14 @@
  * and text nodes. Raw HTML is never interpreted (`<script>` is just text) and
  * link targets are restricted to http(s) / mailto by `sanitizeUrl`.
  *
+ * Citations of the owner's documents (`[file, p. 3](praxi-doc://...)`) become `doc` nodes.
+ *
  * Supported: headings, paragraphs, fenced code, blockquotes, (nested, task)
  * lists, GFM tables, rules, and inline code / bold / italic / strike / links /
  * bare URLs. Unclosed constructs (a streaming message) degrade gracefully.
  */
+
+import { parseCitationHref } from "./documentCitation.ts";
 
 export type Inline =
   | { t: "text"; text: string }
@@ -17,6 +21,8 @@ export type Inline =
   | { t: "em"; children: Inline[] }
   | { t: "del"; children: Inline[] }
   | { t: "link"; href: string; children: Inline[] }
+  /** A `praxi-doc://` citation of the owner's documents: shown as a button, never navigated to. */
+  | { t: "doc"; href: string; children: Inline[] }
   | { t: "br" };
 
 export type Align = "left" | "center" | "right" | null;
@@ -223,6 +229,12 @@ export function parseInline(s: string, depth = 0): Inline[] {
           // `[text](url "title")`: the title is dropped
           const target =
             s.slice(close + 2, end).trim().split(/\s+/)[0] ?? "";
+          if (!image && parseCitationHref(target)) {
+            flush();
+            out.push({ t: "doc", href: target, children: nest(s.slice(open + 1, close)) });
+            i = end + 1;
+            continue;
+          }
           const href = sanitizeUrl(target.replace(/^<|>$/g, ""));
           flush();
           const altText = s.slice(open + 1, close).trim();

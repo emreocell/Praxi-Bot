@@ -49,6 +49,7 @@ const READ_ONLY = new Set([
   "memory_search",
   "session_search",
   "knowledge_search",
+  "documents_search",
   "schedule_list",
   "bot_list"
 ]);

@@ -13,6 +13,8 @@ import type {
 import type {
   KnowledgeSource,
   KnowledgeWatchStatus,
+  KnowledgeFolderListing,
+  KnowledgeFolderPreview,
   KnowledgeSourceInput,
   KnowledgeSourceChange,
   KnowledgeMutation,
@@ -347,6 +349,24 @@ export class ApiClient {
 
   embedKnowledgeSource(bot: string, source: string, expectedRevision: number, resetRetry = false): Promise<KnowledgeEmbeddingProgress> {
     return this.request("POST", `/bots/${encodeURIComponent(bot)}/knowledge/sources/${encodeURIComponent(source)}/embed`, { body: { expected_revision: expectedRevision, reset_retry: resetRetry } });
+  }
+
+  /** Sub-folders of a folder on the machine the daemon runs on (the home folder when no path is given). */
+  browseKnowledgeFolders(path?: string): Promise<KnowledgeFolderListing> {
+    return this.request("GET", "/knowledge/folders", { query: path ? { path } : {} });
+  }
+
+  /** What choosing this folder would index (files, sizes, estimate, what is left out). Reads no document. */
+  previewKnowledgeFolder(bot: string, path: string): Promise<KnowledgeFolderPreview> {
+    return this.request("POST", `/bots/${encodeURIComponent(bot)}/knowledge/folder-preview`, { body: { path } });
+  }
+
+  /** The bytes of an indexed file, to open the file behind a citation. */
+  async getKnowledgeFile(bot: string, source: string, locator: string, download = false): Promise<Blob> {
+    const res = await this.send("GET", `/bots/${encodeURIComponent(bot)}/knowledge/sources/${encodeURIComponent(source)}/file`, {
+      query: { locator, ...(download ? { download: "true" } : {}) }
+    });
+    return res.blob();
   }
 
   listKnowledgeWatch(bot: string): Promise<KnowledgeWatchStatus[]> {

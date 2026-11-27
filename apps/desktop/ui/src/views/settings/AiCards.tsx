@@ -17,6 +17,7 @@ import { LocalInstallCard } from "../../components/LocalInstallCard";
 import { LocalModelsAdvice } from "../../components/LocalModelsAdvice";
 import { EnginesCard } from "./HomeCards";
 import { HelpersCard } from "./HelpersCard";
+import { DocumentsCard } from "./DocumentsCard";
 import { KnowledgeCard } from "./KnowledgeCard";
 import { MemoryCard } from "./MemoryCard";
 import type { CardDef } from "./types";
@@ -121,6 +122,15 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("memory.description"),
       keywords: "memory recall forget undo remember delete hafiza hatirla unut sil geri al gedächtnis merken vergessen löschen",
       node: <MemoryCard />
+    },
+    {
+      id: "documents",
+      section: "ai",
+      kind: "block",
+      title: t("documents.title"),
+      description: t("documents.description"),
+      keywords: "documents folders files pdf word excel ask my documents belgelerim dosya klasör belge dokumente ordner dateien meine",
+      node: <DocumentsCard />
     },
     {
       id: "knowledge",

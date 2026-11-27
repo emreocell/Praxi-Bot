@@ -92,7 +92,8 @@ export const CARD_META: Record<string, CardMeta> = {
   helpers: { page: "models", group: "models", advanced: true },
   providers: { page: "models", group: "models", advanced: true, risk: "providers", learn: "provider" },
   memory: { page: "models", group: "memory", learn: "memory", risk: "memory" },
-  knowledge: { page: "models", group: "memory", learn: "memory" },
+  documents: { page: "models", group: "memory", learn: "folders" },
+  knowledge: { page: "models", group: "memory", learn: "memory", advanced: true },
 
   // Connections: where the bots work, and what they connect to (mail, web, passwords)
   target: { page: "connections", group: "computers" },

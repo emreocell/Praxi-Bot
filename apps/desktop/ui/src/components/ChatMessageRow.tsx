@@ -10,6 +10,7 @@ import type { MessageTimes } from "../lib/messageTime";
 import type { RunState } from "../state/timeline";
 import { MessageFiles } from "./Attachments";
 import { CopyButton } from "./CopyButton";
+import { DocCitationProvider, useCitationOpener } from "./DocCitationLink";
 import { Markdown } from "./Markdown";
 import { MessageActions } from "./MessageActions";
 import { MessageInfo } from "./MessageInfo";
@@ -71,6 +72,7 @@ export const AssistantMessageRow = memo(function AssistantMessageRow({
   const { t } = useTranslation();
   const gv = guest ? botView(guest) : null;
   const [localModel, setLocalModel] = useState(false);
+  const openCitation = useCitationOpener(client, guest?.id ?? botId);
   return (
     <div id={id} tabIndex={-1} className={styles.assistantRow} data-message-row="assistant">
       <div className={styles.assistantBubble} data-message-body>
@@ -83,7 +85,9 @@ export const AssistantMessageRow = memo(function AssistantMessageRow({
           </span>
         ) : null}
         <FoldedBody text={text} className={styles.foldBody} answer>
-          <Markdown text={text} />
+          <DocCitationProvider value={openCitation}>
+            <Markdown text={text} />
+          </DocCitationProvider>
         </FoldedBody>
       </div>
       <MessageActions side="bot" meta={<MessageTime ts={ts} mode={times} />}>
