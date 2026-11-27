@@ -421,9 +421,13 @@ async fn taint_after_mail_read(
     assert_eq!(kit.count("email_search"), 1);
     let record = w.env.storage.get_run(run).unwrap().unwrap();
     let ctx = lp.sh.ctx(&record).unwrap();
-    let taint = ctx.taint.lock();
+    // The lock is not held across `quarantined`, which takes it too.
+    let (untrusted, private) = {
+        let taint = ctx.taint.lock();
+        (taint.exposure.untrusted, taint.private_source)
+    };
     let quarantined = crate::page_guard::quarantined(crate::page_guard::ReaderMode::Auto, &ctx);
-    (taint.exposure.untrusted, taint.private_source, quarantined)
+    (untrusted, private, quarantined)
 }
 
 #[tokio::test]
