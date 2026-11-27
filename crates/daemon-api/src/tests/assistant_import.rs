@@ -345,14 +345,13 @@ async fn a_folder_is_read_only_when_named() {
 async fn a_system_folder_is_refused_on_scan_and_run() {
     let (t, _, _) = setup();
     let base = tempfile::tempdir().unwrap();
-    let mut folders = vec![
-        "/proc".to_owned(),
-        "/proc/self".to_owned(),
-        "/sys".to_owned(),
-        "/dev".to_owned(),
-    ];
+    // `/proc`, `/sys` and `/dev` are system folders on Unix; on Windows they are not absolute
+    // paths at all and are refused for that reason, so the list is Unix-only.
+    #[allow(unused_mut)]
+    let mut folders: Vec<String> = Vec::new();
     #[cfg(unix)]
     {
+        folders.extend(["/proc", "/proc/self", "/sys", "/dev"].map(str::to_owned));
         std::os::unix::fs::symlink("/proc", base.path().join("to-proc")).unwrap();
         folders.push(base.path().join("to-proc").display().to_string());
     }
