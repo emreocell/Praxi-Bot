@@ -756,6 +756,24 @@ export function ChatView({
     return null;
   }, [entries]);
   const turn = useMemo(() => lastTurn(messages), [messages]);
+  // The search jump swaps one run answer for its stored message row (see the entries above).
+  const replacedByJump = (runId: string, text: string) =>
+    messages.some((m) => m.id === jumpMessageId && m.run_id === runId && m.content === text);
+  // The run's actions (steps, remember, retry) sit in the action row of its newest answer, so icons and
+  // time share one line; a run without an answer keeps the standalone bar.
+  const timelineAt = entries.findIndex((e) => e.key === lastActionsKey);
+  const timeline = entries[timelineAt];
+  const actionsHost = (() => {
+    if (timeline?.kind !== "timeline") return null;
+    for (let i = timelineAt - 1; i >= 0; i -= 1) {
+      const e = entries[i];
+      if (e.kind === "user") return null;
+      if (e.kind === "assistant" && e.runId === timeline.run.id) return e.key;
+      if (e.kind === "item" && e.item.kind === "text" && e.runId === timeline.run.id
+        && events.runs[e.runId]?.parentRunId === undefined && !replacedByJump(e.runId, e.item.text)) return e.key;
+    }
+    return null;
+  })();
   const lastItem = entries[entries.length - 1];
   const blockedFiles = attachments.blocked;
   // ---- follow new content unless the user scrolled up
@@ -1579,6 +1597,44 @@ export function ChatView({
     ignoreSelector: "button, a, input, textarea, select"
   });
 
+  const runActions = timeline?.kind === "timeline" ? (
+    <>
+      <IconAction
+        icon={ListOrdered}
+        label={t("runReport.button")}
+        onClick={() => setTimelineRunId(timeline.run.id)}
+        testId="run-timeline"
+      />
+      {timeline.remember ? (
+        (remember[timeline.run.id] ?? "idle") === "saved" ? (
+          <span className={styles.rememberDone} role="status">
+            {t("chat.remember.saved")}
+          </span>
+        ) : (
+          <IconAction
+            icon={Bookmark}
+            label={t("chat.remember.button")}
+            disabled={remember[timeline.run.id] === "busy"}
+            onClick={() => void rememberRun(timeline.run.id)}
+            testId="remember-run"
+          />
+        )
+      ) : null}
+      {timeline.workflow && client ? (
+        <WorkflowReview client={client} runId={timeline.run.id} canRemember={true} />
+      ) : null}
+      {canResend && offersRegenerate(turn, Boolean(timeline.run.error)) ? (
+        <RegenerateAction
+          key={turn?.user.id}
+          usedWriteTools={turn?.usedWriteTools === true}
+          failed={turn?.answered !== true}
+          busy={resending}
+          onRegenerate={() => void resendTurn()}
+        />
+      ) : null}
+    </>
+  ) : null;
+
   const renderItem = (
     item: TimelineItem,
     runId: string
@@ -1588,7 +1644,7 @@ export function ChatView({
     switch (item.kind) {
       case "text":
         // The selected stored answer has its own focus target; avoid drawing its live copy too.
-        if (messages.some((m) => m.id === jumpMessageId && m.run_id === runId && m.content === item.text)) return null;
+        if (replacedByJump(runId, item.text)) return null;
         if (nested) {
           return <p className={ccStyles.nestedText}>{item.text}</p>;
         }
@@ -1603,6 +1659,7 @@ export function ChatView({
             </div>
             <MessageActions
               side="bot"
+              runActions={actionsHost === `${runId}-${item.key}` ? runActions : undefined}
               meta={
                 <MessageTime
                   ts={item.ts}
@@ -1848,7 +1905,8 @@ export function ChatView({
                     botId={e.botId ?? chat?.bot_id} runId={e.runId}
                     guest={lead ? guestBot(e.botId) : undefined} times={messageTimes} client={client}
                     run={e.runId ? events.runs[e.runId] : undefined}
-                    runDto={runs.find((r) => r.id === e.runId)} />
+                    runDto={runs.find((r) => r.id === e.runId)}
+                    runActions={actionsHost === e.key ? runActions : undefined} />
                 );
               }
               case "imported_note": {
@@ -1922,49 +1980,12 @@ export function ChatView({
                   </div>
                 );
               }
-              case "timeline": {
-                const st = remember[e.run.id] ?? "idle";
-                const regen = canResend && offersRegenerate(turn, Boolean(e.run.error)) && e.key === lastActionsKey;
-                return (
+              case "timeline":
+                return actionsHost === null ? (
                   <div key={e.key} className={styles.rememberRow}>
-                    <RunActionBar label={t("chat.runActions")}>
-                      <IconAction
-                        icon={ListOrdered}
-                        label={t("runReport.button")}
-                        onClick={() => setTimelineRunId(e.run.id)}
-                        testId="run-timeline"
-                      />
-                      {e.remember ? (
-                        st === "saved" ? (
-                          <span className={styles.rememberDone} role="status">
-                            {t("chat.remember.saved")}
-                          </span>
-                        ) : (
-                          <IconAction
-                            icon={Bookmark}
-                            label={t("chat.remember.button")}
-                            disabled={st === "busy"}
-                            onClick={() => void rememberRun(e.run.id)}
-                            testId="remember-run"
-                          />
-                        )
-                      ) : null}
-                      {e.workflow && client ? (
-                        <WorkflowReview client={client} runId={e.run.id} canRemember={true} />
-                      ) : null}
-                      {regen ? (
-                        <RegenerateAction
-                          key={turn?.user.id}
-                          usedWriteTools={turn?.usedWriteTools === true}
-                          failed={turn?.answered !== true}
-                          busy={resending}
-                          onRegenerate={() => void resendTurn()}
-                        />
-                      ) : null}
-                    </RunActionBar>
+                    <RunActionBar label={t("chat.runActions")}>{runActions}</RunActionBar>
                   </div>
-                );
-              }
+                ) : null;
               case "chain":
                 return (
                   <ChatStepGroup key={e.key} chain={e.chain} times={messageTimes} lead={lead}

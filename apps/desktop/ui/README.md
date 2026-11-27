@@ -16,9 +16,10 @@ The following query parameters are read by the mock UI in `src/App.tsx`:
 | --- | --- |
 | `mock` | Set to `1` to enable mock mode in development |
 | `lang` | `en`, `de`, `es`, `id`, `pt` or `tr` (defaults to `tr` when omitted or unrecognized) |
-| `screen` | Selects a mock review screen; supported routes include `settings`, `apps` and `onboarding` |
+| `screen` | Selects a mock review screen; supported routes include `settings`, `apps`, `onboarding` and `answer-run` (a finished run that ends with its answer) |
 | `section` | Settings section to open when `screen=settings` |
 | `panel` | Set to `1` to open the side panel |
+| `litebot` | Set to `1` to give the first bot a light model and Full access (the bot panel then shows its model hint; use with `panel=1`) |
 | `control` | Run-bar state: `bot_driving`, `paused` or `human_driving` |
 | `rail` | Positive numeric rail width; values below 150 select the mini rail |
 

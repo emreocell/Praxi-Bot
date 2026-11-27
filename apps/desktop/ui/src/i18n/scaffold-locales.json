@@ -1,4 +1,4 @@
 {
   "scaffold": ["fr", "id", "pt"],
-  "englishFallbackPrefixes": ["serverConnectionStatus."]
+  "englishFallbackPrefixes": ["serverConnectionStatus.", "botPanel.modelHint."]
 }

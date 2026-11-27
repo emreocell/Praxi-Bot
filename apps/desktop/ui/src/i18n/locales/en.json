@@ -1771,6 +1771,10 @@
       "toolsOnHint": "Reading is allowed. Sending always follows the permission mode of this bot, and asks first by default."
     },
     "makeMain": "Make main bot",
+    "modelHint": {
+      "change": "Change model",
+      "label": "About this model"
+    },
     "muteNotify": "Mute run notifications",
     "muteNotifyHint": "Finished and failed runs of this bot stay silent and go to the notification history. Approvals and questions still notify.",
     "myComputer": "My computer",

@@ -2,7 +2,6 @@ import {
   Bell,
   BellOff,
   ChevronRight,
-  Lightbulb,
   Lock,
   PenLine,
   Plus,
@@ -42,6 +41,7 @@ import { BotPanelLibrary } from "./BotPanelLibrary";
 import { BrandMark } from "./BrandMark";
 import { ChatList } from "./ChatList";
 import { MissionBlock } from "./MissionBlock";
+import { ModelHint } from "./ModelHint";
 import { QuotaBlock } from "./QuotaRings";
 import { SubagentDetail } from "./SubagentDetail";
 import { SubagentList, useNow } from "./SubagentList";
@@ -220,7 +220,7 @@ export function BotPanel({
         <X aria-hidden="true" />
       </button>
 
-      <header className={styles.hero}>
+      <header className={styles.hero} data-hint-boundary>
         <div className={styles.ava} style={{ "--bot": bot.color } as CSSProperties}>
           <BotAvatar bot={bot} size="panel" state={state ?? "idle"} decorative />
         </div>
@@ -243,16 +243,11 @@ export function BotPanel({
         </div>
         <div className={styles.meta}>
           <ModelLineText model={model} />
+          {preset === "full" && isLiteModel(model) ? <ModelHint onChangeModel={onOpenSettings} /> : null}
           <span className={styles.metaSep} aria-hidden="true" />
           <PermissionChip preset={preset} short />
           {engineCli ? <span data-testid="bot-engine-label">{t("botEngine.label", { cli: engineCli })}</span> : null}
         </div>
-        {preset === "full" && isLiteModel(model) ? (
-          <p className={styles.liteHint} role="note" data-testid="bot-panel-lite-hint">
-            <Lightbulb aria-hidden="true" />
-            <span>{t("botPanel.liteFullHint")}</span>
-          </p>
-        ) : null}
         {/* What the bot is doing right now, on every tab: identity, then model and level, then this. */}
         {now ? (
           <div className={styles.now} data-kind={now.approval ? "approval" : "run"} data-testid="bot-panel-now">

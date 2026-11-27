@@ -154,6 +154,10 @@ function bot(id: string, name: string, color: string, shape: string, model: stri
   // Design review (mock mode only): `?botcolor=%23f4f4f5` recolours the first bot (the gradient is built from it).
   const forced = typeof window !== "undefined" && id === ATLAS ? new URLSearchParams(window.location.search).get("botcolor") : null;
   if (forced && /^#[0-9a-f]{6}$/i.test(forced)) color = forced;
+  // Design review (mock mode only): `?litebot=1` gives the first bot a light model and Full access,
+  // the case where the bot panel shows its model hint.
+  const lite = typeof window !== "undefined" && id === ATLAS && new URLSearchParams(window.location.search).get("litebot") === "1";
+  if (lite) model = "openai/gpt-5-mini";
   return {
     id,
     name,
@@ -161,7 +165,8 @@ function bot(id: string, name: string, color: string, shape: string, model: stri
     version: 1,
     config: {
       bot: { id: name.toLowerCase(), name, color, shape, persona: "" },
-      models: { executor: model, planner: model, classifier: model }
+      models: { executor: model, planner: model, classifier: model },
+      ...(lite ? { permissions: { preset: "full" } } : {})
     }
   };
 }
@@ -3861,6 +3866,8 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
       { type: "run_started", run_id: runId, bot_id: "11111111-1111-4111-8111-111111111111", chat_id: "33333333-3333-4333-8333-333333333333" },
       { type: "tool_call_requested", run_id: runId, call_id: "mock-tool", tool_name: screen === "changes" ? "fs_edit" : "github.search", input: screen === "changes" ? { path: "docs/haftalik-ozet.md" } : { query: "is:closed updated:this-week" } },
       { type: "tool_call_completed", run_id: runId, call_id: "mock-tool", error: null },
+      // Review state `?screen=answer-run`: the run ends with its answer, so the run actions join its row.
+      ...(screen === "answer-run" ? [{ type: "message_delta", run_id: runId, text: "Haftalık özeti hazırladım; kapanan işleri ve açık kalan iki konuyu ekledim." } as GlobalEnvelope["event"]] : []),
       // Like the daemon, a failed run also reports its error as an `error` event (the chat shows it once).
       ...(screen === "errors-run" ? [{ type: "error", run_id: runId, message: "Error: execution error: The user is controlling the screen right now (observation paused), so this read was not performed: screenshot", recoverable: false } as GlobalEnvelope["event"]] : []),
       { type: "run_finished", run_id: runId, error: screen === "errors-run" ? "Error: execution error: The user is controlling the screen right now (observation paused), so this read was not performed: screenshot" : null }

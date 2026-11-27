@@ -35,6 +35,8 @@ const screens = [
   { name: 'my-bots', query: 'screen=myBots', expect: '[data-testid=my-bots]' },
   { name: 'chat', query: 'screen=bot' },
   { name: 'chat-right-panel', query: 'screen=bot&panel=1' },
+  { name: 'chat-answer-actions', query: 'screen=answer-run' },
+  { name: 'chat-right-panel-lite-hint', query: 'litebot=1&panel=1', act: [{ click: '[data-testid=bot-panel-lite-hint]' }] },
   { name: 'chat-mission', expect: '[data-testid=mission-chat-header]', query: 'screen=mission&panel=1' },
   { name: 'chat-mission-answers', expect: '[data-testid=mission-needs-you]', query: 'screen=mission', act: [{ click: '[data-testid=mission-header-answer]' }] },
   { name: 'chat-mission-done', expect: '[data-testid=mission-digest]', query: 'screen=mission-done', act: [{ click: '[data-testid=mission-header-report]' }] },

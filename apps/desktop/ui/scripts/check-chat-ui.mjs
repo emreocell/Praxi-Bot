@@ -114,6 +114,93 @@ try {
   await screenshot(page, 'commands-empty');
   await input.press('Escape');
   assert.equal(await page.getByRole('combobox').getAttribute('aria-expanded'), 'false');
+  // One row under a message: icons on the left, the time right of them, at wide and narrow widths.
+  await page.goto(base + '?mock=1&screen=answer-run&theme=obsidian&style=glass&wallpaper=sky&clear=1&veil=0&rt=ignore', { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.getByTestId('run-timeline').waitFor();
+  for (const width of [1024, 480]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.waitForTimeout(350);
+    const rows = await page.locator('[data-message-row="assistant"]').evaluateAll((nodes) => nodes.flatMap((node) => {
+      const group = node.querySelector('[data-testid="message-actions"]');
+      const time = node.querySelector('[data-testid="message-time"]');
+      if (!group || !time) return [];
+      const g = group.getBoundingClientRect(); const t = time.getBoundingClientRect();
+      const bubble = node.querySelector('[data-message-body]')?.getBoundingClientRect();
+      return [{ latest: group.getAttribute('data-latest') === 'true', gTop: g.top, gBottom: g.bottom, gRight: g.right, tTop: t.top, tBottom: t.bottom, tLeft: t.left, bubbleBottom: bubble?.bottom ?? 0 }];
+    }));
+    assert.ok(rows.length > 0, `${width}: no answer row with actions and time`);
+    for (const row of rows) {
+      assert.ok(row.tLeft >= row.gRight - 0.5, `${width}: time is not right of the icons`);
+      assert.ok(row.tBottom > row.gTop && row.tTop < row.gBottom, `${width}: time and icons are not on one line`);
+      assert.ok(row.gTop >= row.bubbleBottom - 0.5, `${width}: actions are not under the bubble`);
+    }
+    const latest = rows.filter((row) => row.latest);
+    assert.equal(latest.length, 1, `${width}: the run actions belong in exactly one answer row`);
+    assert.equal(await page.getByTestId('run-actions').count(), 0, `${width}: a second, stacked run bar is still rendered`);
+    const mine = page.locator('[data-message-row="assistant"] [data-latest="true"]');
+    for (const id of ['run-timeline']) assert.equal(await mine.getByTestId(id).count(), 1, `${width}: ${id} is not in the shared row`);
+    await screenshot(page, `message-row-${width}`);
+  }
+  await page.setViewportSize({ width: 1024, height: 1000 });
+  // Keyboard reaches the run actions, the copy button and the time in one tab sequence.
+  await page.getByTestId('run-timeline').focus();
+  await page.keyboard.press('Tab');
+  assert.ok(await page.evaluate(() => document.activeElement?.closest('[data-testid="message-actions"]') !== null), 'Tab leaves the shared action row after one step');
+  process.stdout.write('PASS message actions and time share one row, wide and narrow\n');
+
+  // The light-model hint: nothing visible until hover, keyboard focus or a tap; Escape and an outside press close it.
+  await page.goto(base + '?mock=1&litebot=1&panel=1&theme=obsidian&style=glass&wallpaper=sky&clear=1&veil=0&rt=ignore', { waitUntil: 'domcontentloaded', timeout: 120000 });
+  const hint = page.getByTestId('bot-panel-lite-hint');
+  const hintPanel = page.getByTestId('bot-panel-lite-hint-panel');
+  await hint.waitFor();
+  assert.equal(await hintPanel.isVisible(), false, 'the hint text must be hidden at rest');
+  assert.equal(await page.locator('[data-testid="bot-panel"] [role="note"]').count(), 0, 'the permanent box is gone');
+  const describedBy = await hint.getAttribute('aria-describedby');
+  assert.ok((await page.locator(`[id="${describedBy}"]`).textContent()).length > 20, 'the hint text describes the icon');
+  await hint.hover();
+  await hintPanel.waitFor({ state: 'visible' });
+  const inside = await page.evaluate(() => {
+    const panel = document.querySelector('[data-testid="bot-panel-lite-hint-panel"]').getBoundingClientRect();
+    const edge = document.querySelector('[data-hint-boundary]').getBoundingClientRect();
+    return panel.left >= edge.left - 0.5 && panel.right <= edge.right + 0.5;
+  });
+  assert.ok(inside, 'the hint panel stays inside the bot panel header');
+  await screenshot(page, 'model-hint-hover');
+  await hintPanel.hover(); // the pointer can cross onto the panel (and its link) without it closing
+  await page.waitForTimeout(400);
+  assert.equal(await hintPanel.isVisible(), true, 'hint closes while the pointer is on it');
+  await page.mouse.move(5, 5);
+  await hintPanel.waitFor({ state: 'hidden' });
+  await hint.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await hintPanel.waitFor({ state: 'visible' });
+  await page.keyboard.press('Tab');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-testid')), 'bot-panel-lite-hint-change', 'Tab moves from the icon to "Change model"');
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Escape');
+  await hintPanel.waitFor({ state: 'hidden' });
+  await hint.click();
+  await hintPanel.waitFor({ state: 'visible' });
+  await page.mouse.click(5, 5);
+  await hintPanel.waitFor({ state: 'hidden' });
+  await hint.click();
+  await page.getByTestId('bot-panel-lite-hint-change').click();
+  await page.getByTestId('bot-panel-lite-hint-change').waitFor({ state: 'hidden' });
+  await page.getByRole('dialog').first().waitFor();
+  const touch = await browser.newContext({ hasTouch: true, isMobile: false, viewport: { width: 1024, height: 1000 } });
+  const tap = await touch.newPage();
+  await tap.goto(base + '?mock=1&litebot=1&panel=1&theme=obsidian&style=glass&wallpaper=sky&clear=1&veil=0&rt=ignore', { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await tap.getByTestId('bot-panel-lite-hint').tap();
+  await tap.getByTestId('bot-panel-lite-hint-panel').waitFor({ state: 'visible' });
+  await tap.getByTestId('bot-panel-lite-hint').tap();
+  await tap.getByTestId('bot-panel-lite-hint-panel').waitFor({ state: 'hidden' });
+  await touch.close();
+  await page.addScriptTag({ path: resolve(root, 'node_modules/axe-core/axe.min.js') });
+  const hintAudit = await page.evaluate(async () => (await window.axe.run(document.querySelector('[data-testid="bot-panel"]'))).violations.map((v) => `${v.id}: ${v.description}`));
+  assert.deepEqual(hintAudit, []);
+  process.stdout.write('PASS light-model hint: hidden at rest, hover, focus, tap, Escape, outside press, Change model\n');
+
   assert.deepEqual(errors, []);
   process.stdout.write('PASS avatars, grouped/recent commands, fuzzy highlights, keyboard, empty state and menu axe audit\n');
 } finally {

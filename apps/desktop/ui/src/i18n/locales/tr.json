@@ -1771,6 +1771,10 @@
       "toolsOnHint": "Okumaya izin var. Göndermek her zaman bu botun izin moduna uyar ve varsayılan olarak önce sorar."
     },
     "makeMain": "Ana bot yap",
+    "modelHint": {
+      "change": "Modeli değiştir",
+      "label": "Bu model hakkında"
+    },
     "muteNotify": "Çalışma bildirimlerini sessize al",
     "muteNotifyHint": "Bu botun biten ve başarısız çalışmaları sessiz kalır ve bildirim geçmişine düşer. Onaylar ve sorular yine bildirilir.",
     "myComputer": "Benim bilgisayarım",

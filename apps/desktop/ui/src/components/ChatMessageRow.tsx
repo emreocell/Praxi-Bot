@@ -1,5 +1,5 @@
 import { Pencil } from "lucide-react";
-import { memo, useState, type CSSProperties } from "react";
+import { memo, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar } from "ui";
 import type { ApiClient } from "../api/client";
@@ -63,11 +63,13 @@ export const UserMessageRow = memo(function UserMessageRow({
 });
 
 export const AssistantMessageRow = memo(function AssistantMessageRow({
-  id, ts, text, source, botId, runId, run, runDto, guest, times, client
+  id, ts, text, source, botId, runId, run, runDto, guest, times, client, runActions
 }: {
   id: string; ts: number; text: string; source?: string | null; botId?: string | null;
   runId?: string | null; run?: RunState; runDto?: Run; guest?: Bot; times: MessageTimes;
   client: ApiClient | null;
+  /** The finished run's actions, when this is its newest answer (the one row that re-renders with them). */
+  runActions?: ReactNode;
 }) {
   const { t } = useTranslation();
   const gv = guest ? botView(guest) : null;
@@ -90,7 +92,7 @@ export const AssistantMessageRow = memo(function AssistantMessageRow({
           </DocCitationProvider>
         </FoldedBody>
       </div>
-      <MessageActions side="bot" meta={<MessageTime ts={ts} mode={times} />}>
+      <MessageActions side="bot" runActions={runActions} meta={<MessageTime ts={ts} mode={times} />}>
         <CopyButton text={text} />
         <SpeakButton id={id} text={text} botId={botId} />
         <MessageInfo client={client} side="bot" ts={ts} source={source} runId={runId} run={run} runDto={runDto} onLocalModel={setLocalModel} />
