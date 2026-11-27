@@ -23,7 +23,7 @@ test("the now row lives in the header, after the model line and before the actio
 test("the panel shows the access level as one word, every level has one", () => {
   assert.match(panel, /<PermissionChip preset=\{preset\} short \/>/);
   for (const preset of ["full", "approve-destructive", "read-and-draft", "read-only", "custom"]) {
-    assert.ok(en.botPanel.access[preset], preset);
+    assert.ok(en.accessLevel[preset]?.name, preset);
   }
 });
 

@@ -38,20 +38,6 @@ export function SkeletonLines({ count = 3, className }: { count?: number; classN
   );
 }
 
-/** A list of `count` row placeholders: an icon tile and two lines each (a card, a connection, a skill). */
-export function SkeletonRows({ count = 3, className }: { count?: number; className?: string }) {
-  return (
-    <span className={[styles.rows, className ?? ""].filter(Boolean).join(" ")} aria-hidden="true">
-      {Array.from({ length: count }, (_, i) => (
-        <span key={i} className={styles.row}>
-          <Skeleton shape="circle" width="var(--size-avatar-md)" height="var(--size-avatar-md)" />
-          <SkeletonLines count={2} className={styles.rowText} />
-        </span>
-      ))}
-    </span>
-  );
-}
-
 /** The container of a loading placeholder: one polite status line for assistive technology, the shapes for the eyes. */
 export function SkeletonRegion({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (

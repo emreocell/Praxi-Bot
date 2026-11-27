@@ -72,8 +72,6 @@
   "account": {
     "ai": "AI",
     "appearance": "Appearance",
-    "apps": "Apps",
-    "computer": "Computer",
     "defaultName": "User",
     "help": "Help",
     "localComputer": "This computer",
@@ -444,23 +442,15 @@
       "pair": "Pair this computer",
       "verify": "Check that it works"
     },
-    "startFailed": "Could not start. Check the details above and try again.",
     "starting": "Starting…",
     "state": {
-      "done": "Done",
-      "failed": "Stopped here",
-      "pending": "Waiting",
-      "running": "Working…",
-      "skipped": "Already in place, nothing to do",
-      "waiting": "Needs your answer",
-      "warn": "Done, with a note"
+      "pending": "Waiting"
     },
     "stepOf": "Step {{n}} of 3",
     "title": "Add a server",
     "useServer": "Use this server",
     "user": "User",
-    "userHint": "Oracle and Ubuntu: ubuntu. Oracle Linux: opc.",
-    "viewScreen": "View screen"
+    "userHint": "Oracle and Ubuntu: ubuntu. Oracle Linux: opc."
   },
   "addSkill": {
     "apps": "Apps",
@@ -708,7 +698,6 @@
     "access": {
       "all": "All bots",
       "deletedBot": "deleted bot",
-      "edit": "Bots",
       "label": "Who can use this app",
       "noBotsYet": "There are no bots yet. Create a bot first.",
       "nobody": "No bot can use this app until you tick at least one.",
@@ -725,11 +714,6 @@
     },
     "auth": {
       "expiredToast": "The {{name}} sign-in was not finished within {{minutes}} minutes and was cancelled.",
-      "failedToast": "{{name}}: sign-in did not finish",
-      "openFailed": "{{name}}: the sign-in page could not be opened in the browser",
-      "pasteHint": "If the browser runs on another computer and shows an error page after you sign in, copy that page's full address and paste it here.",
-      "pasteLabel": "Redirect address from the browser",
-      "pasteSubmit": "Finish sign-in",
       "signIn": "Sign in",
       "signOut": "Sign out",
       "signedInToast": "{{name}}: signed in",
@@ -740,18 +724,6 @@
     "botsNone": "No bots",
     "botsSome": "Bots: {{names}}",
     "catalogSection": "Discover",
-    "categories": {
-      "all": "All",
-      "browser": "Browser",
-      "communication": "Communication",
-      "data": "Data",
-      "developer": "Developer",
-      "files": "Files",
-      "home": "Home",
-      "productivity": "Productivity",
-      "search": "Search"
-    },
-    "categoriesLabel": "Categories",
     "changed": {
       "advice": "Only turn it back on if you trust this app and the new wording looks right.",
       "after": "What it says now",
@@ -764,7 +736,6 @@
       "title": "A tool changed after you approved it",
       "toast": "{{name}}: new version of “{{tool}}” approved"
     },
-    "close": "Close",
     "component": {
       "confirm": "Praxi will run this command to install {{name}}:",
       "failed": {
@@ -790,12 +761,6 @@
     },
     "composio": {
       "advanced": {
-        "mode": {
-          "login": "Linked through your Composio sign-in.",
-          "none": "Not linked yet. The first Connect on an app asks you to sign in once.",
-          "project_key": "Using your own Composio project key."
-        },
-        "ownKey": "Use my own project key",
         "signOut": "Sign out of Composio",
         "title": "Composio"
       },
@@ -805,10 +770,7 @@
         "rate_limited": "Composio is busy: showing the saved app list.",
         "unauthorized": "Composio no longer accepts the saved sign-in: showing the saved app list."
       },
-      "connectedSection": "Connected",
-      "disable": "Turn off",
       "disconnectedLocal": "{{name}} was removed here. Remove it in the Composio dashboard too.",
-      "enable": "Turn on",
       "expiredHint": "The sign-in ran out. Reconnect to continue.",
       "failedHint": "The sign-in did not finish. Try again.",
       "getKey": "Open the Composio key page",
@@ -816,18 +778,12 @@
       "keyLabel": "Composio API key",
       "keySave": "Save key",
       "link": {
-        "body": "A free Composio account connects your apps. Press the button, sign in in your browser and come back. There is nothing to copy.",
-        "failed": "The sign-in did not finish. Try again.",
-        "open": "Open Composio",
-        "privacy": "Inputs and results pass through Composio's servers. Praxi asks you before every action.",
-        "title": "Link Composio (free) — one time",
         "waiting": "Waiting for you in the browser…"
       },
       "loadFailed": "The app list could not be loaded.",
       "loadMore": "Show more",
       "loading": "Loading apps…",
       "noResults": "No matching apps.",
-      "openFailed": "The sign-in link was not opened because it is not a Composio link.",
       "relogin": "Sign in to Composio again",
       "retry": "Try again",
       "state": {
@@ -837,7 +793,6 @@
         "not_connected": "Not connected",
         "pending": "Signing in"
       },
-      "title": "Composio",
       "waiting": "Waiting for you in the browser…"
     },
     "composioHub": {
@@ -915,9 +870,7 @@
     "connect": "Connect",
     "connectApp": "Connect {{name}}",
     "connectNow": "Connect",
-    "connected": "Connected",
     "connectedAs": "Connected as {{account}}",
-    "connectedSection": "Connected",
     "connectedToast": "{{name}} connected",
     "custom": {
       "add": "Add server",
@@ -1074,12 +1027,8 @@
       "tokenLabel": "Long-lived access key",
       "tokenStored": "A key is stored. Leave this empty to keep it."
     },
-    "loading": "Loading catalog…",
-    "localSection": "On this computer",
     "manage": "Manage",
-    "mcpServers": "Advanced",
     "missingSecret": "Enter every required secret.",
-    "noResults": "No matching servers.",
     "reconnect": "Reconnect",
     "sample": {
       "empty": "It works, but there is nothing to show yet.",
@@ -1117,11 +1066,7 @@
         "unknown_app": "Composio does not offer {{name}}, so it cannot be connected. Look for another app in the list.",
         "upstream": "Composio could not be reached or did not answer. Check the connection of the computer the bots run on, then try again."
       },
-      "login": "The sign-in page opened in your browser. Finish it there and {{name}} opens next by itself.",
-      "opened": "{{name}}'s page is open in your browser. Allow access there; it shows up as Connected here.",
-      "progress": "Step {{current}} of {{total}}",
-      "timedOut": "The sign-in was not finished in time. Press Connect to start again.",
-      "title": "Connect {{name}}"
+      "opened": "{{name}}'s page is open in your browser. Allow access there; it shows up as Connected here."
     },
     "signIn": {
       "copyLink": "Copy the link",
@@ -1172,7 +1117,6 @@
       "quarantined": "Quarantined"
     },
     "test": {
-      "noSamples": "Nothing to show yet (the account may be empty).",
       "ok": "It works. The app answered.",
       "okAs": "It works. Connected as {{account}}.",
       "run": "Test connection",
@@ -1200,8 +1144,7 @@
       "savedNo": "{{name}}: every action asks again.",
       "savedYes": "{{name}}: its read-only tools now run without asking.",
       "yes": "Yes, let its read-only tools run without asking"
-    },
-    "usedBy": "Used by"
+    }
   },
   "audit": {
     "action": "Technical name",
@@ -1718,30 +1661,6 @@
     "permissions": "Permissions",
     "persona": "Persona",
     "personaPlaceholder": "How should this bot behave? (system instruction)",
-    "preset": {
-      "approve-destructive": {
-        "hint": "Reads, browsing, workspace edits and the bot's own computer run freely; deleting, sending, money and your own PC ask first.",
-        "name": "Approve destructive (Balanced)"
-      },
-      "custom": {
-        "hint": "Choose a level for each category.",
-        "name": "Custom"
-      },
-      "full": {
-        "exceptions": "Full access asks only before spending money. Shell commands, file changes, installs, browsing, sign-ups with the bot’s own e-mail, forms, e-mail and messages run without a card, in your own chats and in scheduled and triggered runs. Payments are recognised from checkout pages, payment programs, payment APIs and payment apps; a charge hidden behind an ordinary button cannot be recognised. Catastrophic never-list commands, your own site rules and mail that the safety checks flag (opted-out recipients, daily volume) are still held back.",
-        "exceptionsTitle": "See exceptions",
-        "hint": "Asks only before spending money. Everything else runs without asking.",
-        "name": "Full access"
-      },
-      "read-and-draft": {
-        "hint": "Reads are free; every change, send, page fetch, click and command asks first.",
-        "name": "Read & draft (Careful)"
-      },
-      "read-only": {
-        "hint": "The bot can look but never change anything.",
-        "name": "Read-only"
-      }
-    },
     "role": {
       "classifier": "Classifier",
       "executor": "Executor",
@@ -1792,14 +1711,6 @@
     "used": "Used {{usd}} and {{amount}} of text usage. Resets {{when}}."
   },
   "botPanel": {
-    "access": {
-      "approve-destructive": "Balanced",
-      "custom": "Custom",
-      "full": "Full access",
-      "read-and-draft": "Careful",
-      "read-only": "Read-only"
-    },
-    "botsComputer": "{{bot}}'s computer · {{name}}",
     "chats": "Chats",
     "close": "Close panel",
     "computer": "Computer",
@@ -1841,8 +1752,6 @@
     },
     "muteNotify": "Mute run notifications",
     "muteNotifyHint": "Finished and failed runs of this bot stay silent and go to the notification history. Approvals and questions still notify.",
-    "myComputer": "My computer",
-    "needsDesktop": "{{name}} has no desktop session, so there is no screen to show. To add one, run this on this computer:",
     "noChatMatches": "No chats match",
     "now": {
       "detailTitle": "Current run",
@@ -1854,22 +1763,8 @@
       "thinking": "Thinking…",
       "waiting": "Waiting for your approval"
     },
-    "pausedIdle": "Paused to save resources - click to resume",
-    "permissionLabel": "Permission level: {{level}}",
     "profile": "Bot profile",
-    "runsOnHost": "Runs on {{name}} (host)",
-    "runsOnLocal": "Runs on this computer",
-    "screenListFailed": "{{name}}'s screen list could not be loaded. It will be tried again in a moment.",
     "searchChats": "Search chats…",
-    "serverIssue": {
-      "connecting": "Connecting to {{name}}… its screen shows up as soon as it answers.",
-      "notPaired": "{{name}} no longer accepts this computer. Pair it again with a new ticket.",
-      "offline": "{{name}} is not answering. Its bots keep running there; this app reconnects on its own.",
-      "version": "This app and {{name}} are on different versions. Update both to the same version."
-    },
-    "showScreen": "Show screen",
-    "sideBot": "Bot's computer",
-    "sideMine": "My computer",
     "subagents": {
       "detail": {
         "approval": "Waiting for your approval. Decide in the chat.",
@@ -1902,7 +1797,6 @@
       "library": "Library",
       "tools": "Tools"
     },
-    "thisBot": "This bot",
     "toggle": "Bot panel",
     "triggers": {
       "account": "Mailbox",
@@ -3225,24 +3119,12 @@
     },
     "take": "Take control",
     "terminal": "Terminal",
-    "terminalSoon": "Coming soon",
     "thisComputer": "This computer",
     "title": "Computer"
   },
   "computerPicker": {
-    "add": "Add server…",
     "host": "Host",
-    "label": "Computer: {{name}}",
-    "link": {
-      "connected": "Connected",
-      "connecting": "Connecting…",
-      "idle": "Paired, not connected",
-      "offline": "Not answering",
-      "unreachable": "No longer paired"
-    },
-    "localHint": "Runs here, on this PC",
-    "makeHome": "Make this server my bots' home…",
-    "menu": "Computer"
+    "label": "Computer: {{name}}"
   },
   "connectionTest": {
     "button": "Test connection",
@@ -7046,10 +6928,8 @@
   },
   "settingsModal": {
     "ai": {
-      "advanced": "Advanced provider settings",
       "defaultModel": {
         "description": "Used when a bot has no model set.",
-        "heading": "Default",
         "title": "Default model"
       },
       "detected": {
@@ -7064,7 +6944,6 @@
         "docs": "Docs",
         "enabledToast": "{{name}} enabled.",
         "experimentalChip": "Experimental",
-        "howSignIn": "How to sign in",
         "install": "Install",
         "installApproval": "Runs as your current user, without elevation. This downloads and executes vendor software. Approve once to continue. Sign in separately in your terminal.",
         "installDone": "Installer finished. Detection refreshed; sign-in may still be required.",
@@ -7078,12 +6957,10 @@
           "timeout": "Installation exceeded ten minutes and was stopped. Check the output before retrying."
         },
         "installLabel": "Install command",
-        "installOutput": "Installer output (untrusted)",
         "installRunning": "Installing… leaving this section does not revoke an accepted approval.",
         "installSummary": "Install or update {{engine}}",
         "loginLabel": "Sign in with",
         "moreEngines": "More engines you can install ({{count}})",
-        "notInstalled": "Not installed",
         "noteNative": "Runs with its own tools: choose it in a bot's Engine settings.",
         "noteUnsupported": "Praxi detects it but cannot run it as an engine yet.",
         "noteUnverified": "Unverified command: check the vendor docs, then copy and run it yourself.",
@@ -7093,8 +6970,6 @@
         "problem": "That did not work.",
         "refresh": "Rescan",
         "retry": "Retry",
-        "signIn": "Sign in",
-        "signInIn": "Run in a terminal:",
         "status": {
           "notInstalled": "Not installed",
           "outdated": "Update needed",
@@ -7749,11 +7624,6 @@
         "enter": "Enter",
         "title": "Send message"
       },
-      "theme": {
-        "description": "Choose a look for your workspace.",
-        "system": "Follow system",
-        "title": "Theme"
-      },
       "times": {
         "description": "A small time next to each message. Hover it for the seconds and the full date.",
         "minutes": "Hour:minute",
@@ -7910,37 +7780,11 @@
         "empty": "No standing site or action permissions yet. Choose \"Always allow\" on an approval card to add one here.",
         "title": "Allowed sites and actions"
       },
-      "compare": "What each level does alone, and what it asks",
       "custom": "You have custom rules (see Advanced). Pick a level to replace them.",
       "description": "Pick how much freedom your bots have. You can change it any time.",
-      "lead": "Choose one level. Every bot follows it unless you gave that bot its own rules.",
-      "levels": {
-        "balanced": {
-          "ask": "Delete things, send messages or email, spend money, use your own computer.",
-          "name": "Balanced",
-          "own": "Read, browse, edit files in the work area.",
-          "summary": "Everyday work flows. Risky things need your OK."
-        },
-        "careful": {
-          "ask": "Edit or save a file, send a message or email, open a web page, run a command.",
-          "name": "Careful",
-          "own": "Read files, look things up, draft text.",
-          "summary": "Bots look, but you approve every change."
-        },
-        "handsOff": {
-          "ask": "Only spending money, and catastrophic commands on the never-list.",
-          "name": "Full access",
-          "own": "Everything else: commands, files, browsing, sign-ups, forms, e-mail and messages, also in scheduled and triggered runs.",
-          "summary": "Bots get on with it. They ask only before spending money."
-        }
-      },
       "offline": "Not connected to the helper yet, so the level cannot be shown or changed.",
-      "onItsOwn": "On its own",
-      "recommended": "Recommended",
-      "samePresets": "These three levels are the same presets you can pick for a single bot under Permissions: Careful is Read & draft, Balanced is Approve destructive, Full access is Full.",
       "saved": "Saved. It applies from the bot’s next step.",
-      "title": "What bots can do on their own",
-      "willAsk": "Will ask you first"
+      "title": "What bots can do on their own"
     },
     "save": {
       "idle": "Changes save by themselves",

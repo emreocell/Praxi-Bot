@@ -72,8 +72,6 @@
   "account": {
     "ai": "KI",
     "appearance": "Darstellung",
-    "apps": "Apps",
-    "computer": "Computer",
     "defaultName": "Benutzer",
     "help": "Hilfe",
     "localComputer": "Dieser Computer",
@@ -444,23 +442,15 @@
       "pair": "Diesen Computer koppeln",
       "verify": "Prüfen, ob es funktioniert"
     },
-    "startFailed": "Der Start hat nicht geklappt. Prüfe die Details oben und versuche es noch mal.",
     "starting": "Startet …",
     "state": {
-      "done": "Fertig",
-      "failed": "Hier gestoppt",
-      "pending": "Wartet",
-      "running": "Arbeitet …",
-      "skipped": "Bereits vorhanden, nichts zu tun",
-      "waiting": "Braucht deine Antwort",
-      "warn": "Fertig, mit einem Hinweis"
+      "pending": "Wartet"
     },
     "stepOf": "Schritt {{n}} von 3",
     "title": "Server hinzufügen",
     "useServer": "Diesen Server verwenden",
     "user": "Benutzer",
-    "userHint": "Oracle und Ubuntu: ubuntu. Oracle Linux: opc.",
-    "viewScreen": "Bildschirm ansehen"
+    "userHint": "Oracle und Ubuntu: ubuntu. Oracle Linux: opc."
   },
   "addSkill": {
     "apps": "Apps",
@@ -708,7 +698,6 @@
     "access": {
       "all": "Alle Bots",
       "deletedBot": "gelöschter Bot",
-      "edit": "Bots",
       "label": "Wer diese App nutzen darf",
       "noBotsYet": "Es gibt noch keine Bots. Erstelle zuerst einen Bot.",
       "nobody": "Kein Bot kann diese App nutzen, bis du mindestens einen ankreuzt.",
@@ -725,11 +714,6 @@
     },
     "auth": {
       "expiredToast": "Die Anmeldung bei {{name}} wurde nicht innerhalb von {{minutes}} Minuten abgeschlossen und abgebrochen.",
-      "failedToast": "{{name}}: Anmeldung nicht abgeschlossen",
-      "openFailed": "{{name}}: Die Anmeldeseite konnte nicht im Browser geöffnet werden",
-      "pasteHint": "Wenn der Browser auf einem anderen Computer läuft und nach der Anmeldung eine Fehlerseite zeigt, kopiere die vollständige Adresse dieser Seite und füge sie hier ein.",
-      "pasteLabel": "Weiterleitungsadresse aus dem Browser",
-      "pasteSubmit": "Anmeldung abschließen",
       "signIn": "Anmelden",
       "signOut": "Abmelden",
       "signedInToast": "{{name}}: angemeldet",
@@ -740,18 +724,6 @@
     "botsNone": "Keine Bots",
     "botsSome": "Bots: {{names}}",
     "catalogSection": "Entdecken",
-    "categories": {
-      "all": "Alle",
-      "browser": "Browser",
-      "communication": "Kommunikation",
-      "data": "Daten",
-      "developer": "Entwickler",
-      "files": "Dateien",
-      "home": "Zuhause",
-      "productivity": "Produktivität",
-      "search": "Suche"
-    },
-    "categoriesLabel": "Kategorien",
     "changed": {
       "advice": "Schalten Sie es nur wieder ein, wenn Sie dieser App vertrauen und der neue Text in Ordnung aussieht.",
       "after": "Das steht jetzt dort",
@@ -764,7 +736,6 @@
       "title": "Ein Werkzeug hat sich nach Ihrer Freigabe geändert",
       "toast": "{{name}}: neue Version von „{{tool}}“ freigegeben"
     },
-    "close": "Schließen",
     "component": {
       "confirm": "Praxi führt diesen Befehl aus, um {{name}} zu installieren:",
       "failed": {
@@ -790,12 +761,6 @@
     },
     "composio": {
       "advanced": {
-        "mode": {
-          "login": "Über deine Composio-Anmeldung verknüpft.",
-          "none": "Noch nicht verknüpft. Beim ersten „Verbinden“ einer App wirst du einmal zur Anmeldung aufgefordert.",
-          "project_key": "Verwendet deinen eigenen Composio-Projektschlüssel."
-        },
-        "ownKey": "Eigenen Projektschlüssel verwenden",
         "signOut": "Von Composio abmelden",
         "title": "Composio"
       },
@@ -805,10 +770,7 @@
         "rate_limited": "Composio ist ausgelastet: Die gespeicherte App-Liste wird angezeigt.",
         "unauthorized": "Composio akzeptiert die gespeicherte Anmeldung nicht mehr: Es wird die gespeicherte App-Liste angezeigt."
       },
-      "connectedSection": "Verbunden",
-      "disable": "Ausschalten",
       "disconnectedLocal": "{{name}} wurde hier entfernt. Entferne es auch im Composio-Dashboard.",
-      "enable": "Einschalten",
       "expiredHint": "Die Anmeldung ist abgelaufen. Verbinde dich neu, um fortzufahren.",
       "failedHint": "Die Anmeldung wurde nicht abgeschlossen. Versuche es erneut.",
       "getKey": "Composio-Schlüsselseite öffnen",
@@ -816,18 +778,12 @@
       "keyLabel": "Composio-API-Schlüssel",
       "keySave": "Schlüssel speichern",
       "link": {
-        "body": "Ein kostenloses Composio-Konto verbindet deine Apps. Drücke die Schaltfläche, melde dich im Browser an und komm zurück. Es muss nichts kopiert werden.",
-        "failed": "Die Anmeldung wurde nicht abgeschlossen. Versuche es erneut.",
-        "open": "Composio öffnen",
-        "privacy": "Eingaben und Ergebnisse laufen über die Server von Composio. Praxi fragt dich vor jeder Aktion.",
-        "title": "Composio (kostenlos) verknüpfen – einmalig",
         "waiting": "Wartet auf dich im Browser …"
       },
       "loadFailed": "Die App-Liste konnte nicht geladen werden.",
       "loadMore": "Mehr anzeigen",
       "loading": "Apps werden geladen …",
       "noResults": "Keine passenden Apps.",
-      "openFailed": "Der Anmeldelink wurde nicht geöffnet, weil er kein Composio-Link ist.",
       "relogin": "Erneut bei Composio anmelden",
       "retry": "Erneut versuchen",
       "state": {
@@ -837,15 +793,12 @@
         "not_connected": "Nicht verbunden",
         "pending": "Anmeldung läuft"
       },
-      "title": "Composio",
       "waiting": "Wartet auf dich im Browser …"
     },
     "connect": "Verbinden",
     "connectApp": "{{name}} verbinden",
     "connectNow": "Verbinden",
-    "connected": "Verbunden",
     "connectedAs": "Verbunden als {{account}}",
-    "connectedSection": "Verbunden",
     "connectedToast": "{{name}} verbunden",
     "custom": {
       "add": "Server hinzufügen",
@@ -960,12 +913,8 @@
       "productivity": "Produktivität",
       "social": "Soziales"
     },
-    "loading": "Katalog wird geladen …",
-    "localSection": "Auf diesem Computer",
     "manage": "Verwalten",
-    "mcpServers": "Erweitert",
     "missingSecret": "Gib alle erforderlichen Zugangsdaten ein.",
-    "noResults": "Keine passenden Server.",
     "reconnect": "Neu verbinden",
     "sample": {
       "empty": "Es funktioniert, aber es gibt noch nichts anzuzeigen.",
@@ -1003,11 +952,7 @@
         "unknown_app": "Composio bietet {{name}} nicht an, deshalb lässt es sich nicht verbinden. Suche in der Liste nach einer anderen App.",
         "upstream": "Composio war nicht erreichbar oder hat nicht geantwortet. Prüfe die Verbindung des Computers, auf dem die Bots laufen, und versuche es erneut."
       },
-      "login": "Die Anmeldeseite wurde in deinem Browser geöffnet. Schließe die Anmeldung dort ab, danach öffnet sich {{name}} von selbst.",
-      "opened": "Die Seite von {{name}} ist in deinem Browser geöffnet. Erlaube dort den Zugriff; hier erscheint die App dann als „Verbunden“.",
-      "progress": "Schritt {{current}} von {{total}}",
-      "timedOut": "Die Anmeldung wurde nicht rechtzeitig abgeschlossen. Klicke auf „Verbinden“, um neu zu starten.",
-      "title": "{{name}} verbinden"
+      "opened": "Die Seite von {{name}} ist in deinem Browser geöffnet. Erlaube dort den Zugriff; hier erscheint die App dann als „Verbunden“."
     },
     "signIn": {
       "copyLink": "Link kopieren",
@@ -1058,7 +1003,6 @@
       "quarantined": "In Quarantäne"
     },
     "test": {
-      "noSamples": "Noch nichts anzuzeigen (das Konto ist vielleicht leer).",
       "ok": "Es funktioniert. Die App hat geantwortet.",
       "okAs": "Es funktioniert. Verbunden als {{account}}.",
       "run": "Verbindung testen",
@@ -1086,8 +1030,7 @@
       "savedNo": "{{name}}: Jede Aktion fragt wieder nach.",
       "savedYes": "{{name}}: Die lesenden Werkzeuge laufen jetzt ohne Nachfrage.",
       "yes": "Ja, nur lesende Werkzeuge ohne Nachfrage ausführen"
-    },
-    "usedBy": "Genutzt von"
+    }
   },
   "audit": {
     "action": "Technischer Name",
@@ -1600,30 +1543,6 @@
     "permissions": "Berechtigungen",
     "persona": "Persönlichkeit",
     "personaPlaceholder": "Wie soll sich dieser Bot verhalten? (Systemanweisung)",
-    "preset": {
-      "approve-destructive": {
-        "hint": "Lesen, Surfen, Änderungen im Arbeitsbereich und der eigene Computer des Bots laufen frei; Löschen, Senden, Geld und dein eigener PC fragen zuerst.",
-        "name": "Kritisches genehmigen (Ausgewogen)"
-      },
-      "custom": {
-        "hint": "Wähle eine Stufe für jede Kategorie.",
-        "name": "Benutzerdefiniert"
-      },
-      "full": {
-        "exceptions": "Läuft ohne Nachfrage (auch Löschen), außer bei Geld, E-Mail-Versand, Aktivierung von Zeitplänen und katastrophalen Befehlen auf der Verbotsliste. Wenn du den Lauf selbst startest, besucht der Bot auch nach dem Lesen einer Seite jede öffentliche Webseite, registriert sich und füllt Formulare ohne Nachfrage aus. Er fragt nur dann wieder, wenn der Lauf auch deine privaten Daten (Dateien, E-Mails, Gedächtnis) hält und eine neue Seite oder ein Formular ein Stück davon enthält, bei einem gespeicherten Geheimnis, bei einem Seitenskript und, nach dem Lesen nicht vertrauenswürdiger Inhalte, vor dem Start eines Programms.",
-        "exceptionsTitle": "Ausnahmen ansehen",
-        "hint": "Läuft ohne Nachfrage, auch beim Löschen. Ein paar feste Stopps fragen immer zuerst.",
-        "name": "Voll"
-      },
-      "read-and-draft": {
-        "hint": "Lesen ist frei; jede Änderung, jedes Senden, jeder Seitenabruf, Klick und Befehl fragt zuerst.",
-        "name": "Lesen & entwerfen (Vorsichtig)"
-      },
-      "read-only": {
-        "hint": "Der Bot kann nachsehen, aber nie etwas ändern.",
-        "name": "Nur lesen"
-      }
-    },
     "role": {
       "classifier": "Klassifikator",
       "executor": "Ausführung",
@@ -1674,14 +1593,6 @@
     "used": "{{usd}} und {{amount}} Textbausteine verbraucht. Zurückgesetzt am {{when}}."
   },
   "botPanel": {
-    "access": {
-      "approve-destructive": "Balanced",
-      "custom": "Custom",
-      "full": "Full access",
-      "read-and-draft": "Careful",
-      "read-only": "Read-only"
-    },
-    "botsComputer": "Computer von {{bot}} · {{name}}",
     "chats": "Chats",
     "close": "Panel schließen",
     "computer": "Computer",
@@ -1719,8 +1630,6 @@
     "makeMain": "Zum Haupt-Bot machen",
     "muteNotify": "Lauf-Benachrichtigungen stummschalten",
     "muteNotifyHint": "Beendete und fehlgeschlagene Läufe dieses Bots bleiben still und landen im Benachrichtigungsverlauf. Freigaben und Fragen melden sich weiterhin.",
-    "myComputer": "Mein Computer",
-    "needsDesktop": "{{name}} hat keine Desktop-Sitzung, daher gibt es keinen Bildschirm zum Anzeigen. Um eine hinzuzufügen, führe auf diesem Computer aus:",
     "noChatMatches": "Keine passenden Chats",
     "now": {
       "detailTitle": "Aktueller Lauf",
@@ -1732,22 +1641,8 @@
       "thinking": "Denkt nach …",
       "waiting": "Wartet auf deine Genehmigung"
     },
-    "pausedIdle": "Zum Ressourcensparen pausiert – zum Fortsetzen klicken",
-    "permissionLabel": "Berechtigungsstufe: {{level}}",
     "profile": "Bot-Profil",
-    "runsOnHost": "Läuft auf {{name}} (Host)",
-    "runsOnLocal": "Läuft auf diesem Computer",
-    "screenListFailed": "Die Bildschirmliste von {{name}} konnte nicht geladen werden. Es wird gleich noch einmal versucht.",
     "searchChats": "Chats durchsuchen …",
-    "serverIssue": {
-      "connecting": "Verbindung zu {{name}} wird hergestellt … sein Bildschirm erscheint, sobald er antwortet.",
-      "notPaired": "{{name}} akzeptiert diesen Computer nicht mehr. Koppele ihn erneut mit einem neuen Ticket.",
-      "offline": "{{name}} antwortet nicht. Seine Bots laufen dort weiter; diese App verbindet sich von selbst neu.",
-      "version": "Diese App und {{name}} haben unterschiedliche Versionen. Aktualisiere beide auf dieselbe Version."
-    },
-    "showScreen": "Bildschirm anzeigen",
-    "sideBot": "Computer des Bots",
-    "sideMine": "Mein Computer",
     "subagents": {
       "detail": {
         "approval": "Wartet auf deine Genehmigung. Entscheide im Chat.",
@@ -1780,7 +1675,6 @@
       "library": "Bibliothek",
       "tools": "Werkzeuge"
     },
-    "thisBot": "Dieser Bot",
     "toggle": "Bot-Panel",
     "triggers": {
       "account": "Postfach",
@@ -3103,24 +2997,12 @@
     },
     "take": "Kontrolle übernehmen",
     "terminal": "Terminal",
-    "terminalSoon": "Demnächst verfügbar",
     "thisComputer": "Dieser Computer",
     "title": "Computer"
   },
   "computerPicker": {
-    "add": "Server hinzufügen …",
     "host": "Server",
-    "label": "Computer: {{name}}",
-    "link": {
-      "connected": "Verbunden",
-      "connecting": "Verbindet …",
-      "idle": "Gekoppelt, nicht verbunden",
-      "offline": "Antwortet nicht",
-      "unreachable": "Nicht mehr gekoppelt"
-    },
-    "localHint": "Läuft hier, auf diesem PC",
-    "makeHome": "Diesen Server zum Zuhause meiner Bots machen …",
-    "menu": "Computer"
+    "label": "Computer: {{name}}"
   },
   "connectionTest": {
     "button": "Verbindung testen",
@@ -6893,10 +6775,8 @@
   },
   "settingsModal": {
     "ai": {
-      "advanced": "Erweiterte Anbietereinstellungen",
       "defaultModel": {
         "description": "Wird verwendet, wenn für einen Bot kein Modell festgelegt ist.",
-        "heading": "Standard",
         "title": "Standardmodell"
       },
       "detected": {
@@ -6911,7 +6791,6 @@
         "docs": "Doku",
         "enabledToast": "{{name}} aktiviert.",
         "experimentalChip": "Experimentell",
-        "howSignIn": "So meldest du dich an",
         "install": "Installieren",
         "installApproval": "Läuft als dein aktueller Benutzer, ohne erhöhte Rechte. Dabei wird Software des Anbieters heruntergeladen und ausgeführt. Genehmige einmal, um fortzufahren. Melde dich separat in deinem Terminal an.",
         "installDone": "Installation abgeschlossen. Erkennung aktualisiert; eine Anmeldung kann noch nötig sein.",
@@ -6925,12 +6804,10 @@
           "timeout": "Die Installation hat zehn Minuten überschritten und wurde gestoppt. Prüfe die Ausgabe, bevor du es erneut versuchst."
         },
         "installLabel": "Installationsbefehl",
-        "installOutput": "Ausgabe des Installationsprogramms (nicht vertrauenswürdig)",
         "installRunning": "Wird installiert … das Verlassen dieses Bereichs widerruft eine erteilte Genehmigung nicht.",
         "installSummary": "{{engine}} installieren oder aktualisieren",
         "loginLabel": "Anmelden mit",
         "moreEngines": "Weitere installierbare Engines ({{count}})",
-        "notInstalled": "Nicht installiert",
         "noteNative": "Läuft mit eigenen Werkzeugen: Wähle sie in den Engine-Einstellungen eines Bots.",
         "noteUnsupported": "Praxi erkennt sie, kann sie aber noch nicht als Engine ausführen.",
         "noteUnverified": "Ungeprüfter Befehl: Lies die Dokumentation des Anbieters, kopiere ihn dann und führe ihn selbst aus.",
@@ -6940,8 +6817,6 @@
         "problem": "Das hat nicht funktioniert.",
         "refresh": "Neu scannen",
         "retry": "Erneut versuchen",
-        "signIn": "Anmelden",
-        "signInIn": "In einem Terminal ausführen:",
         "status": {
           "notInstalled": "Nicht installiert",
           "outdated": "Update nötig",
@@ -7364,11 +7239,6 @@
         "enter": "Enter",
         "title": "Nachricht senden"
       },
-      "theme": {
-        "description": "Wähle ein Aussehen für deinen Arbeitsbereich.",
-        "system": "System folgen",
-        "title": "Design"
-      },
       "times": {
         "description": "Eine kleine Uhrzeit neben jeder Nachricht. Fahre darüber, um Sekunden und das vollständige Datum zu sehen.",
         "minutes": "Stunde:Minute",
@@ -7525,37 +7395,11 @@
         "empty": "Noch keine dauerhaften Website- oder Aktionsfreigaben. Wählen Sie in einer Bestätigungskarte „Immer erlauben“, um eine hinzuzufügen.",
         "title": "Erlaubte Websites und Aktionen"
       },
-      "compare": "What each level does alone, and what it asks",
       "custom": "Du hast eigene Regeln (siehe Erweitert). Wähle eine Stufe, um sie zu ersetzen.",
       "description": "Wähle, wie viel Freiheit deine Bots haben. Du kannst es jederzeit ändern.",
-      "lead": "Wähle eine Stufe. Jeder Bot folgt ihr, außer du hast ihm eigene Regeln gegeben.",
-      "levels": {
-        "balanced": {
-          "ask": "Dinge löschen, Nachrichten oder E-Mails senden, Geld ausgeben, deinen eigenen Computer nutzen.",
-          "name": "Ausgewogen",
-          "own": "Lesen, surfen, Dateien im Arbeitsbereich bearbeiten.",
-          "summary": "Der Alltag läuft. Riskantes braucht dein OK."
-        },
-        "careful": {
-          "ask": "Eine Datei ändern oder speichern, Nachricht oder E-Mail senden, eine Webseite öffnen, einen Befehl ausführen.",
-          "name": "Vorsichtig",
-          "own": "Dateien lesen, etwas nachschlagen, Texte entwerfen.",
-          "summary": "Bots schauen nur, du bestätigst jede Änderung."
-        },
-        "handsOff": {
-          "ask": "Geld ausgeben, gefährliche Befehle und alles, nachdem eine nicht vertrauenswürdige Seite gelesen wurde.",
-          "name": "Voll",
-          "own": "Fast alles, auch Dateien löschen und Nachrichten senden.",
-          "summary": "Bots legen einfach los. Nur die größten Risiken fragen nach."
-        }
-      },
       "offline": "Noch nicht mit dem Helfer verbunden, daher kann die Stufe nicht angezeigt oder geändert werden.",
-      "onItsOwn": "Allein",
-      "recommended": "Empfohlen",
-      "samePresets": "Diese drei Stufen sind dieselben Vorgaben, die du für einen einzelnen Bot unter Berechtigungen wählen kannst: Vorsichtig ist „Lesen & entwerfen“, Ausgewogen ist „Kritisches genehmigen“, Voll ist Voll.",
       "saved": "Gespeichert. Gilt ab dem nächsten Schritt des Bots.",
-      "title": "Was Bots allein tun dürfen",
-      "willAsk": "Fragt dich zuerst"
+      "title": "Was Bots allein tun dürfen"
     },
     "save": {
       "idle": "Änderungen werden automatisch gespeichert",

@@ -72,8 +72,6 @@
   "account": {
     "ai": "Yapay zekâ",
     "appearance": "Görünüm",
-    "apps": "Uygulamalar",
-    "computer": "Bilgisayar",
     "defaultName": "Kullanıcı",
     "help": "Yardım",
     "localComputer": "Bu bilgisayar",
@@ -444,23 +442,15 @@
       "pair": "Bu bilgisayarı eşleştir",
       "verify": "Çalıştığını denetle"
     },
-    "startFailed": "Başlatılamadı. Yukarıdaki ayrıntılara bakıp yeniden dene.",
     "starting": "Başlıyor…",
     "state": {
-      "done": "Tamam",
-      "failed": "Burada durdu",
-      "pending": "Bekliyor",
-      "running": "Çalışıyor…",
-      "skipped": "Zaten hazır, yapılacak bir şey yok",
-      "waiting": "Yanıtın gerekiyor",
-      "warn": "Tamam, bir notla"
+      "pending": "Bekliyor"
     },
     "stepOf": "Adım {{n}} / 3",
     "title": "Sunucu ekle",
     "useServer": "Bu sunucuyu kullan",
     "user": "Kullanıcı",
-    "userHint": "Oracle ve Ubuntu: ubuntu. Oracle Linux: opc.",
-    "viewScreen": "Ekranı gör"
+    "userHint": "Oracle ve Ubuntu: ubuntu. Oracle Linux: opc."
   },
   "addSkill": {
     "apps": "Uygulamalar",
@@ -708,7 +698,6 @@
     "access": {
       "all": "Tüm botlar",
       "deletedBot": "silinmiş bot",
-      "edit": "Botlar",
       "label": "Bu uygulamayı kimler kullanabilir",
       "noBotsYet": "Henüz bot yok. Önce bir bot oluştur.",
       "nobody": "En az bir bot seçmedikçe hiçbir bot bu uygulamayı kullanamaz.",
@@ -725,11 +714,6 @@
     },
     "auth": {
       "expiredToast": "{{name}} girişi {{minutes}} dakika içinde bitirilmedi ve iptal edildi.",
-      "failedToast": "{{name}}: oturum açma tamamlanmadı",
-      "openFailed": "{{name}}: oturum açma sayfası tarayıcıda açılamadı",
-      "pasteHint": "Tarayıcı başka bir bilgisayarda çalışıyorsa ve oturum açtıktan sonra hata sayfası gösteriyorsa, o sayfanın tam adresini kopyalayıp buraya yapıştır.",
-      "pasteLabel": "Tarayıcıdaki yönlendirme adresi",
-      "pasteSubmit": "Oturum açmayı bitir",
       "signIn": "Oturum aç",
       "signOut": "Oturumu kapat",
       "signedInToast": "{{name}}: oturum açıldı",
@@ -740,18 +724,6 @@
     "botsNone": "Hiçbir bot",
     "botsSome": "Botlar: {{names}}",
     "catalogSection": "Keşfet",
-    "categories": {
-      "all": "Tümü",
-      "browser": "Tarayıcı",
-      "communication": "İletişim",
-      "data": "Veri",
-      "developer": "Geliştirici",
-      "files": "Dosyalar",
-      "home": "Ev otomasyonu",
-      "productivity": "Üretkenlik",
-      "search": "Arama"
-    },
-    "categoriesLabel": "Kategoriler",
     "changed": {
       "advice": "Yalnızca bu uygulamaya güveniyorsanız ve yeni metin doğru görünüyorsa tekrar açın.",
       "after": "Şimdiki metin",
@@ -764,7 +736,6 @@
       "title": "Bir araç, onayladığınızdan sonra değişti",
       "toast": "{{name}}: “{{tool}}” aracının yeni sürümü onaylandı"
     },
-    "close": "Kapat",
     "component": {
       "confirm": "Praxi {{name}} kurmak için şu komutu çalıştıracak:",
       "failed": {
@@ -790,12 +761,6 @@
     },
     "composio": {
       "advanced": {
-        "mode": {
-          "login": "Composio girişin üzerinden bağlı.",
-          "none": "Henüz bağlı değil. Bir uygulamanın ilk Bağlan'ında bir kez giriş istenir.",
-          "project_key": "Kendi Composio proje anahtarın kullanılıyor."
-        },
-        "ownKey": "Kendi proje anahtarımı kullan",
         "signOut": "Composio'dan çıkış yap",
         "title": "Composio"
       },
@@ -805,10 +770,7 @@
         "rate_limited": "Composio meşgul: kayıtlı uygulama listesi gösteriliyor.",
         "unauthorized": "Composio kayıtlı girişi artık kabul etmiyor: kayıtlı uygulama listesi gösteriliyor."
       },
-      "connectedSection": "Bağlı",
-      "disable": "Kapat",
       "disconnectedLocal": "{{name}} burada kaldırıldı. Composio panelinden de kaldır.",
-      "enable": "Aç",
       "expiredHint": "Girişin süresi doldu. Devam etmek için yeniden bağlan.",
       "failedHint": "Giriş tamamlanamadı. Yeniden dene.",
       "getKey": "Composio anahtar sayfasını aç",
@@ -816,18 +778,12 @@
       "keyLabel": "Composio API anahtarı",
       "keySave": "Anahtarı kaydet",
       "link": {
-        "body": "Ücretsiz bir Composio hesabı uygulamalarını bağlar. Düğmeye bas, tarayıcıda giriş yap ve geri dön. Kopyalanacak bir şey yok.",
-        "failed": "Giriş tamamlanamadı. Yeniden dene.",
-        "open": "Composio'yu aç",
-        "privacy": "Girdiler ve sonuçlar Composio sunucularından geçer. Praxi her işlemden önce sana sorar.",
-        "title": "Composio'yu bağla (ücretsiz) — bir kez",
         "waiting": "Tarayıcıda seni bekliyor…"
       },
       "loadFailed": "Uygulama listesi yüklenemedi.",
       "loadMore": "Daha fazla göster",
       "loading": "Uygulamalar yükleniyor…",
       "noResults": "Eşleşen uygulama yok.",
-      "openFailed": "Giriş bağlantısı Composio bağlantısı olmadığı için açılmadı.",
       "relogin": "Composio'ya yeniden giriş yap",
       "retry": "Yeniden dene",
       "state": {
@@ -837,7 +793,6 @@
         "not_connected": "Bağlı değil",
         "pending": "Giriş yapılıyor"
       },
-      "title": "Composio",
       "waiting": "Tarayıcıda seni bekliyor…"
     },
     "composioHub": {
@@ -915,9 +870,7 @@
     "connect": "Bağlan",
     "connectApp": "{{name}} uygulamasını bağla",
     "connectNow": "Bağlan",
-    "connected": "Bağlandı",
     "connectedAs": "{{account}} olarak bağlı",
-    "connectedSection": "Bağlı",
     "connectedToast": "{{name}} bağlandı",
     "custom": {
       "add": "Sunucu ekle",
@@ -1074,12 +1027,8 @@
       "tokenLabel": "Uzun ömürlü erişim anahtarı",
       "tokenStored": "Bir anahtar kayıtlı. Aynı kalsın istiyorsan boş bırak."
     },
-    "loading": "Katalog yükleniyor…",
-    "localSection": "Bu bilgisayarda",
     "manage": "Yönet",
-    "mcpServers": "Gelişmiş",
     "missingSecret": "Gerekli tüm gizli anahtarları gir.",
-    "noResults": "Eşleşen sunucu yok.",
     "reconnect": "Yeniden bağlan",
     "sample": {
       "empty": "Çalışıyor ama gösterecek bir şey yok.",
@@ -1117,11 +1066,7 @@
         "unknown_app": "Composio {{name}} uygulamasını sunmuyor, bu yüzden bağlanamıyor. Listede başka bir uygulama ara.",
         "upstream": "Composio'ya ulaşılamadı ya da yanıt vermedi. Botların çalıştığı bilgisayarın bağlantısını kontrol edip yeniden dene."
       },
-      "login": "Giriş sayfası tarayıcında açıldı. Orada bitir; {{name}} sayfası ardından kendiliğinden açılır.",
-      "opened": "{{name}} sayfası tarayıcında açık. Orada izin ver; burada Bağlı olarak görünür.",
-      "progress": "Adım {{current}} / {{total}}",
-      "timedOut": "Giriş zamanında bitirilmedi. Yeniden başlamak için Bağlan'a bas.",
-      "title": "{{name}} uygulamasını bağla"
+      "opened": "{{name}} sayfası tarayıcında açık. Orada izin ver; burada Bağlı olarak görünür."
     },
     "signIn": {
       "copyLink": "Bağlantıyı kopyala",
@@ -1172,7 +1117,6 @@
       "quarantined": "Karantinada"
     },
     "test": {
-      "noSamples": "Henüz gösterilecek bir şey yok (hesap boş olabilir).",
       "ok": "Çalışıyor. Uygulama yanıt verdi.",
       "okAs": "Çalışıyor. {{account}} olarak bağlı.",
       "run": "Bağlantıyı dene",
@@ -1200,8 +1144,7 @@
       "savedNo": "{{name}}: her işlem yeniden size sorar.",
       "savedYes": "{{name}}: salt okunur araçları artık sormadan çalışır.",
       "yes": "Evet, yalnızca okuyan araçları sormadan çalışsın"
-    },
-    "usedBy": "Kullananlar"
+    }
   },
   "audit": {
     "action": "Teknik ad",
@@ -1718,30 +1661,6 @@
     "permissions": "İzinler",
     "persona": "Kişilik",
     "personaPlaceholder": "Bu bot nasıl davranmalı? (sistem talimatı)",
-    "preset": {
-      "approve-destructive": {
-        "hint": "Okuma, gezinme, çalışma alanı düzenlemeleri ve botun kendi bilgisayarı serbest; silme, gönderme, para ve kendi bilgisayarın önce sorar.",
-        "name": "Yıkıcı işlemlerde onay (Dengeli)"
-      },
-      "custom": {
-        "hint": "Her kategori için bir düzey seç.",
-        "name": "Özel"
-      },
-      "full": {
-        "exceptions": "Tam erişim yalnızca para harcamadan önce sorar. Komutlar, dosya değişiklikleri, kurulumlar, gezinme, botun kendi e-postasıyla kayıtlar, formlar, e-posta ve mesajlar; kendi sohbetlerinde, zamanlanmış ve tetiklenmiş çalışmalarda da onay kartı olmadan yapılır. Ödemeler ödeme sayfalarından, ödeme programlarından, ödeme API’lerinden ve ödeme uygulamalarından tanınır; sıradan bir düğmenin arkasındaki ücret tanınamaz. Yıkıcı yasaklı liste komutları, kendi site kuralların ve güvenlik kontrollerinin işaretlediği e-postalar (listeden çıkanlar, günlük sınır) yine durdurulur.",
-        "exceptionsTitle": "İstisnalara bak",
-        "hint": "Yalnızca para harcamadan önce sorar. Gerisi sormadan çalışır.",
-        "name": "Tam erişim"
-      },
-      "read-and-draft": {
-        "hint": "Okumalar serbest; her değişiklik, gönderim, sayfa açma, tıklama ve komut önce sorar.",
-        "name": "Oku ve taslak hazırla (Dikkatli)"
-      },
-      "read-only": {
-        "hint": "Bot bakabilir ama hiçbir şeyi değiştiremez.",
-        "name": "Salt okunur"
-      }
-    },
     "role": {
       "classifier": "Sınıflandırıcı",
       "executor": "Yürütücü",
@@ -1792,14 +1711,6 @@
     "used": "{{usd}} ve {{amount}} metin parçası kullanıldı. Sıfırlanma: {{when}}."
   },
   "botPanel": {
-    "access": {
-      "approve-destructive": "Dengeli",
-      "custom": "Özel",
-      "full": "Tam erişim",
-      "read-and-draft": "Dikkatli",
-      "read-only": "Salt okunur"
-    },
-    "botsComputer": "{{bot}} botunun bilgisayarı · {{name}}",
     "chats": "Sohbetler",
     "close": "Paneli kapat",
     "computer": "Bilgisayar",
@@ -1841,8 +1752,6 @@
     },
     "muteNotify": "Çalışma bildirimlerini sessize al",
     "muteNotifyHint": "Bu botun biten ve başarısız çalışmaları sessiz kalır ve bildirim geçmişine düşer. Onaylar ve sorular yine bildirilir.",
-    "myComputer": "Benim bilgisayarım",
-    "needsDesktop": "{{name}} sunucusunda masaüstü oturumu yok, bu yüzden gösterilecek ekran yok. Eklemek için bu bilgisayarda şunu çalıştır:",
     "noChatMatches": "Eşleşen sohbet yok",
     "now": {
       "detailTitle": "Şu anki çalışma",
@@ -1854,22 +1763,8 @@
       "thinking": "Düşünüyor…",
       "waiting": "Onayını bekliyor"
     },
-    "pausedIdle": "Kaynak tasarrufu için duraklatıldı — devam etmek için tıkla",
-    "permissionLabel": "İzin düzeyi: {{level}}",
     "profile": "Bot profili",
-    "runsOnHost": "{{name}} sunucusunda çalışır",
-    "runsOnLocal": "Bu bilgisayarda çalışır",
-    "screenListFailed": "{{name}} ekran listesi yüklenemedi. Birazdan yeniden denenecek.",
     "searchChats": "Sohbetlerde ara…",
-    "serverIssue": {
-      "connecting": "{{name}} sunucusuna bağlanılıyor… yanıt verince ekranı burada görünür.",
-      "notPaired": "{{name}} bu bilgisayarı artık kabul etmiyor. Yeni bir biletle yeniden eşleştir.",
-      "offline": "{{name}} yanıt vermiyor. Botlar orada çalışmaya devam eder; bu uygulama kendiliğinden yeniden bağlanır.",
-      "version": "Bu uygulama ile {{name}} farklı sürümlerde. İkisini aynı sürüme güncelle."
-    },
-    "showScreen": "Ekranı göster",
-    "sideBot": "Botun bilgisayarı",
-    "sideMine": "Benim bilgisayarım",
     "subagents": {
       "detail": {
         "approval": "Onayını bekliyor. Sohbetten karar ver.",
@@ -1902,7 +1797,6 @@
       "library": "Kitaplık",
       "tools": "Araçlar"
     },
-    "thisBot": "Bu bot",
     "toggle": "Bot paneli",
     "triggers": {
       "account": "Posta kutusu",
@@ -3225,24 +3119,12 @@
     },
     "take": "Kontrolü devral",
     "terminal": "Terminal",
-    "terminalSoon": "Yakında",
     "thisComputer": "Bu bilgisayar",
     "title": "Bilgisayar"
   },
   "computerPicker": {
-    "add": "Sunucu ekle…",
     "host": "Sunucu",
-    "label": "Bilgisayar: {{name}}",
-    "link": {
-      "connected": "Bağlı",
-      "connecting": "Bağlanıyor…",
-      "idle": "Eşleşmiş, bağlı değil",
-      "offline": "Yanıt vermiyor",
-      "unreachable": "Artık eşleşmiş değil"
-    },
-    "localHint": "Burada, bu PC'de çalışır",
-    "makeHome": "Bu sunucuyu botlarımın evi yap…",
-    "menu": "Bilgisayar"
+    "label": "Bilgisayar: {{name}}"
   },
   "connectionTest": {
     "button": "Bağlantıyı dene",
@@ -7046,10 +6928,8 @@
   },
   "settingsModal": {
     "ai": {
-      "advanced": "Gelişmiş sağlayıcı ayarları",
       "defaultModel": {
         "description": "Botta model seçili değilse kullanılır.",
-        "heading": "Varsayılan",
         "title": "Varsayılan model"
       },
       "detected": {
@@ -7064,7 +6944,6 @@
         "docs": "Belgeler",
         "enabledToast": "{{name}} etkinleştirildi.",
         "experimentalChip": "Deneysel",
-        "howSignIn": "Nasıl giriş yapılır",
         "install": "Kur",
         "installApproval": "Mevcut kullanıcınla, yetki yükseltmeden çalışır. Satıcı yazılımını indirip çalıştırır. Devam etmek için bir kez onayla. Girişi ayrıca terminalinden yap.",
         "installDone": "Kurulum tamamlandı. Algılama yenilendi; giriş yapman gerekebilir.",
@@ -7078,12 +6957,10 @@
           "timeout": "Kurulum on dakikayı aştığı için durduruldu. Yeniden denemeden önce çıktıyı kontrol et."
         },
         "installLabel": "Kurulum komutu",
-        "installOutput": "Kurulum çıktısı (doğrulanmamış)",
         "installRunning": "Kuruluyor… bu bölümden ayrılmak verilmiş onayı iptal etmez.",
         "installSummary": "{{engine}} kur veya güncelle",
         "loginLabel": "Giriş için",
         "moreEngines": "Kurabileceğin diğer motorlar ({{count}})",
-        "notInstalled": "Kurulu değil",
         "noteNative": "Kendi araçlarıyla çalışır: botun Motor ayarlarından seç.",
         "noteUnsupported": "Praxi bunu algılıyor ama henüz motor olarak çalıştıramıyor.",
         "noteUnverified": "Doğrulanmamış komut: satıcı belgelerine bak, sonra kopyalayıp kendin çalıştır.",
@@ -7093,8 +6970,6 @@
         "problem": "İşlem başarısız oldu.",
         "refresh": "Yeniden tara",
         "retry": "Yeniden dene",
-        "signIn": "Giriş yap",
-        "signInIn": "Terminalde çalıştır:",
         "status": {
           "notInstalled": "Kurulu değil",
           "outdated": "Güncelleme gerekli",
@@ -7749,11 +7624,6 @@
         "enter": "Enter",
         "title": "Mesaj gönder"
       },
-      "theme": {
-        "description": "Çalışma alanına uygun bir görünüm seç.",
-        "system": "Sistemi izle",
-        "title": "Tema"
-      },
       "times": {
         "description": "Her mesajın yanında küçük bir saat. Üzerine gelince saniye ve tam tarih görünür.",
         "minutes": "Saat:dakika",
@@ -7910,37 +7780,11 @@
         "empty": "Henüz kalıcı site veya işlem izni yok. Buraya eklemek için onay kartında \"Her zaman izin ver\"i seçin.",
         "title": "İzin verilen siteler ve işlemler"
       },
-      "compare": "Her seviye neyi kendi yapar, neyi sorar?",
       "custom": "Özel kuralların var (Gelişmiş’e bak). Onların yerine geçmesi için bir seviye seç.",
       "description": "Botlarına ne kadar serbestlik vereceğini seç. İstediğin zaman değiştirebilirsin.",
-      "lead": "Bir seviye seç. Kendi kuralını vermediğin her bot buna uyar.",
-      "levels": {
-        "balanced": {
-          "ask": "Bir şeyi silmek, mesaj veya e-posta göndermek, para harcamak, kendi bilgisayarını kullanmak.",
-          "name": "Dengeli",
-          "own": "Okumak, gezinmek, çalışma alanındaki dosyaları düzenlemek.",
-          "summary": "Günlük işler akar. Riskli şeyler için onayın gerekir."
-        },
-        "careful": {
-          "ask": "Dosya düzenlemek ya da kaydetmek, mesaj veya e-posta göndermek, web sayfası açmak, komut çalıştırmak.",
-          "name": "Dikkatli",
-          "own": "Dosya okumak, bir şey aramak, metin taslağı yazmak.",
-          "summary": "Botlar bakar, her değişikliği sen onaylarsın."
-        },
-        "handsOff": {
-          "ask": "Yalnızca para harcama ve yasaklı listedeki yıkıcı komutlar.",
-          "name": "Tam erişim",
-          "own": "Gerisi: komutlar, dosyalar, gezinme, kayıtlar, formlar, e-posta ve mesajlar; zamanlanmış ve tetiklenmiş çalışmalar dahil.",
-          "summary": "Botlar işini kendisi halleder. Yalnızca para harcamadan önce sorarlar."
-        }
-      },
       "offline": "Yardımcıya henüz bağlı değil, bu yüzden seviye gösterilemiyor ya da değiştirilemiyor.",
-      "onItsOwn": "Kendi başına",
-      "recommended": "Önerilen",
-      "samePresets": "Bu üç seviye, tek bir bot için İzinler bölümünde seçebileceğin hazır ayarlarla aynıdır: Dikkatli “Oku ve taslak hazırla”, Dengeli “Yıkıcı işlemlerde onay”, Tam erişim ise “Tam”dır.",
       "saved": "Kaydedildi. Botun bir sonraki adımından itibaren geçerli.",
-      "title": "Botlar kendi başına neler yapabilir",
-      "willAsk": "Önce sana soracak"
+      "title": "Botlar kendi başına neler yapabilir"
     },
     "save": {
       "idle": "Değişiklikler kendiliğinden kaydedilir",

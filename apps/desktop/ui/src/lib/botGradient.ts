@@ -1,7 +1,7 @@
 /**
  * The bot's grainy mesh gradient (design v7). The recipe is the design's: three radial gradients
  * from the bot colour (`--bot`) and two hue-shifted derivatives (`--bot2`, `--bot3`, written with
- * relative colour syntax), a slow drift and a fractal-noise grain on top (see `BotGradient`).
+ * relative colour syntax), a slow drift and a fractal-noise grain on top.
  *
  * Two guards the mock did not need, both decided here so they can be tested without a browser:
  *  - a neutral colour (white, grey, black) has no hue to shift, so its derivatives would all be the
