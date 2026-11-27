@@ -246,7 +246,9 @@ bot böyle bir blok almaz ve başka bir botun adresini asla görmez.
    modelden değil) ya da Ayarlar > Posta ve web > Güvenli gönderim bölümünde listelediğin bir alan
    adındaysa (“Doğrulama e-postasının bağlantı verebileceği ek siteler”) **izlenebilir** olarak
    döndürülür. Diğer her bağlantı yalnızca ana makine adıyla “dış bağlantı, izlenmedi” diye listelenir.
-   Düz `http` reddedilir.
+   Düz `http` reddedilir. Botun önceki bir oturumda aldığı bağlantı (bir gün saklanır) o siteyle birlikte
+   hatırlanır: sonraki oturum onu yalnızca tarayıcı aynı sitedeyken ve bağlantı bu denetimden hâlâ
+   geçiyorsa sormadan açar; başka bir sayfadayken sorar.
 4. Bot izlenebilir bir bağlantıyı `browser_open` ile açar, oturumun açıldığını doğrular ve bildirir.
    CAPTCHA, telefon ya da iki adımlı doğrulama adımları sana **Kontrolü devral** ile gelir. İzlenen tarif
    yerleşik `signup-to-site` becerisidir.

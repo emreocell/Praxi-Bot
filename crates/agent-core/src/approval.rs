@@ -1541,11 +1541,38 @@ impl Shared {
             "browser_open" => {
                 input.as_object().is_some_and(|o| o.len() == 1)
                     && input.get("url").and_then(Value::as_str).is_some_and(|u| {
-                        u.starts_with("https://") && ctx.mail_links.lock().contains(u)
+                        u.starts_with("https://")
+                            && (ctx.mail_links.lock().contains(u)
+                                || self.restored_link_followable(ctx, u))
                     })
             }
             _ => false,
         }
+    }
+
+    /// A link a session before remembered (not one this run's own `email_wait_for`
+    /// returned) is followed without a card only when all three hold: the browser is
+    /// now on the site the wait that judged it was started on (registrable domain, so
+    /// a stale link of site A is not followed while the run works on site B); it
+    /// passes the verifier again with that site and the owner's domain list as it is
+    /// NOW (a domain the owner removed, or a link that was never same-site, no longer
+    /// opens); and it was remembered with that site. A link remembered with no site
+    /// (only the owner's list allowed it) needs the list alone. Anything else asks.
+    fn restored_link_followable(&self, ctx: &RunCtx, url: &str) -> bool {
+        use builtin_tools::connector_email::verify::{LinkVerdict, classify_link, site_domain};
+        let Some(mail) = self.mail.get() else {
+            return false;
+        };
+        let allow = mail.guard().settings().verification_domains();
+        let page = ctx.landed_origin.lock().as_deref().and_then(site_domain);
+        ctx.restored_mail_links.iter().any(|l| {
+            l.url == url
+                && l.site.as_deref().is_none_or(|s| page.as_deref() == Some(s))
+                && matches!(
+                    classify_link(url, l.site.as_deref(), &allow),
+                    LinkVerdict::Followable(_)
+                )
+        })
     }
 
     /// The taint gate for this call: egress after a read, or a program start

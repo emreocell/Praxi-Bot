@@ -1476,6 +1476,25 @@ async fn a_wait_survives_the_end_of_its_run() {
         .unwrap();
     assert_ne!(elsewhere, id);
     second_session.cancel_tagged("run-2");
+    // The same site but another kind of ask (the caller named an age, so no start watermark)
+    // is a new wait: it does not inherit the watermark of the one the default look-back began.
+    let older_on_purpose = second_session
+        .start(
+            &conn,
+            next,
+            &filter,
+            &WaitPlan {
+                since: None,
+                ..plan
+            },
+            WaitBinding {
+                origin: None,
+                site: Some("https://site.test"),
+            },
+        )
+        .unwrap();
+    assert_ne!(older_on_purpose, id);
+    second_session.cancel_tagged("run-2");
     // The same ask for the same site, the new session's browser being on no page: taken over.
     let resumed = second_session
         .start(

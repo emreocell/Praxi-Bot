@@ -604,7 +604,7 @@ impl Waiters {
         let site = domain_of(binding.origin).or_else(|| domain_of(binding.site));
         let resumed = self
             .store
-            .waits_like(bot, account, filter, plan.max_age.as_secs())
+            .waits_like(bot, account, filter, plan.max_age.as_secs(), plan.since)
             .into_iter()
             .find(|w| !map.contains_key(&w.id) && domain_of(w.origin.as_deref()) == site);
         if let Some(w) = resumed {
@@ -612,7 +612,7 @@ impl Waiters {
         }
         let now = now_secs();
         let wait = PersistedWait {
-            id: format!("mw-{}", uuid::Uuid::new_v4().simple()),
+            id: WaitStore::new_wait_id(),
             bot: bot.map(str::to_owned),
             account: account.to_owned(),
             filter: filter.clone(),
@@ -1020,6 +1020,10 @@ pub fn found_json(
         "from_junk": d.from_junk,
         "codes": v.codes,
         "followable_links": v.followable,
+        // The site those links were judged against (null: only the owner's domain list). The
+        // run loop keeps it with each link it remembers, so a later session follows a link
+        // only while the browser is on that site.
+        "link_site": basis.site_domain,
         "other_links": other,
         "link_check": basis.note,
         "next_step": next,
