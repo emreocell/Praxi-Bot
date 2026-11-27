@@ -243,16 +243,20 @@ Bir botu gizli bilgi içermeyen tek bir dosya olarak paylaş (bkz.
 
 ### `bot import`
 
-Claude Desktop, Claude Code, OpenClaw ya da Hermes uygulamalarından MCP sunucularını ve becerileri getirir.
-Önce her zaman bir önizleme gelir (içe aktarılacaklar / atlananlar ve nedenleri). Sunucular kapalı gelir,
-her gizli değer gizli bilgi deposuna gider ve yalnızca tarayıcının düşük riskli bulduğu beceriler içe aktarılır.
-Diğerleri `bot skills install` için bırakılır. Sohbetler, notlar, API anahtarları ve oturum açma bilgileri
-hiçbir zaman kopyalanmaz.
+Claude Desktop ve Claude Code, Cursor, VS Code, Codex, OpenClaw, Hermes ya da beceri ve komut istemi
+içeren düz bir markdown klasöründen MCP sunucularını, becerileri ve yönergeleri getirir.
+Önce her zaman bir önizleme gelir (içe aktarılacaklar / atlananlar ve nedenleri). Sunucular kapalı gelir.
+Gizli bir değer ancak o değeri onayladıktan sonra gizli bilgi deposuna gider (terminalde her değer için sorulur,
+ya da `--move-secrets`) ve hiçbir zaman düz metin olarak bir yapılandırmaya yazılmaz. Yalnızca tarayıcının düşük
+riskli bulduğu beceriler içe aktarılır, diğerleri `bot skills install` için bırakılır. `CLAUDE.md` / `AGENTS.md`
+yalnızca `--bot` ile bir botun yönergelerine eklenir. Sohbetler, notlar, API anahtarları ve oturum açma bilgileri
+hiçbir zaman kopyalanmaz. Masaüstü uygulamasında aynı akış Ayarlar altındadır. `run` işini daemon yapar;
+`--server` ile sunucunun kendi dosyalarından içe aktarılır.
 
 | Alt komut | Anlamı |
 | --- | --- |
-| `bot import detect` | Diğer uygulamaların kurulumlarını arar ve önizlemeyi gösterir. Hiçbir şey yazmaz, daemon gerektirmez |
-| `bot import run [--from claude\|openclaw\|hermes] [--yes]` | Önizlemeyi gösterir. `--yes` ile içe aktarır (sunucular için daemon gerekir) |
+| `bot import detect [--from APP] [--folder DIR]` | Diğer uygulamaların kurulumlarını arar ve önizlemeyi gösterir. Hiçbir şey yazmaz, daemon gerektirmez |
+| `bot import run [--from APP] [--folder DIR] [--yes] [--move-secrets] [--bot BOT_ID]` | Önizlemeyi gösterir. `--yes` ile daemon üzerinden içe aktarır. `APP`: `claude`, `cursor`, `vscode`, `codex`, `openclaw`, `hermes` ya da `folder` |
 
 ### `bot approve <TOOL_CALL_ID>`
 

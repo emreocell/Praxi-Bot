@@ -68,7 +68,7 @@ Adapted files carry the header `// Adapted from vercel-labs/agent-browser (Apach
 
 ## moltis importers (MIT)
 
-`apps/cli/src/import_cmd.rs` (`bot import`) adapts the detection paths and the
+`crates/assistant-import` (the scanner behind `bot import` and the desktop Import screen) adapts the detection paths and the
 "what maps to what" tables of the `import-core`, `claude-import`, `openclaw-import` and
 `hermes-import` crates of [moltis](https://github.com/moltis-org/moltis), rewritten against
 Praxi-Bot's `McpServerConfig`, secret store and skill hub (no moltis code is linked or copied

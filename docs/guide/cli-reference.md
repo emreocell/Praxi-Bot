@@ -248,15 +248,20 @@ Share a bot as one file without secrets (see
 
 ### `bot import`
 
-Bring MCP servers and skills from Claude Desktop, Claude Code, OpenClaw or Hermes. A preview
-(will import / skipped and why) always comes first. Servers arrive switched off, every secret
-value goes to the secret store, and only skills the scanner rates low-risk are imported; others
-are left for `bot skills install`. Chats, notes, API keys and sign-ins are never copied.
+Bring MCP servers, skills and instructions from Claude Desktop and Claude Code, Cursor, VS Code,
+Codex, OpenClaw, Hermes or a plain folder of skill and prompt markdown. A preview (will import /
+skipped and why) always comes first. Servers arrive switched off; a secret value goes to the
+secret store only after you confirm that one value (asked per value on a terminal, or
+`--move-secrets`), and is never written as plaintext into a config. Only skills the scanner rates
+low-risk are imported; others are left for `bot skills install`. `CLAUDE.md` / `AGENTS.md` are
+added to a bot's instructions only with `--bot`. Chats, notes, API keys and sign-ins are never
+copied. The desktop app has the same flow under Settings. `run` is done by the daemon, so with
+`--server` it imports from the server's own files.
 
 | Subcommand | Meaning |
 | --- | --- |
-| `bot import detect` | Look for other apps' setups and show the preview; writes nothing, needs no daemon |
-| `bot import run [--from claude\|openclaw\|hermes] [--yes]` | Show the preview; with `--yes` import it (needs the daemon for servers) |
+| `bot import detect [--from APP] [--folder DIR]` | Look for other apps' setups and show the preview; writes nothing, needs no daemon |
+| `bot import run [--from APP] [--folder DIR] [--yes] [--move-secrets] [--bot BOT_ID]` | Show the preview; with `--yes` import it through the daemon. `APP` is `claude`, `cursor`, `vscode`, `codex`, `openclaw`, `hermes` or `folder` |
 
 ### `bot approve <TOOL_CALL_ID>`
 

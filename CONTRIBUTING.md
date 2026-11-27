@@ -58,6 +58,7 @@ size are welcome: fixes, improvements and new features, from first-timers and re
 | `cli-provider` | Detects and runs locally installed coding CLIs (Claude Code, Codex, Cursor, OpenCode, Antigravity, Qwen Code, GitHub Copilot CLI, Kiro CLI, Kimi Code CLI, Qoder CLI, Mistral Vibe, Goose), installs them and signs them in on a host |
 | `pty-session` | A program on a pseudo-terminal (ConPTY / `openpty`): input, bounded text output, screen, resize, kill. Behind the `shell_interactive` tool and the CLI sign-in flows |
 | `mcp-bridge` | MCP client and server bridge, OAuth for remote MCP servers |
+| `assistant-import` | Finds the setups of other assistants (Claude, Cursor, VS Code, Codex, OpenClaw, Hermes, a folder) and plans what can be imported; behind `bot import` and the desktop Import screen ([design](docs/design/import-from-assistants-adr.md)) |
 | `composio` | Composio app connections (REST client, curated catalog, logos) |
 | `connector-email` | IMAP/SMTP tools |
 | `web-tools`, `doc-tools`, `dev-tools`, `openapi-tools` | Web research, document/data, git/process and OpenAPI-import tools |
