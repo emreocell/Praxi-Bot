@@ -465,7 +465,7 @@ pub fn build_args(opts: &LaunchOptions, profile: &Path) -> Vec<String> {
 /// the text is not a plain language list (`ll`, `ll-RR`, comma separated): it
 /// goes onto a command line, so it is checked here and not by the caller.
 #[must_use]
-pub fn language_args(languages: Option<String>, extra: &[String]) -> Vec<String> {
+pub(crate) fn language_args(languages: Option<String>, extra: &[String]) -> Vec<String> {
     let chosen = extra
         .iter()
         .any(|a| a.starts_with("--lang") || a.starts_with("--accept-lang"));
