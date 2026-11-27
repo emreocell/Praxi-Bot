@@ -75,7 +75,8 @@ export function scaleBox(box: Box, scale: number): Box {
 
 /**
  * CSS `aspect-ratio` for the card from a `1280×800` resolution label, so a 16:10 screen is not
- * letterboxed in a 16:9 box. Unknown or absurd sizes fall back to 16 / 10.
+ * letterboxed in a 16:9 box. Portrait displays keep their tall shape; only absurd sizes are clamped.
+ * Unknown sizes fall back to 16 / 10.
  */
 export function cardAspect(resolution: string | null): string {
   const m = resolution ? /^(\d+)\s*[×x]\s*(\d+)$/.exec(resolution.trim()) : null;
@@ -83,6 +84,6 @@ export function cardAspect(resolution: string | null): string {
   const w = Number(m[1]);
   const h = Number(m[2]);
   if (w <= 0 || h <= 0) return "16 / 10";
-  const ratio = Math.min(2.4, Math.max(1.2, w / h));
+  const ratio = Math.min(2.4, Math.max(0.4, w / h));
   return `${Math.round(ratio * 1000)} / 1000`;
 }

@@ -48,8 +48,13 @@ test("scaleBox never goes below a readable size or above the box", () => {
 test("the card follows the screen's aspect ratio instead of letterboxing in a 16:9 box", () => {
   assert.equal(cardAspect("1280×800"), "1600 / 1000");
   assert.equal(cardAspect("1920x1080"), "1778 / 1000");
+  // A display in portrait keeps its tall shape instead of being flattened to a wide card.
+  assert.equal(cardAspect("800x1280"), "625 / 1000");
   assert.equal(cardAspect(null), "16 / 10");
   assert.equal(cardAspect("0×0"), "16 / 10");
+  // Only absurd aspect ratios are clamped.
+  assert.equal(cardAspect("100x10000"), "400 / 1000");
+  assert.equal(cardAspect("10000x100"), "2400 / 1000");
 });
 
 test("the card asks for a sharp picture (>= 960 wide), the viewer for the full cap", () => {
