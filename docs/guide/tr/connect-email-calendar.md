@@ -29,7 +29,7 @@ ters giderse ne yapacağını sade bir dille söyler.
 | Gmail / Google Workspace | **Google ile giriş** (Google'ın kendi Gmail sunucusu, yalnızca okuma) ya da uygulama parolası (yalnızca e-posta) | Google ile giriş (yalnızca okuma) | Google takvim için uygulama parolası kabul etmez. Giriş, kendi hesabında bir kez oluşturduğun Google istemcisini kullanır; bkz. [Google Workspace](google-workspace.md). |
 | Outlook / Microsoft 365 | Uygulamalar penceresinde Microsoft girişi (Outlook) | Aynı | Microsoft e-posta için uygulama parolalarını kapattı; parola artık işe yaramaz. |
 | Yahoo | Uygulama parolası | Sunulmuyor | Yahoo'nun Praxi'nin kullanabileceği bir takvim bağlantısı yok. |
-| Diğerleri | Uygulama parolası (sunucular `imap.<alan adı>` ve `smtp.<alan adı>` diye tahmin edilir) | Yazdığın sunucu adresinden CalDAV | Sunucu adlarını düzeltmek için **Daha fazla seçenek**'i aç. |
+| Diğerleri | Uygulama parolası (sunucular `imap.<alan adı>` ve `smtp.<alan adı>` diye tahmin edilir) | Yazdığın sunucu adresinden CalDAV | Sunucu adlarını düzeltmek için **Daha fazla seçenek**'i aç, sonra onayla. |
 
 Google ve Microsoft girişleri **Uygulamalar** penceresinde yapılır (sihirbaz onu senin
 için açar). Orada işin bitince geri dön ve **Bitirdim, kontrol et**'e bas.
@@ -41,6 +41,22 @@ dolar). Praxi takvimlerini oradan bulur. Birkaç tane bulursa botun görmesini
 istediklerini işaretle; her biri [Takvim (CalDAV)](calendar.md) içinde ayrı bir
 takvim olur. Praxi, güvenliğin için bir takvim sunucusunun başka bir adrese
 yönlendirmesini izlemez; başka bir sağlayıcıda sağlayıcının verdiği son CalDAV adresini yaz.
+
+### Praxi'nin tanımadığı sunucular: parolanın nereye gideceğini sen onaylarsın
+
+Gmail, iCloud, Yahoo ve Fastmail'de Praxi sağlayıcının kendi sunucularını kullanır ve deneme
+hemen başlar. **Başka herhangi bir sağlayıcıda**, ya da sunucu adlarını veya portları
+değiştirirsen, adlar yalnızca bir tahmindir (ya da senin yazdığındır); bu yüzden Praxi önce
+onları gösterir: gelen (IMAP) sunucu, giden (SMTP) sunucu ve takvim (CalDAV) adresi, her biri
+portuyla. **Bunlar sağlayıcımın sunucuları** kutusunu işaretleyene kadar hiçbir şey denenmez ve
+uygulama parolan hiçbir yere gönderilmez (herhangi birini değiştirirsen işaret kalkar).
+
+Bağlantılar her zaman şifrelidir. Posta için gelen 993, giden 465 (güvenli bağlantı) ya da 587
+(STARTTLS, yalnızca sen seçersen) portu kullanılır; takvim adresi `https://` ile başlamalıdır.
+Sunucu adları herkese açık ad olmalı; IP adresi ya da kendi ağındaki bir ad olmaz ve Praxi'nin
+arka plan servisi bu bilgisayarı ya da özel bir ağı gösteren sunucuyu reddeder. Kendi ağındaki
+bir posta ya da takvim sunucusunu bağlamak için bunun yerine [E-posta](email.md) ve
+[Takvim (CalDAV)](calendar.md) ayarlarını kullan.
 
 ## Bot neleri yapabilir: önce okuma, göndermek ikinci bir onay
 

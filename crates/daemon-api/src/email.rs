@@ -201,6 +201,13 @@ pub struct EmailAccountInput {
     /// secret store and is never returned or logged. Required on create.
     #[serde(default)]
     pub password: Option<String>,
+    /// Only for `POST /v1/email/test`: refuse a server whose name resolves to a loopback,
+    /// LAN, link-local or metadata address, so a typed or guessed host cannot be used to
+    /// reach into the owner's network. Mail connections are always TLS with a verified
+    /// certificate; this adds the "public servers only" rule for the guided setup. Ignored
+    /// when saving an account.
+    #[serde(default)]
+    pub public_hosts_only: bool,
 }
 
 impl std::fmt::Debug for EmailAccountInput {

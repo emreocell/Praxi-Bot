@@ -22998,6 +22998,10 @@
             ],
             "description": "(App) password, **write-only**, used once."
           },
+          "public_only": {
+            "type": "boolean",
+            "description": "Only dial a public `https` server: plain `http`, loopback, LAN, link-local and\nmetadata addresses are refused, so a typed or guessed address cannot be used to reach\ninto the owner's network or to send the password in the clear. Set by the guided\n\"Connect my email and calendar\" flow; the default keeps the self-hosted case (a\nRadicale on the LAN) open for the calendar settings."
+          },
           "url": {
             "type": [
               "string",
@@ -26243,6 +26247,10 @@
           "provider": {
             "$ref": "#/components/schemas/EmailProviderKind",
             "description": "Kind of mailbox; default `imap_smtp`. For `agentmail` the inbox is\ncreated at the provider (its address is returned), or, with `inbox`, an\nexisting one is connected; `address`, `imap` and `smtp` are not used and\n`api_key` is required."
+          },
+          "public_hosts_only": {
+            "type": "boolean",
+            "description": "Only for `POST /v1/email/test`: refuse a server whose name resolves to a loopback,\nLAN, link-local or metadata address, so a typed or guessed host cannot be used to\nreach into the owner's network. Mail connections are always TLS with a verified\ncertificate; this adds the \"public servers only\" rule for the guided setup. Ignored\nwhen saving an account."
           },
           "send_mode": {
             "$ref": "#/components/schemas/EmailSendMode",

@@ -7237,6 +7237,16 @@
           "two": "Name it Praxi and copy the password it shows."
         }
       },
+      "approve": {
+        "caldav": "Calendar (CalDAV): {{url}}",
+        "caldavNone": "Calendar (CalDAV): type the address above",
+        "confirm": "These are my provider's servers. Send my app password to them to test.",
+        "edited": "You changed the servers. Your app password is sent to them, over a secure connection, only after you confirm.",
+        "guessed": "Praxi does not know this provider, so these server names are a guess from your address. Your app password is sent to them, over a secure connection, only after you confirm. Change them above if they are wrong.",
+        "imap": "Incoming mail (IMAP): {{host}}, port {{port}}",
+        "smtp": "Outgoing mail (SMTP): {{host}}, port {{port}}, {{security}}",
+        "title": "Check where your password will go"
+      },
       "back": "Back",
       "bot": {
         "hint": "Only that bot sees this mail. You can change it later.",
@@ -7293,11 +7303,20 @@
             "icloud": "Apple refused the calendar login. Use the same app-specific password, and your Apple ID as the login name under More options.",
             "other": "The calendar server refused the login. Check the login name and the app password."
           },
-          "detail": "The server said: {{error}}",
+          "insecure": "The calendar address must start with https://. Praxi never sends a password over an unencrypted connection.",
           "notFound": "The calendar server found no calendar at that address. Check the CalDAV address your provider lists.",
           "other": "The calendar server did not accept the request. Check the address and the login.",
           "redirect": "The calendar server sent us to another address, and Praxi does not follow that for your safety. Type the final calendar address your provider lists.",
+          "refused": "Praxi does not connect to that address: it points at this computer or at a private network. Use the public CalDAV address your provider lists.",
           "unreachable": "The calendar server could not be reached. Check your internet connection and the address, then try again."
+        },
+        "error": {
+          "busy": "Another connection test is still running. Wait a moment and try again.",
+          "conflict": "A mailbox or calendar with that name already exists. Disconnect it first, or pick another name.",
+          "denied": "Praxi is not allowed to do this here. Check that you are signed in as the owner.",
+          "generic": "Something went wrong. Check the details and try again.",
+          "network": "Praxi could not reach its own service. Make sure it is running, then try again.",
+          "rejected": "Praxi could not use these details. Check the server names and ports: they must be public mail servers with a secure connection."
         },
         "mail": {
           "auth": {
@@ -7332,16 +7351,32 @@
         "setup": "Step 2 of 2. Follow the steps, then test the connection."
       },
       "missing": {
+        "approve": "Confirm the servers above to test the connection. Your password is not sent before that.",
         "bot": "Pick which bot may use this mailbox to test the connection.",
         "password": "Paste the app password above to test the connection.",
+        "problem": "Fix the server details above to test the connection.",
         "server": "Type the calendar server address, or untick My calendar, to test the connection."
       },
       "more": {
         "login": "Login name, if it is not your address",
         "loginHint": "For iCloud this is your Apple ID.",
+        "security": {
+          "implicit": "Secure connection (TLS, port 465)",
+          "start_tls": "STARTTLS (port 587)"
+        },
+        "smtpSecurity": "Outgoing security",
         "title": "More options"
       },
       "next": "Next",
+      "problems": {
+        "calendarHost": "The calendar address must be a public name like caldav.example.com, not an IP address or a name inside a private network.",
+        "calendarInvalid": "The calendar address is not valid. Type it without a login or password inside it.",
+        "calendarScheme": "The calendar address must start with https://. Other kinds of address are not accepted.",
+        "imapHost": "The incoming server name must be a public name like imap.example.com, not an IP address or a name inside a private network.",
+        "imapPort": "The incoming mail port must be 993, the secure one. Praxi never connects without encryption.",
+        "smtpHost": "The outgoing server name must be a public name like smtp.example.com, not an IP address or a name inside a private network.",
+        "smtpPort": "The outgoing mail port must be 465 with a secure connection, or 587 with STARTTLS. Praxi never connects without encryption."
+      },
       "providers": {
         "fastmail": "Fastmail",
         "google": "Gmail or Google Workspace",
@@ -7354,7 +7389,7 @@
         "calendarBad": "Calendar does not work yet.",
         "calendarOk_one": "Calendar works. Found {{count}} calendar.",
         "calendarOk_other": "Calendar works. Found {{count}} calendars.",
-        "error": "Praxi could not run the test: {{message}}",
+        "error": "Praxi could not run the test.",
         "mailBad": "Mail does not work yet.",
         "mailOk": "Mail works. The server accepted the login.",
         "mailReadNote": "Sending is not set up, which is fine while the bot only reads.",

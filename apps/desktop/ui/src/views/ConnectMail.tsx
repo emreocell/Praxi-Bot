@@ -11,32 +11,39 @@ import { Modal } from "../components/Modal";
 import { MAIL_CHANGED_EVENT, mailToolsOn, mailToolsPatch } from "../lib/botMail";
 import { botFromScope } from "../lib/emailAccounts";
 import { openExternal } from "../lib/externalLink";
-import { humanLine } from "../lib/humanError";
 import type { BotScope } from "../lib/mcpApps";
 import {
   allPassed,
   anyPassed,
   type ConnectPath,
   calendarFixKey,
-  calendarProblem,
   detectProvider,
   domainOf,
+  errorFixKey,
+  foundCalendars,
   type GuidePlan,
   type GuideSaved,
   type GuideTest,
   googleMailCalendarEntries,
   googleSignedIn,
   isAddress,
+  isApproved,
   isServerProblem,
   type MailServers,
   mailFixKey,
   mailServers,
-  normaliseServerAddress,
+  needsApproval,
+  type PlanProblem,
+  planProblems,
   PROVIDER_IDS,
   type ProviderId,
   providerProfile,
+  SMTP_PORT_FOR,
   savePlan,
-  testPlan
+  serversEdited,
+  targetKey,
+  testPlan,
+  calendarUrl
 } from "../lib/mailGuide";
 import { openApps } from "../lib/settingsLink";
 import styles from "./ConnectMail.module.css";
@@ -58,6 +65,7 @@ export interface FlowSeed {
   test?: GuideTest | null;
   saved?: GuideSaved | null;
   allowSend?: boolean;
+  calendarServer?: string;
   signedIn?: { google?: boolean; microsoft?: boolean };
 }
 
@@ -111,7 +119,9 @@ export function ConnectMailFlow({
   const [password, setPassword] = useState(seed?.password ?? "");
   const [login, setLogin] = useState("");
   const [serverEdit, setServerEdit] = useState<Partial<Record<keyof MailServers, string>>>({});
-  const [calendarServer, setCalendarServer] = useState("");
+  const [calendarServer, setCalendarServer] = useState(seed?.calendarServer ?? "");
+  /** The servers the owner approved to receive the password ({@link targetKey} at that time). */
+  const [approved, setApproved] = useState<string | null>(null);
   const [scope, setScope] = useState<BotScope>(() =>
     bots.length === 1 ? { mode: "some", ids: [bots[0].id] } : { mode: "some", ids: [] }
   );
@@ -121,6 +131,7 @@ export function ConnectMailFlow({
   const [picked, setPicked] = useState<string[] | null>(null);
   const [saved, setSaved] = useState<GuideSaved | null>(seed?.saved ?? null);
   const [saving, setSaving] = useState(false);
+  /** The `fix.` key of the last failure of the flow itself (never the daemon's own text). */
   const [problem, setProblem] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState<{ google?: boolean; microsoft?: boolean }>(seed?.signedIn ?? {});
   const [checking, setChecking] = useState(false);
@@ -156,9 +167,13 @@ export function ConnectMailFlow({
           login,
           password,
           mail: { on: mailPath === "app_password", servers, bot: bot ?? null, allowSend },
-          calendar: { on: calendarPath === "app_password", server: calendarServer }
+          calendar: { on: calendarPath === "app_password", server: calendarServer },
+          approved
         }
       : null;
+  const problems: PlanProblem[] = plan && usesPassword ? planProblems(plan) : [];
+  const askApproval = plan !== null && usesPassword && needsApproval(plan);
+  const approvedNow = plan !== null && isApproved(plan);
 
   const reset = () => {
     setTest(null);
@@ -166,17 +181,19 @@ export function ConnectMailFlow({
     setProblem(null);
   };
 
-  const missing: "password" | "bot" | "server" | null = !usesPassword
+  const missing: "password" | "bot" | "server" | "problem" | "approve" | null = !usesPassword
     ? null
     : password === ""
       ? "password"
       : mailPath === "app_password" && bot === undefined
         ? "bot"
-        : calendarPath === "app_password" &&
-            provider === "other" &&
-            normaliseServerAddress(calendarServer) === ""
+        : calendarPath === "app_password" && provider === "other" && calendarServer.trim() === ""
           ? "server"
-          : null;
+          : problems.length > 0
+            ? "problem"
+            : !approvedNow
+              ? "approve"
+              : null;
 
   const runTest = async () => {
     if (!client || !plan || missing || testing) return;
@@ -185,10 +202,10 @@ export function ConnectMailFlow({
     try {
       const result = await testPlan(client, plan);
       setTest(result);
-      const found = result.calendar?.state === "ok" ? result.calendar.report.calendars.map((c) => c.url) : [];
+      const found = result.calendar?.state === "ok" ? foundCalendars(result.calendar.report).map((c) => c.url) : [];
       setPicked(found);
     } catch (e) {
-      setProblem(humanLine(e));
+      setProblem(errorFixKey(e));
     } finally {
       setTesting(false);
     }
@@ -203,7 +220,7 @@ export function ConnectMailFlow({
         client.listEmailAccounts().catch(() => []),
         client.listCalendarAccounts().catch(() => [])
       ]);
-      const found = test.calendar?.state === "ok" ? test.calendar.report.calendars : [];
+      const found = test.calendar?.state === "ok" ? foundCalendars(test.calendar.report) : [];
       const chosen = found.filter((c) => (picked ?? []).includes(c.url));
       const result = await savePlan(
         client,
@@ -221,10 +238,10 @@ export function ConnectMailFlow({
         const boundBot = bots.find((b) => b.id === plan.mail?.bot);
         setToolsOn(result.mail && boundBot ? mailToolsOn(boundBot.config) : null);
       } else if (result.failed.length > 0) {
-        setProblem(humanLine(result.failed[0].error));
+        setProblem(errorFixKey(result.failed[0].error));
       }
     } catch (e) {
-      setProblem(humanLine(e));
+      setProblem(errorFixKey(e));
     } finally {
       setSaving(false);
     }
@@ -258,7 +275,7 @@ export function ConnectMailFlow({
       setToolsOn(true);
       window.dispatchEvent(new Event(MAIL_CHANGED_EVENT));
     } catch (e) {
-      setProblem(humanLine(e));
+      setProblem(errorFixKey(e));
     }
   };
 
@@ -452,7 +469,11 @@ export function ConnectMailFlow({
             {usesPassword && servers ? (
               <details
                 className={styles.more}
-                open={test?.mail?.state === "failed" && isServerProblem(worstOf(test.mail.report))}
+                open={
+                  provider === "other" ||
+                  (plan !== null && serversEdited(plan)) ||
+                  (test?.mail?.state === "failed" && isServerProblem(worstOf(test.mail.report)))
+                }
                 data-testid="connect-mail-more"
               >
                 <summary>{t(`${K}.more.title`)}</summary>
@@ -493,9 +514,51 @@ export function ConnectMailFlow({
                         />
                       </Field>
                     ))}
+                    <Field label={t(`${K}.more.smtpSecurity`)} htmlFor="connect-mail-smtpSecurity">
+                      <select
+                        id="connect-mail-smtpSecurity"
+                        className={formStyles.select}
+                        value={servers.smtpSecurity}
+                        data-testid="connect-mail-smtp-security"
+                        onChange={(e) => {
+                          const security = e.target.value as MailServers["smtpSecurity"];
+                          setServerEdit((s) => ({
+                            ...s,
+                            smtpSecurity: security,
+                            smtpPort: String(SMTP_PORT_FOR[security])
+                          }));
+                          reset();
+                        }}
+                      >
+                        <option value="implicit">{t(`${K}.more.security.implicit`)}</option>
+                        <option value="start_tls">{t(`${K}.more.security.start_tls`)}</option>
+                      </select>
+                    </Field>
                   </div>
                 ) : null}
               </details>
+            ) : null}
+
+            {askApproval && plan ? (
+              <ApproveServers
+                plan={plan}
+                approved={approvedNow}
+                onApprove={(on) => {
+                  setApproved(on ? targetKey(plan) : null);
+                  reset();
+                }}
+              />
+            ) : null}
+
+            {problems.length > 0 ? (
+              <ul className={styles.result} role="alert" data-testid="connect-mail-problems">
+                {problems.map((p) => (
+                  <li key={p} className={[styles.line, styles.lineBad].join(" ")}>
+                    <CircleAlert aria-hidden="true" />
+                    <span className={styles.lineText}>{t(`${K}.problems.${p}`)}</span>
+                  </li>
+                ))}
+              </ul>
             ) : null}
 
             {needsGoogle ? (
@@ -537,7 +600,7 @@ export function ConnectMailFlow({
 
             {problem ? (
               <Callout tone="danger" role="alert">
-                {problem}
+                {t(`${K}.fix.${problem}`)}
               </Callout>
             ) : null}
           </>
@@ -633,6 +696,55 @@ export function ConnectMailFlow({
         ) : null}
       </DialogFooter>
     </form>
+  );
+}
+
+/**
+ * Where the password would go, when Praxi did not pick the servers itself (an address on an
+ * unknown domain, or servers the owner edited). Nothing is tested before the owner ticks this.
+ */
+function ApproveServers({
+  plan,
+  approved,
+  onApprove
+}: {
+  plan: GuidePlan;
+  approved: boolean;
+  onApprove: (on: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const mail = plan.mail?.on ? plan.mail.servers : null;
+  const caldav = plan.calendar?.on ? calendarUrl(plan) : "";
+  return (
+    <div className={styles.section} data-testid="connect-mail-approve-box">
+      <h3 className={styles.sectionTitle}>{t(`${K}.approve.title`)}</h3>
+      <p className={styles.text}>{t(`${K}.approve.${plan.provider === "other" ? "guessed" : "edited"}`)}</p>
+      <ul className={styles.servers} data-testid="connect-mail-servers">
+        {mail ? (
+          <>
+            <li>{t(`${K}.approve.imap`, { host: mail.imapHost.trim(), port: mail.imapPort })}</li>
+            <li>
+              {t(`${K}.approve.smtp`, {
+                host: mail.smtpHost.trim(),
+                port: mail.smtpPort,
+                security: t(`${K}.more.security.${mail.smtpSecurity}`)
+              })}
+            </li>
+          </>
+        ) : null}
+        {caldav ? <li>{t(`${K}.approve.caldav`, { url: caldav })}</li> : null}
+        {plan.calendar?.on && !caldav ? <li>{t(`${K}.approve.caldavNone`)}</li> : null}
+      </ul>
+      <label className={styles.choice}>
+        <input
+          type="checkbox"
+          checked={approved}
+          data-testid="connect-mail-approve"
+          onChange={(e) => onApprove(e.target.checked)}
+        />
+        <span>{t(`${K}.approve.confirm`)}</span>
+      </label>
+    </div>
   );
 }
 
@@ -818,10 +930,11 @@ function TestResults({
   );
   const mail = test.mail;
   const calendar = test.calendar;
+  const found = calendar?.state === "ok" ? foundCalendars(calendar.report) : [];
   return (
     <ul className={styles.result} data-testid="connect-mail-results" aria-live="polite">
       {mail?.state === "error"
-        ? line(false, t(`${K}.result.error`, { message: humanLine(mail.error) }))
+        ? line(false, t(`${K}.result.error`), t(`${K}.fix.${errorFixKey(mail.error)}`))
         : mail
           ? (() => {
               const r = mail.report;
@@ -841,25 +954,18 @@ function TestResults({
             })()
           : null}
       {calendar?.state === "error"
-        ? line(false, t(`${K}.result.error`, { message: humanLine(calendar.error) }))
+        ? line(false, t(`${K}.result.error`), t(`${K}.fix.${errorFixKey(calendar.error)}`))
         : calendar?.state === "ok"
-          ? line(true, t(`${K}.result.calendarOk`, { count: calendar.report.calendars.length }))
+          ? line(true, t(`${K}.result.calendarOk`, { count: found.length }))
           : calendar
-            ? line(
-                false,
-                t(`${K}.result.calendarBad`),
-                `${t(`${K}.fix.${calendarFixKey(provider, calendar.report.error)}`)}${
-                  calendarProblem(calendar.report.error) === "other" && calendar.report.error
-                    ? ` ${t(`${K}.fix.calendar.detail`, { error: calendar.report.error })}`
-                    : ""
-                }`
-              )
+            ? // Only the fix for the cause: the daemon's own words are never shown.
+              line(false, t(`${K}.result.calendarBad`), t(`${K}.fix.${calendarFixKey(provider, calendar.report.error)}`))
             : null}
-      {calendar?.state === "ok" && calendar.report.calendars.length > 1 ? (
+      {calendar?.state === "ok" && found.length > 1 ? (
         <li>
           <p className={styles.text}>{t(`${K}.result.pick`)}</p>
           <ul className={styles.found}>
-            {calendar.report.calendars.map((c) => (
+            {found.map((c) => (
               <li key={c.url}>
                 <label>
                   <input
@@ -939,7 +1045,7 @@ function Done({
       ) : null}
       {saved && saved.failed.length > 0 ? (
         <Callout tone="danger" role="alert">
-          {t(`${K}.done.partFailed`, { message: problem ?? humanLine(saved.failed[0].error) })}
+          {t(`${K}.done.partFailed`, { message: t(`${K}.fix.${problem ?? errorFixKey(saved.failed[0].error)}`) })}
         </Callout>
       ) : null}
       <p className={styles.text}>{t(`${K}.done.revoke`)}</p>

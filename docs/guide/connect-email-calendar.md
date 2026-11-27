@@ -29,7 +29,7 @@ Open it in **Settings → Connections → Mail and web → Connect my email and 
 | Gmail / Google Workspace | **Sign in with Google** (Google's own Gmail server, read-only), or an app password (mail only) | Sign in with Google (read-only) | Google does not accept app passwords for calendars. The sign-in uses the Google client you make once in your own account, see [Google Workspace](google-workspace.md). |
 | Outlook / Microsoft 365 | Microsoft sign-in in the Apps window (Outlook) | Same | Microsoft turned off app passwords for mail, so a password cannot work any more. |
 | Yahoo | App password | Not offered | Yahoo has no calendar connection Praxi can use. |
-| Anything else | App password (servers are guessed as `imap.<domain>` and `smtp.<domain>`) | CalDAV, from the server address you type | Open **More options** to correct the server names. |
+| Anything else | App password (servers are guessed as `imap.<domain>` and `smtp.<domain>`) | CalDAV, from the server address you type | Open **More options** to correct the server names, then confirm them. |
 
 The Google and Microsoft sign-ins happen in the **Apps** window (the wizard opens it for
 you). When you are done there, come back and press **I am done, check**.
@@ -42,6 +42,22 @@ bot should see; each becomes its own calendar in
 [Calendar (CalDAV)](calendar.md). Praxi never follows a calendar server's redirect to
 another address (for your safety), so for another provider type the final CalDAV
 address the provider lists.
+
+### Servers Praxi does not know: you confirm where the password goes
+
+For Gmail, iCloud, Yahoo and Fastmail Praxi uses the provider's own servers and the test
+starts at once. For **any other provider**, or if you change the server names or ports, the
+server names are only a guess (or something you typed), so Praxi first shows them: the
+incoming (IMAP) server, the outgoing (SMTP) server and the calendar (CalDAV) address, each with
+its port. Nothing is tested, and your app password is not sent anywhere, until you tick
+**These are my provider's servers** (changing any of them takes the tick back).
+
+Connections are always encrypted. Mail uses port 993 for incoming and port 465 (secure
+connection) or port 587 (STARTTLS, only if you pick it) for outgoing; a calendar address must
+start with `https://`. Server names must be public names, not an IP address or a name inside
+your own network, and Praxi's daemon refuses a server that points at this computer or a private
+network. To connect a mail or calendar server on your own network, use the
+[E-mail](email.md) and [Calendar (CalDAV)](calendar.md) settings instead.
 
 ## What the bot may do: read first, sending is a second opt-in
 

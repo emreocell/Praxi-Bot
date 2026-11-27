@@ -30,6 +30,17 @@ pub fn calendar_policy(protected: &[SocketAddr]) -> Arc<dyn UrlPolicy> {
     })
 }
 
+/// The stricter policy for a login the owner has only just typed (the guided setup's test): the
+/// daemon's own sockets, link-local and metadata space as above, and also loopback, LAN, CGNAT and
+/// other private space, so the test can only reach a public server.
+#[must_use]
+pub fn public_calendar_policy(protected: &[SocketAddr]) -> Arc<dyn UrlPolicy> {
+    Arc::new(DefaultUrlPolicy {
+        blocked_sockets: protected.to_vec(),
+        ..DefaultUrlPolicy::default()
+    })
+}
+
 /// Whether `url` names this machine: `localhost` (or a `*.localhost` name) or a
 /// loopback address. Decided on the parsed host, never on its text, so
 /// `127.attacker.com` is a name like any other.

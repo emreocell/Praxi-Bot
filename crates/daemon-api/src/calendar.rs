@@ -73,6 +73,13 @@ pub struct CalendarTestInput {
     /// (App) password, **write-only**, used once.
     #[serde(default)]
     pub password: Option<String>,
+    /// Only dial a public `https` server: plain `http`, loopback, LAN, link-local and
+    /// metadata addresses are refused, so a typed or guessed address cannot be used to reach
+    /// into the owner's network or to send the password in the clear. Set by the guided
+    /// "Connect my email and calendar" flow; the default keeps the self-hosted case (a
+    /// Radicale on the LAN) open for the calendar settings.
+    #[serde(default)]
+    pub public_only: bool,
 }
 
 impl std::fmt::Debug for CalendarTestInput {
@@ -82,9 +89,17 @@ impl std::fmt::Debug for CalendarTestInput {
             .field("url", &self.url)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("public_only", &self.public_only)
             .finish()
     }
 }
+
+/// Most calendars a test report lists.
+pub const MAX_FOUND_CALENDARS: usize = 20;
+/// Longest calendar address a test report carries.
+pub const MAX_FOUND_URL_LEN: usize = 2048;
+/// Longest calendar name a test report carries.
+pub const MAX_FOUND_NAME_LEN: usize = 120;
 
 /// A calendar a test found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

@@ -39,7 +39,7 @@ use web_tools::UrlPolicy;
 
 pub use client::{CalendarAccount, CalendarClient, CalendarError, CalendarInfo};
 pub use ical::{Event, When};
-pub use policy::calendar_policy;
+pub use policy::{calendar_policy, public_calendar_policy};
 pub use tools::TOOL_NAMES;
 
 /// Sends an iTIP message (an invitation or a cancellation) by e-mail, and applies the

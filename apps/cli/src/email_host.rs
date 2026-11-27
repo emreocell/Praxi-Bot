@@ -106,6 +106,42 @@ fn mailbox_error(e: &EmailError, name: &str) -> EmailControlError {
     }
 }
 
+/// Refuse a mail server that is not on the public internet: its name (or address) must resolve
+/// only to addresses that are not loopback, LAN, link-local, metadata or otherwise reserved. For
+/// the guided setup, where the host may be a guess from a typed address; mail connections are
+/// always TLS with a verified certificate on top of this.
+async fn ensure_public_hosts(account: &AccountConfig) -> Result<(), EmailControlError> {
+    for (host, port) in [
+        (&account.imap.host, account.imap.port),
+        (&account.smtp.host, account.smtp.port),
+    ] {
+        let refused = || {
+            invalid(
+                "this server is on this computer or a private network, not a public mail server",
+            )
+        };
+        let addrs: Vec<std::net::SocketAddr> =
+            match tokio::time::timeout(std::time::Duration::from_secs(8), {
+                tokio::net::lookup_host((host.as_str(), port))
+            })
+            .await
+            {
+                Ok(Ok(found)) => found.collect(),
+                // A name that does not resolve is reported by the probe itself as unreachable.
+                _ => continue,
+            };
+        let public = |ip: std::net::IpAddr| {
+            !web_tools::policy::is_always_blocked(ip)
+                && !web_tools::policy::is_loopback(ip)
+                && !web_tools::policy::is_private(ip)
+        };
+        if addrs.iter().any(|a| !public(a.ip())) {
+            return Err(refused());
+        }
+    }
+    Ok(())
+}
+
 /// What a test message says. Fixed: the API takes no text from the caller.
 const TEST_SUBJECT: &str = "Praxi-Bot test message";
 const TEST_BODY: &str = "This message was sent by Praxi-Bot to check that this mailbox can send mail. You can delete it.";
@@ -1015,6 +1051,9 @@ impl EmailControl for EmailHost {
             return self.test_agentmail_key(&input).await;
         }
         let account = self.draft_account(&input)?;
+        if input.public_hosts_only {
+            ensure_public_hosts(&account).await?;
+        }
         let password = if let Some(p) = input.password.clone().filter(|p| !p.is_empty()) {
             p
         } else {

@@ -21,12 +21,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use connector_calendar::{
     CalendarAccount, CalendarClient, CalendarConnector, CalendarError, InviteMailer,
-    calendar_policy,
+    calendar_policy, public_calendar_policy,
 };
 use connector_email::{CalendarPart, EmailConnector, OutgoingMail};
 use daemon_api::calendar::{
     CalendarAccountDto, CalendarAccountInput, CalendarControl, CalendarControlError,
-    CalendarFoundDto, CalendarTestInput, CalendarTestReport,
+    CalendarFoundDto, CalendarTestInput, CalendarTestReport, MAX_FOUND_CALENDARS,
+    MAX_FOUND_NAME_LEN, MAX_FOUND_URL_LEN,
 };
 use secret_store::{MemoryStore, SecretRef, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -172,6 +173,8 @@ pub struct CalendarHost {
     connector: Arc<CalendarConnector>,
     /// Where a calendar may be dialled (also for a connection test).
     policy: Arc<dyn UrlPolicy>,
+    /// Where a not-yet-saved login typed in the guided setup may be dialled: public servers only.
+    public_policy: Arc<dyn UrlPolicy>,
     /// Serialises changes (read-modify-write of the file and the connector).
     ops: tokio::sync::Mutex<()>,
 }
@@ -196,7 +199,9 @@ pub fn start_calendar(
             Vec::new()
         }
     };
-    let policy = calendar_policy(&crate::serve::daemon_protected_sockets(daemon_port));
+    let protected = crate::serve::daemon_protected_sockets(daemon_port);
+    let policy = calendar_policy(&protected);
+    let public_policy = public_calendar_policy(&protected);
     let connector = Arc::new(CalendarConnector::with_policy(Arc::clone(&policy)));
     for p in connector.replace_accounts(accounts, store) {
         warn(&p);
@@ -213,6 +218,7 @@ pub fn start_calendar(
         secrets: Arc::clone(store),
         connector,
         policy,
+        public_policy,
         ops: tokio::sync::Mutex::new(()),
     }))
 }
@@ -243,18 +249,70 @@ fn valid_name(name: &str) -> Result<(), CalendarControlError> {
     Ok(())
 }
 
+/// Longest error text a report carries.
+const MAX_ERROR_CHARS: usize = 200;
+
 /// The plain-words version of a failed server call.
 fn friendly(e: &CalendarError) -> String {
-    let text = e.to_string();
+    plain(&e.to_string())
+}
+
+/// Plain words for a failure text. A text this does not know is still bounded and has every
+/// address, login-in-an-address and long token cut out, so no URL, host name or credential a
+/// server or a library put into its message reaches the response.
+fn plain(text: &str) -> String {
     if text.contains("refused the login") {
         "The server refused the login. Check the user name and the app password.".to_owned()
+    } else if text.contains("must be https") {
+        "The address must start with https://. A password is never sent over an unencrypted connection."
+            .to_owned()
+    } else if text.contains("blocked by URL policy")
+        || text.contains("leads somewhere a calendar may not be")
+    {
+        "This address is not allowed: it points at this computer or at a private or reserved network."
+            .to_owned()
     } else if text.contains("not found") {
         "The server does not know this address. Check the address and try again.".to_owned()
     } else if text.contains("error sending request") || text.contains("timed out") {
         "Could not reach the server. Check the address and your internet connection.".to_owned()
     } else {
-        text
+        scrub(text)
     }
+}
+
+/// `text` without addresses (anything with `://`, or a `user@host` / `user:pass@host` token) and
+/// cut to [`MAX_ERROR_CHARS`].
+fn scrub(text: &str) -> String {
+    let words: Vec<&str> = text
+        .split_whitespace()
+        .map(|w| {
+            if w.contains("://") || w.contains('@') {
+                "…"
+            } else {
+                w
+            }
+        })
+        .collect();
+    let joined = words.join(" ");
+    if joined.chars().count() > MAX_ERROR_CHARS {
+        joined.chars().take(MAX_ERROR_CHARS).collect::<String>() + "…"
+    } else {
+        joined
+    }
+}
+
+/// The calendars of a test report: at most [`MAX_FOUND_CALENDARS`], each with a bounded name and
+/// an address that is not longer than [`MAX_FOUND_URL_LEN`].
+fn found_dtos(found: Vec<connector_calendar::CalendarInfo>) -> Vec<CalendarFoundDto> {
+    found
+        .into_iter()
+        .filter(|c| c.url.len() <= MAX_FOUND_URL_LEN)
+        .take(MAX_FOUND_CALENDARS)
+        .map(|c| CalendarFoundDto {
+            name: c.name.chars().take(MAX_FOUND_NAME_LEN).collect(),
+            url: c.url,
+        })
+        .collect()
 }
 
 fn dto(a: &CalendarAccount, store: &Arc<dyn SecretStore>) -> CalendarAccountDto {
@@ -585,6 +643,10 @@ impl CalendarControl for CalendarHost {
                 let (Some(user), Some(password)) = (&input.username, &input.password) else {
                     return Err(invalid("a user name and password are needed to test"));
                 };
+                let strict = input.public_only;
+                if strict && !url.trim().to_ascii_lowercase().starts_with("https://") {
+                    return Ok(fail(plain("the url must be https")));
+                }
                 let account = CalendarAccount {
                     name: "test".into(),
                     url: url.trim().to_owned(),
@@ -594,9 +656,14 @@ impl CalendarControl for CalendarHost {
                     email: None,
                     timeout_secs: 20,
                 };
-                match trial_client(&account, password, &self.policy) {
+                let policy = if strict {
+                    &self.public_policy
+                } else {
+                    &self.policy
+                };
+                match trial_client(&account, password, policy) {
                     Ok(c) => c,
-                    Err(CalendarControlError::Invalid(m)) => return Ok(fail(m)),
+                    Err(CalendarControlError::Invalid(m)) => return Ok(fail(plain(&m))),
                     Err(e) => return Err(e),
                 }
             }
@@ -611,13 +678,7 @@ impl CalendarControl for CalendarHost {
             Ok(found) => Ok(CalendarTestReport {
                 ok: true,
                 scheduling: client.supports_scheduling().await,
-                calendars: found
-                    .into_iter()
-                    .map(|c| CalendarFoundDto {
-                        name: c.name,
-                        url: c.url,
-                    })
-                    .collect(),
+                calendars: found_dtos(found),
                 error: None,
             }),
             Err(e) => Ok(fail(friendly(&e))),

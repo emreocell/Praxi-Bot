@@ -7237,6 +7237,16 @@
           "two": "Adını Praxi koy ve gösterilen parolayı kopyala."
         }
       },
+      "approve": {
+        "caldav": "Takvim (CalDAV): {{url}}",
+        "caldavNone": "Takvim (CalDAV): adresi yukarıya yaz",
+        "confirm": "Bunlar sağlayıcımın sunucuları. Denemek için uygulama parolamı bu sunuculara gönder.",
+        "edited": "Sunucuları değiştirdin. Uygulama parolan, ancak sen onayladıktan sonra ve güvenli bir bağlantıyla bu sunuculara gönderilir.",
+        "guessed": "Praxi bu sağlayıcıyı tanımıyor; bu sunucu adları adresinden yapılmış bir tahmin. Uygulama parolan, ancak sen onayladıktan sonra ve güvenli bir bağlantıyla bu sunuculara gönderilir. Yanlışsa yukarıdan değiştir.",
+        "imap": "Gelen posta (IMAP): {{host}}, port {{port}}",
+        "smtp": "Giden posta (SMTP): {{host}}, port {{port}}, {{security}}",
+        "title": "Parolanın nereye gideceğini kontrol et"
+      },
       "back": "Geri",
       "bot": {
         "hint": "Bu postayı yalnızca o bot görür. Sonra değiştirebilirsin.",
@@ -7293,11 +7303,20 @@
             "icloud": "Apple takvim girişini reddetti. Aynı uygulamaya özel parolayı kullan ve \"Daha fazla seçenek\" altında kullanıcı adı olarak Apple Kimliğini yaz.",
             "other": "Takvim sunucusu girişi reddetti. Kullanıcı adını ve uygulama parolasını kontrol et."
           },
-          "detail": "Sunucu şunu söyledi: {{error}}",
+          "insecure": "Takvim adresi https:// ile başlamalı. Praxi parolayı asla şifresiz bir bağlantıdan göndermez.",
           "notFound": "Takvim sunucusu bu adreste takvim bulamadı. Sağlayıcının verdiği CalDAV adresini kontrol et.",
           "other": "Takvim sunucusu isteği kabul etmedi. Adresi ve girişi kontrol et.",
           "redirect": "Takvim sunucusu bizi başka bir adrese yönlendirdi; Praxi güvenliğin için bunu izlemez. Sağlayıcının verdiği son takvim adresini yaz.",
+          "refused": "Praxi bu adrese bağlanmaz: adres bu bilgisayarı ya da özel bir ağı gösteriyor. Sağlayıcının verdiği herkese açık CalDAV adresini kullan.",
           "unreachable": "Takvim sunucusuna ulaşılamadı. İnternet bağlantını ve adresi kontrol edip yeniden dene."
+        },
+        "error": {
+          "busy": "Başka bir bağlantı denemesi hâlâ sürüyor. Biraz bekleyip yeniden dene.",
+          "conflict": "Bu adla bir posta kutusu ya da takvim zaten var. Önce onun bağlantısını kes ya da başka bir ad seç.",
+          "denied": "Praxi'nin burada bunu yapmasına izin yok. Sahip olarak giriş yaptığından emin ol.",
+          "generic": "Bir şeyler ters gitti. Bilgileri kontrol edip yeniden dene.",
+          "network": "Praxi kendi servisine ulaşamadı. Çalıştığından emin ol, sonra yeniden dene.",
+          "rejected": "Praxi bu bilgileri kullanamadı. Sunucu adlarını ve portları kontrol et: güvenli bağlantılı, herkese açık posta sunucuları olmalı."
         },
         "mail": {
           "auth": {
@@ -7332,16 +7351,32 @@
         "setup": "Adım 2 / 2. Adımları uygula, sonra bağlantıyı dene."
       },
       "missing": {
+        "approve": "Bağlantıyı denemek için yukarıdaki sunucuları onayla. Ondan önce parolan gönderilmez.",
         "bot": "Bağlantıyı denemek için bu posta kutusunu hangi botun kullanacağını seç.",
         "password": "Bağlantıyı denemek için yukarıya uygulama parolasını yapıştır.",
+        "problem": "Bağlantıyı denemek için yukarıdaki sunucu bilgilerini düzelt.",
         "server": "Bağlantıyı denemek için takvim sunucusu adresini yaz ya da \"Takvimim\"in işaretini kaldır."
       },
       "more": {
         "login": "Adresin değilse kullanıcı adı",
         "loginHint": "iCloud'da bu Apple Kimliğindir.",
+        "security": {
+          "implicit": "Güvenli bağlantı (TLS, port 465)",
+          "start_tls": "STARTTLS (port 587)"
+        },
+        "smtpSecurity": "Giden posta güvenliği",
         "title": "Daha fazla seçenek"
       },
       "next": "İleri",
+      "problems": {
+        "calendarHost": "Takvim adresi caldav.example.com gibi herkese açık bir ad olmalı; IP adresi ya da özel ağdaki bir ad olmaz.",
+        "calendarInvalid": "Takvim adresi geçerli değil. İçinde kullanıcı adı ya da parola olmadan yaz.",
+        "calendarScheme": "Takvim adresi https:// ile başlamalı. Başka türde adresler kabul edilmez.",
+        "imapHost": "Gelen sunucu adı imap.example.com gibi herkese açık bir ad olmalı; IP adresi ya da özel ağdaki bir ad olmaz.",
+        "imapPort": "Gelen posta portu güvenli olan 993 olmalı. Praxi şifresiz bağlanmaz.",
+        "smtpHost": "Giden sunucu adı smtp.example.com gibi herkese açık bir ad olmalı; IP adresi ya da özel ağdaki bir ad olmaz.",
+        "smtpPort": "Giden posta portu güvenli bağlantıyla 465, STARTTLS ile 587 olmalı. Praxi şifresiz bağlanmaz."
+      },
       "providers": {
         "fastmail": "Fastmail",
         "google": "Gmail veya Google Workspace",
@@ -7354,7 +7389,7 @@
         "calendarBad": "Takvim henüz çalışmıyor.",
         "calendarOk_one": "Takvim çalışıyor. {{count}} takvim bulundu.",
         "calendarOk_other": "Takvim çalışıyor. {{count}} takvim bulundu.",
-        "error": "Praxi denemeyi çalıştıramadı: {{message}}",
+        "error": "Praxi denemeyi çalıştıramadı.",
         "mailBad": "E-posta henüz çalışmıyor.",
         "mailOk": "E-posta çalışıyor. Sunucu girişi kabul etti.",
         "mailReadNote": "Gönderme kurulu değil; bot yalnızca okuyorsa sorun değil.",

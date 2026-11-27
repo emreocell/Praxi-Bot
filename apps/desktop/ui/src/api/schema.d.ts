@@ -6504,6 +6504,14 @@ export interface components {
             name?: string | null;
             /** @description (App) password, **write-only**, used once. */
             password?: string | null;
+            /**
+             * @description Only dial a public `https` server: plain `http`, loopback, LAN, link-local and
+             *     metadata addresses are refused, so a typed or guessed address cannot be used to reach
+             *     into the owner's network or to send the password in the clear. Set by the guided
+             *     "Connect my email and calendar" flow; the default keeps the self-hosted case (a
+             *     Radicale on the LAN) open for the calendar settings.
+             */
+            public_only?: boolean;
             /** @description Address to try. */
             url?: string | null;
             /** @description Login name. */
@@ -7784,6 +7792,14 @@ export interface components {
              *     `api_key` is required.
              */
             provider?: components["schemas"]["EmailProviderKind"];
+            /**
+             * @description Only for `POST /v1/email/test`: refuse a server whose name resolves to a loopback,
+             *     LAN, link-local or metadata address, so a typed or guessed host cannot be used to
+             *     reach into the owner's network. Mail connections are always TLS with a verified
+             *     certificate; this adds the "public servers only" rule for the guided setup. Ignored
+             *     when saving an account.
+             */
+            public_hosts_only?: boolean;
             /** @description Draft only, or ask the owner each time (default). */
             send_mode?: components["schemas"]["EmailSendMode"];
             /** @description Further bots that may use the account besides `bot`. */

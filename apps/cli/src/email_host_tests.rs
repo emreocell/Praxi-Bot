@@ -571,3 +571,35 @@ host = "mail.lan.example"
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn the_guided_test_refuses_servers_on_this_computer_or_a_private_network() {
+    let f = fixture();
+    // `input` points at 127.0.0.1: fine for the settings form, refused when only public hosts may be tried.
+    let mut strict = input("guided", None);
+    strict.public_hosts_only = true;
+    let err = f.host.test_draft(strict).await.unwrap_err();
+    assert!(matches!(err, EmailControlError::Invalid(_)), "{err:?}");
+
+    for host in [
+        "localhost",
+        "192.168.1.20",
+        "10.0.0.5",
+        "169.254.169.254",
+        "::1",
+    ] {
+        let mut one = input("guided", None);
+        one.imap.host = host.into();
+        one.public_hosts_only = true;
+        assert!(
+            matches!(
+                f.host.test_draft(one).await,
+                Err(EmailControlError::Invalid(_))
+            ),
+            "{host} must be refused"
+        );
+    }
+
+    // Only the guided flow asks for the rule: the settings form still reaches a local server.
+    assert!(f.host.test_draft(input("settings", None)).await.is_ok());
+}

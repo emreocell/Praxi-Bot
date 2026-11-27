@@ -795,3 +795,110 @@ async fn invitations_go_through_the_owners_mail_rules_and_are_logged_with_the_bo
     );
     assert!(m.check(Some(other), &to(&["x@example.com"])).await.is_ok());
 }
+
+fn strict(url: String) -> CalendarTestInput {
+    CalendarTestInput {
+        url: Some(url),
+        username: Some("me@example.com".into()),
+        password: Some(PW.into()),
+        public_only: true,
+        ..CalendarTestInput::default()
+    }
+}
+
+#[tokio::test]
+async fn the_guided_test_dials_only_public_https_servers_and_never_sends_the_password_elsewhere() {
+    let r = rig();
+    let d = dav().await;
+    for url in [
+        // Plain http, even to this machine, which the settings form allows.
+        format!("http://127.0.0.1:{}/two/", d.port),
+        "http://calendar.example.com/".to_owned(),
+        "ftp://calendar.example.com/".to_owned(),
+    ] {
+        let report = r.host.test(strict(url.clone())).await.unwrap();
+        assert!(!report.ok, "{url}");
+        assert!(
+            report.error.as_deref().unwrap().contains("https"),
+            "{url}: {report:?}"
+        );
+    }
+    // https to loopback, LAN, link-local and metadata addresses.
+    for url in [
+        format!("https://127.0.0.1:{}/two/", d.port),
+        "https://localhost/".to_owned(),
+        "https://192.168.1.10/".to_owned(),
+        "https://10.1.2.3:8443/".to_owned(),
+        "https://169.254.169.254/".to_owned(),
+        "https://[::1]/".to_owned(),
+    ] {
+        let report = r.host.test(strict(url.clone())).await.unwrap();
+        assert!(!report.ok, "{url}");
+        assert!(
+            report.error.as_deref().unwrap().contains("not allowed"),
+            "{url}: {report:?}"
+        );
+    }
+    assert!(
+        d.auth.lock().unwrap().is_empty(),
+        "no request, and so no password, reached the local server"
+    );
+    // Without the flag the local server is still reachable (self-hosted calendars).
+    let open = CalendarTestInput {
+        public_only: false,
+        ..strict(format!("http://127.0.0.1:{}/two/", d.port))
+    };
+    assert!(r.host.test(open).await.unwrap().ok);
+}
+
+#[test]
+fn failure_text_is_bounded_and_carries_no_address_or_login() {
+    let text = format!(
+        "boom https://me:hunter2@evil.example/path?token=abc me@example.com {}",
+        "x".repeat(500)
+    );
+    let out = plain(&text);
+    assert!(out.chars().count() <= MAX_ERROR_CHARS + 1, "{}", out.len());
+    for leak in [
+        "evil.example",
+        "hunter2",
+        "token=abc",
+        "me@example.com",
+        "://",
+    ] {
+        assert!(!out.contains(leak), "{leak} leaked: {out}");
+    }
+    assert!(out.starts_with("boom"));
+}
+
+#[test]
+fn a_test_report_lists_few_calendars_with_bounded_names_and_addresses() {
+    let many: Vec<_> = (0..50)
+        .map(|i| connector_calendar::CalendarInfo {
+            name: format!("{i}{}", "n".repeat(500)),
+            url: format!("https://dav.example.com/{i}/"),
+        })
+        .chain(std::iter::once(connector_calendar::CalendarInfo {
+            name: "long".into(),
+            url: format!("https://dav.example.com/{}", "a".repeat(3000)),
+        }))
+        .collect();
+    let out = found_dtos(many);
+    assert_eq!(out.len(), MAX_FOUND_CALENDARS);
+    assert!(
+        out.iter()
+            .all(|c| c.name.chars().count() <= MAX_FOUND_NAME_LEN)
+    );
+    assert!(out.iter().all(|c| c.url.len() <= MAX_FOUND_URL_LEN));
+    let long_first = found_dtos(vec![
+        connector_calendar::CalendarInfo {
+            name: "long".into(),
+            url: format!("https://dav.example.com/{}", "a".repeat(3000)),
+        },
+        connector_calendar::CalendarInfo {
+            name: "ok".into(),
+            url: "https://dav.example.com/ok/".into(),
+        },
+    ]);
+    assert_eq!(long_first.len(), 1);
+}
