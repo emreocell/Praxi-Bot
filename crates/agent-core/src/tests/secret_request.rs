@@ -311,7 +311,8 @@ async fn a_failed_late_submit_still_expires_the_form() {
     let env = setup();
     let fake = Fake::new(vec![calls(&[("c1", "secret_request", ask())]), text("ok")]);
     let mut config = on(cfg(Policy::full()));
-    config.secret_request_timeout = Duration::from_millis(50);
+    // Long enough that the claim below always happens before the timer, even on a slow runner.
+    config.secret_request_timeout = Duration::from_millis(400);
     let lp = loop_with_request_tool(&env, &fake, config);
     let mut rx = lp.subscribe();
     let run = owner_turn(&lp, env.chat, "go");
@@ -319,7 +320,7 @@ async fn a_failed_late_submit_still_expires_the_form() {
         unreachable!()
     };
     let info = lp.claim_secret_request(card.call_id).unwrap();
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
     lp.restore_secret_request(card.call_id, info);
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert!(tool_messages(&fake.request(1))[0].contains("did not answer in time"));
