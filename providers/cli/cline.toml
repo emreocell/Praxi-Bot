@@ -19,6 +19,8 @@ unverified = [
 
 [install]
 npm = "cline"
+# Exact release (npm dist-tag latest on 2026-11-27). Never a range or a tag.
+version = "3.0.76"
 
 [acp]
 args = ["--acp"]

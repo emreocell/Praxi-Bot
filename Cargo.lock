@@ -6960,6 +6960,7 @@ name = "provider-catalog"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cli-provider",
  "flate2",
  "fs4",
  "futures",

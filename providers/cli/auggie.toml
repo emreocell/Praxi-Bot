@@ -20,6 +20,8 @@ unverified = [
 
 [install]
 npm = "@augmentcode/auggie"
+# Exact release (npm dist-tag latest on 2026-11-27). Never a range or a tag.
+version = "1.2.3"
 # The install page lists macOS, Linux and Windows WSL, not native Windows.
 windows = false
 

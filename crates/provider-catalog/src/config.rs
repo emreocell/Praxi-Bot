@@ -104,44 +104,22 @@ pub enum CliEngine {
     /// Goose (`goose acp`).
     Goose,
     /// An ACP engine defined by a data file (`providers/cli/<id>.toml`), named by its id.
-    /// Only the shape of the id is checked here; the engine registry decides whether the
-    /// engine exists, so a config naming an engine this build lacks still loads.
+    /// Only an engine this build ships exists: any other id is an unknown engine.
     Data(DataEngineId),
 }
 
-/// The id of a data-driven CLI engine: a short lower-case slug, interned for the life of
-/// the process (at most [`DataEngineId::MAX_DISTINCT`] distinct ids, so a hostile config
-/// cannot grow memory).
+/// The id of a data-driven CLI engine that this build ships (`providers/cli/<id>.toml`).
+/// It borrows the registry's own `'static` id: nothing a config file says is ever copied,
+/// leaked or counted, so a hostile `providers.toml` cannot fill a table or crowd out a real
+/// engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataEngineId(&'static str);
 
 impl DataEngineId {
-    pub const MAX_DISTINCT: usize = 64;
-
-    /// `None` unless `id` is a slug (`a-z`, digits, `-`; 2 to 24 characters; starts with a letter).
+    /// `None` unless a shipped data-driven spec has exactly this id.
     #[must_use]
-    pub fn intern(id: &str) -> Option<Self> {
-        static SEEN: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
-        let slug = (2..=24).contains(&id.len())
-            && id.starts_with(|c: char| c.is_ascii_lowercase())
-            && id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if !slug {
-            return None;
-        }
-        let mut seen = SEEN
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(known) = seen.iter().find(|known| **known == id) {
-            return Some(Self(known));
-        }
-        if seen.len() >= Self::MAX_DISTINCT {
-            return None;
-        }
-        let leaked: &'static str = Box::leak(id.to_owned().into_boxed_str());
-        seen.push(leaked);
-        Some(Self(leaked))
+    pub fn from_registry(id: &str) -> Option<Self> {
+        cli_provider::acp_data::data_id(id).map(|data| Self(data.engine().spec.id))
     }
 
     #[must_use]
@@ -165,7 +143,7 @@ impl<'de> Deserialize<'de> for CliEngine {
 }
 
 impl CliEngine {
-    /// The engine with this wire id: a built-in one, else a well-formed data-driven id.
+    /// The engine with this wire id: a built-in one, else a shipped data-driven one.
     #[must_use]
     pub fn from_id(id: &str) -> Option<Self> {
         Some(match id {
@@ -182,7 +160,7 @@ impl CliEngine {
             "kimi" => Self::Kimi,
             "vibe" => Self::Vibe,
             "goose" => Self::Goose,
-            other => Self::Data(DataEngineId::intern(other)?),
+            other => Self::Data(DataEngineId::from_registry(other)?),
         })
     }
 
@@ -1158,7 +1136,7 @@ mod cli_tests {
         assert!(!text.contains("key"));
     }
     #[test]
-    fn engine_wire_ids_round_trip_and_data_driven_ids_are_well_formed_slugs() {
+    fn engine_wire_ids_round_trip_and_only_shipped_data_driven_ids_exist() {
         // Built in and data-driven (`providers/cli/`) engines are the same plain string.
         for id in ["claude", "opencode", "goose", "cline", "auggie"] {
             let engine: CliEngine = serde_json::from_value(serde_json::json!(id)).unwrap();
@@ -1184,11 +1162,18 @@ mod cli_tests {
                 "{bad:?}"
             );
         }
-        // The number of distinct unknown ids is bounded, so a hostile file cannot grow memory.
-        let accepted = (0..DataEngineId::MAX_DISTINCT * 2)
-            .filter(|i| DataEngineId::intern(&format!("fuzz-{i}")).is_some())
-            .count();
-        assert!(accepted <= DataEngineId::MAX_DISTINCT);
+        // A well-formed slug is still an unknown engine unless a shipped spec has that id:
+        // nothing is remembered, so a file full of made-up ids cannot crowd out a real one.
+        for i in 0..200 {
+            let id = format!("fuzz-{i}");
+            assert!(CliEngine::from_id(&id).is_none(), "{id}");
+            assert!(
+                serde_json::from_value::<CliEngine>(serde_json::json!(id)).is_err(),
+                "{id}"
+            );
+        }
+        assert!(CliEngine::from_id("cline").is_some());
+        assert!(CliEngine::from_id("auggie").is_some());
     }
     #[test]
     fn a_data_driven_engine_is_a_provider_entry_like_any_other() {

@@ -142,8 +142,10 @@ pub enum Transport {
 }
 
 impl Driver {
-    /// The drivers written in Rust. Data-driven engines are in [`Driver::all`].
-    pub const ALL: [Self; 13] = [
+    /// The drivers written in Rust. Private on purpose: it leaves out the data-driven
+    /// engines, so a loop over it would skip them (a folder rule, a consent check, a level
+    /// check) and treat them as unchecked. Everything outside this file uses [`Driver::all`].
+    const BUILT_IN: [Self; 13] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -162,7 +164,7 @@ impl Driver {
     /// Every driver: the Rust ones, then the data-driven ACP engines.
     #[must_use]
     pub fn all() -> Vec<Self> {
-        Self::ALL
+        Self::BUILT_IN
             .into_iter()
             .chain(acp_data::ids().map(Self::Data))
             .collect()
@@ -191,7 +193,7 @@ impl Driver {
 
     #[must_use]
     pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL
+        Self::BUILT_IN
             .into_iter()
             .find(|d| d.id() == id)
             .or_else(|| acp_data::data_id(id).map(Self::Data))
@@ -642,6 +644,55 @@ pub fn acp_args(driver: Driver, plan: &LevelPlan, model: Option<&str>) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every loop over drivers (folder rules, consent, level checks) goes through
+    /// `Driver::all()`. This fails if a data-driven engine is ever left out of it, or if the
+    /// Rust-only list becomes reachable again from another module.
+    #[test]
+    fn all_includes_every_data_driven_engine() {
+        let all = Driver::all();
+        assert!(!acp_data::engines().is_empty());
+        assert_eq!(
+            all.len(),
+            Driver::BUILT_IN.len() + acp_data::engines().len(),
+            "a data-driven engine is missing from Driver::all()"
+        );
+        for engine in acp_data::engines() {
+            let driver = Driver::from_id(engine.spec.id)
+                .unwrap_or_else(|| panic!("{} has no driver", engine.spec.id));
+            assert!(matches!(driver, Driver::Data(_)), "{}", engine.spec.id);
+            assert!(all.contains(&driver), "{} is skipped", engine.spec.id);
+        }
+        // The consent and level gate holds for them too: never wider than asked, and Full is
+        // the only level that auto-allows.
+        for driver in all {
+            for level in ApprovalLevel::ALL {
+                let plan = level_plan(driver, level);
+                assert!(plan.applied.rank() <= level.rank(), "{}", driver.id());
+                assert!(level == ApprovalLevel::Full || !plan.acp_allow_all);
+            }
+        }
+        // No module outside this file can name the Rust-only list: it stays private.
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![src];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && path.file_name().is_some_and(|n| n != "levels.rs")
+                {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    assert!(
+                        !text.contains("Driver::BUILT_IN") && !text.contains("Driver::ALL"),
+                        "{} loops over a list without the data-driven engines; use Driver::all()",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     #[allow(clippy::too_many_lines)] // One table, one test.

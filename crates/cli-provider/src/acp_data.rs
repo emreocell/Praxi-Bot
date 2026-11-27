@@ -4,10 +4,12 @@
 //! A file is untrusted-by-default configuration, not code. The schema is strict
 //! (`deny_unknown_fields`), argv is fixed text with no interpolation of user, model or
 //! prompt text, an approval level can only be mapped to the same or a *narrower* level (an
-//! unsupported level falls back to Ask, or is marked not enforceable and refused), flags
-//! that look permissive are only accepted at the Full level, and an engine is always
-//! experimental until a real run is verified. Everything an entry does not state is listed
-//! under `unverified` instead of being guessed.
+//! unsupported level falls back to Ask, or is marked not enforceable and refused), below
+//! Full the argv and flags may only be tokens from a short allow-list of known-safe ones
+//! (anything else is refused at load, not filtered by what it looks like), and an engine is
+//! always experimental until a real run is verified. Its install command is unverified too,
+//! so it is shown to copy and never run by Praxi. Everything an entry does not state is
+//! listed under `unverified` instead of being guessed.
 //!
 //! Entries are compiled in (`include_str!`), parsed once, validated, and then leaked into
 //! `'static` descriptors that the same `CliEngineSpec`, [`LevelPlan`] and launch code as the
@@ -216,8 +218,11 @@ struct File {
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct Install {
-    /// npm package; the argv is always `npm install -g <package>`.
+    /// npm package (a registry name, never a path or a version spec); the argv is always
+    /// `npm install -g <package>@<version>`.
     npm: Option<String>,
+    /// The exact version to install (`1.2.3`): required with `npm`, never a range or a tag.
+    version: Option<String>,
     /// Whether that installer is documented for native Windows (default: yes).
     windows: Option<bool>,
 }
@@ -258,8 +263,9 @@ const fn yes() -> bool {
 
 // ------------------------------------------------------------------------ validation
 
-/// Words that make a flag a grant of more trust. Allowed in a level below Full only when
-/// the next token is `false` (`--auto-approve false` pins the safe value).
+/// Words that make a flag a grant of more trust. Used only to say *why* a token below Full
+/// was refused; what is accepted there is [`SAFE_SINGLES`] and [`SAFE_PAIRS`], not "whatever
+/// does not contain one of these words".
 const PERMISSIVE: &[&str] = &[
     "yolo",
     "skip-permission",
@@ -274,13 +280,26 @@ const PERMISSIVE: &[&str] = &[
     "no-confirm",
 ];
 
+/// Tokens a level below Full (and the ACP start argv, which every level shares) may carry on
+/// their own. They start the ACP server or turn a CLI's own convenience off.
+const SAFE_SINGLES: &[&str] = &["acp", "--acp", "--no-auto-update", "--disallow-temp-dir"];
+
+/// Flag and value pairs a level below Full may carry. A value is pinned: `--auto-approve
+/// false` is the safe setting of a flag that is permissive with any other value.
+const SAFE_PAIRS: &[(&str, &str)] = &[
+    ("--auto-approve", "false"),
+    ("--allow-tool", "write"),
+    ("--agent-engine", "v3"),
+];
+
 fn is_permissive(token: &str) -> bool {
     let lower = token.to_ascii_lowercase();
     PERMISSIVE.iter().any(|word| lower.contains(word))
 }
 
-/// `--flag`, `-f`, `value`, `key=value`: printable ASCII with no whitespace, quoting, shell
-/// or interpolation characters (`$ % { } ( ) ; & | < > ` backtick, quotes, backslash).
+/// `--flag`, `-f`, `value`: letters, digits, `-`, `_` and `.` only. No path, URL, `key=value`,
+/// list, address, whitespace, quoting, shell or interpolation character, so a token can never
+/// point the CLI at a file, a host or a config of someone else's choosing.
 fn is_fixed_token(token: &str) -> bool {
     !token.is_empty()
         && token.len() <= 64
@@ -288,9 +307,9 @@ fn is_fixed_token(token: &str) -> bool {
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-')
-        && token.chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '=' | ':' | '/' | '@' | ',')
-        })
+        && token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 fn is_slug(text: &str, max: usize) -> bool {
@@ -326,14 +345,39 @@ fn is_model_id(text: &str) -> bool {
         })
 }
 
+/// A registry package name by npm's own rules, stricter where npm is loose: an optional
+/// `@scope/`, then lower-case letters, digits, `-`, `.`, `_`, starting with a letter or digit
+/// (so never `.x`, `_x` or `-x`), at most 214 characters. No second `@` (a version or tag),
+/// no further `/` (a path or a `user/repo` shorthand) and no `..`.
 fn is_npm_package(text: &str) -> bool {
-    !text.is_empty()
-        && text.len() <= 80
-        && !text.starts_with('-')
-        && !text.contains("..")
-        && text
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '/' | '.' | '-' | '_'))
+    fn part(text: &str) -> bool {
+        text.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && text.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_')
+            })
+            && !text.contains("..")
+    }
+    if text.is_empty() || text.len() > 214 {
+        return false;
+    }
+    match text.strip_prefix('@') {
+        Some(scoped) => scoped
+            .split_once('/')
+            .is_some_and(|(scope, name)| part(scope) && part(name)),
+        None => part(text),
+    }
+}
+
+/// An exact release: `major.minor.patch`, plain numbers. Never a range, a tag or `latest`.
+fn is_exact_version(text: &str) -> bool {
+    let parts: Vec<&str> = text.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.len() <= 9
+                && p.chars().all(|c| c.is_ascii_digit())
+                && (*p == "0" || !p.starts_with('0'))
+        })
 }
 
 fn is_https_url(text: &str) -> bool {
@@ -356,18 +400,31 @@ fn is_home_relative(text: &str) -> bool {
         })
 }
 
+/// Below Full (`full == false`) only [`SAFE_SINGLES`] and [`SAFE_PAIRS`] pass. At Full a token
+/// only has to be a fixed one, because that level grants the trust anyway.
 fn check_tokens(tokens: &[String], full: bool, what: &str) -> Result<(), String> {
     if tokens.len() > 8 {
         return Err(format!("{what}: more than 8 arguments"));
     }
-    for (i, token) in tokens.iter().enumerate() {
+    let mut i = 0;
+    while let Some(token) = tokens.get(i) {
         if !is_fixed_token(token) {
             return Err(format!("{what}: {token:?} is not a fixed argument"));
         }
-        let pinned_false = tokens.get(i + 1).is_some_and(|next| next == "false");
-        if !full && is_permissive(token) && !pinned_false {
+        if full || SAFE_SINGLES.contains(&token.as_str()) {
+            i += 1;
+        } else if tokens
+            .get(i + 1)
+            .is_some_and(|next| SAFE_PAIRS.contains(&(token.as_str(), next.as_str())))
+        {
+            i += 2;
+        } else if is_permissive(token) {
             return Err(format!(
                 "{what}: {token:?} grants trust and is only allowed at Full"
+            ));
+        } else {
+            return Err(format!(
+                "{what}: {token:?} is not in the allow-list of arguments below Full"
             ));
         }
     }
@@ -409,10 +466,15 @@ fn level_entry(key: ApprovalLevel, level: Level) -> Result<LevelEntry, String> {
             "levels.{name}: Full is never marked not enforceable"
         ));
     }
-    if let Some(mode) = &level.mode
-        && (!is_fixed_token(mode) || mode.contains('='))
-    {
-        return Err(format!("levels.{name}: mode {mode:?} is not a plain id"));
+    if let Some(mode) = &level.mode {
+        if !is_fixed_token(mode) {
+            return Err(format!("levels.{name}: mode {mode:?} is not a plain id"));
+        }
+        if key != ApprovalLevel::Full && is_permissive(mode) {
+            return Err(format!(
+                "levels.{name}: mode {mode:?} grants trust and is only allowed at Full"
+            ));
+        }
     }
     check_tokens(
         &level.flags,
@@ -479,15 +541,22 @@ pub fn parse(text: &str) -> Result<AcpEngine, String> {
     if file.protected_dirs.len() > 6 || !file.protected_dirs.iter().all(|d| is_home_relative(d)) {
         return Err("protected_dirs must be home-relative folders".into());
     }
-    if let Some(package) = &file.install.npm
-        && !is_npm_package(package)
-    {
-        return Err(format!(
-            "install.npm {package:?} is not a plain package name"
-        ));
-    }
-    if file.install.npm.is_none() && file.install.windows.is_some() {
-        return Err("install.windows needs install.npm".into());
+    if let Some(package) = &file.install.npm {
+        if !is_npm_package(package) {
+            return Err(format!(
+                "install.npm {package:?} is not a plain package name"
+            ));
+        }
+        if !file
+            .install
+            .version
+            .as_deref()
+            .is_some_and(is_exact_version)
+        {
+            return Err("install.version must be an exact x.y.z release".into());
+        }
+    } else if file.install.windows.is_some() || file.install.version.is_some() {
+        return Err("install.windows and install.version need install.npm".into());
     }
     if file.acp.args.is_empty() {
         return Err("acp.args must start the ACP server".into());
@@ -511,18 +580,26 @@ pub fn parse(text: &str) -> Result<AcpEngine, String> {
             .transpose()?,
     ];
 
-    let install = file.install.npm.map(|package| {
-        let args: &'static [&'static str] =
-            Box::leak(Box::new(["install", "-g", leak_str(package)]));
-        InstallCommand {
-            program: "npm",
-            args,
-            // The package name is the vendor's documented one; the install itself has not
-            // been run here. The registry allows only this fixed npm argv to execute.
-            verified: true,
-            executable: true,
-        }
-    });
+    let install = file
+        .install
+        .npm
+        .zip(file.install.version)
+        .map(|(package, version)| {
+            let args: &'static [&'static str] = Box::leak(Box::new([
+                "install",
+                "-g",
+                leak_str(format!("{package}@{version}")),
+            ]));
+            InstallCommand {
+                program: "npm",
+                args,
+                // Shown to copy, like an experimental built-in's, and never run by Praxi: no
+                // install of this exact package and version has been recorded. It becomes
+                // runnable only through a reviewed change that records a real install.
+                verified: false,
+                executable: false,
+            }
+        });
     let windows = file.install.windows.unwrap_or(true);
     let spec: &'static CliEngineSpec = Box::leak(Box::new(CliEngineSpec {
         id: leak_str(file.id),
@@ -565,6 +642,7 @@ evidence = "Read from the vendor docs."
 unverified = ["sign-in status"]
 [install]
 npm = "demo-cli"
+version = "1.2.3"
 [acp]
 args = ["--acp"]
 model = "none"
@@ -589,7 +667,9 @@ allow_all = true
         assert_eq!(engine.spec.id, "demo");
         assert!(!engine.spec.runnable);
         let install = engine.spec.install_unix.unwrap();
-        assert_eq!(install.args, ["install", "-g", "demo-cli"]);
+        assert_eq!(install.args, ["install", "-g", "demo-cli@1.2.3"]);
+        // No install has been recorded: shown to copy, never run by Praxi.
+        assert!(!install.verified && !install.executable);
         for level in ApprovalLevel::ALL {
             let plan = engine.level_plan(level);
             assert!(plan.applied.rank() <= level.rank());
@@ -651,6 +731,24 @@ allow_all = true
             (
                 broken("npm = \"demo-cli\"", "npm = \"--prefix=/\""),
                 "plain package",
+            ),
+            // A package needs an exact version.
+            (broken("version = \"1.2.3\"\n", ""), "exact"),
+            (
+                broken("version = \"1.2.3\"", "version = \"^1.2.3\""),
+                "exact",
+            ),
+            (
+                broken("version = \"1.2.3\"", "version = \"latest\""),
+                "exact",
+            ),
+            (broken("version = \"1.2.3\"", "version = \"1.2\""), "exact"),
+            (
+                broken(
+                    "npm = \"demo-cli\"\nversion = \"1.2.3\"",
+                    "version = \"1.2.3\"",
+                ),
+                "need install.npm",
             ),
             // Experimental until a real run is verified.
             (
@@ -760,6 +858,201 @@ allow_all = true
             "native = \"default\"\nflags = [\"--auto-approve\", \"false\"]",
         );
         assert!(parse(&pinned).is_ok());
+    }
+
+    #[test]
+    fn npm_package_names_follow_npms_rules() {
+        for good in [
+            "cline",
+            "demo-cli",
+            "a",
+            "@augmentcode/auggie",
+            "@scope/pkg.name_1",
+            "x2",
+            &"a".repeat(214),
+        ] {
+            assert!(is_npm_package(good), "{good}");
+        }
+        let too_long = "a".repeat(215);
+        for bad in [
+            "",
+            "/bin/sh",
+            "/opt/x",
+            "./x",
+            "../x",
+            "a/b",
+            "user/repo",
+            "a@1.2.3",
+            "a@latest",
+            "@scope/pkg@1.2.3",
+            "@@scope/pkg",
+            "@scope",
+            "@scope/",
+            "@/pkg",
+            "@scope/a/b",
+            ".hidden",
+            "_private",
+            "-flag",
+            "--prefix",
+            "@.scope/pkg",
+            "@scope/.pkg",
+            "@scope/_pkg",
+            "Upper",
+            "a b",
+            "a;b",
+            "a..b",
+            "git+https://example.com/x.git",
+            "https://example.com/x.tgz",
+            "file:../x",
+            "C:\\x",
+            &too_long,
+        ] {
+            assert!(!is_npm_package(bad), "{bad}");
+        }
+        // And through the loader, whatever the version.
+        for bad in ["/bin/sh", "a@1.2.3", "@s/n@1", "_x", "../x", "a/b"] {
+            let text = broken("npm = \"demo-cli\"", &format!("npm = \"{bad}\""));
+            assert!(parse(&text).unwrap_err().contains("plain package"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_version_is_an_exact_release() {
+        for good in ["0.0.1", "1.2.3", "10.20.30"] {
+            assert!(is_exact_version(good), "{good}");
+        }
+        for bad in [
+            "",
+            "1",
+            "1.2",
+            "1.2.3.4",
+            "01.2.3",
+            "1.2.x",
+            "^1.2.3",
+            "~1.2.3",
+            ">=1.2.3",
+            "1.2.3-rc.1",
+            "latest",
+            "1.2.3 ",
+            "1.2.3@x",
+            "*",
+        ] {
+            assert!(!is_exact_version(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_install_command_is_unverified_and_never_runs() {
+        for engine in engines() {
+            for install in [engine.spec.install_windows, engine.spec.install_unix]
+                .into_iter()
+                .flatten()
+            {
+                assert!(
+                    !install.verified && !install.executable,
+                    "{}: no real install is recorded",
+                    engine.spec.id
+                );
+                // The pin is in the argv: `npm install -g <name>@<x.y.z>`.
+                assert_eq!(&install.args[..2], ["install", "-g"]);
+                let (name, version) = install.args[2].rsplit_once('@').unwrap();
+                assert!(is_npm_package(name) && is_exact_version(version));
+            }
+            // The one-click install path takes only a verified, executable command.
+            assert!(
+                crate::engine_spec(engine.spec.id)
+                    .and_then(CliEngineSpec::install)
+                    .is_none_or(|i| !(i.verified && i.executable))
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_outside_the_allow_list_passes_below_full() {
+        let refused = [
+            // A new grant under a name nobody listed.
+            "--yes",
+            "--auto",
+            "--unrestricted",
+            "--no-sandbox",
+            "--approval-mode",
+            "--trust",
+            "--config=/attacker",
+            "--config",
+            "--config=x",
+            "--url=https://evil.example",
+            "--registry=https://evil.example",
+            "--host=evil",
+            "--tools=a,b",
+            "/etc/passwd",
+            "C:/x",
+            "user@host",
+            "a:b",
+            "a,b",
+            "key=value",
+            // The permissive flag with any value but the pinned safe one.
+            "--auto-approve",
+        ];
+        for token in refused {
+            let in_flags = broken(
+                "native = \"default\"",
+                &format!("native = \"default\"\nflags = [\"{token}\"]"),
+            );
+            assert!(parse(&in_flags).is_err(), "flags {token}");
+            let in_args = broken(
+                "args = [\"--acp\"]",
+                &format!("args = [\"--acp\", \"{token}\"]"),
+            );
+            assert!(parse(&in_args).is_err(), "args {token}");
+        }
+        // A pair is checked as a pair: the pinned value, not any value.
+        for flags in [
+            r#"["--auto-approve", "true"]"#,
+            r#"["--auto-approve", "false", "--auto-approve", "true"]"#,
+            r#"["--allow-tool", "bash"]"#,
+            r#"["--allow-tool"]"#,
+            r#"["write"]"#,
+            r#"["false"]"#,
+        ] {
+            let text = broken(
+                "native = \"default\"",
+                &format!("native = \"default\"\nflags = {flags}"),
+            );
+            assert!(parse(&text).is_err(), "{flags}");
+        }
+        // Every level below Full is held to it, not only Ask.
+        for level in ["accept_edits", "auto"] {
+            let text = format!(
+                "{GOOD}\n[levels.{level}]\napplied = \"ask\"\nnative = \"x\"\nflags = [\"--yes\"]\n"
+            );
+            assert!(parse(&text).is_err(), "{level}");
+        }
+        // The known-safe tokens pass.
+        let safe = broken(
+            "native = \"default\"",
+            "native = \"default\"\nflags = [\"--no-auto-update\", \"--disallow-temp-dir\", \"--auto-approve\", \"false\", \"--allow-tool\", \"write\"]",
+        );
+        assert!(parse(&safe).is_ok());
+        // A mode below Full cannot be a grant either; at Full it can.
+        let yolo_ask = broken(
+            "native = \"default\"",
+            "native = \"default\"\nmode = \"yolo\"",
+        );
+        assert!(
+            parse(&yolo_ask)
+                .unwrap_err()
+                .contains("only allowed at Full")
+        );
+        let yolo_full = broken("allow_all = true", "allow_all = true\nmode = \"yolo\"");
+        assert!(parse(&yolo_full).is_ok());
+        // At Full a token is still a fixed one: no path, URL, `=` or list.
+        for token in ["--config=/attacker", "/bin/sh", "a:b", "a@b", "a,b"] {
+            let text = broken("\"--auto-approve\", \"true\"", &format!("\"{token}\""));
+            assert!(
+                parse(&text).unwrap_err().contains("fixed argument"),
+                "{token}"
+            );
+        }
     }
 
     /// A data entry for `id` with the given ACP argv, model selection and level tables.

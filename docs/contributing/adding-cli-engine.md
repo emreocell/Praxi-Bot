@@ -14,10 +14,16 @@ offered). The schema is strict, and `cargo test -p cli-provider` rejects a file 
 
 - has an unknown key, a command that is not a bare executable name, or an argument that is
   not fixed text (no `{prompt}`, no `$VAR`, no spaces, no shell characters);
-- installs anything but `npm install -g <package>`;
+- installs anything but `npm install -g <package>@<x.y.z>`: the package must be a plain npm
+  registry name (optional `@scope/`, lower case, no path, no second `@`, at most 214
+  characters) and `install.version` an exact release, never a range or a tag. The command is
+  always **unverified, copy only**: Praxi shows it and the owner runs it. It becomes
+  one-click only when a reviewed change records a real install;
 - maps a level to a wider one, or marks Full as not enforceable;
-- uses a permissive flag (`--yolo`, `--auto-approve`, `--force`, ...) below Full (a flag may
-  pin the safe value: `--auto-approve false`);
+- uses an argument below Full that is not on the allow-list of known-safe tokens
+  (`SAFE_SINGLES` and `SAFE_PAIRS` in `acp_data.rs`; the ACP start argv counts as below Full).
+  Permissive flags (`--yolo`, `--auto-approve true`, `--force`, ...) are only for Full, and
+  no argument anywhere carries `/ : @ , =`;
 - claims anything but `support = "experimental"`, or states no `unverified` facts;
 - reuses an id, command or alias of another engine.
 
@@ -43,7 +49,8 @@ path is separate and its existing fail-closed checks remain in force.
 1. Add fixed vendor metadata to `registry.rs`: commands, probe arguments,
    install descriptors, documented version floor and fallback models. Never
    interpolate user or model text into installer commands.
-2. Add the driver to `Driver::ALL` and define its transport and approval mapping
+2. Add the driver to the built-in list in `levels.rs` (`Driver::BUILT_IN`, private; every
+   other loop uses `Driver::all()`, which also holds the data-driven engines) and define its transport and approval mapping
    in `levels.rs`. Unsupported levels must fall back to Ask or be refused;
    never silently widen them. Retired engines stay hidden unless installed.
 3. Add protocol-specific behaviour to the appropriate shared decoder and a
