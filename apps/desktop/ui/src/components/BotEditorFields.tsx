@@ -34,10 +34,10 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
-import { appGroups } from "../lib/botApps";
 import { brandIcon } from "../lib/brandIcons";
 import { modelGroups } from "../lib/modelPicker";
 import { modelLine } from "../lib/modelName";
+import { appGroups } from "../lib/botApps";
 import { BotAvatarUploadField } from "./BotAdvancedFields";
 import styles from "./BotEditorFields.module.css";
 import { BrandMark } from "./BrandMark";
@@ -59,7 +59,7 @@ const PRESET_ICONS: Record<PresetChoice, typeof Eye> = {
 };
 
 
-/** Identity: the face and the name (what it should do has its own section). */
+/** Identity: the face, the name and how the bot behaves. */
 export function IdentityFields({
   botId,
   draft,
