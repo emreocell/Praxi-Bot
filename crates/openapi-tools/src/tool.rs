@@ -292,6 +292,31 @@ impl Shared {
         }
     }
 
+    /// `base_url` + `path`, which must stay on the base URL's origin and below
+    /// its path with no query or fragment of its own: whatever the path
+    /// template or the parameter values hold, a request goes to the owner's API.
+    fn request_url(&self, path: &str) -> Result<Url, ToolError> {
+        let base = Url::parse(&self.base_url)
+            .map_err(|e| ToolError::Execution(format!("invalid base URL: {e}")))?;
+        let url = Url::parse(&format!("{}{path}", self.base_url))
+            .map_err(|e| invalid(format!("invalid request URL: {e}")))?;
+        let prefix = base.path().trim_end_matches('/');
+        let inside = url.path() == prefix
+            || url
+                .path()
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with('/'));
+        if url.origin() != base.origin()
+            || !inside
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || !url.username().is_empty()
+        {
+            return Err(invalid("the request would leave the API's base URL"));
+        }
+        Ok(url)
+    }
+
     fn secret(&self, r: &SecretRef, redactor: &mut Redactor) -> Result<String, ToolError> {
         let v = resolve(self.cfg.secrets.as_ref(), r)
             .map_err(|e| ToolError::Execution(format!("credential unavailable: {e}")))?;
@@ -505,8 +530,7 @@ impl OpenApiTool {
         if !path.starts_with('/') {
             path.insert(0, '/');
         }
-        let url = format!("{}{path}", self.shared.base_url);
-        let url = Url::parse(&url).map_err(|e| invalid(format!("invalid request URL: {e}")))?;
+        let url = self.shared.request_url(&path)?;
 
         let mut rb = self
             .shared

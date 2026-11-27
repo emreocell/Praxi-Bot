@@ -13,9 +13,10 @@ sen açarsın.
 2. **Belge nerede?** Bir **web adresi** ver (örneğin `https://api.example.com/openapi.json`)
    ya da bilgisayarından bir **dosya** (JSON veya YAML) seç. Web adresi sonradan **Adresten
    güncelle** ile yenilenebilir, dosya yenilenemez.
-3. **API adresi:** isteğe bağlı. İstekler yalnızca bu adrese gider. Boş bırakırsan belgedeki
-   ilk sunucu kullanılır. Belge hiç sunucu vermiyorsa ya da yalnızca göreli bir adres
-   veriyorsa adresi senin girmen gerekir.
+3. **API adresi:** istekler yalnızca bu adrese gider. Boş bırakabilmen için bir web adresi
+   vermiş olman ve belgenin aynı sitede bir sunucu listelemesi gerekir; o zaman bu sunucu
+   kullanılır. Dosya için ya da belge başka bir sitede sunucu veriyorsa adresi senin girmen
+   gerekir: anahtarının nereye gideceğine belge karar veremez.
 4. **Giriş:** API'nin ne beklediğini seç:
 
    | Seçenek | Praxi'nin gönderdiği |
@@ -23,7 +24,7 @@ sen açarsın.
    | Yok | hiçbir şey |
    | Erişim anahtarı (Bearer) | `Authorization: Bearer <anahtar>` |
    | Başlıkta API anahtarı | adını verdiğin başlıkta anahtar (örneğin `X-Api-Key`) |
-   | Adreste API anahtarı | adını verdiğin sorgu parametresi olarak anahtar |
+   | Adreste API anahtarı | adını verdiğin sorgu parametresi olarak anahtar (API ikisini de destekliyorsa başlığı tercih et: adresler servisin kendi günlüklerine düşer) |
    | Kullanıcı adı ve parola | HTTP basic kimlik doğrulaması |
 
 5. **API'yi bağla**'yı seç.
@@ -78,17 +79,24 @@ API'ye yapacağı çağrı önce sorar.
 
 - **Tek sunucu.** İstekler yalnızca verdiğin API adresine gider. Botun verdiği yol değerleri
   kodlanır, sunucuyu değiştiremez ve ana yolun dışına çıkamaz (`..` reddedilir).
-- **Yönlendirme yok.** Yönlendirme ile yanıt veren API izlenmez; böylece bir yönlendirme
-  anahtarını başka bir sunucuya götüremez.
+- **Yönlendirme yok.** Yönlendirme ile yanıt veren API izlenmez, aynı sunucuya olsa bile;
+  böylece bir yönlendirme anahtarını hiçbir yere götüremez.
+- **Yalnızca senin adresin.** Sen bir adres verdiğinde belgenin kendi `servers` listesi yok
+  sayılır. Başka belgelere giden bağlantılar (web adresine `$ref`) hiç indirilmez.
+- **Başlık değerleri.** Botun bir başlık için verdiği değerde satır sonu varsa reddedilir.
 - **Özel adres yok.** Kendi makinendeki veya ağındaki adresler (`localhost`, `192.168.x.x`,
   `10.x.x.x`, bağlantı-yerel ve bulut meta veri adresleri) hem API için hem belgeyi indirmek
   için reddedilir; bir ad bunlardan birine çözülürse de.
 - **Proxy yok.** Ortamın proxy ayarları bu istekler için kullanılmaz.
-- **Boyut sınırları.** Belge en fazla 8 MiB, yanıt 256 KiB'ta (ya da daha azında) kesilir ve
+- **Boyut sınırları.** Belge en fazla 8 MiB; şemaları 10'dan derin `$ref` zinciri kuran ya da
+  1 MiB'tan fazlaya açılan işlem dışarıda bırakılır ve API altında sayılır; yanıt 256 KiB'ta (ya da daha azında) kesilir ve
   istek 30 saniyede zaman aşımına uğrar. Kesilen yanıt "kesildi" diye işaretlenir.
 - **Gizli bilgi dışarıda kalır.** Anahtar yalnızca çağrı sırasında okunur; her sonuçta, hatada
-  ve günlükte maskelenir. Anahtarı taşıyan başlık veya sorgu parametresi araçtan gizlenir ve
-  bot tarafından ayarlanamaz.
+  ve günlükte maskelenir; anahtar adreste gidip API onu geri yansıtsa bile. Anahtarı taşıyan
+  başlık veya sorgu parametresi araçtan gizlenir ve bot tarafından ayarlanamaz.
+- **Para işleri sorar.** Yol ve işlem adının yanında etiketler, özet ve açıklama da ödeme
+  sözcükleri için okunur; `/graphql` ya da `/rpc` gibi tek kapılı bir adrese `POST` (yol
+  hiçbir şey söylemez) de her zaman sorar.
 
 ## Sınırlar ve bilinmesi gerekenler
 

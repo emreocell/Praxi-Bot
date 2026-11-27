@@ -149,10 +149,16 @@ fn slug(name: &str) -> String {
     if out.is_empty() { "api".into() } else { out }
 }
 
-fn import_options(id: &str, base_url: Option<&str>) -> ImportOptions {
+/// Options for reading a document. `base_url` is the owner's choice and the
+/// only server ever used; without it the document's own `servers` count only
+/// when they sit on `spec_url`'s host.
+fn import_options(id: &str, base_url: Option<&str>, spec_url: Option<&str>) -> ImportOptions {
     ImportOptions {
         name_prefix: prefix(id),
         base_url: base_url.map(str::to_owned),
+        server_host: spec_url
+            .and_then(|u| reqwest::Url::parse(u.trim()).ok())
+            .and_then(|u| u.host_str().map(str::to_owned)),
         max_operations: MAX_OPERATIONS,
         max_spec_bytes: MAX_SPEC_BYTES,
         ..ImportOptions::default()
@@ -227,8 +233,11 @@ impl OpenApiHost {
         let parsed = std::fs::read_to_string(self.spec_path(&stored.id))
             .map_err(|e| format!("cannot read the saved document: {e}"))
             .and_then(|text| {
-                ApiSpec::parse(&text, &import_options(&stored.id, Some(&stored.base_url)))
-                    .map_err(|e| e.to_string())
+                ApiSpec::parse(
+                    &text,
+                    &import_options(&stored.id, Some(&stored.base_url), None),
+                )
+                .map_err(|e| e.to_string())
             });
         let has_secret = self.secret_present(&stored.id);
         match parsed {
@@ -685,8 +694,11 @@ impl OpenApiAppsControl for OpenApiHost {
             .as_deref()
             .map(str::trim)
             .filter(|b| !b.is_empty());
-        let spec =
-            ApiSpec::parse(&text, &import_options(&id, base_url)).map_err(|e| spec_error(&e))?;
+        let spec = ApiSpec::parse(
+            &text,
+            &import_options(&id, base_url, input.spec_url.as_deref()),
+        )
+        .map_err(|e| spec_error(&e))?;
         let auth_input = input.auth.as_ref();
         let kind = auth_input.map_or(OpenApiAuthKind::None, |a| a.kind);
         let auth = check_auth_shape(
@@ -746,7 +758,7 @@ impl OpenApiAppsControl for OpenApiHost {
         }
         if let Some(url) = input.base_url.as_deref().map(str::trim) {
             let text = std::fs::read_to_string(self.spec_path(id)).map_err(internal)?;
-            let spec = ApiSpec::parse(&text, &import_options(id, Some(url)))
+            let spec = ApiSpec::parse(&text, &import_options(id, Some(url), None))
                 .map_err(|e| spec_error(&e))?;
             app.stored.base_url.clone_from(&spec.base_url);
             app.spec = Some(spec);
@@ -799,7 +811,7 @@ impl OpenApiAppsControl for OpenApiHost {
             invalid("this API was added from a file; add the document again to update it")
         })?;
         let text = self.download(&url).await?;
-        let spec = ApiSpec::parse(&text, &import_options(id, Some(&app.stored.base_url)))
+        let spec = ApiSpec::parse(&text, &import_options(id, Some(&app.stored.base_url), None))
             .map_err(|e| spec_error(&e))?;
         // Keep what still exists; an operation that vanished is switched off.
         let known: HashSet<&str> = spec.operations.iter().map(|o| o.name.as_str()).collect();
@@ -1161,6 +1173,66 @@ mod tests {
             r.host.refresh("shop").await,
             Err(OpenApiAppsError::Invalid(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn the_documents_servers_are_used_only_from_its_own_host_and_never_over_the_owners_address()
+     {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let serve = |servers_url: String| {
+            let text = SHOP.replace("http://placeholder.invalid/api", &servers_url);
+            Mock::given(method("GET"))
+                .and(path("/spec.yaml"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(text))
+        };
+        let from_url = || {
+            serde_json::from_value::<OpenApiAppInput>(
+                json!({"name": "Shop", "spec_url": format!("{}/spec.yaml", server.uri())}),
+            )
+            .unwrap()
+        };
+        let r = rig(true);
+
+        // Pasted text has no host to compare with: the owner must give the address.
+        let text_only = json!({"name": "a", "spec_text": SHOP});
+        let err = r
+            .host
+            .add(serde_json::from_value(text_only).unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, OpenApiAppsError::Invalid(m) if m.contains("base URL")),
+            "{err:?}"
+        );
+
+        // A server on another host than the document's is not taken.
+        serve("https://api.elsewhere.example/api".into())
+            .mount(&server)
+            .await;
+        let err = r.host.add(from_url()).await.unwrap_err();
+        assert!(matches!(err, OpenApiAppsError::Invalid(_)), "{err:?}");
+        assert!(r.host.list().is_empty(), "no app was saved");
+        server.reset().await;
+
+        // The same host is fine, and so is the owner's own address over any server.
+        serve(format!("{}/api", server.uri())).mount(&server).await;
+        let app = r.host.add(from_url()).await.unwrap();
+        assert_eq!(app.base_url, format!("{}/api", server.uri()));
+        server.reset().await;
+        serve("https://api.elsewhere.example/api".into())
+            .mount(&server)
+            .await;
+        let mut own = from_url();
+        own.name = "Mine".into();
+        own.base_url = Some(format!("{}/mine", server.uri()));
+        let app = r.host.add(own).await.unwrap();
+        assert_eq!(app.base_url, format!("{}/mine", server.uri()));
+        // A refresh keeps the owner's address although the document names another.
+        let app = r.host.refresh(&app.id).await.unwrap();
+        assert_eq!(app.base_url, format!("{}/mine", server.uri()));
     }
 
     #[tokio::test]

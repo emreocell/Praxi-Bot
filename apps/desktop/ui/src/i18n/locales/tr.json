@@ -1090,8 +1090,8 @@
       "alwaysAskHint": "Bu bir ödeme işlemine benziyor, bu yüzden Tam erişimde bile her seferinde sorar.",
       "auth": "Giriş",
       "authSet": "Giriş: {{kind}}.",
-      "baseUrl": "API adresi (isteğe bağlı)",
-      "baseUrlHint": "İstekler yalnızca bu adrese gider. Boş bırakırsan belgedeki ilk sunucu kullanılır.",
+      "baseUrl": "API adresi",
+      "baseUrlHint": "İstekler yalnızca bu adrese gider. Boş bırakabilmen için belgenin bir web adresinden gelmesi ve aynı sitede bir sunucu listelemesi gerekir; değilse adresi gir.",
       "enabledCount": "{{total}} işlemden {{enabled}} tanesi açık",
       "err": {
         "file": "Bir dosya seç.",
@@ -1121,6 +1121,7 @@
       "paramName": "Parametre adı",
       "password": "Parola",
       "pill": "REST API'ler",
+      "queryKeyHint": "Adresteki anahtar servisin kendi günlüklerine düşebilir. API izin veriyorsa bunun yerine başlık seç.",
       "refresh": "Adresten güncelle",
       "refreshed": "Belge güncellendi.",
       "remove": "Kaldır",

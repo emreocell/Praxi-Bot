@@ -18,7 +18,9 @@ pub enum OpenApiAuthKind {
     None,
     /// An API key in a request header (`name` is the header).
     ApiKeyHeader,
-    /// An API key in the query string (`name` is the parameter).
+    /// An API key in the query string (`name` is the parameter). The key is
+    /// masked in every result, error and log, but the service sees it in the
+    /// URL it logs: prefer [`Self::ApiKeyHeader`] when the API offers both.
     ApiKeyQuery,
     /// `Authorization: Bearer <secret>`.
     Bearer,
@@ -161,7 +163,10 @@ pub struct OpenApiAppInput {
     /// The document itself (JSON or YAML), for example read from a file.
     #[serde(default)]
     pub spec_text: Option<String>,
-    /// The API's base URL. Defaults to the first `servers` entry of the document.
+    /// The API's base URL; the only server ever used (the document's `servers`
+    /// are ignored). It may be left out only with `spec_url` when the
+    /// document's first `servers` entry is on the same host as `spec_url`;
+    /// otherwise it is required.
     #[serde(default)]
     pub base_url: Option<String>,
     /// Credentials; default none.

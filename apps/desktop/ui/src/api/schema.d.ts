@@ -11118,7 +11118,12 @@ export interface components {
         /** @description Body of `POST /v1/openapi-apps`. Give the document as `spec_url` or `spec_text`. */
         OpenApiAppInput: {
             auth?: null | components["schemas"]["OpenApiAuthInput"];
-            /** @description The API's base URL. Defaults to the first `servers` entry of the document. */
+            /**
+             * @description The API's base URL; the only server ever used (the document's `servers`
+             *     are ignored). It may be left out only with `spec_url` when the
+             *     document's first `servers` entry is on the same host as `spec_url`;
+             *     otherwise it is required.
+             */
             base_url?: string | null;
             /** @description Display name. */
             name: string;

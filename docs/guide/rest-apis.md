@@ -14,9 +14,10 @@ Open **Apps** and choose **REST APIs** in the top bar.
    `https://api.example.com/openapi.json`) or choose a **file** (JSON or YAML) from your
    computer. A web address can be refreshed later with **Update from the address**; a file
    cannot.
-3. **API address:** optional. Requests go only to this address. Leave it empty to use the first
-   server the document lists. If the document lists none, or only a relative one, you must
-   enter it.
+3. **API address:** requests go only to this address. You can leave it empty only when you
+   gave a web address and the document lists a server on that same site; that server is then
+   used. For a file, or a document that names a server on another site, you must enter it:
+   a document cannot decide where your key is sent.
 4. **Sign-in:** choose what the API expects:
 
    | Choice | What Praxi sends |
@@ -24,7 +25,7 @@ Open **Apps** and choose **REST APIs** in the top bar.
    | None | nothing |
    | Access key (Bearer) | `Authorization: Bearer <key>` |
    | API key in a header | the key in the header you name (for example `X-Api-Key`) |
-   | API key in the address | the key as the query parameter you name |
+   | API key in the address | the key as the query parameter you name (prefer a header when the API offers both: addresses end up in the service's own logs) |
    | User name and password | HTTP basic authentication |
 
 5. Choose **Connect API**.
@@ -82,17 +83,24 @@ an e-mail in a run, a call to the API asks first.
 
 - **One host.** Requests go only to the API address you gave. Path values a bot supplies are
   encoded and cannot change the host or leave the base path (`..` is refused).
-- **No redirects.** An API that answers with a redirect is not followed, so a redirect
-  cannot send your key to another host.
+- **No redirects.** An API that answers with a redirect is not followed, not even to the same
+  host, so a redirect cannot send your key anywhere.
+- **Only your address.** The document's own `servers` are ignored when you give an address.
+  Links to other documents (`$ref` to a web address) are never fetched.
+- **Header values.** A line break in a value a bot supplies for a header is refused.
 - **No private addresses.** Addresses on your own machine or network (`localhost`,
   `192.168.x.x`, `10.x.x.x`, link-local and cloud metadata addresses) are refused for the
   API and for downloading the document, also when a name resolves to one.
 - **No proxy.** The environment's proxy settings are not used for these requests.
-- **Size caps.** The document is limited to 8 MiB, a response is cut at 256 KiB (or less)
+- **Size caps.** The document is limited to 8 MiB, an operation whose schemas nest `$ref`s more
+  than 10 deep or expand to more than 1 MiB is left out and counted under the API, a response is cut at 256 KiB (or less)
   and a request times out after 30 seconds. A cut response is marked as truncated.
 - **Secrets stay out.** The key is read only when a call is made and masked in every result,
-  error and log. A header or query parameter that carries the key is hidden from the tool and
-  cannot be set by a bot.
+  error and log, also when it travels in the address and the API echoes it back. A header or
+  query parameter that carries the key is hidden from the tool and cannot be set by a bot.
+- **Money asks.** Besides the path and the operation id, the tags, summary and description are
+  read for payment words, and a `POST` to a one-door endpoint such as `/graphql` or `/rpc`
+  (where the path says nothing) always asks too.
 
 ## Limits and things to know
 

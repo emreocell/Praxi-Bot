@@ -155,9 +155,15 @@ async fn spec_download_reads_the_document() {
         .await
         .unwrap();
     assert_eq!(
-        ApiSpec::parse(&text, &ImportOptions::default())
-            .unwrap()
-            .title,
+        ApiSpec::parse(
+            &text,
+            &ImportOptions {
+                base_url: Some(server.uri()),
+                ..ImportOptions::default()
+            }
+        )
+        .unwrap()
+        .title,
         "Shop"
     );
 }

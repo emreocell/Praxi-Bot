@@ -189,8 +189,14 @@ pub struct ApiSpec {
 pub struct ImportOptions {
     /// Prefix for tool names (`<prefix>_<operation>`); empty for none.
     pub name_prefix: String,
-    /// Override for the base URL (required when `servers` is relative/missing).
+    /// The API's base URL, chosen by the owner. When set, the document's
+    /// `servers` are ignored altogether.
     pub base_url: Option<String>,
+    /// Host the document was downloaded from. With no `base_url`, the first
+    /// `servers` entry is used only when it is on this host; any other host
+    /// (or no host here at all) needs an explicit `base_url`, so a document
+    /// cannot aim the API's credentials at a server of its own choosing.
+    pub server_host: Option<String>,
     /// Keep only operations having one of these tags (empty = all).
     pub include_tags: Vec<String>,
     /// Drop operations having one of these tags.
@@ -207,6 +213,12 @@ pub struct ImportOptions {
     pub max_operations: usize,
     /// Reject specs larger than this many bytes.
     pub max_spec_bytes: usize,
+    /// Deepest `$ref` nesting followed in a schema (and longest `$ref` chain);
+    /// an operation that needs more is left out.
+    pub max_ref_depth: usize,
+    /// Largest expanded (all `$ref`s inlined) parameter and body schema of one
+    /// operation, in bytes; an operation that needs more is left out.
+    pub max_expanded_bytes: usize,
 }
 
 impl Default for ImportOptions {
@@ -214,6 +226,7 @@ impl Default for ImportOptions {
         Self {
             name_prefix: String::new(),
             base_url: None,
+            server_host: None,
             include_tags: Vec::new(),
             exclude_tags: Vec::new(),
             include_operation_ids: Vec::new(),
@@ -222,6 +235,8 @@ impl Default for ImportOptions {
             include_deprecated: false,
             max_operations: 100,
             max_spec_bytes: 8 * 1024 * 1024,
+            max_ref_depth: 10,
+            max_expanded_bytes: 1024 * 1024,
         }
     }
 }
@@ -229,7 +244,6 @@ impl Default for ImportOptions {
 /// Maximum tool-name length accepted by common providers.
 const MAX_NAME_LEN: usize = 64;
 const MAX_DESCRIPTION: usize = 1500;
-const MAX_REF_DEPTH: usize = 24;
 const NODE_BUDGET: usize = 200_000;
 
 impl ApiSpec {
@@ -255,7 +269,7 @@ impl ApiSpec {
         if !(version.starts_with("3.0") || version.starts_with("3.1")) {
             return Err(OpenApiError::UnsupportedVersion(version.to_string()));
         }
-        let mut res = Resolver::new(&root);
+        let mut res = Resolver::new(&root, opts);
         let base_url = base_url(&root, opts)?;
 
         let mut operations = Vec::new();
@@ -368,6 +382,11 @@ fn base_url(root: &Value, opts: &ImportOptions) -> Result<String, OpenApiError> 
     let raw = if let Some(b) = &opts.base_url {
         b.clone()
     } else {
+        let Some(trusted) = opts.server_host.as_deref() else {
+            return Err(OpenApiError::NoServer(
+                "the document's `servers` are not trusted; give the API's base URL".into(),
+            ));
+        };
         let server = root
             .get("servers")
             .and_then(Value::as_array)
@@ -384,6 +403,17 @@ fn base_url(root: &Value, opts: &ImportOptions) -> Result<String, OpenApiError> 
                     url = url.replace(&format!("{{{k}}}"), d);
                 }
             }
+        }
+        let same_host = Url::parse(&url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+            .is_some_and(|h| h == trusted.to_ascii_lowercase());
+        if !same_host {
+            return Err(OpenApiError::NoServer(
+                "the document names a server on another host than it was downloaded from; \
+                 give the API's base URL"
+                    .into(),
+            ));
         }
         url
     };
@@ -497,6 +527,20 @@ fn build_operation(
         format!("{prefix}_{base_name}")
     };
 
+    // A path that steps out of its prefix or smuggles a query would let one
+    // operation reach another endpoint (or leave the base URL's path).
+    if path.split('/').any(|seg| {
+        matches!(seg, "." | "..")
+            || seg.eq_ignore_ascii_case("%2e")
+            || seg.eq_ignore_ascii_case("%2e%2e")
+    }) || path.contains(['?', '#', '\\'])
+        || path.chars().any(char::is_control)
+    {
+        return Err(
+            "the path contains `.`/`..` segments, a query, a fragment or control characters".into(),
+        );
+    }
+
     // Merge path-level and operation-level parameters; op-level wins.
     let mut raw: Vec<(String, String, Value)> = Vec::new(); // (in, name, param)
     for src in [item, op] {
@@ -537,8 +581,12 @@ fn build_operation(
         }
     }
 
+    res.begin_operation();
     let body = build_body(res, op)?;
     let params = bind_params(res, &raw, body.is_some());
+    if let Some(why) = res.op_overflow.take() {
+        return Err(why);
+    }
 
     let summary = op.get("summary").and_then(Value::as_str).unwrap_or("");
     let desc = op.get("description").and_then(Value::as_str).unwrap_or("");
@@ -754,15 +802,35 @@ struct Resolver<'a> {
     root: &'a Value,
     warnings: Vec<String>,
     nodes: usize,
+    max_depth: usize,
+    max_bytes: usize,
+    /// Bytes expanded for the operation being built.
+    op_bytes: usize,
+    /// Why the operation being built cannot be expanded within the limits.
+    op_overflow: Option<String>,
 }
 
 impl<'a> Resolver<'a> {
-    fn new(root: &'a Value) -> Self {
+    fn new(root: &'a Value, opts: &ImportOptions) -> Self {
         Self {
             root,
             warnings: Vec::new(),
             nodes: 0,
+            max_depth: opts.max_ref_depth,
+            max_bytes: opts.max_expanded_bytes,
+            op_bytes: 0,
+            op_overflow: None,
         }
+    }
+
+    /// Start a new operation: the size and depth limits apply to each one.
+    fn begin_operation(&mut self) {
+        self.op_bytes = 0;
+        self.op_overflow = None;
+    }
+
+    fn overflow(&mut self, why: String) {
+        self.op_overflow.get_or_insert(why);
     }
 
     fn warn(&mut self, msg: String) {
@@ -779,18 +847,26 @@ impl<'a> Resolver<'a> {
     /// Follow a top-level `$ref` chain (path items, parameters, bodies).
     fn resolve_top(&mut self, v: &Value) -> Option<Value> {
         let mut cur = v.clone();
-        for _ in 0..MAX_REF_DEPTH {
+        let mut seen: Vec<String> = Vec::new();
+        loop {
             let Some(r) = cur.get("$ref").and_then(Value::as_str).map(str::to_string) else {
                 return Some(cur);
             };
+            if seen.contains(&r) {
+                self.warn(format!("circular $ref `{r}`"));
+                return None;
+            }
+            if seen.len() >= self.max_depth {
+                self.warn("$ref chain too deep".into());
+                return None;
+            }
             let Some(target) = self.lookup(&r) else {
                 self.warn(format!("cannot resolve $ref `{r}`"));
                 return None;
             };
+            seen.push(r);
             cur = target.clone();
         }
-        self.warn("$ref chain too deep".into());
-        None
     }
 
     fn resolve_schema(&mut self, v: &Value) -> Value {
@@ -800,8 +876,25 @@ impl<'a> Resolver<'a> {
 
     fn walk(&mut self, v: &Value, stack: &mut Vec<String>, name_map: bool) -> Value {
         self.nodes += 1;
-        if self.nodes > NODE_BUDGET || stack.len() > MAX_REF_DEPTH {
-            self.warn("schema too large or deep; truncated".into());
+        self.op_bytes += 8;
+        if self.nodes > NODE_BUDGET {
+            self.warn("schema too large; truncated".into());
+            self.overflow("its schemas expand past the size limit".into());
+            return json!({});
+        }
+        if stack.len() > self.max_depth {
+            self.warn("schema too deep; truncated".into());
+            self.overflow(format!(
+                "its schemas nest $refs deeper than {}",
+                self.max_depth
+            ));
+            return json!({});
+        }
+        if self.op_bytes > self.max_bytes {
+            self.overflow(format!(
+                "its schemas expand to more than {} bytes",
+                self.max_bytes
+            ));
             return json!({});
         }
         match v {
@@ -811,7 +904,10 @@ impl<'a> Resolver<'a> {
                     // Keys are property names, values are schemas.
                     return Value::Object(
                         o.iter()
-                            .map(|(k, x)| (k.clone(), self.walk(x, stack, false)))
+                            .map(|(k, x)| {
+                                self.op_bytes += k.len();
+                                (k.clone(), self.walk(x, stack, false))
+                            })
                             .collect(),
                     );
                 }
@@ -826,6 +922,7 @@ impl<'a> Resolver<'a> {
                     ) {
                         continue;
                     }
+                    self.op_bytes += k.len();
                     let child = self.walk(
                         x,
                         stack,
@@ -840,6 +937,10 @@ impl<'a> Resolver<'a> {
                 }
                 Value::Object(out)
             }
+            Value::String(s) => {
+                self.op_bytes += s.len();
+                v.clone()
+            }
             other => other.clone(),
         }
     }
@@ -851,6 +952,8 @@ impl<'a> Resolver<'a> {
         stack: &mut Vec<String>,
     ) -> Value {
         if stack.iter().any(|s| s == r) {
+            // A recursive model (a tree node) is cut where it repeats.
+            self.warn(format!("recursive $ref `{r}` is cut where it repeats"));
             return json!({
                 "type": "object",
                 "description": format!("(recursive reference to {r})")

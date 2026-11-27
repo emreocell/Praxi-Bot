@@ -152,6 +152,7 @@ function AddForm({ onAdded }: { onAdded: (app: OpenApiApp) => void }) {
             {t(kind === "api_key_header" ? "apps.restApis.headerName" : "apps.restApis.paramName")}
           </label>
           <input id="oa-auth-name" className={formStyles.input} value={authName} placeholder={kind === "api_key_header" ? "X-Api-Key" : "api_key"} onChange={(e) => setAuthName(e.target.value)} />
+          {kind === "api_key_query" ? <p className={formStyles.hint}>{t("apps.restApis.queryKeyHint")}</p> : null}
           {err("name_auth")}
         </div>
       ) : null}

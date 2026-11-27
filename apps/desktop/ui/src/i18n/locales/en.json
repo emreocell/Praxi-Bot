@@ -1090,8 +1090,8 @@
       "alwaysAskHint": "This looks like a payment, so it asks every time, even at Full access.",
       "auth": "Sign-in",
       "authSet": "Sign-in: {{kind}}.",
-      "baseUrl": "API address (optional)",
-      "baseUrlHint": "Requests go only to this address. Leave it empty to use the first server the document lists.",
+      "baseUrl": "API address",
+      "baseUrlHint": "Requests go only to this address. You can leave it empty only when the document comes from a web address and lists a server on that same site; otherwise enter it.",
       "enabledCount": "{{enabled}} of {{total}} operations on",
       "err": {
         "file": "Choose a file.",
@@ -1121,6 +1121,7 @@
       "paramName": "Parameter name",
       "password": "Password",
       "pill": "REST APIs",
+      "queryKeyHint": "A key in the address can end up in the service's own logs. Choose a header instead if the API allows it.",
       "refresh": "Update from the address",
       "refreshed": "Document updated.",
       "remove": "Remove",
