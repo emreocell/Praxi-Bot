@@ -133,7 +133,7 @@
       "have": "Bir sunucum var",
       "haveHint": "Tek satırı kopyala, sunucuda yapıştır, verdiği kodu buraya yapıştır.",
       "local": "Bu bilgisayarda çalıştır (başlamak için önerilir)",
-      "localHint": "Kurulacak bir şey yok. Botların burada zaten çalışıyor. Sunucuyu sonra ekleyebilirsin.",
+      "localHint": "Kurulum yok. Botların burada çalışır. İstersen sonra sunucu eklersin.",
       "need": "Sunucuya ihtiyacım var (ücretsiz seçenekler, adım adım)",
       "needHint": "Sunucu edinmek için kısa rehber: ücretsiz bulut sunucusu, kiralık sunucu veya evdeki boş bir bilgisayar.",
       "title": "Hangisi sana uyuyor?"
@@ -354,16 +354,16 @@
     "hostKeyTitle": "Bu senin sunucun mu?",
     "hostKeyYes": "Evet, bu sunucuya güven",
     "intro": {
-      "optional": "Sunucuya ihtiyacın yok: isteğe bağlıdır ve her şey bu bilgisayarda zaten çalışıyor.",
+      "optional": "Gerekmez. Her şey zaten bu bilgisayarda çalışıyor.",
       "title": "Sunucuya ihtiyacın var mı?",
-      "what": "Sunucu, gece gündüz açık duran başka bir bilgisayardır; kendi bilgisayarın kapalıyken de botların çalışmaya devam eder."
+      "what": "Sunucu, sürekli açık kalan başka bir bilgisayardır; kendi bilgisayarın kapalıyken botların çalışmaya devam eder."
     },
     "keyFile": "Özel anahtar dosyası",
     "keyHint": "Yalnızca yol kullanılır. Praxi anahtarın kendisini kopyalamaz ve saklamaz.",
     "keysFound": "Bu bilgisayarda bulunan anahtarlar",
     "lead": "Kiraladığın bir sunucuya bağlan. Kurulumu Praxi senin yerine yapar.",
     "local": {
-      "body": "Botların bu bilgisayarda çalışır. Bilgisayar ve Praxi açıkken çalışırlar. Başlamak için gereken tek şey bu.",
+      "body": "Botların bu bilgisayar ve Praxi açıkken burada çalışır. Başlamak için bu yeter.",
       "done": "Anladım",
       "later": "İleride botların 7/24 çalışsın istersen bilgisayar menüsünü aç ve yeniden Sunucu ekle'yi seç.",
       "title": "İyi seçim: kurulacak bir şey yok"
@@ -797,7 +797,7 @@
     },
     "composioHub": {
       "accountConnected": "Composio hesabı bağlı",
-      "accountHint": "Uygulamaları görmek ve bağlamak için Composio hesabını bir kez bağla.",
+      "accountHint": "Uygulama bulup bağlamak için Composio'ya bir kez giriş yap.",
       "actionClass": {
         "destructive": "Siler",
         "money": "Para hareketi yapar",
@@ -1663,7 +1663,7 @@
     "unsavedIn": "Kaydedilmemiş değişiklikler: {{sections}}"
   },
   "botEmpty": {
-    "body": "Burada henüz bir şey yok. Bir şey iste, sohbet bu alanda açılsın.",
+    "body": "Henüz bir şey yok. Sohbeti başlatmak için bir şey iste.",
     "createBot": "Bot oluştur",
     "goFirst": "{{name}} botuna git",
     "goneHint": "Silinmiş ya da başka bir bilgisayarda olabilir. İlk botuna git ya da yeni bir tane oluştur.",
@@ -2530,7 +2530,7 @@
     },
     "emptyGreeting": "Merhaba, ben {{name}}",
     "emptyHint": "Sohbeti başlatmak için bir şey yaz.",
-    "emptySub": "Bir şey sor ya da hazır bir işle başla.",
+    "emptySub": "Bir soru sor ya da hazır bir görevle başla.",
     "emptyTitle": "Birlikte ne yapalım?",
     "export": {
       "done": "Sohbet kaydedildi",
@@ -4371,11 +4371,11 @@
       "defaultName": "Praxi",
       "noService": "Praxi'nin arka plan servisi henüz çalışmıyor. Birkaç saniye bekleyip yeniden dene.",
       "recap": "Yapay zekâ: {{model}} · Özgürlük: {{level}}",
-      "subtitle": "Ona bir ad ve bir görünüm ver. İkisini de sonra değiştirebilirsin.",
-      "title": "Botunla tanış",
+      "subtitle": "Bir ad ve görünüm seç. İstediğin zaman değiştirirsin.",
+      "title": "Botuna ad ver",
       "tryTitle": "Önce şunu dene",
       "whereBody": "Botun, Praxi-Bot açıkken bu bilgisayarda çalışır. Yalnızca onunla paylaştığın klasörlere dokunur.",
-      "whereLater": "Bilgisayarın kapalıyken de çalışmasını mı istiyorsun? Sonra Ayarlar'dan bir sunucu ekleyebilirsin. Şimdi gerekmez.",
+      "whereLater": "Bilgisayarın kapalıyken de çalışsın mı? Sonra Ayarlar'dan sunucu ekleyebilirsin. Şimdi gerekmez.",
       "whereTitle": "Botun nerede çalışır"
     },
     "brain": {
@@ -4396,13 +4396,13 @@
         "three": "Buraya dön ve aşağıya yapıştır. Praxi-Bot anahtarı hemen kontrol eder.",
         "two": "Google ile giriş yap ve “API anahtarı oluştur”a bas. Sonra anahtarı kopyala."
       },
-      "freeSub": "Google Gemini'nin ücretsiz bir planı var. Yaklaşık iki dakika sürer ve yalnızca bir Google hesabı gerekir.",
+      "freeSub": "Google Gemini'nin ücretsiz planı var. Google hesabınla yaklaşık iki dakika sürer.",
       "freeTitle": "Ücretsiz bir model kullan",
       "getFreeKey": "Anahtarımı al",
       "getKey": "Anahtar al",
       "here": {
         "sub": "{{names}} · anahtar gerekmez",
-        "title": "Bu bilgisayarda hazır olanı kullan"
+        "title": "Burada hazır olanı kullan"
       },
       "hide": "Anahtarı gizle",
       "keyHint": "Sistem anahtarlığına kaydedilir. Bir daha gösterilmez.",
@@ -4413,7 +4413,7 @@
         "prefix": "Bu, bu servisin bir anahtarına benzemiyor. Yine de deneyebilirsin ama doğrusunu kopyaladığından emin ol.",
         "short": "Bu bir anahtar için çok kısa. Anahtarın tamamını kopyala; harf ve rakamlardan oluşan uzun bir satırdır."
       },
-      "laterNote": "Hazır değil misin? Üstteki “Bunu sonra eklerim”e bas. Etrafa göz atabilirsin; Ayarlar → Yapay zekâ'dan bir model ekler eklemez botun cevap vermeye başlar.",
+      "laterNote": "Hazır değil misin? Üstteki \"Bunu sonra eklerim\"e bas. Önce etrafa bak; hazır olunca Ayarlar → Yapay zekâ'dan model ekle.",
       "local": {
         "llamacpp": "llama.cpp sunucusu",
         "lmstudio": "LM Studio"
@@ -4429,7 +4429,7 @@
       },
       "own": {
         "sub": "Anthropic, OpenAI, OpenRouter veya DeepSeek'ten.",
-        "title": "Bir erişim anahtarım var"
+        "title": "Kendi anahtarım var"
       },
       "paste": "Yapıştır",
       "providers": {
@@ -4457,8 +4457,8 @@
       },
       "recommended": "Önerilen",
       "show": "Anahtarı göster",
-      "subtitle": "Botun adına düşünen yapay zekâ budur. Sonra istediğin zaman değiştirebilirsin.",
-      "title": "Bir yapay zekâ bağla",
+      "subtitle": "Botunun düşünmesini sağlayan budur. Sonra değiştirebilirsin.",
+      "title": "Yapay zekâ bağla",
       "useCli": "{{name}} kullan"
     },
     "creating": "Oluşturuluyor…",
@@ -4503,8 +4503,8 @@
         }
       },
       "recommended": "Önerilen",
-      "subtitle": "Botunun sormadan ne kadarını yapabileceğine karar ver. Sonradan her bota ayrı seviye verebilirsin.",
-      "title": "Ne kadar serbest olsun?"
+      "subtitle": "Botunun sormadan ne kadarını yapabileceğine karar ver. Sonra her bota ayrı seviye verebilirsin.",
+      "title": "Kendi başına ne kadar yapsın?"
     },
     "help": "Yardım lazım mı?",
     "language": "Dil",
@@ -4517,12 +4517,12 @@
       "screen": "Şu an ekranımda ne var?"
     },
     "service": {
-      "body": "Praxi onu kendiliğinden başlatır. Birkaç saniye bekleyip yeniden dene; olmazsa uygulamayı yeniden başlat.",
+      "body": "Praxi onu kendiliğinden başlatır. Birkaç saniye bekle ve yeniden dene, ya da uygulamayı yeniden başlat.",
       "retry": "Yeniden dene",
-      "title": "Praxi'nin arka plan servisi henüz çalışmıyor"
+      "title": "Praxi servisi henüz çalışmıyor"
     },
     "skip": "Bunu sonra eklerim",
-    "skipTip": "Önce etrafa göz at. Kurulumu sonra “Kurulumu bitir” düğmesinden tamamlayabilirsin.",
+    "skipTip": "Önce etrafa bak. Kurulumu sonra Kurulumu bitir düğmesinden tamamla.",
     "start": "Başla",
     "steps": {
       "bot": "Botun",
@@ -4842,7 +4842,7 @@
       "botHint": "Buradaki bir bot, bu bilgisayar kapalıyken de çalışır.",
       "model": "{{name}} üzerinde bir yapay zekâ bağla",
       "modelAction": "Yapay zekâ bağla",
-      "modelHint": "Bu sunucudaki botların onunla düşünür."
+      "modelHint": "Bu sunucudaki botlar düşünmek için bunu kullanır."
     },
     "stepsLabel": "{{name}} kurulumu",
     "viewScreen": "Ekranı izle"
@@ -5190,7 +5190,7 @@
       "title": "Botla sohbet",
       "working": "Bot çalışıyor…"
     },
-    "checkingTargets": "Ekranlar denetleniyor…",
+    "checkingTargets": "Ekran aranıyor…",
     "clearForeignPause": "{{owner}} duraklatmasını kaldır",
     "clearPauseAction": "Duraklatmayı kaldır",
     "close": "Görünümü kapat",
@@ -5260,7 +5260,7 @@
       "wait": "Sunucu ekranını hâlâ kontrol ediyor. Birkaç saniye bekleyip yenile.",
       "wayland": "Sunucunun masaüstünü X11 oturumuna geçir, sonra ekranı yeniden aç."
     },
-    "noTargets": "Henüz bildirilen bir ekran hedefi yok.",
+    "noTargets": "Henüz gösterilecek ekran yok.",
     "openScreen": "Ekranı aç",
     "otherOwner": "Kontrol {{owner}} tarafında",
     "outcomeHint": "Ne tamamladın? (isteğe bağlı)",
@@ -5472,17 +5472,17 @@
   },
   "main": {
     "clearSelection": "Genel görünüme dön",
-    "daemonConnectingDescription": "Bu bilgisayardaki yerleşik Praxi-Bot arka plan servisine bağlanılıyor.",
+    "daemonConnectingDescription": "Bu bilgisayardaki Praxi servisine bağlanılıyor.",
     "daemonConnectingTitle": "Yerel servis başlatılıyor…",
-    "daemonOfflineDescription": "Praxi-Bot'un arka plan servisi yanıt vermiyor. Birkaç saniye bekleyip yeniden dene. Sorun sürerse bir güvenlik duvarının Praxi-Bot'u engellemediğini kontrol et veya uygulamayı yeniden başlat.",
-    "daemonOfflineTitle": "Yerel arka plan servisi çalışmıyor",
+    "daemonOfflineDescription": "Praxi servisi yanıt vermiyor. Birkaç saniye bekle ve yeniden dene. Sorun sürerse güvenlik duvarını kontrol et ya da uygulamayı yeniden başlat.",
+    "daemonOfflineTitle": "Yerel servis çalışmıyor",
     "daemonRetry": "Bağlantıyı yeniden dene",
     "runSetupWizard": "Kurulum sihirbazını çalıştır",
-    "selectBotDescription": "Soldan bir bot seç ya da yeni bir bot oluştur.",
-    "selectBotTitle": "Konuşmak için bir bot seç",
+    "selectBotDescription": "Soldan bir bot seç ya da yeni bot oluştur.",
+    "selectBotTitle": "Sohbet için bir bot seç",
     "selectedBotLabel": "Etkin bot profili",
-    "welcomeDescription": "Üç kısa adımda ilk botun çalışmaya hazır.",
-    "welcomeTitle": "İlk botunu hazırlayalım"
+    "welcomeDescription": "Üç kısa adım. Sonra botun çalışmaya hazır.",
+    "welcomeTitle": "İlk botunu kuralım"
   },
   "memory": {
     "add": "Hafızaya ekle",
@@ -5839,8 +5839,8 @@
     "costUnavailable": "Maliyet alınamadı",
     "count": "{{total}} bottan {{shown}} tanesi gösteriliyor",
     "dailyLimit": "{{name}} için günlük harcama",
-    "emptyHint": "Araştırma, günlük işler veya kendi fikirleriniz için size yardımcı olacak bir bot oluşturun.",
-    "emptyTitle": "İlk botunuzu oluşturun",
+    "emptyHint": "Araştırma, günlük işler veya kendi fikirlerin için bir bot oluştur.",
+    "emptyTitle": "İlk botunu oluştur",
     "filter": "Durum",
     "grid": "Kart görünümü",
     "lastActivity": "Son etkinlik",
@@ -6004,9 +6004,9 @@
     "clear": "Temizle",
     "clearedToast": "Bildirimler temizlendi",
     "dismiss": "Kapat",
-    "empty": "Bir bot işini bitirince, sana bir şey sorunca ya da bir işte başarısız olunca burada görürsün.",
+    "empty": "Bot bir işi bitirince, sana bir şey sorunca ya da hata verince burada görürsün.",
     "emptyAction": "Bildirim ayarları",
-    "emptyTitle": "Bildirim yok",
+    "emptyTitle": "Henüz bildirim yok",
     "filterChip": {
       "all": "Tümü",
       "errors": "Başarısız",
@@ -6556,8 +6556,8 @@
     "durationSeconds": "{{seconds}} sn",
     "edit": "Düzenle",
     "empty": {
-      "hint": "Bir botun bir istemi otomatik çalıştırması için oluştur; örneğin hafta içi her gün 09:00.",
-      "noBots": "Önce bir bot oluştur, sonra onun için bir şey zamanla.",
+      "hint": "Botun bir istemi belirli aralıklarla çalıştırsın diye bir görev oluştur; örneğin hafta içi her gün 09:00.",
+      "noBots": "Önce bir bot oluştur, sonra onun için bir görev zamanla.",
       "title": "Henüz zamanlanmış görev yok"
     },
     "enabled": "Etkin",
@@ -6823,7 +6823,7 @@
     "add": "Sunucu ekle",
     "alreadyHere": "Zaten {{name}} üzerindesin.",
     "checkNow": "Bu sunucuya geç",
-    "empty": "Henüz sunucu yok. Sorun değil: botların bu bilgisayarda çalışıyor.",
+    "empty": "Henüz sunucu yok. Botların zaten bu bilgisayarda çalışıyor.",
     "lead": "Sunucular, bu bilgisayar kapalıyken botlarını çalışır tutar.",
     "remove": "Kaldır",
     "removeBody": "Bu bilgisayar sunucuyu ve eşleşmesini unutur. Sunucunun kendisine, botlarına ve dosyalarına dokunulmaz; çalışmaya devam ederler. Sonra yeniden ekleyebilirsin.",
@@ -6968,7 +6968,7 @@
       "title": "Bildirimler"
     },
     "onboarding": {
-      "description": "Model sağlayıcısını, güvenlik varsayılanlarını veya ilk botunu yapılandırmak için 5 adımlı rehberli kurulumu yeniden aç.",
+      "description": "Model bağlamak, güvenlik varsayılanlarını ayarlamak veya ilk botunu oluşturmak için kurulum sihirbazını yeniden aç.",
       "restart": "Kurulum sihirbazını yeniden çalıştır",
       "resume": "Kurulum sihirbazına devam et",
       "statusCompleted": "Tamamlandı",
@@ -8249,7 +8249,7 @@
     "files": "{{count}} dosya",
     "files_one": "{{count}} dosya",
     "installNow": "{{name}} yükle",
-    "installedEmpty": "Kitaplıktan henüz bir şey yüklenmedi. Beceri bulmak için Göz at sekmesini aç.",
+    "installedEmpty": "Kitaplıktan henüz bir şey yüklemedin. Beceri bulmak için Göz at sekmesini aç.",
     "installedToast": "{{name}} yüklendi.",
     "listFailed": "Beceri listesi yüklenemedi",
     "loadFailed": "Becerilerin yüklenemedi",

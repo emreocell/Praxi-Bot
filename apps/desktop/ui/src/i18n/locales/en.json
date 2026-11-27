@@ -133,7 +133,7 @@
       "have": "I have a server",
       "haveHint": "Copy one line, paste it on the server, and paste the code it gives you back here.",
       "local": "Run on this computer (recommended to start)",
-      "localHint": "Nothing to set up. Your bots already work here. You can add a server later.",
+      "localHint": "Nothing to set up. Your bots work here. Add a server later if you want.",
       "need": "I need a server (free options, step by step)",
       "needHint": "A short guide to get one: a free cloud server, a rented one, or a spare computer at home.",
       "title": "Which of these fits you?"
@@ -354,16 +354,16 @@
     "hostKeyTitle": "Is this your server?",
     "hostKeyYes": "Yes, trust this server",
     "intro": {
-      "optional": "You do not need one: it is optional, and everything already works on this computer.",
+      "optional": "You do not need one. Everything already works on this computer.",
       "title": "Do you need a server?",
-      "what": "A server is another computer that stays on day and night, so your bots keep working even when your own computer is off."
+      "what": "A server is another computer that stays on, so your bots keep working when yours is off."
     },
     "keyFile": "Private key file",
     "keyHint": "Only the path is used. Praxi never copies or stores the key itself.",
     "keysFound": "Keys found on this computer",
     "lead": "Connect a server you rent. Praxi does the setup for you.",
     "local": {
-      "body": "Your bots run on this computer. They work while the computer and Praxi are on. That is all you need to start.",
+      "body": "Your bots run on this computer while it and Praxi are on. That is enough to start.",
       "done": "Got it",
       "later": "If you later want your bots to work around the clock, open the computer menu and choose Add a server again.",
       "title": "Good choice: nothing to set up"
@@ -797,7 +797,7 @@
     },
     "composioHub": {
       "accountConnected": "Composio account connected",
-      "accountHint": "Connect a Composio account once to browse and connect apps.",
+      "accountHint": "Sign in to Composio once to find and connect apps.",
       "actionClass": {
         "destructive": "Deletes",
         "money": "Moves money",
@@ -1663,7 +1663,7 @@
     "unsavedIn": "Unsaved changes: {{sections}}"
   },
   "botEmpty": {
-    "body": "Nothing here yet. Ask for something, and the conversation will open in this space.",
+    "body": "Nothing here yet. Ask for something to start the chat.",
     "createBot": "Create a bot",
     "goFirst": "Go to {{name}}",
     "goneHint": "It may have been deleted, or it lives on another computer. Go to your first bot or create a new one.",
@@ -2529,8 +2529,8 @@
       "shortSeconds": "s"
     },
     "emptyGreeting": "Hi, I'm {{name}}",
-    "emptyHint": "Say something to start the conversation.",
-    "emptySub": "Ask something or start with a ready-made task.",
+    "emptyHint": "Type something to start the conversation.",
+    "emptySub": "Ask a question or pick a starter task.",
     "emptyTitle": "What shall we work on?",
     "export": {
       "done": "Chat saved",
@@ -4371,18 +4371,18 @@
       "defaultName": "Praxi",
       "noService": "Praxi's background service is not running yet. Wait a few seconds and try again.",
       "recap": "AI: {{model}} · Freedom: {{level}}",
-      "subtitle": "Give it a name and a look. You can change both later.",
-      "title": "Meet your bot",
+      "subtitle": "Pick a name and look. Change them anytime.",
+      "title": "Name your bot",
       "tryTitle": "Try this first",
-      "whereBody": "Your bot runs on this computer while Praxi-Bot is open. It only touches the folders you share with it.",
-      "whereLater": "Want it to keep working when your computer is off? You can add a server later in Settings. You do not need one now.",
+      "whereBody": "Your bot runs on this computer while Praxi-Bot is open. It only touches folders you share with it.",
+      "whereLater": "Want it to keep working when your computer is off? Add a server later in Settings. You do not need one now.",
       "whereTitle": "Where your bot runs"
     },
     "brain": {
       "another": "Choose a different one",
       "change": "Change",
       "checking": "Checking…",
-      "choices": "How would you like to start?",
+      "choices": "How do you want to start?",
       "cliReady": "{{name}} is ready",
       "cliSub": "Your subscription · no key needed",
       "cliSubAccount": "{{account}} · no key needed",
@@ -4396,13 +4396,13 @@
         "three": "Come back here and paste it below. Praxi-Bot checks it right away.",
         "two": "Sign in with Google and press “Create API key”. Then copy the key."
       },
-      "freeSub": "Google Gemini has a free plan. It takes about two minutes and you only need a Google account.",
+      "freeSub": "Google Gemini has a free plan. Takes about two minutes with a Google account.",
       "freeTitle": "Use a free model",
       "getFreeKey": "Get my key",
       "getKey": "Get a key",
       "here": {
         "sub": "{{names}} · no key needed",
-        "title": "Use what is already on this computer"
+        "title": "Use what's already here"
       },
       "hide": "Hide key",
       "keyHint": "Saved in your system keychain. It is never shown again.",
@@ -4413,7 +4413,7 @@
         "prefix": "This does not look like a key from this service. You can still try it, but check you copied the right one.",
         "short": "That is too short for a key. Copy the whole key, it is a long line of letters and numbers."
       },
-      "laterNote": "Not ready? Press “I will add this later” at the top. You can look around, and your bot starts answering as soon as you add a model in Settings → AI.",
+      "laterNote": "Not ready? Press \"I will add this later\" at the top. Look around first; add a model in Settings → AI when you are ready.",
       "local": {
         "llamacpp": "llama.cpp server",
         "lmstudio": "LM Studio"
@@ -4429,7 +4429,7 @@
       },
       "own": {
         "sub": "From Anthropic, OpenAI, OpenRouter or DeepSeek.",
-        "title": "I have an access key"
+        "title": "I have my own key"
       },
       "paste": "Paste",
       "providers": {
@@ -4457,7 +4457,7 @@
       },
       "recommended": "Recommended",
       "show": "Show key",
-      "subtitle": "This is the AI that does the thinking for your bot. You can change it later.",
+      "subtitle": "This is what thinks for your bot. You can change it later.",
       "title": "Connect an AI",
       "useCli": "Use {{name}}"
     },
@@ -4503,8 +4503,8 @@
         }
       },
       "recommended": "Recommended",
-      "subtitle": "Decide how much your bot may do without asking. Every bot can have its own level later.",
-      "title": "How much freedom?"
+      "subtitle": "Choose how much your bot may do without asking. Each bot can have its own level later.",
+      "title": "How much can it do alone?"
     },
     "help": "Need help?",
     "language": "Language",
@@ -4517,12 +4517,12 @@
       "screen": "What is on my screen right now?"
     },
     "service": {
-      "body": "Praxi starts it automatically. Wait a few seconds and try again; if it keeps failing, restart the app.",
+      "body": "Praxi starts it automatically. Wait a few seconds and try again, or restart the app.",
       "retry": "Try again",
-      "title": "Praxi's background service is not running yet"
+      "title": "Praxi's service is not running yet"
     },
     "skip": "I will add this later",
-    "skipTip": "Look around first. You can finish the setup later from the Finish setup button.",
+    "skipTip": "Look around first. Finish setup later from the Finish setup button.",
     "start": "Start",
     "steps": {
       "bot": "Your bot",
@@ -4839,10 +4839,10 @@
     },
     "steps": {
       "bot": "Create your first bot here",
-      "botHint": "A bot here keeps working while this computer is off.",
+      "botHint": "A bot here keeps working when this computer is off.",
       "model": "Connect an AI on {{name}}",
       "modelAction": "Connect an AI",
-      "modelHint": "Your bots on this server think with it."
+      "modelHint": "Bots on this server use it to think."
     },
     "stepsLabel": "Set up {{name}}",
     "viewScreen": "View screen"
@@ -5190,7 +5190,7 @@
       "title": "Chat with bot",
       "working": "Bot is working…"
     },
-    "checkingTargets": "Checking for screens…",
+    "checkingTargets": "Looking for a screen…",
     "clearForeignPause": "Clear {{owner}}'s pause",
     "clearPauseAction": "Clear pause",
     "close": "Close viewer",
@@ -5230,7 +5230,7 @@
       "browser": "Browser",
       "desktop": "Desktop"
     },
-    "loadingPreview": "Loading the first frame…",
+    "loadingPreview": "Loading the first picture…",
     "noScreen": {
       "desktop_off": "desktop control is switched off",
       "no_display": "no display is available",
@@ -5260,7 +5260,7 @@
       "wait": "The server is still checking its screen. Wait a few seconds and refresh.",
       "wayland": "Switch the server's desktop to an X11 session, then open the screen again."
     },
-    "noTargets": "No screen targets reported yet.",
+    "noTargets": "No screen to show yet.",
     "openScreen": "Open screen",
     "otherOwner": "Controlled by {{owner}}",
     "outcomeHint": "What did you complete? (optional)",
@@ -5472,17 +5472,17 @@
   },
   "main": {
     "clearSelection": "Back to overview",
-    "daemonConnectingDescription": "Connecting to the bundled Praxi-Bot background service on this computer.",
-    "daemonConnectingTitle": "Starting local background service…",
-    "daemonOfflineDescription": "Praxi-Bot's background service is not answering. Wait a few seconds and try again. If it keeps failing, check that a firewall is not blocking Praxi-Bot, or restart the app.",
-    "daemonOfflineTitle": "Local background service is not running",
+    "daemonConnectingDescription": "Connecting to Praxi's service on this computer.",
+    "daemonConnectingTitle": "Starting the local service…",
+    "daemonOfflineDescription": "Praxi's service is not answering. Wait a few seconds and try again. If it keeps failing, check your firewall or restart the app.",
+    "daemonOfflineTitle": "Local service is not running",
     "daemonRetry": "Retry connection",
     "runSetupWizard": "Run setup wizard",
-    "selectBotDescription": "Choose a bot on the left, or create a new one.",
-    "selectBotTitle": "Pick a bot to talk to",
+    "selectBotDescription": "Pick one on the left, or create a bot.",
+    "selectBotTitle": "Choose a bot to chat with",
     "selectedBotLabel": "Active Bot Profile",
-    "welcomeDescription": "Three short steps and your first bot is ready to work.",
-    "welcomeTitle": "Let’s get your first bot ready"
+    "welcomeDescription": "Three quick steps. Then your bot can work.",
+    "welcomeTitle": "Set up your first bot"
   },
   "memory": {
     "add": "Add memory",
@@ -5839,8 +5839,8 @@
     "costUnavailable": "Cost unavailable",
     "count": "Showing {{shown}} of {{total}} bots",
     "dailyLimit": "Daily spending for {{name}}",
-    "emptyHint": "Create a bot to help with research, everyday tasks, or your own ideas.",
-    "emptyTitle": "Your first bot starts here",
+    "emptyHint": "Create a bot for research, daily tasks, or your own ideas.",
+    "emptyTitle": "Create your first bot",
     "filter": "Status",
     "grid": "Card grid",
     "lastActivity": "Last activity",
@@ -6004,9 +6004,9 @@
     "clear": "Clear",
     "clearedToast": "Notifications cleared",
     "dismiss": "Dismiss",
-    "empty": "When a bot finishes, asks you something or fails, you will see it here.",
+    "empty": "When a bot finishes, asks you something, or fails, you will see it here.",
     "emptyAction": "Notification settings",
-    "emptyTitle": "No notifications",
+    "emptyTitle": "No notifications yet",
     "filterChip": {
       "all": "All",
       "errors": "Failed",
@@ -6556,8 +6556,8 @@
     "durationSeconds": "{{seconds}}s",
     "edit": "Edit",
     "empty": {
-      "hint": "Create one to have a bot run a prompt automatically, for example every weekday at 9.",
-      "noBots": "Create a bot first, then schedule something for it.",
+      "hint": "Create one to run a prompt on a schedule, for example every weekday at 9.",
+      "noBots": "Create a bot first, then schedule a task for it.",
       "title": "No scheduled tasks yet"
     },
     "enabled": "Enabled",
@@ -6823,7 +6823,7 @@
     "add": "Add a server",
     "alreadyHere": "You are already on {{name}}.",
     "checkNow": "Switch to it",
-    "empty": "No server yet. This is fine: your bots run on this computer.",
+    "empty": "No server yet. Your bots already run on this computer.",
     "lead": "Servers keep your bots running when this computer is off.",
     "remove": "Remove",
     "removeBody": "This computer forgets the server and its pairing. The server itself, its bots and its files are not touched and keep running. You can add it again later.",
@@ -6968,7 +6968,7 @@
       "title": "Notifications"
     },
     "onboarding": {
-      "description": "Re-open the 5-step guided setup to configure a model provider, safety defaults, or your first bot.",
+      "description": "Re-open the guided setup to connect a model, set safety defaults, or create your first bot.",
       "restart": "Run setup wizard again",
       "resume": "Resume setup wizard",
       "statusCompleted": "Completed",
