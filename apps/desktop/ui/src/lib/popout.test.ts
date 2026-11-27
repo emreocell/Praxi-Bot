@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   buildPopoutSearchParams,
   chatPopoutLabel,
+  distanceFromRect,
   isAlreadyDecidedError,
   isDragOutsideWindow,
   isPopoutLabel,
@@ -117,6 +118,14 @@ test("drag-out detection requires real drag and triggers outside viewport or far
     shouldPopOutOnDrag({ start: { x: 200, y: 120 }, current: { x: 500, y: 250 }, viewport, sourceRect }),
     true
   );
+});
+
+test("distanceFromRect is zero inside the rectangle and grows outside", () => {
+  const rect = { left: 10, top: 20, right: 110, bottom: 80 };
+  assert.equal(distanceFromRect({ x: 50, y: 40 }, rect), 0);
+  assert.equal(distanceFromRect({ x: 0, y: 40 }, rect), 10);
+  assert.equal(distanceFromRect({ x: 50, y: 5 }, rect), 15);
+  assert.ok(distanceFromRect({ x: 200, y: 200 }, rect) > 90);
 });
 
 test("isAlreadyDecidedError identifies cross-window decision conflicts without matching unrelated errors", () => {
