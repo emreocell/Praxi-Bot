@@ -4582,6 +4582,7 @@ mod tests {
             payment: tool_registry::PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
+            ..ToolContext::default()
         }
     }
 
@@ -6767,6 +6768,7 @@ mod tests {
                 payment: tool_registry::PaymentApproval::Unchecked,
                 control_guard: None,
                 lane: None,
+                ..ToolContext::default()
             };
             async move { reader.call(&c, json!({"path": p})).await }
         };

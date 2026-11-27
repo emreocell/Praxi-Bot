@@ -63,21 +63,23 @@ impl ClientHandler for BridgeClient {
         }
     }
 
-    async fn on_custom_request(
+    fn on_custom_request(
         &self,
         request: CustomRequest,
         _context: RequestContext<RoleClient>,
-    ) -> Result<CustomResult, rmcp::ErrorData> {
-        if request.method == "elicitation/create" {
+    ) -> impl Future<Output = Result<CustomResult, rmcp::ErrorData>> + '_ {
+        let result = if request.method == "elicitation/create" {
             // rmcp preserves requests whose typed payload could not decode as
             // custom requests (for example an unsupported nested schema).
-            return Ok(CustomResult(serde_json::json!({"action": "decline"})));
-        }
-        Err(rmcp::ErrorData::new(
-            ErrorCode::METHOD_NOT_FOUND,
-            request.method,
-            None,
-        ))
+            Ok(CustomResult(serde_json::json!({"action": "decline"})))
+        } else {
+            Err(rmcp::ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                request.method,
+                None,
+            ))
+        };
+        std::future::ready(result)
     }
 }
 
@@ -144,10 +146,10 @@ impl BridgeClient {
         mut params: CallToolRequestParams,
         call: Arc<Call>,
     ) -> Result<CallToolResult, ServiceError> {
+        const MAX_ROUNDS: usize = 4;
         let _lease = self.calls.enter(Arc::clone(&call));
         // MCP 2026-07-28 carries these same requests in an intermediate
         // tools/call result. Earlier revisions dispatch via ClientHandler.
-        const MAX_ROUNDS: usize = 4;
         for _ in 0..MAX_ROUNDS {
             match peer.call_tool_once(params.clone()).await? {
                 CallToolResponse::Complete(result) => return Ok(result),

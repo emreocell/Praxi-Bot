@@ -1199,19 +1199,20 @@ pub(crate) async fn events(
             feed.delivered = feed.scan;
         }
     }
-    let messaging_channel = headers
+    let owner = actor.is_owner() && !from_messaging_channel(&headers);
+    Ok(
+        Sse::new(event_stream(feed, (actor.local, actor.decisions, owner)))
+            .keep_alive(KeepAlive::default()),
+    )
+}
+
+/// Telegram and Discord streams keep approval decisions but never see
+/// owner-only forms.
+fn from_messaging_channel(headers: &HeaderMap) -> bool {
+    headers
         .get("x-praxi-message-source")
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|source| matches!(source, "telegram" | "discord"));
-    Ok(Sse::new(event_stream(
-        feed,
-        (
-            actor.local,
-            actor.decisions,
-            actor.is_owner() && !messaging_channel,
-        ),
-    ))
-    .keep_alive(KeepAlive::default()))
+        .is_some_and(|source| matches!(source, "telegram" | "discord"))
 }
 
 /// Counters of the SSE machinery (authenticated, unlike `/v1/health`).
@@ -1398,6 +1399,7 @@ mod tests {
     async fn streams_carry_only_the_events_the_client_may_see() {
         use crate::{PeerIdentity, PeerRole, live_view::Actor};
         use futures::StreamExt as _;
+        type Case<'a> = (&'a str, (bool, bool, bool), Vec<&'a str>);
         let peer = |role| {
             let a = Actor::peer(&PeerIdentity {
                 key: "k".into(),
@@ -1420,7 +1422,7 @@ mod tests {
             "tool_call_requested",
             "tool_call_requested",
         ];
-        let cases: Vec<(&str, (bool, bool, bool), Vec<&str>)> = vec![
+        let cases: Vec<Case> = vec![
             ("local management", (true, true, true), all.to_vec()),
             // The bearer alone (CLI engine, bot child, script): owner key absent.
             ("local bearer only", (true, false, true), progress.clone()),

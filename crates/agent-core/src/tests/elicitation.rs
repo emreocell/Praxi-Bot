@@ -3,7 +3,7 @@ use tool_registry::elicitation::{Decision, Form};
 
 use super::*;
 
-pub(crate) const NAME: &str = "mcp:calendar/elicit";
+const NAME: &str = "mcp:calendar/elicit";
 const CANARY: &str = "elicitation-canary-9413";
 
 struct FormTool {
@@ -52,7 +52,7 @@ impl Tool for FormTool {
             .await;
         let result = match decision {
             Decision::Accept(values) => {
-                assert!(values.get("region").and_then(Value::as_str) == Some(CANARY));
+                assert_eq!(values.get("region").and_then(Value::as_str), Some(CANARY));
                 assert_eq!(values.len(), 1);
                 "accepted"
             }
@@ -67,10 +67,14 @@ impl Tool for FormTool {
 
 fn rig(env: &Env, config: LoopConfig) -> (AgentLoop, Arc<Fake>, Arc<Mutex<Vec<&'static str>>>) {
     // The test focuses on in-tool owner decisions, after the tool was admitted.
-    let fake = Fake::new(vec![calls(&[("form", NAME, json!({}))]), text("Finished")]);
+    let fake = Fake::new(vec![form_call("form"), text("Finished")]);
     let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
     let answers = register_form(&lp);
     (lp, fake, answers)
+}
+
+pub(crate) fn form_call(id: &str) -> Reply {
+    calls(&[(id, "use_tool", json!({"name": NAME, "input": {}}))])
 }
 
 pub(crate) fn register_form(lp: &AgentLoop) -> Arc<Mutex<Vec<&'static str>>> {

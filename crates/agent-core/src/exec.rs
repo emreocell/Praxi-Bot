@@ -2193,6 +2193,7 @@ impl TurnExecutor {
                             ctx_ref,
                             call_id,
                             &tool,
+                            &observed,
                             input,
                             meta,
                             target,
@@ -2464,6 +2465,7 @@ impl TurnExecutor {
         ctx: &RunCtx,
         call: ToolCallId,
         tool: &Arc<dyn Tool>,
+        effective_name: &str,
         input: Value,
         meta: bool,
         target: Option<tool_registry::ControlTarget>,
@@ -2554,7 +2556,9 @@ impl TurnExecutor {
                     exposure_private: exposure.private,
                     control_guard,
                     lane: ctx.lane(),
-                    elicitation: self.sh.elicitation_handler(run.id, &tool.spec().name),
+                    // Legacy discovery executes through use_tool, whose target
+                    // is the MCP tool. Its wrapper forwards this context.
+                    elicitation: self.sh.elicitation_handler(run.id, effective_name),
                 };
                 call_with_url_guard(url_guard.as_ref(), tool, &tctx, input).await
             },
