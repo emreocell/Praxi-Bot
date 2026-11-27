@@ -430,26 +430,15 @@ pub fn view_line(attached: bool) -> &'static str {
     }
 }
 
-/// What a key press can reach for the CAPTCHA budget: moving focus or editing text cannot
-/// solve a check or send a form; Enter, Space and everything else act on the focused control,
-/// which could be the check or the submit button.
+/// What a key press can reach for the CAPTCHA budget: closing a popup or editing text cannot
+/// solve a check or send a form. Everything else can: Enter and Space act on the focused
+/// control (the check or the submit), the arrows, Home/End and Page keys move a slider or a
+/// radio, and Tab probes the focus order, which a behavioural puzzle can read.
 pub(crate) fn key_reach(key: &str) -> Reach<'static> {
     let last = key.rsplit('+').next().unwrap_or(key).trim();
     if matches!(
         last.to_ascii_lowercase().as_str(),
-        "tab"
-            | "escape"
-            | "esc"
-            | "arrowup"
-            | "arrowdown"
-            | "arrowleft"
-            | "arrowright"
-            | "home"
-            | "end"
-            | "pageup"
-            | "pagedown"
-            | "backspace"
-            | "delete"
+        "escape" | "esc" | "backspace" | "delete"
     ) {
         Reach::Nothing
     } else {
@@ -3098,15 +3087,25 @@ impl BrowserTool {
                 .load(std::sync::atomic::Ordering::SeqCst)
                 == epoch
         {
-            if matches!(self.op, Op::Open | Op::Attach) {
-                // A navigation (or switching browsers) has no receiving element to inspect. Do not probe
-                // a remote URL here: Option cannot distinguish a refusal from
-                // an unopened browser, and a refusal must never cause a retry.
-                // Leaving or reloading a challenge page gives no attempts back:
-                // the budget belongs to the site, not to the page.
+            if self.op == Op::Attach {
+                // Switching browsers has no receiving element to inspect.
                 return Ok(permit);
             }
-            self.refuse_observation_while_latched()?;
+            if let Reach::Navigate(url) = reach {
+                // A navigation has no receiving element to inspect, and the remote URL is
+                // never probed: Option cannot distinguish a refusal from an unopened browser,
+                // and a refusal must never cause a retry. Leaving the page, or reloading it,
+                // gives no attempts back (the budget belongs to the site, not to the page);
+                // only an address that could send the form (same site, with a query) is
+                // looked at, and only then is the page read.
+                let current = self.shared.driver.current_url().await;
+                if !crate::handover::navigation_submits(current.as_deref(), url) {
+                    return Ok(permit);
+                }
+            }
+            if self.op != Op::Open {
+                self.refuse_observation_while_latched()?;
+            }
             let snapshot = self.shared.driver.snapshot(false).await.map_err(exec_err)?;
             if self.op == Op::Eval
                 && matches!(
@@ -3250,7 +3249,7 @@ impl BrowserTool {
                     return Ok(kept);
                 }
                 let permit = self
-                    .gate(run_id, "open", i.url.clone(), Reach::Nothing)
+                    .gate(run_id, "open", i.url.clone(), Reach::Navigate(&i.url))
                     .await?;
                 if permit.needs_observation()
                     || self
@@ -3562,7 +3561,10 @@ impl BrowserTool {
                 let i: SelectTextIn = parse(input)?;
                 let opts = i.opts()?;
                 let what = opts.r.clone().unwrap_or_else(|| "text".to_owned());
-                let permit = self.gate(run_id, "click", what, Reach::Nothing).await?;
+                // Selecting is a double or triple click or a drag: inside a named element it
+                // is pointing at it, and by visible text alone it could land anywhere.
+                let reach = opts.r.as_deref().map_or(Reach::Anywhere, Reach::Look);
+                let permit = self.gate(run_id, "click", what, reach).await?;
                 if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                     return Ok(fresh);
                 }
@@ -3573,7 +3575,12 @@ impl BrowserTool {
             }
             Op::DismissConsent => {
                 let permit = self
-                    .gate(run_id, "click", "consent dialog".to_owned(), Reach::Nothing)
+                    .gate(
+                        run_id,
+                        "click",
+                        "consent dialog".to_owned(),
+                        Reach::Anywhere,
+                    )
                     .await?;
                 if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                     return Ok(fresh);
@@ -3684,7 +3691,7 @@ impl BrowserTool {
                                 run_id,
                                 "open",
                                 url.clone().unwrap_or_else(|| "new tab".into()),
-                                Reach::Nothing,
+                                url.as_deref().map_or(Reach::Nothing, Reach::Navigate),
                             )
                             .await?;
                         if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {

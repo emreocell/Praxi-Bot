@@ -768,10 +768,9 @@ async fn an_hcaptcha_iframe_does_not_stop_the_form_from_being_filled() {
         .await
         .unwrap();
     let click = tool(&page, "browser_click");
-    click.call(&context, json!({"ref":"e4"})).await.unwrap();
     click.call(&context, json!({"ref":"e7"})).await.unwrap();
     tool(&page, "browser_press")
-        .call(&context, json!({"key":"Tab"}))
+        .call(&context, json!({"key":"Escape"}))
         .await
         .unwrap();
     tool(&page, "browser_back")
@@ -785,6 +784,14 @@ async fn an_hcaptcha_iframe_does_not_stop_the_form_from_being_filled() {
     );
     // The check itself is a hard one: never tried by the bot.
     let err = click.call(&context, json!({"ref":"e5"})).await.unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    // A tick box of the form could be the check, and Tab probes the focus order: not free.
+    let err = click.call(&context, json!({"ref":"e4"})).await.unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    let err = tool(&page, "browser_press")
+        .call(&context, json!({"key":"Tab"}))
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("browser_handover"), "{err}");
     // The submit needs the solved token: refused, and the reason is plain.
     let err = click.call(&context, json!({"ref":"e6"})).await.unwrap_err();
@@ -881,18 +888,21 @@ fn only_the_check_and_the_buttons_are_gated_by_element() {
             reach,
         )
     };
-    // Fields, a checkbox of the form, a link, a hover on a field, leaving the page: free.
-    for r in ["e1", "e2", "e3", "e4", "e7"] {
+    // Typed fields, a select list, a link, a hover on a field, leaving the page: free.
+    for r in ["e1", "e2", "e3", "e7"] {
         assert!(at(Reach::Element(r)).is_ok(), "{r}");
     }
     assert!(at(Reach::Look("e2")).is_ok());
-    assert!(
-        at(Reach::Look("e6")).is_ok(),
-        "hovering a button sends nothing"
-    );
+    assert!(at(Reach::Look("e7")).is_ok());
     assert!(at(Reach::Nothing).is_ok());
-    // The check (inside the frame), the submit and "anywhere" are not.
+    // The check (inside the frame), a tick box, the submit, hovering the submit and "anywhere"
+    // are not.
     assert!(at(Reach::Element("e5")).is_err());
+    assert!(at(Reach::Element("e4")).is_err());
+    assert!(
+        at(Reach::Look("e6")).is_err(),
+        "hovering the submit is probing it"
+    );
     assert!(
         at(Reach::Look("e5")).is_err(),
         "pointing at the check is an action on it"
@@ -947,8 +957,275 @@ async fn the_notice_tells_the_model_that_filling_is_free() {
         panic!()
     };
     assert!(
-        text.contains("attempt 1 of 2") && text.contains("Filling the other fields"),
+        text.contains("attempt 1 of 2") && text.contains("Typing into the text fields"),
         "{text}"
     );
     handover_hub().forget("form-notice");
+}
+
+// ── Review fixes: roles, frames, keys, hovers, navigation ───────────────────
+
+/// A page whose check is named only "Verify" and sits in frames with harmless titles.
+const DISGUISED_PAGE: &str = "# Join (https://club.example/join)\n  text \"Verify you are human\"\n  [e1] textbox \"Email\"\n  [e2] link \"Help\"\n  frame \"Widget\"\n    [e3] checkbox \"Verify\"\n  iframe \"Embedded content\"\n    [e4] checkbox \"Continue\"\n    [e5] textbox \"Answer\"\n  shadow-host \"x\"\n    [e6] button \"Go\"\n  [e7] checkbox \"Remember me\"\n  [e8] radio \"Plan A\"\n  [e9] slider \"Volume\"\n  [e10] canvas \"puzzle\"\n  [e11] img \"tile\"\n  [e12] clickable \"Open\"\n  [e13] button \"Join\"\n  [e14] listbox \"Plan\"\n  [e15] searchbox \"Find\"\n  [e16] combobox \"Country\"\n  [e17] spinbutton \"Seats\"\n  [e18] textbox \"g-recaptcha-response\"";
+
+/// Whether `reach` is counted on `page`: free actions never run out, counted ones do.
+fn counted(page: &str, reach: Reach<'_>) -> bool {
+    let hub = HandoverHub::default();
+    (0..3)
+        .map(|_| hub.captcha_action_at("run-probe", Some("https://club.example"), page, reach))
+        .any(|r| r.is_err())
+}
+
+#[test]
+fn the_role_decides_what_is_free_not_the_label_or_the_title_of_a_frame() {
+    assert_eq!(
+        detect(DISGUISED_PAGE),
+        Some(Challenge::Captcha { hard: false })
+    );
+    // Only typed fields and links are ordinary.
+    for r in ["e1", "e2", "e14", "e15", "e16", "e17"] {
+        assert!(!counted(DISGUISED_PAGE, Reach::Element(r)), "{r} is free");
+    }
+    // A tick box called "Verify" in a frame called "Widget", the same in a frame with another
+    // name, a typed answer inside a frame, a shadow host, every role that ticks, drags or
+    // points, a role the budget has never heard of, the submit and a typed token field that
+    // names the service are all the check.
+    for r in [
+        "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10", "e11", "e12", "e13", "e18",
+    ] {
+        assert!(counted(DISGUISED_PAGE, Reach::Element(r)), "{r} is counted");
+    }
+    // A ref the page does not show is the worst case, looked at or not.
+    assert!(counted(DISGUISED_PAGE, Reach::Element("e99")));
+    assert!(counted(DISGUISED_PAGE, Reach::Look("e99")));
+}
+
+#[test]
+fn looking_at_the_check_or_the_submit_is_an_attempt_but_looking_at_a_field_is_not() {
+    for r in ["e3", "e4", "e7", "e10", "e13"] {
+        assert!(counted(DISGUISED_PAGE, Reach::Look(r)), "{r}");
+    }
+    for r in ["e1", "e2", "e14"] {
+        assert!(!counted(DISGUISED_PAGE, Reach::Look(r)), "{r}");
+    }
+}
+
+#[test]
+fn only_closing_and_editing_keys_are_free_on_a_captcha_page() {
+    use crate::browser::key_reach;
+    for key in [
+        "Tab",
+        "Shift+Tab",
+        "ArrowLeft",
+        "ArrowRight",
+        "Home",
+        "End",
+        "PageDown",
+        "Enter",
+        "Space",
+        "a",
+    ] {
+        assert_eq!(key_reach(key), Reach::Anywhere, "{key}");
+    }
+    for key in ["Escape", "Esc", "Backspace", "Delete", "Control+Backspace"] {
+        assert_eq!(key_reach(key), Reach::Nothing, "{key}");
+    }
+}
+
+#[tokio::test]
+async fn tabbing_and_hovering_the_submit_use_up_the_attempts_but_scroll_back_and_tab_switch_do_not()
+{
+    let page = Page::new(RECAPTCHA_FORM, "https://shop.example/signup");
+    let context = ctx("form-probes");
+    let site = Some("https://shop.example");
+    let attempts = || handover_hub().next_captcha_attempt("form-probes", site);
+    for _ in 0..4 {
+        tool(&page, "browser_scroll")
+            .call(&context, json!({"dy": 300}))
+            .await
+            .unwrap();
+        tool(&page, "browser_back")
+            .call(&context, json!({}))
+            .await
+            .unwrap();
+        tool(&page, "browser_tabs")
+            .call(&context, json!({"switch_to": 1}))
+            .await
+            .unwrap();
+        tool(&page, "browser_press")
+            .call(&context, json!({"key": "Escape"}))
+            .await
+            .unwrap();
+        // Hovering a field is looking at it.
+        let _ = tool(&page, "browser_hover")
+            .call(&context, json!({"ref": "e1"}))
+            .await;
+    }
+    assert_eq!(attempts(), 1, "none of that is an attempt");
+    // Tab is one attempt, hovering the submit the second; then nothing is left to probe with.
+    tool(&page, "browser_press")
+        .call(&context, json!({"key": "Tab"}))
+        .await
+        .unwrap();
+    assert_eq!(attempts(), 2);
+    let _ = tool(&page, "browser_hover")
+        .call(&context, json!({"ref": "e6"}))
+        .await;
+    assert_eq!(attempts(), 3, "the hover was admitted as an attempt");
+    for call in [
+        tool(&page, "browser_press")
+            .call(&context, json!({"key": "Tab"}))
+            .await,
+        tool(&page, "browser_hover")
+            .call(&context, json!({"ref": "e6"}))
+            .await,
+    ] {
+        assert!(call.unwrap_err().to_string().contains("browser_handover"));
+    }
+    handover_hub().forget("form-probes");
+}
+
+#[tokio::test]
+async fn dismissing_a_consent_dialog_or_selecting_text_cannot_reach_the_check_for_free() {
+    let page = Page::new(RECAPTCHA_FORM, "https://shop.example/signup");
+    let context = ctx("form-consent");
+    let site = Some("https://shop.example");
+    let attempts = || handover_hub().next_captcha_attempt("form-consent", site);
+    // The driver refuses these (the test page has no dialog), but the budget answers first.
+    let _ = tool(&page, "browser_dismiss_consent")
+        .call(&context, json!({}))
+        .await;
+    assert_eq!(attempts(), 2, "the dismiss helper clicks: one attempt");
+    // Selecting inside a field is free, inside the check or by text alone is not.
+    let select = tool(&page, "browser_select_text");
+    let _ = select.call(&context, json!({"ref": "e1"})).await;
+    assert_eq!(attempts(), 2);
+    let _ = select.call(&context, json!({"text": "robot"})).await;
+    assert_eq!(attempts(), 3);
+    let err = select
+        .call(&context, json!({"ref": "e5"}))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    let err = tool(&page, "browser_dismiss_consent")
+        .call(&context, json!({}))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    handover_hub().forget("form-consent");
+}
+
+#[test]
+fn only_an_address_that_could_send_the_form_counts_as_sending_it() {
+    let here = Some("https://shop.example/signup");
+    for (target, sends) in [
+        ("https://shop.example/signup?captcha=7x4k", true),
+        ("https://www.shop.example/done?ok=1", true),
+        ("https://shop.example:443/a?b", true),
+        // Leaving, another page of the site without a query, or an empty query: nothing sent.
+        ("https://other.example/signup?captcha=7x4k", false),
+        ("https://shop.example/pricing", false),
+        ("https://shop.example/pricing?", false),
+        ("javascript:document.forms[0].submit()", false),
+        ("about:blank", false),
+        ("not a url", false),
+    ] {
+        assert_eq!(navigation_submits(here, target), sends, "{target}");
+    }
+    assert!(!navigation_submits(None, "https://shop.example/a?b=1"));
+    assert!(!navigation_submits(
+        Some("about:blank"),
+        "https://shop.example/a?b=1"
+    ));
+}
+
+#[tokio::test]
+async fn an_address_that_could_send_the_captcha_form_is_an_attempt_but_leaving_is_free() {
+    let page = Page::new(RECAPTCHA_FORM, "https://shop.example/signup");
+    let context = ctx("form-open");
+    let site = Some("https://shop.example");
+    let attempts = || handover_hub().next_captcha_attempt("form-open", site);
+    let open = tool(&page, "browser_open");
+    // Leaving for another site, or another page without a query, spends nothing, however often.
+    for url in [
+        "https://other.example/signup?captcha=1",
+        "https://shop.example/pricing",
+        "https://other.example/",
+    ] {
+        for _ in 0..3 {
+            open.call(&context, json!({"url": url})).await.unwrap();
+        }
+    }
+    assert_eq!(attempts(), 1);
+    // A same-site address with a query is a GET form: one attempt each, never a third.
+    for n in 0..2 {
+        open.call(
+            &context,
+            json!({"url": format!("https://shop.example/signup?captcha=guess{n}")}),
+        )
+        .await
+        .unwrap();
+    }
+    let err = open
+        .call(
+            &context,
+            json!({"url": "https://shop.example/signup?captcha=guess2"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    // A new tab follows the same rule.
+    let err = tool(&page, "browser_tabs")
+        .call(
+            &context,
+            json!({"new": true, "url": "https://shop.example/signup?captcha=guess3"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    // Leaving still works after the refusals.
+    open.call(&context, json!({"url": "https://other.example/"}))
+        .await
+        .unwrap();
+    handover_hub().forget("form-open");
+}
+
+#[tokio::test]
+async fn script_and_data_addresses_are_refused_with_or_without_a_captcha() {
+    for (run, snapshot) in [
+        ("scheme-captcha", RECAPTCHA_FORM),
+        ("scheme-plain", LOGIN_PAGE),
+    ] {
+        let page = Page::new(snapshot, "https://shop.example/signup");
+        let context = ctx(run);
+        for url in [
+            "javascript:document.forms[0].submit()",
+            " JaVaScRiPt:void(0)",
+            "java\nscript:alert(1)",
+            "data:text/html,<form method=post><script>document.forms[0].submit()</script>",
+        ] {
+            let err = tool(&page, "browser_open")
+                .call(&context, json!({"url": url}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, tool_registry::ToolError::InvalidInput(_)),
+                "{url}: {err}"
+            );
+            let err = tool(&page, "browser_tabs")
+                .call(&context, json!({"new": true, "url": url}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, tool_registry::ToolError::InvalidInput(_)),
+                "{url}: {err}"
+            );
+        }
+        assert_eq!(
+            handover_hub().next_captcha_attempt(run, Some("https://shop.example")),
+            1,
+            "a refused address spends nothing"
+        );
+        handover_hub().forget(run);
+    }
 }

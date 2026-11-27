@@ -339,11 +339,16 @@ pub fn detect(snapshot: &str) -> Option<Challenge> {
 pub enum Reach<'a> {
     /// A named element (`e12`) that is clicked, filled or selected.
     Element(&'a str),
-    /// A named element that is only looked at (hover): it counts only on the check itself.
+    /// A named element that is only pointed at (hover, select text in it): judged like a click,
+    /// because pointing at the check or the submit is probing it.
     Look(&'a str),
     /// Acts where the focus is or by coordinates, so it could land on the check
     /// (Enter, Space, a pointer click, a script): counted like the check itself.
     Anywhere,
+    /// Loads this address in the browser. Going to another site, or to another page of this
+    /// one, touches nothing; a same-site address with a query string could send the form
+    /// (a GET form), so that counts like the submit (see [`navigation_submits`]).
+    Navigate(&'a str),
     /// Touches no element (leaving the page, switching a tab, scrolling).
     Nothing,
 }
@@ -351,13 +356,14 @@ pub enum Reach<'a> {
 /// What a snapshot element is, for the CAPTCHA budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Touch {
-    /// The check itself, or something inside its frame.
+    /// The check itself, or anything that could act on it: a tick box, a radio, a slider, a
+    /// canvas, a picture, anything inside a frame, and every role the budget does not know.
     Check,
-    /// An ordinary field of the form: text, select, checkbox, radio.
+    /// A plainly typed field of the form (text, search, number, select list).
     Field,
     /// A link: it leaves the page, it cannot solve the check or send the form.
     Link,
-    /// Anything else that acts (a button): it may send the form.
+    /// A button or menu entry: it may send the form.
     Submit,
     /// The ref is not in the snapshot.
     Unknown,
@@ -374,9 +380,22 @@ fn indent(line: &str) -> usize {
     line.len() - line.trim_start().len()
 }
 
-/// Classify the element `target` of `snapshot`. The element is part of the check when its own
-/// line names the check or one of its frames (an iframe that names a CAPTCHA service) holds it.
-/// A page that merely embeds a widget does not turn its other fields into the check.
+/// Roles that hold another document or tree: whatever is inside one could be the challenge
+/// (the title of a frame says nothing a page cannot choose freely).
+fn holds_frame(role: &str) -> bool {
+    matches!(
+        role.to_ascii_lowercase().as_str(),
+        "iframe" | "frame" | "frameset" | "embed" | "object" | "shadow-host" | "shadow-root"
+    )
+}
+
+/// Classify the element `target` of `snapshot`, while a CAPTCHA is on the page.
+///
+/// A label proves nothing, so the ROLE decides: only typed fields and links are ordinary, and
+/// everything that can be ticked, dragged or pointed at (checkbox, radio, switch, slider,
+/// canvas, image, a role this code does not know) acts on a check. Anything inside a frame
+/// counts as the check whatever the frame is called, and an element that itself names the
+/// check does too: those two rules only ever add to the budget, never take from it.
 fn touch(snapshot: &str, target: &str) -> Touch {
     let lines: Vec<&str> = snapshot.lines().collect();
     let Some(at) = lines
@@ -394,17 +413,36 @@ fn touch(snapshot: &str, target: &str) -> Touch {
         let d = indent(line);
         if d < depth {
             depth = d;
-            if parts(line).1.eq_ignore_ascii_case("iframe") && names_check(&line.to_lowercase()) {
+            if holds_frame(parts(line).1) {
                 return Touch::Check;
             }
         }
     }
     match parts(lines[at]).1.to_ascii_lowercase().as_str() {
-        "textbox" | "searchbox" | "spinbutton" | "combobox" | "listbox" | "option" | "checkbox"
-        | "radio" | "switch" | "slider" => Touch::Field,
+        "textbox" | "searchbox" | "spinbutton" | "combobox" | "listbox" => Touch::Field,
         "link" => Touch::Link,
-        _ => Touch::Submit,
+        "button" | "menuitem" | "tab" | "popupbutton" | "disclosuretriangle" => Touch::Submit,
+        _ => Touch::Check,
     }
+}
+
+/// Whether loading `target` from the page at `current` could send the page's form: it stays on
+/// the same site and carries a query string (what a GET form sends, a guessed answer included).
+/// Another site, or another page of this one without a query, only leaves.
+#[must_use]
+pub fn navigation_submits(current: Option<&str>, target: &str) -> bool {
+    let target = target.trim();
+    let (Some(current), Ok(target_url)) = (current, url::Url::parse(target)) else {
+        return false;
+    };
+    let same_site = match (
+        crate::browser::origin_of(current),
+        crate::browser::origin_of(target),
+    ) {
+        (Some(a), Some(b)) => site_key(Some(&a)) == site_key(Some(&b)),
+        _ => false,
+    };
+    same_site && target_url.query().is_some_and(|q| !q.is_empty())
 }
 
 /// The notice appended to a snapshot that shows `challenge`; `seen` counts the
@@ -413,7 +451,7 @@ fn touch(snapshot: &str, target: &str) -> Touch {
 pub fn notice(challenge: &Challenge, seen: u32) -> String {
     match challenge {
         Challenge::Captcha { hard } if !*hard && seen <= CAPTCHA_OWN_ATTEMPTS => format!(
-            "[Praxi notice] This page shows a CAPTCHA (a check that wants proof of a human). If you can see images and it is a simple one (an \"I'm not a robot\" checkbox or an easy picture or text puzzle) you may try it yourself, as an ordinary user would: attempt {seen} of {CAPTCHA_OWN_ATTEMPTS}. Filling the other fields of the form is free; only the check itself and the submit button count as attempts. Never use a solving service or tricks. If it does not work, or you cannot see images, call browser_handover with kind \"captcha\"."
+            "[Praxi notice] This page shows a CAPTCHA (a check that wants proof of a human). If you can see images and it is a simple one (an \"I'm not a robot\" checkbox or an easy picture or text puzzle) you may try it yourself, as an ordinary user would: attempt {seen} of {CAPTCHA_OWN_ATTEMPTS}. Typing into the text fields of the form and following links is free; ticking a box, pressing Tab or Enter, pointing at or pressing the check or the submit button each count as an attempt. Never use a solving service or tricks. If it does not work, or you cannot see images, call browser_handover with kind \"captcha\"."
         ),
         Challenge::Captcha { .. } => "[Praxi notice] This page shows a CAPTCHA you must not try to solve yourself (it is a behavioural or picture puzzle, or your own attempts are used up). You may still fill the ordinary fields of the form, but it cannot be submitted until the check is solved. Call browser_handover with kind \"captcha\": the owner takes control, solves it, and the run continues.".to_owned(),
         Challenge::Code { field } => format!(
@@ -614,11 +652,13 @@ impl HandoverHub {
 
     /// Admit one own action on the page at `origin`, never an unbounded batch or a third attempt.
     ///
-    /// Only the check and the submit that needs its token are gated. Filling, selecting or
-    /// ticking an ordinary field of a form that embeds a CAPTCHA, following a link, hovering or
-    /// leaving the page is admitted and never counted. A button (the submit) is refused while a
-    /// hard check is on the page and otherwise costs one of the own attempts, so a text puzzle
-    /// cannot be guessed over and over by typing an answer and submitting it.
+    /// While a CAPTCHA is on the page only plainly typed fields (text, search, number, select
+    /// list) and links are free, and so are scrolling, going back and switching a tab. A box
+    /// to tick, a radio, a slider, a canvas, a picture, anything inside a frame, a button (the
+    /// submit), pressing Tab, Enter or a pointer click, hovering the check or the submit, and
+    /// a same-site address with a query each cost one of the own attempts; a hard check
+    /// refuses them all. So a text puzzle cannot be guessed over and over by typing an answer
+    /// and submitting it, and a behavioural one cannot be probed by tabbing or hovering.
     ///
     /// # Errors
     /// Refuses hard challenges and actions after the second own attempt at this site.
@@ -634,12 +674,10 @@ impl HandoverHub {
         };
         let kind = match reach {
             Reach::Nothing => return Ok(()),
-            Reach::Anywhere => Touch::Check,
-            Reach::Element(r) => touch(snapshot, r),
-            Reach::Look(r) => match touch(snapshot, r) {
-                Touch::Check => Touch::Check,
-                _ => return Ok(()),
-            },
+            Reach::Anywhere | Reach::Navigate(_) => Touch::Check,
+            // Pointing at the check or the submit is probing it (a puzzle can answer to a
+            // hover), so a look is judged like a click: only an ordinary field or a link is free.
+            Reach::Element(r) | Reach::Look(r) => touch(snapshot, r),
         };
         match kind {
             Touch::Field | Touch::Link => return Ok(()),
