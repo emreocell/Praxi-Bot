@@ -554,6 +554,8 @@ fn link_count(_: &std::fs::Metadata) -> u64 {
     1
 }
 
+// On Windows there is no mode to set, so the body cannot fail; the signature is shared with Unix.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn set_mode(path: &Path, dir: bool) -> std::io::Result<()> {
     #[cfg(unix)]
     {
