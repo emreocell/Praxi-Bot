@@ -1468,8 +1468,12 @@ mod tests {
             String::from_utf8_lossy(&out.stdout).trim().to_owned()
         };
 
-        // A commit is a write: the budget is asked, and the change can be undone.
-        fs::write(work.path().join("a.txt"), "two\n").unwrap();
+        // A commit is a write: the budget is asked, and the change can be undone. The new
+        // content is longer than the old: git trusts a file whose size and modification time
+        // match its index entry, and a restored index entry holds the old time, which on a
+        // fast machine is the same tick as this write. An equal size would then read as
+        // "nothing to commit" after the restore below.
+        fs::write(work.path().join("a.txt"), "two, and longer\n").unwrap();
         let out = tool(&tools, "git_commit")
             .call(&ctx(), json!({"paths": ["a.txt"], "message": "second"}))
             .await
