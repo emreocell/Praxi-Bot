@@ -84,7 +84,8 @@ pub use control::{
 };
 pub use desktop::{DesktopSettings, SharedOcr, default_ocr, ocr_from_dir, resolve_input_target};
 pub use files::{
-    OptionalTools, try_with_exclusive_file_access, with_checkpoint_access, workspace_refusal,
+    FileGate, OptionalTools, VettedFile, try_with_exclusive_file_access, with_checkpoint_access,
+    workspace_refusal,
 };
 pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
 pub use handover::{
@@ -307,16 +308,32 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             cfg.fill_secrets.clone(),
         ));
     }
+    // The file tools are built first: the browser's `browser_upload` and download folder judge
+    // paths with the very same rules (scope, roots, credential denylist, provenance).
+    let fs_home = cfg
+        .fs_access
+        .as_ref()
+        .and_then(|_| cfg.fs_home.clone().or_else(user_home));
+    let (fs_tools, file_gate) = files::tools_scoped_with_gate(
+        &cfg.data_dir,
+        &cfg.fs_allowed_roots,
+        &cfg.fs_granted_paths,
+        cfg.fs_access.clone(),
+        fs_home.clone(),
+        cfg.provenance.clone(),
+    );
+    let file_gate = Some(Arc::new(file_gate));
     if let Some(driver) = cfg.browser {
-        all.extend(browser::tools_with_origin(
+        all.extend(browser::tools_with_files(
             driver,
             &cfg.data_dir,
             cfg.control.clone(),
             cfg.fill_secrets.clone(),
             Some(Arc::clone(&page_origin)),
+            file_gate,
         ));
     } else {
-        all.extend(browser::managed_tools_with_profiles(
+        all.extend(browser::managed_tools_with_files(
             cfg.browser_settings,
             &cfg.data_dir,
             cfg.control.clone(),
@@ -324,6 +341,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             cfg.fill_secrets.clone(),
             Some(Arc::clone(&page_origin)),
             cfg.browser_profiles,
+            file_gate,
         ));
     }
     if let Some(secrets) = &cfg.fill_secrets {
@@ -339,18 +357,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             all.push(secret_request::secret_request_tool(Arc::clone(secrets)));
         }
     }
-    let fs_home = cfg
-        .fs_access
-        .as_ref()
-        .and_then(|_| cfg.fs_home.clone().or_else(user_home));
-    all.extend(files::tools_scoped(
-        &cfg.data_dir,
-        &cfg.fs_allowed_roots,
-        &cfg.fs_granted_paths,
-        cfg.fs_access.clone(),
-        fs_home.clone(),
-        cfg.provenance.clone(),
-    ));
+    all.extend(fs_tools);
     if cfg.optional_tools != OptionalTools::default() {
         all.extend(files::guarded_tools(
             &cfg.data_dir,
@@ -410,6 +417,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         Arc::clone(&mail),
         page_origin,
         cfg.web.as_ref().map(|w| Arc::clone(&w.policy)),
+        Some(&cfg.data_dir),
     ));
     if let Some(web) = cfg.web.clone() {
         match web_tools::tools(web) {
@@ -523,8 +531,15 @@ mod tests {
         }
         println!("schema-bytes total {total} over {} tools", rows.len());
         // Loose ceiling so a runaway description is noticed; not a target. Raised from 24 000
-        // when `shell_interactive` (about 1.9 KB) joined a list that was already near it.
-        assert!(total < 26_000, "tool list grew to {total} bytes");
+        // when `shell_interactive` (about 1.9 KB) joined a list that was already near it, and
+        // to 28 000 when `browser_upload`, `browser_downloads`, `browser_reload` and
+        // `browser_forward` (together about 2 KB, with the longer `browser_tabs`) joined, and
+        // to 30 000 because that left no room at all: the next tool must not trip it.
+        assert!(total < 30_000, "tool list grew to {total} bytes");
+        assert!(
+            total + 1_000 < 30_000,
+            "tool list is {total} bytes: no room left below the 30 000 ceiling, raise it with the next tool"
+        );
     }
 
     #[test]
@@ -664,7 +679,11 @@ mod tests {
             ("browser_dismiss_consent", W, B),
             ("browser_wait", R, B),
             ("browser_back", W, B),
+            ("browser_forward", W, B),
+            ("browser_reload", W, B),
             ("browser_tabs", W, B),
+            ("browser_upload", W, B),
+            ("browser_downloads", R, B),
             ("browser_screenshot", R, B),
             ("browser_handover", R, Me),
             ("browser_pointer", W, B),
@@ -1318,7 +1337,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 44 + 8 + 2 + 2 + 1 + 1 + 1);
+        assert_eq!(added, 48 + 8 + 2 + 2 + 1 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg

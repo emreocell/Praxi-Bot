@@ -6347,7 +6347,6 @@
       "braveKeyLabel": "Brave Search API key",
       "clearKey": "Clear key",
       "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
-      "credentialsTitle": "Self-hosted & API backends",
       "description": "Search backend priority order, API keys, and live connectivity probe.",
       "fallbackNotes": "Earlier fallback errors before success: {{details}}",
       "keyEmptyPlaceholder": "Enter API key…",
@@ -6359,8 +6358,6 @@
       "note": "Web search tries active backends in priority order until one returns results. Changes apply immediately on the next bot turn without restarting.",
       "orderHint": "Move preferred backends up. Keyless fallbacks work without an API key but may occasionally hit upstream rate limits.",
       "orderTitle": "Backend order & fallbacks",
-      "save": "Save changes",
-      "searxngHint": "Base URL of your own SearXNG instance (clear and save to disable).",
       "searxngLabel": "SearXNG URL",
       "status": {
         "active": "Active",
@@ -6368,7 +6365,6 @@
         "needsKey": "Needs API key",
         "needsUrl": "Needs URL"
       },
-      "tavilyHint": "Optional API key for Tavily Search (stored write-only in the secret store).",
       "tavilyKeyLabel": "Tavily Search API key",
       "test": "Test",
       "testFailed": "Search probe failed ({{ms}} ms): {{error}}",

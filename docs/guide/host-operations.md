@@ -138,6 +138,62 @@ on it. `--uninstall` also uninstalls and keeps the data. `--purge` deletes
 `/var/lib/praxi`, `/etc/praxi` and the `praxi` user. `--yes` skips the typed
 confirmation for `--purge`.
 
+On a Linux host installed with the managed updater, the desktop's **Update server**
+button requests the exact published desktop release over the paired connection.
+The host administrator pairing is required, and only the daemon's own process can pass
+the request on to the root updater. The updater never installs a release older than the one
+on the server, and it keeps to the server's channel (see below): a server set to `stable`
+does not move to a pre-release. It checks both SHA-256 and GitHub build provenance (for the
+release tag itself, never a branch), stops the daemon, copies its SQLite databases to
+`/var/lib/praxi-updates/db-snapshot` (root only; the next update replaces it), switches the
+program files, starts `praxi.service`, and waits up to six minutes for the new process to
+report ready. If it does not, the updater stops it, puts the databases and the previous
+program files back, and checks that the previous daemon starts. Data the new release wrote in
+that time is lost with the rollback. The update needs free disk space for the copy and stops
+before it changes anything when there is not enough.
+A host installed before the managed updater needs one verified installer upgrade.
+Use the SSH upgrade or the commands the app shows if it cannot start the update.
+
+Scheduled updates are off by default. To change that, create `/etc/praxi/updates.toml`
+as root and set the mode and channel.
+
+```toml
+mode = "notify"         # off, notify, auto
+channel = "stable"      # stable, pre-release
+```
+
+The systemd timer checks daily. `notify` shows available releases on the selected
+server in the desktop app. `auto` also installs them and can restart the daemon
+while bots are working. `stable` waits for a stable release. `pre-release` also
+considers preview releases. A `channel` you set also applies to the desktop's update
+button. Without one, a server that runs a pre-release follows pre-releases and a server
+that runs a final release follows stable releases. The file must be a regular file owned
+by root, not a link, and under 16 KiB. Run `sudo systemctl start praxi-update-check.service`
+to apply a mode change immediately. Use `sudo journalctl -u 'praxi-update*.service'`
+to inspect failures. To turn off update requests from paired desktops, disable
+and stop `praxi-update.socket` on the host.
+
+Managed rollback restores the program files and the databases copied just before the
+update. A killed update run (time limit, crash) is marked failed and the daemon is
+started again, so the update button does not stay off. `praxi self-update --rollback`
+and the installer rollback below only switch program files. Before upgrading a host
+with important data, take a backup as described below so you can also recover from a
+failed data migration.
+
+The database copy is a rollback aid, not a backup. It holds only the SQLite databases in
+`/var/lib/praxi` and `/var/lib/praxi/bots/<id>`, taken for this one update and replaced by the
+next. Before the copy the updater stops the daemon and then every other process of the `praxi`
+user (a leftover one is ended; if one will not stop, the update stops before changing
+anything). It reads and writes the data directory only through directory handles and refuses
+a link anywhere inside it. The restore first prepares every database beside its place, then
+replaces them all, so a failure while preparing leaves the data as it was. If the updater is
+killed during the last few renames, its recovery step (it runs after every updater run)
+finishes the restore before the daemon starts; if that fails the daemon stays stopped and
+the next update refuses until `sudo systemctl start praxi-update-check.service` has finished
+it. A power loss in that moment is not covered. Keep your own backup of everything else, as
+described below: the encrypted secret file, browser profiles, host config and the API token
+are not in the copy.
+
 ## Roll back
 
 Use the path that matches how far the upgrade got.
@@ -207,7 +263,13 @@ again after a restore without `--include-secrets` (`sudo praxi setup` or
 ## Pairing the desktop app
 
 The desktop app talks to the host over an outbound peer channel. The host
-does not open an extra listening port for it. Two ways to pair:
+does not open an extra listening port for it.
+
+**From the server provider's console:** open **Add server** in the desktop app
+and choose **I have a server**. Paste the setup command into the server console.
+It verifies the installer, sets up the service and prints a QR and a `bot-pair:`
+line. Paste the full line into the app within 30 minutes. If it expired, run
+`sudo praxi host invite --role desktop` on the server to get a new one.
 
 **From the owning computer** (the usual path): leave the desktop app or
 `bot serve` running, then `bot host add user@server`. The command installs
@@ -242,6 +304,10 @@ longer install-time notes are in
 Until the host has a model key, chats have nothing to answer with. The
 screen and bot list still work.
 
+The **Praxi desktop** peer represents the computer you paired from. Its offline
+status affects work that targets that computer. Jobs targeting the server can
+keep running there while the desktop is closed.
+
 To measure whether live screen view is using a direct path or a relay (RTT and
 frame rate), open a tunnel with `bot --remote <ENDPOINT> proxy` and follow
 [Measuring the live-view link](../design/live-view-link-measurement.md).
@@ -262,6 +328,16 @@ security-list notes are in
 [Firewall notes](remote-host.md#4-firewall-notes-oracle-cloud).
 
 ## Troubleshooting
+
+Server coding CLIs are installed and checked as the `praxi` service account.
+Use the server settings' sign-in action. If a CLI needs its own interactive
+setup, open a terminal on the server and use the same account and executable paths.
+
+```sh
+sudo -Hu praxi env HOME=/var/lib/praxi NPM_CONFIG_PREFIX=/var/lib/praxi/.npm-global \
+  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
+  /bin/bash --noprofile --norc
+```
 
 | What you see | What to do |
 | --- | --- |

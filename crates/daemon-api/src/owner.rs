@@ -331,6 +331,9 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/calendar/accounts/{}"),
     ("POST", "/v1/calendar/test"),
     ("PUT", "/v1/web/search"),
+    // a probe spends the stored search keys (or the owner-typed SearXNG address) on a query the
+    // caller chooses: a token holder must not run it
+    ("POST", "/v1/web/search/test"),
     ("PUT", "/v1/voice"),
     // downloads hundreds of MB onto the owner's disk
     ("POST", "/v1/voice/local/install"),
@@ -425,7 +428,6 @@ pub const TOKEN_OK_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/view/sessions/{}/input"),
     ("POST", "/v1/email/accounts/{}/test"),
     ("POST", "/v1/email/test"),
-    ("POST", "/v1/web/search/test"),
     ("POST", "/v1/voice/transcribe"),
     ("POST", "/v1/webhooks/{}"),
     // HMAC is the credential. The handler rejects a call that is not signed.
@@ -440,6 +442,7 @@ pub const TOKEN_OK_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/admin/import/schedules/activate"),
     ("POST", "/v1/admin/import/schedules/release"),
     ("POST", "/v1/admin/cli-engines/{}/install"),
+    ("POST", "/v1/admin/host-update"),
     ("POST", "/v1/admin/terminal"),
     ("POST", "/v1/admin/terminal/{}/input"),
     ("POST", "/v1/admin/terminal/{}/resize"),

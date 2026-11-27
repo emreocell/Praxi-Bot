@@ -765,6 +765,7 @@ pub(crate) fn is_page_action(name: &str) -> bool {
             | "browser_dismiss_consent"
             | "browser_act"
             | "browser_pointer"
+            | "browser_upload"
     )
 }
 
@@ -935,14 +936,25 @@ pub(crate) struct RunCtx {
     /// browser itself; `None`: unknown, so the action stays once-only). Set by the loop right
     /// before the decision and handed to the tool as `expected_origin`.
     pub page_origin: Mutex<Option<String>>,
-    /// Links `email_wait_for` returned as followable in this run (https, on the
-    /// sign-up site or an owner-listed domain). Written only by the loop from
-    /// that tool's own structured result, never from model text. In memory, per
-    /// run; not copied to a sub-agent.
+    /// Links `email_wait_for` returned as followable IN THIS RUN (https, on the
+    /// sign-up site or an owner-listed domain). Written only by the loop from that
+    /// tool's own structured result, never from model text.
     pub mail_links: Mutex<HashSet<String>>,
     /// Approval calls (tool + card summary) of this mission session whose card expired and
     /// parked the item: the same call is refused without a new card. In memory, per run.
     pub parked_calls: Mutex<HashSet<String>>,
+    /// Links an earlier session of the same bot was given (kept a day in the data
+    /// directory: a mission's next session still holds the link of the mail the
+    /// last one read), each with the site that session's wait allowed it on. A
+    /// root run starts with them, a sub-agent with none. They are leads, not
+    /// permissions: one is followed without a card only while the browser is on
+    /// that site and the link still passes the check it passed then
+    /// ([`Shared::restored_link_followable`]).
+    pub restored_mail_links: Vec<builtin_tools::connector_email::wait_store::RememberedLink>,
+    /// The origin the browser is on, read right before a `browser_open` is
+    /// decided (`page_origin` is not: `browser_open` is judged by where it goes).
+    /// Only read to place a restored link; `None`: unknown or no page.
+    pub landed_origin: Mutex<Option<String>>,
 }
 
 /// "Allow this tool for this task": one tool, this run, at most the exposure
@@ -988,6 +1000,13 @@ pub(crate) fn control_kind_of(name: &str) -> Option<tool_registry::ControlKind> 
 }
 
 impl RunCtx {
+    /// The bot id its followable mail links are kept under; a sub-agent keeps none.
+    pub(crate) fn bot_id_for_links(&self) -> Option<String> {
+        self.parent_run_id
+            .is_none()
+            .then(|| self.bot_id.to_string())
+    }
+
     /// Own per-run state key for tools that keep any (the browser tab): a subagent
     /// run is its own lane, a top-level run shares the bot's default.
     pub(crate) fn lane(&self) -> Option<String> {
@@ -2005,6 +2024,22 @@ impl Shared {
         }
     }
 
+    /// The followable mail links this bot was given recently (a root run only): what
+    /// an earlier session of the same bot read from a verification mail.
+    fn remembered_mail_links(
+        &self,
+        run: &Run,
+    ) -> Vec<builtin_tools::connector_email::wait_store::RememberedLink> {
+        if run.parent_run_id.is_some() {
+            return Vec::new();
+        }
+        builtin_tools::connector_email::WaitStore::shared(self.storage.data_dir())
+            .links(Some(&run.bot_id.to_string()))
+            .into_iter()
+            .filter(|l| l.url.starts_with("https://"))
+            .collect()
+    }
+
     /// Exposure a run starts with: the parent's (subagents), what its own
     /// history already holds, and the provenance of the chat messages that
     /// enter its context.
@@ -2239,6 +2274,8 @@ impl Shared {
             tool_grants: Mutex::new(Vec::new()),
             page_origin: Mutex::new(None),
             mail_links: Mutex::new(HashSet::new()),
+            restored_mail_links: self.remembered_mail_links(run),
+            landed_origin: Mutex::new(None),
             parked_calls: Mutex::new(HashSet::new()),
         });
         Ok(Arc::clone(self.runs.lock().entry(run.id).or_insert(ctx)))

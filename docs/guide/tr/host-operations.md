@@ -130,6 +130,65 @@ değişmişse komut herhangi bir değişiklikten önce durur (`host key mismatch
 `--uninstall` ayrıca kaldırır ve veriyi korur. `--purge` ise `/var/lib/praxi`, `/etc/praxi` ve
 `praxi` kullanıcısını siler. `--yes`, `--purge` için yazdırılan onayı atlar.
 
+Yönetilen güncelleyiciyle kurulmuş bir Linux sunucusunda **Sunucuyu güncelle**
+düğmesi, masaüstü uygulamasının yayınlanan sürümünü eşleştirilmiş bağlantı üzerinden
+ister. Bu işlem için masaüstünün sunucu yönetici yetkisi gerekir ve isteği root
+güncelleyiciye yalnızca arka plan servisinin kendi süreci iletebilir. Güncelleyici,
+sunucuda kurulu olandan eski bir sürümü asla kurmaz ve sunucunun kanalına uyar (aşağıya bak):
+`stable` seçili bir sunucu ön sürüme geçmez. SHA‑256 özetini ve GitHub derleme kaynağını
+(yalnızca sürüm etiketi için, hiçbir dal için değil) doğrular, servisi durdurur, SQLite
+veritabanlarını `/var/lib/praxi-updates/db-snapshot` klasörüne kopyalar (yalnızca root
+okuyabilir; sonraki güncelleme bunu değiştirir), program dosyalarını değiştirir,
+`praxi.service` birimini başlatır ve yeni sürecin hazır olduğunu bildirmesini en fazla altı
+dakika bekler. Hazır olmazsa güncelleyici onu durdurur, veritabanlarını ve önceki program
+dosyalarını geri koyar ve önceki servisin açıldığını kontrol eder. Yeni sürümün bu sürede
+yazdığı veriler geri almayla birlikte kaybolur. Güncelleme kopya için boş disk alanı ister;
+yeterli alan yoksa hiçbir şeyi değiştirmeden durur. Daha eski kurulumlarda doğrulanmış
+kurulum programıyla bir kez yükseltme yap. Uygulama güncellemeyi başlatamazsa SSH ile
+yükseltme yolunu veya uygulamanın gösterdiği komutları kullan.
+
+Zamanlanmış güncellemeler varsayılan olarak kapalıdır. Ayarı değiştirmek için
+`/etc/praxi/updates.toml` dosyasını root olarak oluştur ve modu ve kanalı seç.
+
+```toml
+mode = "notify"         # off, notify, auto
+channel = "stable"      # stable, pre-release
+```
+
+systemd zamanlayıcısı her gün kontrol eder. `notify`, masaüstünde seçili sunucu
+için yeni sürümü gösterir. `auto` güncellemeyi de kurar ve botlar çalışırken servisi
+yeniden başlatabilir. `stable` kararlı sürümü bekler. `pre-release` ön sürümleri de
+kontrol eder. Yazdığın `channel` değeri masaüstündeki güncelleme düğmesi için de geçerlidir.
+Yazmazsan ön sürüm çalıştıran sunucu ön sürümleri, kararlı sürüm çalıştıran sunucu kararlı
+sürümleri izler. Dosya sıradan bir dosya olmalı, sahibi root olmalı, bağlantı olmamalı ve
+16 KiB'den küçük olmalı. Ayar değişikliğini hemen uygulamak için
+`sudo systemctl start praxi-update-check.service` çalıştır. Hata kayıtları için
+`sudo journalctl -u 'praxi-update*.service'` komutunu kullan. Masaüstünden gelen
+güncelleme isteklerini kapatmak için sunucuda `praxi-update.socket` birimini durdur
+ve devre dışı bırak.
+
+Yönetilen geri alma, program dosyalarını ve güncellemeden hemen önce kopyalanan veritabanlarını
+geri yükler. Yarıda kesilen bir güncelleme (süre sınırı, çökme) başarısız sayılır ve servis yeniden
+başlatılır; böylece güncelleme düğmesi kapalı kalmaz. `praxi self-update --rollback` ve aşağıdaki
+kurulum programı geri alması yalnızca program dosyalarını değiştirir. Önemli veriler bulunan bir
+sunucuyu yükseltmeden önce aşağıdaki yedekleme adımlarını uygula. Böylece başarısız
+bir veri geçişinden de dönebilirsin.
+
+Veritabanı kopyası bir yedek değil, geri almaya yardım eden bir kopyadır. Yalnızca
+`/var/lib/praxi` ve `/var/lib/praxi/bots/<id>` içindeki SQLite veritabanlarını içerir, o tek
+güncelleme için alınır ve sonraki güncelleme onu değiştirir. Kopyadan önce güncelleyici servisi,
+ardından `praxi` kullanıcısının diğer tüm süreçlerini durdurur (artakalan varsa sonlandırılır;
+biri durmazsa güncelleme hiçbir şeyi değiştirmeden durur). Veri dizinini yalnızca dizin
+tanıtıcılarıyla okur ve yazar, içindeki herhangi bir bağlantıyı (symlink) reddeder. Geri yükleme
+önce her veritabanını yerinin yanında hazırlar, sonra hepsini birlikte yerine koyar; hazırlık
+sırasındaki bir hata veriyi olduğu gibi bırakır. Güncelleyici son birkaç yeniden adlandırma
+sırasında öldürülürse, kurtarma adımı (her güncelleyici çalışmasından sonra çalışır) servis
+açılmadan önce geri yüklemeyi bitirir; bu da olmazsa servis kapalı kalır ve
+`sudo systemctl start praxi-update-check.service` işlemi bitirene kadar sonraki güncelleme
+başlamaz. O anda elektrik kesilmesi kapsam dışıdır. Geri kalan her şey için aşağıda anlatıldığı gibi
+kendi yedeğini tut: şifreli gizli dosyası, tarayıcı profilleri, sunucu ayarı ve API belirteci
+kopyada yoktur.
+
 ## Geri alma
 
 Yükseltmenin ne kadar ilerlediğine uyan yolu kullan.
@@ -193,6 +252,16 @@ tutarken ya da servis portunda yanıt verirken çalışmayı reddeder, bu yüzde
 
 ## Masaüstü uygulamasını eşleştirme
 
+**Sunucu sağlayıcısının konsolundan:** masaüstünde **Sunucu ekle** ekranını aç
+ve **Sunucum var** seçeneğini seç. Kurulum komutunu sunucu konsoluna yapıştır.
+Komut kurulum programını doğrular, servisi kurar ve QR ile bir `bot-pair:` satırı
+gösterir. Satırın tamamını 30 dakika içinde uygulamaya yapıştır. Süre dolduysa
+sunucuda `sudo praxi host invite --role desktop` ile yeni bir kod al.
+
+**Praxi desktop** eşleştirmeyi yaptığın bilgisayarı temsil eder. Çevrimdışı olması
+o bilgisayarı hedefleyen işleri etkiler. Sunucuyu hedefleyen işler, masaüstü
+kapalıyken sunucuda çalışmaya devam edebilir.
+
 Masaüstü uygulaması sunucuyla dışa doğru açılan bir eş kanalı üzerinden konuşur. Sunucu bunun için
 fazladan bir dinleme portu açmaz. İki eşleştirme yolu var:
 
@@ -245,6 +314,16 @@ eşleştirilmiş uygulamayla ulaş. Oracle güvenlik listesi notları
 [Güvenlik duvarı notları](remote-host.md) bölümünde.
 
 ## Sorun giderme
+
+Sunucudaki kodlama CLI’ları `praxi` servis hesabıyla kurulur ve denetlenir.
+Sunucu ayarlarındaki giriş seçeneğini kullan. CLI kendi terminalinde kurulum
+istiyorsa sunucuda bir terminal açıp aynı hesap ve yolları kullan.
+
+```sh
+sudo -Hu praxi env HOME=/var/lib/praxi NPM_CONFIG_PREFIX=/var/lib/praxi/.npm-global \
+  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
+  /bin/bash --noprofile --norc
+```
 
 | Ne görüyorsun | Ne yapmalı |
 | --- | --- |

@@ -38,7 +38,7 @@ pub use search::{
     BING_ENDPOINT, BRAVE_ENDPOINT, BingBackend, BraveBackend, DEFAULT_CHALLENGE_COOLDOWN,
     DEFAULT_SEARCH_TIMEOUT, DUCKDUCKGO_ENDPOINT, DUCKDUCKGO_LITE_ENDPOINT, DuckDuckGoBackend,
     DuckDuckGoLiteBackend, KNOWN_BACKENDS, MultiSearch, SearchBackend, SearchConfig, SearchOutcome,
-    SearchQuery, SearchResult, SearxngBackend, TAVILY_ENDPOINT, TavilyBackend,
+    SearchQuery, SearchResult, SearxngBackend, TAVILY_ENDPOINT, TavilyBackend, is_keyless_backend,
 };
 pub use tools::{TOOL_NAMES, WebToolsConfig, register, tools};
 pub use xmlfeed::{

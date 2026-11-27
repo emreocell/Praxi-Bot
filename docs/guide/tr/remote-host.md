@@ -30,11 +30,16 @@ Bağımsız olarak kurulmuş **GitHub CLI 2.80.0 ya da daha yenisini** kullan. K
 doğrulamadan ya da kurulumdan önce bu desteklenen en düşük sürümü denetler. Gerekli `--source-ref`,
 `--source-digest`, `--custom-trusted-root` ve imzalayan politikası bayrakları o sürümde bulunur.
 `gh` programını [cli.github.com](https://cli.github.com) adresinden al, bir Praxi sürüm dosyasından değil.
+Kurulum (`--verify-only` dışındaki her şey) yalnızca `/usr/bin/gh` programını kullanır; bu dosya
+root'a ait olmalı ve yalnızca root'un yazabildiği klasörlerde durmalı. Program temiz bir `PATH`,
+`HOME` ve `gh` yapılandırmasıyla çalıştırılır; `PATH` içinde başka yerde duran bir `gh` kullanılmaz.
+`--verify-only` ise `PATH` içindeki `gh` programını kullanmaya devam eder.
 
 **Linux Server Packages** iş akışı, yanında `.sha256` dosyaları olan `praxi-linux-x86_64.tar.gz` ve
 `praxi-linux-aarch64.tar.gz` dosyalarını derler. Son sürümler, korumalı bir etiketten gelen onaylamalar
-gerektirir. Ön sürüm onaylamaları etiketten ya da o etiket için `main` üzerinde elle başlatılan bir
-çalışmadan gelir. Bir sürüm; arşivleri, onaylanmış `install-linux.sh` dosyasını ve
+gerektirir. Kurulum programı yalnızca kaynak ref'i sürüm etiketinin kendisi olan (`refs/tags/<etiket>`)
+kaynak kanıtını kabul eder, ön sürümlerde de; `main` üzerinde elle başlatılan çalışma kabul edilmez.
+Bir sürüm; arşivleri, onaylanmış `install-linux.sh` dosyasını ve
 **`praxi-linux.sigstore.json`** dosyasını içerir. İmzasız dal ya da elle derleme çıktıları bu kurulum
 programıyla kurulamaz. Bir sağlama toplamı bütünlüğü denetler, imzalı kaynağın yerini asla tutmaz.
 

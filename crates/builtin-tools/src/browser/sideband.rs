@@ -14,9 +14,31 @@ use tool_registry::OutputExposure;
 /// Runs remembered at once; more means something is not taking them, so they are dropped.
 const MAX_RUNS: usize = 64;
 
+/// One file a `browser_upload` handed to a page.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UploadedFile {
+    /// The file's name (no folders).
+    pub name: String,
+    /// Its size in bytes.
+    pub size: u64,
+    /// Its SHA-256, lower-case hex, taken just before the browser was told about it.
+    pub sha256: String,
+}
+
+/// What a `browser_upload` did, for the audit log.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UploadRecord {
+    /// The origin of the page the files went to, as the browser reported it.
+    pub origin: Option<String>,
+    /// The files, in the order they were set.
+    pub files: Vec<UploadedFile>,
+}
+
 /// The facts of one call.
 #[derive(Debug, Default, Clone)]
 pub struct Sideband {
+    /// The files a `browser_upload` handed to a page.
+    pub upload: Option<UploadRecord>,
     /// The picture the call saved under the data directory, if any.
     pub screenshot: Option<PathBuf>,
     /// What the call's error is made of, when it failed after reading a page.
@@ -40,6 +62,11 @@ fn entry<'a>(m: &'a mut HashMap<String, Sideband>, run_id: &str) -> &'a mut Side
 /// Record the picture a call of `run_id` saved (the newest wins).
 pub fn note_screenshot(run_id: &str, path: &Path) {
     entry(&mut map(), run_id).screenshot = Some(path.to_path_buf());
+}
+
+/// Record the files a call of `run_id` handed to a page (the audit log reads it).
+pub(super) fn note_upload(run_id: &str, record: UploadRecord) {
+    entry(&mut map(), run_id).upload = Some(record);
 }
 
 /// Record what the failing call of `run_id` carries.

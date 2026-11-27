@@ -3,6 +3,8 @@
 # (x86_64 or aarch64; Debian/Ubuntu or Fedora/RHEL/Oracle Linux family).
 #
 # Trust: use independently installed GitHub CLI >= 2.80.0 (https://cli.github.com).
+# An installation verifies with /usr/bin/gh only (it must be root-owned, in directories that only
+# root can write) and runs it with a clean environment; --verify-only uses the gh on your PATH.
 # Verify the installer itself BEFORE running it, including with sudo. Copy this
 # bootstrap from a reviewed copy of this repository; replace the example tag:
 #   (
@@ -57,6 +59,12 @@ readonly REPO="emreocell/Praxi-Bot"
 readonly SIGNER_WORKFLOW="github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml"
 readonly BUNDLE_ASSET="praxi-linux.sigstore.json"
 readonly MIN_GH_VERSION="2.80.0"
+# An installation (anything but --verify-only) verifies with the system package's gh only, never one
+# found through the caller's PATH, and runs it with a clean environment.
+readonly TRUSTED_GH="/usr/bin/gh"
+readonly TRUSTED_UID=0
+readonly TRUSTED_ROOT_DIR="/"
+readonly VERIFIER_PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 PREFIX="/opt/praxi"
 LIBEXEC_DIR="${PREFIX}/libexec"
 DATA_DIR="/var/lib/praxi"
@@ -66,6 +74,8 @@ NODE_ENV_FILE="${CONF_DIR}/praxi-node.env"
 UNIT_DIR="/etc/systemd/system"
 SLICE_NAME="praxi.slice"
 SVC_USER="praxi"
+UPDATE_UNITS=(praxi-update.socket praxi-update@.service praxi-update-check.timer praxi-update-check.service)
+SERVICE_PATH="${DATA_DIR}/.local/bin:${DATA_DIR}/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
 
 VERSION="latest"
 LOCAL_FILE=""
@@ -105,6 +115,27 @@ log() { printf '[praxi-install] %s\n' "$*"; }
 warn() { printf '[praxi-install] warning: %s\n' "$*" >&2; }
 die() { printf '[praxi-install] error: %s\n' "$*" >&2; exit 1; }
 
+# Print the real path of ${TRUSTED_GH} after checking every component: owned by ${TRUSTED_UID}, not a
+# symbolic link and not writable by group or others (a root-owned program in a writable directory can
+# still be replaced). Mirrors trusted_verifier() of `bot self-update`.
+trusted_gh_path() {
+  local resolved p owner mode
+  [[ -e "${TRUSTED_GH}" ]] \
+    || die "the GitHub CLI is required at ${TRUSTED_GH}: install the official package from https://cli.github.com (a gh found through PATH is not used for an installation)"
+  resolved="$(readlink -f -- "${TRUSTED_GH}")" || die "cannot resolve ${TRUSTED_GH}"
+  [[ -f "${resolved}" && -x "${resolved}" ]] || die "${TRUSTED_GH} is not an executable file"
+  p="${resolved}"
+  while :; do
+    [[ ! -L "${p}" ]] || die "untrusted GitHub CLI path: ${p} is a symbolic link"
+    read -r owner mode < <(stat -c '%u %a' -- "${p}") || die "cannot inspect ${p}"
+    [[ "${owner}" == "${TRUSTED_UID}" ]] || die "untrusted GitHub CLI path: ${p} is not owned by root"
+    (( (8#${mode} & 8#022) == 0 )) || die "untrusted GitHub CLI path: ${p} is writable by group or others"
+    [[ "${p}" != "${TRUSTED_ROOT_DIR}" && "${p}" != "/" ]] || break
+    p="$(dirname -- "${p}")"
+  done
+  printf '%s\n' "${resolved}"
+}
+
 # Versions before this one wrote a host-wide journald cap. Remove that file only
 # when it carries our marker line (never a file an admin wrote under that name),
 # and never restart journald as a side effect.
@@ -127,6 +158,8 @@ Usage (as root):
 Install trusted GitHub CLI >= 2.80.0 independently (https://cli.github.com).
 This is the supported floor for all required identity/offline flags. No verifier is
 downloaded or installed by this script. Old releases without provenance fail.
+An installation uses /usr/bin/gh only: it must be root-owned, in directories only root can
+write, and runs with a clean PATH, HOME and gh config. --verify-only uses the gh on your PATH.
 
 Verified bootstrap (copy from a reviewed repository, choose a release tag):
   (
@@ -307,9 +340,45 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
 fi
 
+# Open ${1} as the maintenance lock in descriptor ${maintenance_lock}, never through a link. Mirrors
+# lock_file() of `bot self-update`: what is locked must be a regular file of ${TRUSTED_UID}, and the
+# name must still lead to the very file that was opened. A plain `exec fd>>path` would follow a link
+# planted at that name, and create whatever it points to.
+open_maintenance_lock() {
+  local path="$1" tmp owner fd_id path_id
+  [[ ! -L "${path}" ]] || die "unsafe maintenance lock: ${path} is a symbolic link"
+  if [[ ! -e "${path}" ]]; then
+    # link(2) neither follows a link at the new name nor replaces anything: the name is ours only if
+    # it was free, and a lock file that raced into place is checked like any other below.
+    tmp="$(mktemp -- "${path}.XXXXXX")" || die "cannot create the maintenance lock ${path}"
+    ln -- "${tmp}" "${path}" 2>/dev/null || true
+    rm -f -- "${tmp}"
+  fi
+  # Read-only: this open never creates a file. flock(2) does not need write access.
+  exec {maintenance_lock}<"${path}" || die "cannot open the maintenance lock ${path}"
+  [[ -f "/proc/self/fd/${maintenance_lock}" ]] || die "unsafe maintenance lock: ${path} is not a regular file"
+  read -r owner fd_id < <(stat -L -c '%u %d:%i' -- "/proc/self/fd/${maintenance_lock}") \
+    || die "cannot inspect the maintenance lock ${path}"
+  [[ "${owner}" == "${TRUSTED_UID}" ]] || die "unsafe maintenance lock: ${path} is not owned by root"
+  # Without -L, stat describes a link itself: a name that became a link differs from the open file.
+  path_id="$(stat -c '%d:%i' -- "${path}")" || die "cannot inspect the maintenance lock ${path}"
+  [[ ! -L "${path}" && "${path_id}" == "${fd_id}" ]] \
+    || die "unsafe maintenance lock: ${path} was replaced while it was opened"
+}
+
+# The managed updater, local self-update and this installer share this lock.
+if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
+  command -v flock >/dev/null 2>&1 || die "flock is required; install util-linux and retry"
+  mkdir -p -- "$(dirname "${PREFIX}")"
+  open_maintenance_lock "${PREFIX}.maintenance.lock"
+  flock -n "${maintenance_lock}" || die "another Praxi maintenance operation is running; wait and retry"
+fi
+
 # ---------------------------------------------------------------- uninstall
 if [[ "${UNINSTALL}" -eq 1 ]]; then
   log "stopping and removing services"
+  systemctl disable --now praxi-update.socket praxi-update-check.timer >/dev/null 2>&1 || true
+  for u in "${UPDATE_UNITS[@]}"; do rm -f "${UNIT_DIR:?}/${u:?}"; done
   for u in praxi.service praxi-node.service praxi-desktop.service praxi-xvfb.service "${SLICE_NAME}"; do
     systemctl disable --now "${u}" >/dev/null 2>&1 || true
     rm -f "${UNIT_DIR:?}/${u:?}"
@@ -608,17 +677,17 @@ install_packages() {
 # ---------------------------------------------------------- verify release
 # curl/gh must already be trusted and installed. Do not change packages, users,
 # services or installation paths until the private copy passes verification.
-command -v gh >/dev/null 2>&1 || die "trusted GitHub CLI (gh) is required; install it independently from https://cli.github.com"
+if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+  # A check that installs nothing (and needs no root) uses the gh the caller already trusts.
+  command -v gh >/dev/null 2>&1 || die "trusted GitHub CLI (gh) is required; install it independently from https://cli.github.com"
+  GH_BIN="$(command -v gh)"
+else
+  GH_BIN="$(trusted_gh_path)" || exit 1
+fi
 # Disable optional CLI update checks as well as explicit downloads offline.
 if [[ "${OFFLINE}" -eq 1 ]]; then
   export GH_NO_UPDATE_NOTIFIER=1 GH_NO_EXTENSION_UPDATE_NOTIFIER=1
 fi
-gh_version="$(gh --version)" || die "could not determine GitHub CLI version"
-gh_version="${gh_version%%$'\n'*}"
-[[ "$gh_version" =~ ^gh[[:space:]]version[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)([[:space:]]|$) ]] \
-  || die "GitHub CLI >= ${MIN_GH_VERSION} is required (unrecognized version)"
-(( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 80) )) \
-  || die "GitHub CLI >= ${MIN_GH_VERSION} is required"
 if [[ "${OFFLINE}" -eq 1 ]]; then
   [[ -n "${LOCAL_FILE}" && "${VERSION}" != latest && -n "${TRUSTED_ROOT}" ]] \
     || die "--offline requires --file, an explicit --version, and --custom-trusted-root"
@@ -684,7 +753,7 @@ restore_backup() {
       cp -a "${WORK}/backup/conf/${c}" "${CONF_DIR}/${c}"
     fi
   done
-  for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service \
+  for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service "${UPDATE_UNITS[@]}" \
     praxi.service.d praxi-node.service.d praxi-desktop.service.d praxi-xvfb.service.d; do
     rm -rf "${UNIT_DIR:?}/${u:?}"
     if [[ -e "${WORK}/backup/units/${u}" ]]; then
@@ -705,6 +774,7 @@ on_exit() {
     # Stop anything the failed attempt started or left activating. Stop praxi-xvfb
     # before praxi-desktop/praxi so Upholds= does not restart them during rollback.
     local u was_enabled
+    systemctl disable --now praxi-update.socket praxi-update-check.timer >/dev/null 2>&1 || true
     for u in praxi-node.service praxi-xvfb.service praxi-desktop.service praxi.service "${SLICE_NAME}"; do
       if [[ -f "${UNIT_DIR}/${u}" ]] || systemctl is-active --quiet "${u}" 2>/dev/null; then
         systemctl stop "${u}" >/dev/null 2>&1 || true
@@ -725,6 +795,8 @@ on_exit() {
     done
     restore_backup
     systemctl daemon-reload >/dev/null 2>&1 || true
+    for u in "${UPDATE_TRIGGERS_ENABLED[@]}"; do systemctl enable "${u}" >/dev/null 2>&1 || true; done
+    for u in "${UPDATE_TRIGGERS_ACTIVE[@]}"; do systemctl start "${u}" >/dev/null 2>&1 || true; done
     if [[ "${WAS_ENABLED_XVFB:-0}" -eq 1 && -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
       systemctl enable praxi-xvfb.service >/dev/null 2>&1 || true
     fi
@@ -773,6 +845,31 @@ trap on_exit EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Installations run the verifier with a clean environment: fixed PATH, an isolated HOME and gh config,
+# and no tokens or other variables from the caller (only proxy settings are kept).
+GH_ENV=()
+if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
+  mkdir -m 0700 "${WORK}/gh-home"
+  GH_ENV=(PATH="${VERIFIER_PATH}" HOME="${WORK}/gh-home" GH_CONFIG_DIR="${WORK}/gh-home" GH_HOST=github.com
+    GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 GH_NO_EXTENSION_UPDATE_NOTIFIER=1)
+  for proxy_var in HTTPS_PROXY https_proxy NO_PROXY no_proxy; do
+    [[ -z "${!proxy_var:-}" ]] || GH_ENV+=("${proxy_var}=${!proxy_var}")
+  done
+fi
+run_gh() {
+  if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+    "${GH_BIN}" "$@"
+  else
+    /usr/bin/env -i "${GH_ENV[@]}" "${GH_BIN}" "$@"
+  fi
+}
+gh_version="$(run_gh --version)" || die "could not determine GitHub CLI version"
+gh_version="${gh_version%%$'\n'*}"
+[[ "$gh_version" =~ ^gh[[:space:]]version[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)([[:space:]]|$) ]] \
+  || die "GitHub CLI >= ${MIN_GH_VERSION} is required (unrecognized version)"
+(( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 80) )) \
+  || die "GitHub CLI >= ${MIN_GH_VERSION} is required"
 BASE="https://github.com/${REPO}/releases/download/${VERSION}"
 
 download_release_asset() {
@@ -821,24 +918,15 @@ if [[ -n "${TRUSTED_ROOT}" ]]; then
   trust_args=(--custom-trusted-root "${WORK}/trusted_root.jsonl")
 fi
 # Identity constraints remain fixed in both online and offline verification. The only accepted
-# source ref is the release tag itself; a PRE-RELEASE tag (v1.2.3-alpha.1, any suffix) may also
-# carry provenance from this repository's linux-release workflow run on main, which is how a
-# maintainer republishes the Linux assets of an existing pre-release. Final tags never do.
-source_refs=("refs/tags/${VERSION}")
-[[ "${VERSION}" == *-* ]] && source_refs+=("refs/heads/main")
-verified=0
-for source_ref in "${source_refs[@]}"; do
-  if gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" ${trust_args[@]+"${trust_args[@]}"} \
-    --repo "${REPO}" --hostname github.com \
-    --signer-workflow "${SIGNER_WORKFLOW}" \
-    --source-ref "${source_ref}" --deny-self-hosted-runners \
-    --cert-oidc-issuer https://token.actions.githubusercontent.com \
-    --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256; then
-    verified=1
-    break
-  fi
-done
-[[ "${verified}" -eq 1 ]] || die "provenance verification failed; refusing to install (a checksum is not proof of origin)"
+# source ref is the release tag itself, for final and pre-release tags alike: a build of main (or of
+# any other ref) never stands in for a tag, because an older build can carry a flaw a newer tag fixed.
+run_gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" ${trust_args[@]+"${trust_args[@]}"} \
+  --repo "${REPO}" --hostname github.com \
+  --signer-workflow "${SIGNER_WORKFLOW}" \
+  --source-ref "refs/tags/${VERSION}" --deny-self-hosted-runners \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256 \
+  || die "provenance verification failed; refusing to install (a checksum is not proof of origin)"
 log "verified release provenance for ${VERSION}"
 if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
   log "verification complete; no installation performed"
@@ -934,7 +1022,7 @@ for c in "${ENV_FILE}" "${NODE_ENV_FILE}"; do
     cp -a "${c}" "${WORK}/backup/conf/"
   fi
 done
-for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service \
+for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service "${UPDATE_UNITS[@]}" \
   praxi.service.d praxi-node.service.d praxi-desktop.service.d praxi-xvfb.service.d; do
   if [[ -e "${UNIT_DIR}/${u}" ]]; then
     cp -a "${UNIT_DIR}/${u}" "${WORK}/backup/units/"
@@ -967,7 +1055,16 @@ if systemctl is-active --quiet praxi.service 2>/dev/null; then
   WAS_ACTIVE_PRAXI=1
 fi
 NODE_WAS_ACTIVE="${WAS_ACTIVE_NODE}"
+UPDATE_TRIGGERS_ENABLED=()
+UPDATE_TRIGGERS_ACTIVE=()
+for u in praxi-update.socket praxi-update-check.timer; do
+  if [[ -f "${UNIT_DIR}/${u}" ]]; then
+    if systemctl is-enabled --quiet "${u}"; then UPDATE_TRIGGERS_ENABLED+=("${u}"); fi
+    if systemctl is-active --quiet "${u}"; then UPDATE_TRIGGERS_ACTIVE+=("${u}"); fi
+  fi
+done
 UPGRADE_STOPPED=1
+for u in "${UPDATE_TRIGGERS_ACTIVE[@]}"; do systemctl stop "${u}"; done
 
 if (( WAS_ACTIVE_NODE || WAS_ACTIVE_XVFB || WAS_ACTIVE_DESKTOP || WAS_ACTIVE_PRAXI )); then
   log "stopping active Praxi services for installation"
@@ -985,7 +1082,17 @@ fi
 if systemctl is-active --quiet praxi.service 2>/dev/null; then
   systemctl stop praxi.service
 fi
+# `bot self-update` keeps versioned generations behind current/previous links and launcher symlinks.
+# This installer writes a flat tree and is authoritative for it: drop the stale links and generations so
+# that the next managed update adopts the files installed here instead of re-pointing the launchers at an
+# older release (a downgrade) or rolling back to one.
+[[ ! -L "${PREFIX}/bin" ]] || rm -f -- "${PREFIX}/bin"
+rm -rf -- "${PREFIX}/current" "${PREFIX}/previous" "${PREFIX}/versions"
 install -d -m 0755 "${PREFIX}/bin"
+# Never write through a launcher symlink left by a managed update.
+for launcher in bot bot-node; do
+  [[ ! -L "${PREFIX}/bin/${launcher}" ]] || rm -f -- "${PREFIX}/bin/${launcher}"
+done
 install -m 0755 "${SRC}/bin/bot" "${PREFIX}/bin/bot"
 install -m 0755 "${SRC}/bin/bot-node" "${PREFIX}/bin/bot-node"
 for f in VERSION LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
@@ -1013,7 +1120,7 @@ write_wrapper() { # <command name> <binary name> <env file>
   cat > "/usr/local/bin/${cmd}" <<WRAP
 #!/bin/sh
 # Runs ${PREFIX}/bin/${bin} as the ${SVC_USER} user with ${envf}.
-inner='set -a; . ${envf}; set +a; exec "\$@"'
+inner='export PATH=${SERVICE_PATH} NPM_CONFIG_PREFIX=${DATA_DIR}/.npm-global; set -a; . ${envf}; set +a; exec "\$@"'
 if [ "\$(id -u)" -eq 0 ]; then
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = self-update ]; then
     # Only this explicit maintenance command retains root. Do not source the
@@ -1023,7 +1130,8 @@ if [ "\$(id -u)" -eq 0 ]; then
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = doctor ]; then
     exec systemd-run --quiet --wait --pipe --collect --unit="praxi-doctor-\$\$" \
       --property=User=${SVC_USER} --property=Group=${SVC_USER} \
-      --property=WorkingDirectory=${DATA_DIR} --property=EnvironmentFile=${envf} \
+      --property=WorkingDirectory=${PREFIX} --property=EnvironmentFile=${envf} \
+      --setenv=PATH=${SERVICE_PATH} --setenv=NPM_CONFIG_PREFIX=${DATA_DIR}/.npm-global \
       ${doctor_properties} ${PREFIX}/bin/${bin} "\$@"
   fi
   exec runuser -u ${SVC_USER} -- sh -c "\$inner" sh ${PREFIX}/bin/${bin} "\$@"
@@ -1207,7 +1315,9 @@ Type=simple
 ${SLICE_LINE:+${SLICE_LINE}
 }User=${SVC_USER}
 Group=${SVC_USER}
-WorkingDirectory=${DATA_DIR}
+WorkingDirectory=${PREFIX}
+Environment=PATH=${SERVICE_PATH}
+Environment=NPM_CONFIG_PREFIX=${DATA_DIR}/.npm-global
 EnvironmentFile=${ENV_FILE}
 ExecStart=${PREFIX}/bin/bot ${SERVE_ARGS}
 Restart=on-failure
@@ -1218,6 +1328,67 @@ ${HARDENING}
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+if [[ "${HOST_MODE}" -eq 1 ]]; then
+  cat > "${UNIT_DIR}/praxi-update.socket" <<UNIT
+[Unit]
+Description=Praxi managed update socket
+
+[Socket]
+ListenStream=/run/praxi-update.sock
+SocketGroup=${SVC_USER}
+SocketMode=0660
+Accept=yes
+MaxConnections=4
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target
+UNIT
+  cat > "${UNIT_DIR}/praxi-update@.service" <<UNIT
+[Unit]
+Description=Praxi managed update request
+
+[Service]
+ExecStart=${PREFIX}/bin/bot self-update --managed-port ${PORT}
+# A killed or timed-out run must not leave the status on "running" (it disables the update button).
+ExecStopPost=${PREFIX}/bin/bot self-update --managed-port ${PORT} --recover
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+StateDirectory=praxi-updates
+PrivateTmp=true
+ProtectSystem=full
+RuntimeMaxSec=40min
+UNIT
+  cat > "${UNIT_DIR}/praxi-update-check.service" <<UNIT
+[Unit]
+Description=Praxi scheduled update check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${PREFIX}/bin/bot self-update --managed-port ${PORT} --scheduled
+ExecStopPost=${PREFIX}/bin/bot self-update --managed-port ${PORT} --recover
+StateDirectory=praxi-updates
+PrivateTmp=true
+ProtectSystem=full
+TimeoutStartSec=40min
+UNIT
+  cat > "${UNIT_DIR}/praxi-update-check.timer" <<'UNIT'
+[Unit]
+Description=Check for Praxi releases daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+fi
 
 # Node-agent: installed but NOT enabled; pair it first (praxi-node join <ticket>).
 cat > "${UNIT_DIR}/praxi-node.service" <<UNIT
@@ -1885,6 +2056,10 @@ write_wrapper praxi-node bot-node "${NODE_ENV_FILE}"
 
 systemctl daemon-reload
 systemctl enable praxi.service >/dev/null
+if [[ "${HOST_MODE}" -eq 1 ]]; then
+  systemctl enable praxi-update.socket >/dev/null
+  systemctl enable praxi-update-check.timer >/dev/null
+fi
 if [[ "${DESKTOP_ACTIVE}" -eq 1 ]]; then
   systemctl enable praxi-xvfb.service >/dev/null
 fi
@@ -1935,6 +2110,10 @@ if [[ "${NO_START}" -eq 0 ]]; then
     die "files installed, but service readiness failed (bounded wait); see journal above"
   fi
   log "daemon ready on loopback (health may report setup_required until provider setup)"
+  if [[ "${HOST_MODE}" -eq 1 ]]; then
+    systemctl start praxi-update.socket
+    systemctl start praxi-update-check.timer
+  fi
 else
   log "files installed and units enabled; startup/readiness skipped (--no-start)"
   if [[ "${WAS_ACTIVE_PRAXI}" -eq 1 || "${WAS_ACTIVE_XVFB}" -eq 1 || "${WAS_ACTIVE_DESKTOP}" -eq 1 || "${WAS_ACTIVE_NODE}" -eq 1 ]]; then

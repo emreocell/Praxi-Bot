@@ -12,8 +12,11 @@ and attaches the assets to that tag's GitHub pre-release by itself. No reviewer,
 It still requires this repository (no forks, no pull requests), the tag's own ref or a manual run on
 `main`, and it never overwrites an existing release asset. To (re)publish the assets of an existing
 pre-release tag: `gh workflow run linux-release.yml --ref main -f tag=v0.1.0-alpha.1 -f dry_run=false`.
-Protection is lower than for final tags: nobody else approves the publication and a manual run on
-`main` is attested as a build of `main` (the installer accepts that ref for pre-release tags only).
+Protection is lower than for final tags: nobody else approves the publication. A manual run on
+`main` is attested as a build of `main`, and `install-linux.sh` and the managed updater refuse
+that: they accept only provenance whose source ref is the release tag itself, final or
+pre-release (an older build of `main` could carry a flaw a newer tag fixes). Assets published by
+a manual run on `main` therefore cannot be installed; publish installable assets by pushing the tag.
 
 ## Final tags (`v1.0.0`, no suffix)
 The run fails at "Attest protected release tag" unless the repository has a

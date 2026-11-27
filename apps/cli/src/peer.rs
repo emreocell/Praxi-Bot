@@ -75,7 +75,14 @@ pub async fn start_client(
     })?;
     let (cfg, _) = config(data, false)?;
     let net = PeerNetwork::start(cfg, None).await?;
-    let proxy = match remote_api::ApiProxy::start(net.clone(), peer).await {
+    // Work and secrets only go to a server that runs this release.
+    let proxy = match remote_api::ApiProxy::start_checked(
+        net.clone(),
+        peer,
+        crate::host_compat::compatibility(),
+    )
+    .await
+    {
         Ok(proxy) => proxy,
         Err(e) => {
             net.shutdown().await;

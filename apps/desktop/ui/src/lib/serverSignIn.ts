@@ -56,7 +56,7 @@ export function waitingFor(job: Pick<AdminCliLogin, "code"> | null): "device" | 
 
 /** The status line of one engine in the server's engine list (an i18n key plus its values). */
 export function engineStatus(
-  engine: Pick<AdminCliEngine, "installed" | "signed_in" | "account">
+  engine: Pick<AdminCliEngine, "installed" | "signed_in" | "account"> & Partial<Pick<AdminCliEngine, "credential_file_present">>
 ): { key: string; values?: { account: string } } {
   if (!engine.installed) {
     return { key: "home.engines.notInstalled" };
@@ -64,7 +64,11 @@ export function engineStatus(
   if (engine.signed_in === true) {
     return engine.account ? { key: "home.engines.readyAs", values: { account: engine.account } } : { key: "home.engines.ready" };
   }
-  return { key: engine.signed_in === false ? "home.engines.needsSignIn" : "home.engines.installedUnknown" };
+  if (engine.signed_in === false) {
+    return { key: "home.engines.needsSignIn" };
+  }
+  // Sign-in cannot be checked: say so, and whether a known credential file is there (its contents are not read).
+  return { key: engine.credential_file_present ? "serverConnectionStatus.credentialFound" : "home.engines.installedUnknown" };
 }
 
 /**

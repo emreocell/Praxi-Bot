@@ -501,6 +501,10 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         | "web_metadata"
         | "browser_open"
         | "browser_back"
+        | "browser_forward"
+        | "browser_reload"
+        | "browser_upload"
+        | "browser_downloads"
         | "browser_snapshot"
         | "browser_screenshot"
         | "browser_click"
@@ -600,6 +604,10 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
         ),
         "web_extract" | "web_scrape" | "web_feed" | "web_sitemap" | "web_metadata"
         | "browser_open" => (host_of_url(&str_field("url")), "url"),
+        // A new tab on an address is an open: the card names the site it goes to.
+        "browser_tabs" if input.get("url").is_some_and(Value::is_string) => {
+            (host_of_url(&str_field("url")), "url")
+        }
         "email_send" | "email_draft" => {
             let mut everyone = all_addrs(input.get("to"));
             everyone.extend(all_addrs(input.get("cc")));
@@ -633,6 +641,9 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
         | "browser_dismiss_consent"
         | "browser_tabs"
         | "browser_back"
+        | "browser_forward"
+        | "browser_reload"
+        | "browser_upload"
         | "browser_eval"
         | "browser_act" => ("the browser".to_owned(), "body"),
         "schedule_create" | "schedule_update" | "schedule_resume" => {

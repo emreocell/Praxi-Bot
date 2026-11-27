@@ -19,6 +19,7 @@ use tool_registry::ToolRegistry;
 use tower::ServiceExt;
 
 mod auth;
+mod compat;
 mod daemon;
 mod loss;
 mod streams;

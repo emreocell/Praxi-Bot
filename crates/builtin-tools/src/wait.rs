@@ -43,13 +43,18 @@ pub fn cancel_run_waits(run_id: &str) {
     let mut runs = RUNS.lock();
     runs.entry(run_id.to_owned()).or_default().token.cancel();
     drop(runs);
-    crate::mail_wait::cancel_run_mail_waits(run_id);
+    // The owner stopped the run: nothing is kept for the bot's next run to pick up.
+    crate::mail_wait::cancel_run_mail_waits(run_id, true);
 }
 
 /// Drop the background mail waits of `run_id`: the run is over (finished, failed, stopped or
 /// paused), so nobody can collect them and their polling must not go on.
+///
+/// What a wait wrote to the data directory stays, so the bot's next run (the next mission
+/// session, a run after a restart) can take it over; only an owner Stop
+/// ([`cancel_run_waits`]) forgets it.
 pub fn end_run_mail_waits(run_id: &str) {
-    crate::mail_wait::cancel_run_mail_waits(run_id);
+    crate::mail_wait::cancel_run_mail_waits(run_id, false);
 }
 
 #[derive(Deserialize)]

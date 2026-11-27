@@ -841,6 +841,7 @@ async fn search_maps_the_criteria_to_list_filters() {
         unread: Some(true),
         text: None,
         include_junk: None,
+        page_token: None,
     };
     let found = bound(&server)
         .search(&SearchRequest {
@@ -853,6 +854,89 @@ async fn search_maps_the_criteria_to_list_filters() {
     assert_eq!(found.messages.len(), 1);
     assert_eq!(found.messages[0].id.as_deref(), Some("m9"));
     assert_eq!(found.total, 1);
+}
+
+#[tokio::test]
+async fn search_lists_received_mail_only_and_pages_past_the_first_hundred() {
+    let server = MockServer::start().await;
+    let list_path = format!("/v0/inboxes/{INBOX_ENC}/messages");
+    // Page 2 (matched first: it is the more specific mock) ends the sequence.
+    Mock::given(method("GET"))
+        .and(path(list_path.clone()))
+        .and(query_param("page_token", "tok-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 1,
+            "messages": [msg_json("in3", "2026-11-05T07:00:00Z", "noreply@site-c.com", &["received"])]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(list_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 3,
+            "next_page_token": "tok-2",
+            "messages": [
+                msg_json("in1", "2026-11-05T09:00:00Z", "noreply@site-a.com", &["received"]),
+                msg_json("out1", "2026-11-05T08:30:00Z", INBOX, &["sent"]),
+                msg_json("in2", "2026-11-05T08:00:00Z", "Site B <hello@site-b.com>", &["unread"]),
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let first = bound(&server)
+        .search(&SearchRequest {
+            folder: "INBOX",
+            query: &SearchQuery::default(),
+            limit: 100,
+        })
+        .await
+        .unwrap();
+    let ids =
+        |f: &Found| -> Vec<String> { f.messages.iter().filter_map(|m| m.id.clone()).collect() };
+    assert_eq!(
+        ids(&first),
+        ["in1", "in2"],
+        "the sent message is not listed"
+    );
+    assert_eq!(first.total, 2);
+    assert_eq!(first.next_page_token.as_deref(), Some("tok-2"));
+    let q = SearchQuery {
+        page_token: first.next_page_token.clone(),
+        ..SearchQuery::default()
+    };
+    let second = bound(&server)
+        .search(&SearchRequest {
+            folder: "INBOX",
+            query: &q,
+            limit: 100,
+        })
+        .await
+        .unwrap();
+    assert_eq!(ids(&second), ["in3"]);
+    assert_eq!(second.next_page_token, None, "the last page has no token");
+}
+
+#[tokio::test]
+async fn search_refuses_a_page_token_that_cannot_be_one_before_any_request() {
+    let server = MockServer::start().await;
+    for bad in ["has space", "new\nline", &"x".repeat(5000)] {
+        let q = SearchQuery {
+            page_token: Some(bad.to_owned()),
+            ..SearchQuery::default()
+        };
+        let e = bound(&server)
+            .search(&SearchRequest {
+                folder: "INBOX",
+                query: &q,
+                limit: 5,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(e, EmailError::Input(_)), "{e:?}");
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

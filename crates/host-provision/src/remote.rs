@@ -65,12 +65,21 @@ mod tests {
         assert!(c.contains("PRAXI_TAG=v0.1.0-beta.2\n"));
         assert!(c.contains("gh attestation verify"));
         assert!(c.contains("--source-ref \"refs/tags/${PRAXI_TAG}\""));
-        assert!(c.contains("--ticket-only"));
-        // the attestation check must come before the installer runs
+        assert!(c.contains("--headless"));
+        assert!(c.contains("host invite --role desktop --ttl-secs 1800"));
+        // the attestation check must come before the installer runs, and both run with a clean
+        // environment (fixed PATH, isolated HOME), the check with the system's /usr/bin/gh
+        assert!(c.contains("praxi_clean_env \"${work}\" \\\n    /usr/bin/gh attestation verify"));
         assert!(
-            c.find("gh attestation verify").unwrap()
-                < c.find("install-linux.sh\" --version").unwrap()
+            c.find("/usr/bin/gh attestation verify").unwrap()
+                < c.find("praxi_run_installer \"${work}/install-linux.sh\"")
+                    .unwrap()
         );
+        assert!(!c.contains("bash \"${work}/install-linux.sh\""));
+        assert!(c.contains("PATH=/usr/sbin:/usr/bin:/sbin:/bin"));
+        // the package key is pinned by its full fingerprint and every https download refuses redirects
+        assert!(c.contains("praxi_gh_key_fpr=7F38BBB59D064DBCB3D84D725612B36462313325"));
+        assert!(c.contains("--proto-redir '=https' --tlsv1.2 https://github.com"));
         assert!(c.trim_end().ends_with("PRAXI_SETUP"));
         // only the heredoc terminator line may be at column 0 with that word
         assert_eq!(c.matches("PRAXI_SETUP").count(), 2);

@@ -68,12 +68,19 @@ pub(crate) fn connector(accounts: Vec<AccountConfig>) -> Arc<EmailConnector> {
 struct WaitFake {
     spec: ToolSpec,
     count: Arc<AtomicUsize>,
+    /// The `link_site` it reports (the site its links were judged against).
+    site: Option<&'static str>,
 }
 
 fn wait_fake() -> Arc<WaitFake> {
+    mail_fake(builtin_tools::mail_wait::EMAIL_WAIT_FOR)
+}
+
+/// A mail tool of the bot's own inbox named `name` that answers with structured JSON.
+fn mail_fake(name: &str) -> Arc<WaitFake> {
     Arc::new(WaitFake {
         spec: ToolSpec {
-            name: builtin_tools::mail_wait::EMAIL_WAIT_FOR.into(),
+            name: name.into(),
             description: "wait for mail".into(),
             input_schema: json!({"type": "object"}),
             effect: Effect::Read,
@@ -82,7 +89,15 @@ fn wait_fake() -> Arc<WaitFake> {
             content: ContentClass::all(),
         },
         count: Arc::new(AtomicUsize::new(0)),
+        site: Some("example.com"),
     })
+}
+
+/// A `email_wait_for` whose links were judged against `site` (`None`: only the owner's list).
+fn wait_fake_for(site: Option<&'static str>) -> Arc<WaitFake> {
+    let mut f = Arc::try_unwrap(wait_fake()).ok().unwrap();
+    f.site = site;
+    Arc::new(f)
 }
 
 #[async_trait]
@@ -94,7 +109,7 @@ impl Tool for WaitFake {
         self.count.fetch_add(1, Ordering::SeqCst);
         Ok(ToolOutput {
             content: vec![ContentPart::Json {
-                data: json!({"found": true, "followable_links": [GOOD], "codes": []}),
+                data: json!({"found": true, "followable_links": [GOOD], "link_site": self.site, "codes": []}),
             }],
             spill: None,
             exposure: None,
@@ -336,6 +351,7 @@ fn mail_wait_tool(bot: BotId) -> Arc<dyn Tool> {
         handle,
         Arc::new(builtin_tools::connector_email::PageOriginSlot::new()),
         None,
+        None,
     )
 }
 
@@ -358,9 +374,11 @@ async fn collect_in_run(
 }
 
 /// A run that ends leaves nobody to collect its background waits: their polling stops and their
-/// slots are free again. (The wait here keeps polling for several seconds if nothing ends it.)
+/// slots are free again, but the wait itself is kept, so the bot's NEXT run (the next mission
+/// session) takes it over with the same id. (The wait here keeps polling for several seconds
+/// if nothing ends it.)
 #[tokio::test]
-async fn a_background_mail_wait_ends_with_its_run() {
+async fn a_background_mail_wait_outlives_its_run_for_the_bots_next_run() {
     let env = setup();
     let wait = mail_wait_tool(env.bot);
     let fake = Fake::new(vec![
@@ -380,14 +398,48 @@ async fn a_background_mail_wait_ends_with_its_run() {
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
 
     let id = wait_id_in(&crate::tests::tool_messages(&fake.request(1))[0]);
-    let e = collect_in_run(&wait, env.bot, run, &id).await.unwrap_err();
+    // The next session is a run of its own: it finds the wait by the id the last one noted.
+    let next = protocol::RunId::new();
+    let again = collect_in_run(&wait, env.bot, next, &id).await.unwrap();
+    assert!(format!("{again:?}").contains("pending"), "{again:?}");
+    assert!(format!("{again:?}").contains(&id), "{again:?}");
+    // Another bot has no such wait.
+    assert!(
+        collect_in_run(&wait, BotId::new(), next, &id)
+            .await
+            .is_err()
+    );
+}
+
+/// Only the owner's Stop forgets a wait for good: nothing is left for a later run.
+#[tokio::test]
+async fn stopping_a_run_forgets_its_mail_waits_for_good() {
+    let env = setup();
+    let wait = mail_wait_tool(env.bot);
+    let run = protocol::RunId::new();
+    let out = wait
+        .call(
+            &ToolContext {
+                bot_id: Some(env.bot.to_string()),
+                run_id: run.to_string(),
+                ..ToolContext::default()
+            },
+            json!({"block_seconds": 1}),
+        )
+        .await
+        .unwrap();
+    let id = wait_id_in(&format!("{out:?}"));
+    builtin_tools::wait::cancel_run_waits(&run.to_string());
+    let e = collect_in_run(&wait, env.bot, protocol::RunId::new(), &id)
+        .await
+        .unwrap_err();
     assert!(e.to_string().contains("no such wait"), "{e}");
 }
 
-/// A run parked for an approval when the daemon shuts down is paused; its waits go with it
-/// (no polling task outlives the loop).
+/// A run parked for an approval when the daemon shuts down is paused; its polling goes with it
+/// (no polling task outlives the loop) and the wait waits for the bot's next run.
 #[tokio::test]
-async fn shutdown_ends_the_background_mail_waits_of_the_runs_it_pauses() {
+async fn shutdown_ends_the_polling_of_the_runs_it_pauses_and_keeps_their_waits() {
     let env = setup();
     let wait = mail_wait_tool(env.bot);
     let write = Arc::new(crate::tests::tool("t.write", Effect::Write, "w"));
@@ -414,6 +466,243 @@ async fn shutdown_ends_the_background_mail_waits_of_the_runs_it_pauses() {
 
     let paused = lp.shutdown(std::time::Duration::from_secs(30)).await;
     assert_eq!(paused, vec![run]);
-    let e = collect_in_run(&wait, env.bot, run, &id).await.unwrap_err();
-    assert!(e.to_string().contains("no such wait"), "{e}");
+    // The old run's task is gone; its wait is carried on by whichever run asks next.
+    let after = collect_in_run(&wait, env.bot, protocol::RunId::new(), &id)
+        .await
+        .unwrap();
+    assert!(format!("{after:?}").contains("pending"), "{after:?}");
+}
+
+// ---- Many sites: polling is not looping, and links outlive a session --------------------------
+
+/// Asking for the same wait again and again with its id is waiting. A stand-in tool with the
+/// real name answers at once, so only the loop guard decides. Returns how many calls ran and
+/// whether the guard stopped the run.
+async fn poll_run(args: Value, n: usize) -> (usize, bool) {
+    let env = setup();
+    let mut script: Vec<_> = (0..n)
+        .map(|i| calls(&[(&format!("c{i}"), "email_wait_for", args.clone())]))
+        .collect();
+    script.push(text("done"));
+    let poll = Arc::new(crate::tests::tool(
+        "email_wait_for",
+        Effect::Read,
+        "pending",
+    ));
+    let fake = Fake::new(script);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&poll)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "wait for the mail").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    (
+        poll.count.load(Ordering::SeqCst),
+        lp.stopped_by_guard(run).unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn polling_a_mail_wait_by_id_is_not_a_repeat_loop() {
+    let real = builtin_tools::connector_email::WaitStore::new_wait_id();
+    // With a wait id the store could have handed out: seven identical calls in a row all run
+    // (repeat_stop is 5).
+    assert_eq!(
+        poll_run(json!({"wait_id": real, "block_seconds": 1}), 7).await,
+        (7, false)
+    );
+    // Without one it is an ordinary repeat and stops as before.
+    assert_eq!(poll_run(json!({"block_seconds": 1}), 7).await, (4, true));
+}
+
+#[tokio::test]
+async fn a_made_up_or_endless_wait_poll_is_still_a_repeat_loop() {
+    // An id in no shape the store uses (a model inventing one) or an empty one earns nothing.
+    for fake in ["mw-abc", "x", "", "mw-live"] {
+        assert_eq!(
+            poll_run(json!({"wait_id": fake, "block_seconds": 1}), 7).await,
+            (4, true),
+            "{fake:?}"
+        );
+    }
+    // A real id is exempt for a while (a ten-minute wait polled every 30 s), then counts.
+    let real = builtin_tools::connector_email::WaitStore::new_wait_id();
+    let (ran, stopped) = poll_run(json!({"wait_id": real, "block_seconds": 1}), 40).await;
+    assert!(stopped, "an endless poll ends");
+    assert_eq!(ran, crate::exec::MAX_WAIT_POLLS);
+}
+
+/// The first thing that asks in a SECOND session: read a page, open the link the first
+/// session's mail gave, open another link. With the first session's wait noted, only the
+/// other link asks.
+async fn second_session_first_ask(first_session_read_the_mail: bool) -> Value {
+    second_session(
+        first_session_read_the_mail,
+        wait_fake(),
+        Some("https://app.example.com"),
+        &[],
+    )
+    .await
+}
+
+/// [`second_session_first_ask`] with the wait the first session ran, the page the second
+/// session's browser is on, and the owner's verification-link domains.
+async fn second_session(
+    first_session_read_the_mail: bool,
+    wait: Arc<WaitFake>,
+    browser_on: Option<&str>,
+    owner_domains: &[&str],
+) -> Value {
+    let env = setup();
+    let bot = env.bot.to_string();
+    let conn = connector(vec![account(
+        "bot-mail",
+        Some(bot),
+        "me@agentmail.to",
+        SendMode::Ask,
+    )]);
+    // What the bot reads before it opens anything: a page, and its own mail as structured
+    // data (a run that holds private data and read untrusted text is the one whose link opens
+    // would ask).
+    let page = page_tool();
+    let inbox = mail_fake("email_read");
+    let open = open_tool();
+    *open.page_origin.lock() = browser_on.map(str::to_owned);
+    let mut script = Vec::new();
+    if first_session_read_the_mail {
+        script.push(calls(&[("a1", "fs_read", json!({"path": "page.html"}))]));
+        script.push(calls(&[("a2", "email_wait_for", json!({}))]));
+        script.push(text("noted"));
+    }
+    script.push(calls(&[("c1", "fs_read", json!({"path": "page.html"}))]));
+    script.push(calls(&[("c1b", "email_read", json!({}))]));
+    script.push(calls(&[("c2", "browser_open", json!({"url": GOOD}))]));
+    script.push(calls(&[("c3", "browser_open", json!({"url": EVIL}))]));
+    script.push(text("done"));
+    let fake = Fake::new(script);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&page), t(&open)],
+        profile(FULL),
+        cfg(Policy::full()),
+    );
+    lp.tool_registry()
+        .register(Arc::clone(&wait) as Arc<dyn Tool>);
+    lp.tool_registry()
+        .register(Arc::clone(&inbox) as Arc<dyn Tool>);
+    if !owner_domains.is_empty() {
+        let mut settings = conn.guard().settings();
+        settings.verification_link_domains = owner_domains.iter().map(|d| (*d).into()).collect();
+        conn.guard().set_settings(settings).unwrap();
+    }
+    lp.mail_handle().set(conn);
+    if first_session_read_the_mail {
+        let mut rx = lp.subscribe();
+        lp.send_user_message_from(env.chat, "sign up", crate::MessageMode::Steer, "owner")
+            .unwrap();
+        until(&mut rx, |e| matches!(e, Event::RunFinished(_))).await;
+    }
+    let mut rx = lp.subscribe();
+    lp.send_user_message_from(env.chat, "go on", crate::MessageMode::Steer, "owner")
+        .unwrap();
+    match until(&mut rx, |e| {
+        matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+    })
+    .await
+    {
+        Event::ApprovalNeeded(a) => a.input,
+        other => panic!("expected a card, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn the_link_a_mail_gave_stays_followable_in_the_bots_next_session() {
+    // Control: no earlier session read a mail, so the very first link asks.
+    assert_eq!(second_session_first_ask(false).await["url"], GOOD);
+    // After a session that did, that link opens without a card; the other one still asks.
+    assert_eq!(second_session_first_ask(true).await["url"], EVIL);
+}
+
+#[tokio::test]
+async fn a_remembered_link_is_followed_only_while_the_browser_is_on_its_site() {
+    let ask = |wait, on: Option<&str>, domains: &[&str]| {
+        let on = on.map(str::to_owned);
+        let domains: Vec<String> = domains.iter().map(|d| (*d).to_owned()).collect();
+        async move {
+            let d: Vec<&str> = domains.iter().map(String::as_str).collect();
+            second_session(true, wait, on.as_deref(), &d).await["url"].clone()
+        }
+    };
+    // The site the wait judged it on (a sibling host counts: registrable domain).
+    assert_eq!(
+        ask(wait_fake(), Some("https://www.example.com"), &[]).await,
+        EVIL
+    );
+    // The run now works on another site: the link of site A asks.
+    assert_eq!(
+        ask(wait_fake(), Some("https://other.test"), &[]).await,
+        GOOD
+    );
+    // A look-alike of the site is another site.
+    assert_eq!(
+        ask(wait_fake(), Some("https://example.com.evil.test"), &[]).await,
+        GOOD
+    );
+    // No page open (or none the browser can name): nothing places the link.
+    assert_eq!(ask(wait_fake(), None, &[]).await, GOOD);
+}
+
+#[tokio::test]
+async fn a_remembered_link_never_opens_wider_than_its_wait_allowed() {
+    let ask = |wait, on: Option<&str>, domains: &[&str]| {
+        let on = on.map(str::to_owned);
+        let domains: Vec<String> = domains.iter().map(|d| (*d).to_owned()).collect();
+        async move {
+            let d: Vec<&str> = domains.iter().map(String::as_str).collect();
+            second_session(true, wait, on.as_deref(), &d).await["url"].clone()
+        }
+    };
+    // Judged on no site (only the owner's list could allow it) and the list does not name
+    // it now: it asks, whatever page the browser is on.
+    assert_eq!(
+        ask(wait_fake_for(None), Some("https://app.example.com"), &[]).await,
+        GOOD
+    );
+    // Same, with the owner's list naming it: exactly what the wait allowed, so it opens.
+    assert_eq!(
+        ask(
+            wait_fake_for(None),
+            Some("https://other.test"),
+            &["example.com"]
+        )
+        .await,
+        EVIL
+    );
+    // Judged on site A, but the link is not on A (a stale record, or a hand-edited file): the
+    // verifier refuses it again, even with the browser on A.
+    assert_eq!(
+        ask(
+            wait_fake_for(Some("other.test")),
+            Some("https://other.test"),
+            &[]
+        )
+        .await,
+        GOOD
+    );
+    // An owner list that no longer names the domain takes the second reason away.
+    assert_eq!(
+        ask(
+            wait_fake_for(None),
+            Some("https://app.example.com"),
+            &["unrelated.test"]
+        )
+        .await,
+        GOOD
+    );
 }

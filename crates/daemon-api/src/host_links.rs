@@ -129,6 +129,11 @@ pub enum HostLinkError {
     NotFound,
     /// The ticket or request is not acceptable (message is safe to show).
     Invalid(String),
+    /// The transport protocol was rejected before a host API could be reached.
+    ProtocolMismatch,
+    /// The server runs a Praxi release this computer may not work with; only its status and the
+    /// update request are allowed until the releases match.
+    Incompatible,
     /// Pairing or dialing failed (message is safe to show).
     Failed(String),
 }
@@ -198,6 +203,12 @@ impl From<HostLinkError> for ApiError {
         match e {
             HostLinkError::NotFound => Self::not_found("host"),
             HostLinkError::Invalid(m) => Self::bad_request(m),
+            HostLinkError::ProtocolMismatch => Self::conflict(
+                "the pairing protocol differs; install the same Praxi release on the server and desktop, then create a fresh invite",
+            ),
+            HostLinkError::Incompatible => Self::conflict(
+                "the server runs a different Praxi release; update it first, then try again",
+            ),
             HostLinkError::Failed(m) => Self::new(StatusCode::BAD_GATEWAY, "host_link_failed", m),
         }
     }

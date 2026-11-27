@@ -380,7 +380,9 @@ fn item(kind: &str, id: &str, name: &str, status: &str, code: Option<&str>) -> C
 fn failure(e: &HostLinkError) -> String {
     match e {
         HostLinkError::NotFound => "host_not_found".into(),
-        HostLinkError::Invalid(_) => "invalid".into(),
+        HostLinkError::Invalid(_) | HostLinkError::ProtocolMismatch => "invalid".into(),
+        // The server refuses work from this release; nothing was copied.
+        HostLinkError::Incompatible => "failed".into(),
         HostLinkError::Failed(_) => "host_unreachable".into(),
     }
 }

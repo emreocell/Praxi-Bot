@@ -59,7 +59,10 @@ export function ComputerPicker() {
   const serverStatus = homeStatus(home, false, hostState);
   const toneOf = (s: string) => (s === "online" || s === "local" ? "ok" : s === "connecting" || s === "starting" ? "wait" : "bad");
   const tone = place === "this" ? "ok" : toneOf(status);
-  const label = place === "this" ? t("runLocation.thisComputer") : t(`home.chip.${status}`, { name: serverName });
+  const mismatchLabel = t("serverConnectionStatus.versionMismatch");
+  const label = place === "this" ? t("runLocation.thisComputer")
+    : status === "version_mismatch" ? `${serverName} · ${mismatchLabel}`
+    : t(`home.chip.${status}`, { name: serverName });
   const Icon = place === "server" ? Server : Monitor;
   const unadopted = (hostList?.hosts ?? []).filter((h) => h.id !== (home.kind === "host" ? home.hostId : ""));
   const liveCount = liveRunIds(runs).length;
@@ -85,7 +88,7 @@ export function ComputerPicker() {
 
   // The server's version, asked only while the menu is open on the server.
   const homeId = home.kind === "host" ? home.hostId : "";
-  const { versions, recheck } = useServerVersions(isMockMode() ? client : localApi, homeId ? [homeId] : [], open && place === "server" && status === "online");
+  const { versions, recheck } = useServerVersions(isMockMode() ? client : localApi, homeId ? [homeId] : [], open && place === "server" && (status === "online" || status === "version_mismatch"));
   const homeVersion = versions[homeId];
   const appBuild = { version: hostList?.local_version ?? "", releaseTag: hostList?.local_release_tag ?? null };
   const homeState = stateOf(homeVersion, appBuild);
@@ -225,7 +228,7 @@ export function ComputerPicker() {
           <b>{t("runLocation.title")}</b>
           <small>
             <i className={styles.dot} data-tone={tone} aria-hidden="true" />
-            {t(`runLocation.status.${place === "this" ? "local" : status}`, { name: placeName })}
+            {status === "version_mismatch" && place === "server" ? label : t(`runLocation.status.${place === "this" ? "local" : status}`, { name: placeName })}
           </small>
         </div>
         <div role="radiogroup" aria-label={t("runLocation.title")} ref={group} onKeyDown={onGroupKey} className={styles.group}>
@@ -242,7 +245,7 @@ export function ComputerPicker() {
                 "server",
                 <Server aria-hidden="true" className={styles.icon} />,
                 serverName,
-                `${t("runLocation.serverHint")} · ${t(`runLocation.serverState.${serverWord}`)}`,
+                `${t("runLocation.serverHint")} · ${serverWord === "version_mismatch" ? mismatchLabel : t(`runLocation.serverState.${serverWord}`)}`,
                 toneOf(serverStatus)
               )
             : null}

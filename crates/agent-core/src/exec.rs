@@ -194,6 +194,33 @@ pub(crate) fn cli_session_interrupted(history: &[RunStep]) -> bool {
     })
 }
 
+/// The same collecting call is exempt from the repeat guard this many times in a row (a
+/// ten-minute wait polled every 30 seconds needs 20); the next one counts like any repeat.
+pub(crate) const MAX_WAIT_POLLS: usize = 25;
+
+/// `email_wait_for` asked about an existing wait: `wait_id` is in the shape of the ids the
+/// wait store hands out. A made-up or empty id is an ordinary call and an ordinary repeat.
+fn is_wait_poll(name: &str, arguments: &str) -> bool {
+    name == builtin_tools::mail_wait::EMAIL_WAIT_FOR
+        && serde_json::from_str::<Value>(arguments).is_ok_and(|v| {
+            v.get("wait_id")
+                .and_then(Value::as_str)
+                .is_some_and(builtin_tools::connector_email::WaitStore::is_wait_id)
+        })
+}
+
+/// How many identical calls in a row `streak` counts as for the repeat guard. Collecting a
+/// background mail wait by its id is waiting, not looping: the same call is the right one until
+/// the mail comes (the wait itself ends after ten minutes, a run's total waiting is capped and
+/// the step limit still holds). The exemption is capped too: a poll that never ends is a loop.
+fn repeat_count(name: &str, arguments: &str, streak: usize) -> u32 {
+    if streak <= MAX_WAIT_POLLS && is_wait_poll(name, arguments) {
+        1
+    } else {
+        u32::try_from(streak).unwrap_or(u32::MAX)
+    }
+}
+
 fn call_key(name: &str, args: &str) -> (String, Value) {
     let v = serde_json::from_str(args).unwrap_or_else(|_| Value::String(args.to_owned()));
     (name.to_owned(), v)
@@ -805,7 +832,7 @@ impl TurnExecutor {
         for c in &remaining[..take] {
             let key = call_key(&c.name, &c.arguments);
             let streak = 1 + seq.iter().rev().take_while(|k| **k == key).count();
-            let repeat = u32::try_from(streak).unwrap_or(u32::MAX);
+            let repeat = repeat_count(&c.name, &c.arguments, streak);
             if repeat >= g.repeat_stop {
                 return Err(format!(
                     "repeat detected: tool {} called {repeat} times in a row with identical arguments",
@@ -1787,6 +1814,16 @@ impl TurnExecutor {
                 let origin = resolved.tool.current_origin(&tctx, &resolved.input).await;
                 *ctx.page_origin.lock() = origin;
             }
+            // A link a session before remembered is placed by the page the browser is on now.
+            if resolved.name == "browser_open" && !ctx.restored_mail_links.is_empty() {
+                let tctx = ToolContext {
+                    run_id: ctx.run_id.to_string(),
+                    bot_id: Some(ctx.bot_id.to_string()),
+                    lane: ctx.lane(),
+                    ..ToolContext::default()
+                };
+                *ctx.landed_origin.lock() = resolved.tool.landed_origin(&tctx).await;
+            }
             if resolved.name == builtin_tools::knowledge::KNOWLEDGE_SEARCH
                 && let Ok(mut request) = serde_json::from_value::<
                     memory_store::knowledge::SearchRequest,
@@ -2144,6 +2181,21 @@ impl TurnExecutor {
                             tabs_ref.lock().insert(call_id, tab);
                         }
                     }
+                    // Every file handed to a page is in the audit log: name, size, hash and the
+                    // origin it went to (structured facts of the tool, not words of the page).
+                    if !is_error && let Some(upload) = &reported.upload {
+                        self.sh.audit(
+                            ctx_ref,
+                            "system",
+                            "browser.upload",
+                            &serde_json::json!({
+                                "tool": tool_name,
+                                "origin": upload.origin,
+                                "files": upload.files,
+                                "mode": ctx_ref.profile.permissions.mode().as_str(),
+                            }),
+                        );
+                    }
                     // The result is in the model context even when the tool
                     // returned an error. A denial before this point is not.
                     // The class was captured at resolution time. Output
@@ -2458,7 +2510,7 @@ impl TurnExecutor {
         if tool.spec().name == builtin_tools::mail_wait::EMAIL_WAIT_FOR
             && let Ok(Ok(out)) = &outcome
         {
-            note_mail_links(ctx, out);
+            note_mail_links(ctx, self.sh.storage.data_dir(), out);
         }
         let exposure = match &outcome {
             Ok(Ok(out)) => out.exposure.clone(),
@@ -2638,13 +2690,17 @@ fn fact_note(ctx: &RunCtx, fact: &taint::ExecFact) {
     fact.apply(&mut ctx.taint.lock());
 }
 
-/// Most followable links remembered per run.
-const MAX_MAIL_LINKS: usize = 20;
+/// Most followable links remembered per run (and kept per bot in the data directory).
+const MAX_MAIL_LINKS: usize = builtin_tools::connector_email::wait_store::MAX_LINKS_PER_BOT;
 
 /// Remember the links `email_wait_for` itself judged followable, from its own
 /// structured result (a JSON part the tool built; mail text only ever sits in
-/// string values below other keys). Only https links are kept.
-fn note_mail_links(ctx: &RunCtx, out: &ToolOutput) {
+/// string values below other keys). Only https links are kept. They are also
+/// written to the data directory under the bot, with the site the wait judged them
+/// against (`link_site` of the same result), so the next session of a mission (a
+/// new run) can still open them while its browser is on that site.
+fn note_mail_links(ctx: &RunCtx, data_dir: &std::path::Path, out: &ToolOutput) {
+    let mut fresh: Vec<(Option<String>, Vec<String>)> = Vec::new();
     for part in &out.content {
         let ContentPart::Json { data } = part else {
             continue;
@@ -2652,11 +2708,25 @@ fn note_mail_links(ctx: &RunCtx, out: &ToolOutput) {
         let Some(links) = data.get("followable_links").and_then(Value::as_array) else {
             continue;
         };
+        let site = data.get("link_site").and_then(Value::as_str);
         let mut known = ctx.mail_links.lock();
+        let mut fresh_here = Vec::new();
         for link in links.iter().filter_map(Value::as_str) {
-            if link.starts_with("https://") && known.len() < MAX_MAIL_LINKS {
-                known.insert(link.to_owned());
+            if link.starts_with("https://")
+                && known.len() < MAX_MAIL_LINKS
+                && known.insert(link.to_owned())
+            {
+                fresh_here.push(link.to_owned());
             }
+        }
+        if !fresh_here.is_empty() {
+            fresh.push((site.map(str::to_owned), fresh_here));
+        }
+    }
+    if let Some(bot) = ctx.bot_id_for_links() {
+        let store = builtin_tools::connector_email::WaitStore::shared(data_dir);
+        for (site, links) in &fresh {
+            store.put_links(Some(&bot), site.as_deref(), links);
         }
     }
 }

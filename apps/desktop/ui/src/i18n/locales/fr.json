@@ -6448,7 +6448,6 @@
       "braveKeyLabel": "Clé d'API Brave Search",
       "clearKey": "Effacer la clé",
       "configError": "web.toml n'a pas pu être chargé ({{message}}). Les valeurs par défaut sont affichées : enregistrer les modifications ci-dessous le remplacera.",
-      "credentialsTitle": "Serveurs auto-hébergés et API",
       "description": "Ordre de priorité des moteurs de recherche, clés d'API et test de connectivité en direct.",
       "fallbackNotes": "Erreurs de repli antérieures au succès : {{details}}",
       "keyEmptyPlaceholder": "Saisissez la clé d'API…",
@@ -6460,8 +6459,6 @@
       "note": "La recherche web essaie les moteurs actifs par ordre de priorité jusqu'à ce que l'un renvoie des résultats. Les modifications s'appliquent immédiatement au prochain tour du bot, sans redémarrage.",
       "orderHint": "Montez les moteurs préférés. Les solutions de repli sans clé fonctionnent sans clé d'API mais peuvent parfois atteindre les limites de débit en amont.",
       "orderTitle": "Ordre des moteurs et solutions de repli",
-      "save": "Enregistrer les modifications",
-      "searxngHint": "URL de base de votre propre instance SearXNG (effacez et enregistrez pour la désactiver).",
       "searxngLabel": "URL SearXNG",
       "status": {
         "active": "Actif",
@@ -6469,7 +6466,6 @@
         "needsKey": "Clé d'API requise",
         "needsUrl": "URL requise"
       },
-      "tavilyHint": "Clé d'API facultative pour Tavily Search (stockée en écriture seule dans le stockage des secrets).",
       "tavilyKeyLabel": "Clé d'API Tavily Search",
       "test": "Tester",
       "testFailed": "Échec du test de recherche ({{ms}} ms) : {{error}}",

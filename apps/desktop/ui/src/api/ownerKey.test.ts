@@ -38,3 +38,23 @@ test("the owner key goes to this computer's daemon only, never through a host pr
     ApiClient.ownerKeyProvider = null;
   }
 });
+
+test("a managed host update sends the exact tag and accepts an empty 202 response", async () => {
+  const real = globalThis.fetch;
+  const base = "http://127.0.0.1:50999";
+  const unmark = markRemoteBaseUrl(base);
+  const client = new ApiClient({ base_url: base, token: "proxy-fixture" });
+  globalThis.fetch = (async (url, init) => {
+    assert.equal(String(url), `${base}/v1/admin/host-update`);
+    assert.equal(init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(init?.body)), { tag: "v0.1.0-alpha.6" });
+    return new Response(null, { status: 202 });
+  }) as typeof fetch;
+  try {
+    await client.startManagedHostUpdate("v0.1.0-alpha.6");
+  } finally {
+    globalThis.fetch = real;
+    unmark();
+    client.dispose();
+  }
+});

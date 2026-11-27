@@ -9,9 +9,10 @@
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tool_registry::ToolContext;
 
@@ -20,6 +21,7 @@ use crate::error::{EmailError, ProviderError};
 use crate::imap::{FolderInfo, SearchQuery};
 use crate::message::{MessageDetail, MessageSummary};
 use crate::verify::{self, Verification};
+use crate::wait_store::{PersistedWait, WaitStore, now_secs};
 
 /// Longest a single wait may last.
 pub const MAX_WAIT: Duration = Duration::from_secs(10 * 60);
@@ -29,6 +31,10 @@ pub const POLL_LIMIT: usize = 10;
 pub const DEFAULT_MAX_AGE_SECS: u64 = 15 * 60;
 /// Largest `max_age` a caller may ask for.
 pub const MAX_AGE_SECS: u64 = 60 * 60;
+/// How long before a wait started a mail may still have arrived and count: the
+/// sign-up form was submitted a moment before the wait was asked for. Older mail
+/// is an earlier sign-up's.
+pub const START_GRACE_SECS: i64 = 3 * 60;
 /// Body characters read for keyword matching and code extraction.
 const BODY_CHARS: usize = 20_000;
 /// Longest filter text.
@@ -104,7 +110,7 @@ impl PageOrigin for PageOriginSlot {
 
 /// Which mail is the expected one. All text is compared case-insensitively and
 /// only HERE, on messages that came back from the identity's own inbox.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitFilter {
     /// Sender address domain (`example.com` also matches `mail.example.com`).
     pub from_domain: Option<String>,
@@ -173,6 +179,9 @@ pub struct WaitPlan {
     pub timeout: Duration,
     /// Mail older than this does not count (it is an earlier mail).
     pub max_age: Duration,
+    /// Mail dated before this (unix seconds) does not count either: the wait's
+    /// own start watermark. `None` = only `max_age` bounds the age.
+    pub since: Option<i64>,
     /// First pause between polls; later pauses grow by about 60% up to `max_pause`.
     pub first_pause: Duration,
     /// Longest pause between polls.
@@ -181,7 +190,10 @@ pub struct WaitPlan {
 
 impl WaitPlan {
     /// The plan for `minutes` of waiting (clamped to 1..=10) and a mail no older
-    /// than `max_age_minutes` (clamped to 1..=60).
+    /// than `max_age_minutes` (clamped to 1..=60). Without an explicit
+    /// `max_age_minutes`, mail that arrived more than [`START_GRACE_SECS`]
+    /// before this call is not the expected one (an earlier sign-up's mail);
+    /// naming an age is the caller asking for older mail on purpose.
     #[must_use]
     pub fn minutes(minutes: u64, max_age_minutes: Option<u64>) -> Self {
         Self {
@@ -189,6 +201,9 @@ impl WaitPlan {
             max_age: Duration::from_secs(
                 max_age_minutes.map_or(DEFAULT_MAX_AGE_SECS, |m| m.clamp(1, 60) * 60),
             ),
+            since: max_age_minutes
+                .is_none()
+                .then(|| now_secs() - START_GRACE_SECS),
             first_pause: Duration::from_secs(3),
             max_pause: Duration::from_secs(20),
         }
@@ -207,12 +222,6 @@ pub enum WaitEnd {
     },
     /// The run was stopped.
     Cancelled,
-}
-
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 fn message_key(m: &MessageSummary) -> String {
@@ -272,9 +281,11 @@ pub async fn wait_for_mail<C: Future<Output = ()>>(
     plan: &WaitPlan,
     cancel: C,
 ) -> Result<WaitEnd, EmailError> {
-    wait_inner(scoped, account, filter, plan, cancel, |_| {}).await
+    wait_inner(scoped, account, filter, plan, cancel, |_| {}, &|_| false).await
 }
 
+/// `skip` tells whether a message (`folder NUL id`) was already handed to another
+/// sign-up's wait and so is not the expected one here.
 async fn wait_inner<C: Future<Output = ()>>(
     scoped: &Scoped<'_>,
     account: Option<&str>,
@@ -282,6 +293,7 @@ async fn wait_inner<C: Future<Output = ()>>(
     plan: &WaitPlan,
     cancel: C,
     mut on_poll: impl FnMut(u32),
+    skip: &(dyn Fn(&str) -> bool + Send + Sync),
 ) -> Result<WaitEnd, EmailError> {
     tokio::pin!(cancel);
     let deadline = tokio::time::Instant::now() + plan.timeout.min(MAX_WAIT);
@@ -337,16 +349,23 @@ async fn wait_inner<C: Future<Output = ()>>(
                     checked.insert(key);
                     continue;
                 }
-                // Too old to be the expected mail. A mail whose date cannot be
-                // read counts only when it arrived after the first poll.
+                // Another site's mail (already handed to its own wait): not ours. Asked
+                // every time and not remembered, so it counts again once released.
+                if skip(&key) {
+                    continue;
+                }
+                // Too old to be the expected mail: older than `max_age`, or older than the
+                // wait's start watermark. A mail whose date cannot be read counts only
+                // when it arrived after the first poll.
                 let age_ok = match m
                     .date
                     .as_deref()
                     .and_then(mail_parser::DateTime::parse_rfc3339)
                 {
                     Some(d) => {
-                        let age = now_secs() - d.to_timestamp();
-                        age <= i64::try_from(plan.max_age.as_secs()).unwrap_or(i64::MAX)
+                        let oldest =
+                            now_secs() - i64::try_from(plan.max_age.as_secs()).unwrap_or(i64::MAX);
+                        d.to_timestamp() >= oldest.max(plan.since.unwrap_or(i64::MIN))
                     }
                     None => !first_poll,
                 };
@@ -421,7 +440,12 @@ struct Waiter {
     /// The run that started it: only that run joins or collects it.
     tag: String,
     account: String,
+    /// What the wait asks for and where: account, filter, age and the page it
+    /// started on. Two asks with the same fingerprint are the same ask.
     fingerprint: String,
+    /// The origin the browser was on when the wait started (not when the mail
+    /// is collected): the site the sign-up form was submitted on.
+    origin: Option<String>,
     deadline: std::time::Instant,
     state: Arc<std::sync::Mutex<State>>,
     done: Arc<tokio::sync::Notify>,
@@ -441,16 +465,52 @@ pub struct WaitOwner<'a> {
     pub account: &'a str,
 }
 
+/// Where a wait starts, as the daemon (not the model) knows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WaitBinding<'a> {
+    /// Origin of the page the browser is on RIGHT NOW (asked from the browser):
+    /// the wait is bound to it and its links are judged against it for good.
+    pub origin: Option<&'a str>,
+    /// The `site` the model named. Only used to find the wait of that site a
+    /// session before; never a source of trust.
+    pub site: Option<&'a str>,
+}
+
+fn fingerprint(
+    account: &str,
+    filter: &WaitFilter,
+    max_age_secs: u64,
+    origin: Option<&str>,
+) -> String {
+    format!("{account}|{filter:?}|{max_age_secs}|{origin:?}")
+}
+
+fn domain_of(origin: Option<&str>) -> Option<String> {
+    origin.and_then(verify::site_domain)
+}
+
 /// Background waits for expected mail. A wait polls on its own (so a run is not
 /// blocked for minutes) and is collected with [`Waiters::progress`]; starting
 /// the same wait again in the same run joins the one still polling (a finished
 /// one is never reused: it starts afresh and finds mail that already arrived).
-/// Waits die with their run. Nothing is persisted: a restart forgets the waits,
-/// and starting again finds mail that already arrived (the filters and
-/// `max_age` fully describe a wait).
-#[derive(Default)]
+///
+/// A wait is bound to the origin the browser was on when it STARTED, so
+/// opening the next site while waiting does not change which links its mail may
+/// give. A wait is polled by its run's task, which ends with the run; what is
+/// written to the [`WaitStore`] (the filter, the start watermark, the origin,
+/// the deadline) lets the next run of the bot pick it up again
+/// ([`Waiters::resume`], or by starting the same ask), so a wait outlives the
+/// 40-step session that began it and a daemon restart. Mail already handed to
+/// one site's wait is not handed to another's.
 pub struct Waiters {
     inner: std::sync::Mutex<std::collections::HashMap<String, Waiter>>,
+    store: Arc<WaitStore>,
+}
+
+impl Default for Waiters {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Drop for Waiters {
@@ -466,14 +526,25 @@ impl Drop for Waiters {
     }
 }
 
+type WaiterMap = std::collections::HashMap<String, Waiter>;
+
 impl Waiters {
-    /// No waits.
+    /// No waits, and nothing kept across a restart.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self::with_store(WaitStore::in_memory())
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, Waiter>> {
+    /// No waits yet; pending waits and delivered mail are kept in `store`.
+    #[must_use]
+    pub fn with_store(store: Arc<WaitStore>) -> Self {
+        Self {
+            inner: std::sync::Mutex::default(),
+            store,
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, WaiterMap> {
         let mut map = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let now = std::time::Instant::now();
         map.retain(|_, w| {
@@ -486,8 +557,20 @@ impl Waiters {
         map
     }
 
-    /// Start waiting (or join the identical wait this run still has polling) and
-    /// return its id: unguessable, and useful only to `owner`.
+    fn check_room(map: &WaiterMap, bot: Option<&str>) -> Result<(), EmailError> {
+        let mine = map.values().filter(|w| w.bot.as_deref() == bot).count();
+        if map.len() >= MAX_WAITERS || mine >= MAX_WAITERS_PER_BOT {
+            return Err(EmailError::Input(format!(
+                "too many mail waits are running ({MAX_WAITERS_PER_BOT} per bot): collect or finish one first"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Start waiting (or join the identical wait this run still has polling, or
+    /// take over the one a run before it left for the same site) and return its
+    /// id: unguessable, and useful only to `owner`. The wait is bound to
+    /// `binding.origin`.
     ///
     /// # Errors
     /// [`EmailError::Input`] when the bot already has too many waits.
@@ -497,16 +580,17 @@ impl Waiters {
         owner: WaitOwner<'_>,
         filter: &WaitFilter,
         plan: &WaitPlan,
+        binding: WaitBinding<'_>,
     ) -> Result<String, EmailError> {
-        let WaitOwner { bot, run, account } = owner;
-        let fingerprint = format!("{account}|{filter:?}|{}", plan.max_age.as_secs());
+        let WaitOwner { bot, account, run } = owner;
+        let fp = fingerprint(account, filter, plan.max_age.as_secs(), binding.origin);
         let mut map = self.lock();
         // Only a wait that is still polling is joined: a finished one holds an old
         // answer (found, timed out or failed) that must not stand in for a new ask.
         if let Some((id, _)) = map.iter().find(|(_, w)| {
             w.bot.as_deref() == bot
                 && w.tag == run
-                && w.fingerprint == fingerprint
+                && w.fingerprint == fp
                 && matches!(
                     *w.state.lock().unwrap_or_else(PoisonError::into_inner),
                     State::Pending { .. }
@@ -514,13 +598,77 @@ impl Waiters {
         }) {
             return Ok(id.clone());
         }
-        let mine = map.values().filter(|w| w.bot.as_deref() == bot).count();
-        if map.len() >= MAX_WAITERS || mine >= MAX_WAITERS_PER_BOT {
-            return Err(EmailError::Input(format!(
-                "too many mail waits are running ({MAX_WAITERS_PER_BOT} per bot): collect or finish one first"
-            )));
+        Self::check_room(&map, bot)?;
+        // The same ask a session before left polling for this site: carry on with it
+        // (its start watermark, its page, its deadline) instead of starting over.
+        let site = domain_of(binding.origin).or_else(|| domain_of(binding.site));
+        let resumed = self
+            .store
+            .waits_like(bot, account, filter, plan.max_age.as_secs(), plan.since)
+            .into_iter()
+            .find(|w| !map.contains_key(&w.id) && domain_of(w.origin.as_deref()) == site);
+        if let Some(w) = resumed {
+            return Ok(self.launch(&mut map, connector, owner, w, plan));
         }
-        let id = format!("mw-{}", uuid::Uuid::new_v4().simple());
+        let now = now_secs();
+        let wait = PersistedWait {
+            id: WaitStore::new_wait_id(),
+            bot: bot.map(str::to_owned),
+            account: account.to_owned(),
+            filter: filter.clone(),
+            max_age_secs: plan.max_age.as_secs(),
+            since: plan.since,
+            origin: binding.origin.map(str::to_owned),
+            started_at: now,
+            deadline: now + i64::try_from(plan.timeout.min(MAX_WAIT).as_secs()).unwrap_or(0),
+        };
+        self.store.put_wait(wait.clone());
+        Ok(self.launch(&mut map, connector, owner, wait, plan))
+    }
+
+    /// Take over wait `id` of `owner`'s bot and account that an earlier run (or
+    /// the daemon before a restart) left polling, so this run can collect it. Does
+    /// nothing when a wait with that id is already running here (it is judged by
+    /// [`Waiters::progress`] as before) or none was left.
+    pub fn resume(&self, connector: &Arc<EmailConnector>, owner: WaitOwner<'_>, id: &str) {
+        let mut map = self.lock();
+        if map.contains_key(id) || Self::check_room(&map, owner.bot).is_err() {
+            return;
+        }
+        if let Some(w) = self.store.wait_by_id(id, owner.bot, owner.account) {
+            // Default pauses: the run asking is not the one that planned the wait.
+            let base = WaitPlan::minutes(1, None);
+            self.launch(&mut map, connector, owner, w, &base);
+        }
+    }
+
+    /// Poll for `wait` in the background for what is left of its time.
+    fn launch(
+        &self,
+        map: &mut WaiterMap,
+        connector: &Arc<EmailConnector>,
+        owner: WaitOwner<'_>,
+        wait: PersistedWait,
+        pauses: &WaitPlan,
+    ) -> String {
+        let WaitOwner { bot, account, run } = owner;
+        let left = Duration::from_secs(
+            u64::try_from(wait.deadline - now_secs())
+                .unwrap_or(0)
+                .max(1),
+        );
+        let plan = WaitPlan {
+            timeout: left,
+            max_age: Duration::from_secs(wait.max_age_secs),
+            since: wait.since,
+            ..*pauses
+        };
+        let fp = fingerprint(
+            account,
+            &wait.filter,
+            wait.max_age_secs,
+            wait.origin.as_deref(),
+        );
         let shared = Arc::new(std::sync::Mutex::new(State::Pending { polls: 0 }));
         let done = Arc::new(tokio::sync::Notify::new());
         let task_done = Arc::clone(&done);
@@ -530,22 +678,32 @@ impl Waiters {
             bot.map(str::to_owned),
             account.to_owned(),
         );
-        let (filter_c, plan_c) = (filter.clone(), *plan);
+        let (filter_c, task_fp, store) = (wait.filter.clone(), fp.clone(), Arc::clone(&self.store));
         let task = tokio::spawn(async move {
             let scoped = conn.scoped(bot_owned.as_deref());
             let progress = Arc::clone(&task_shared);
+            let skip = |key: &str| {
+                store.delivered_elsewhere(bot_owned.as_deref(), &account_owned, key, &task_fp)
+            };
             let end = wait_inner(
                 &scoped,
                 Some(&account_owned),
                 &filter_c,
-                &plan_c,
+                &plan,
                 std::future::pending::<()>(),
                 move |n| {
                     *progress.lock().unwrap_or_else(PoisonError::into_inner) =
                         State::Pending { polls: n };
                 },
+                &skip,
             )
             .await;
+            if let Ok(WaitEnd::Found(d)) = &end {
+                // From now on no other site's wait is handed this mail.
+                let folder = d.found_in.as_deref().unwrap_or("INBOX");
+                let key = format!("{folder}\u{0}{}", message_key(&d.summary));
+                store.mark_delivered(bot_owned.as_deref(), &account_owned, &key, &task_fp);
+            }
             *task_shared.lock().unwrap_or_else(PoisonError::into_inner) = match end {
                 Ok(WaitEnd::Found(d)) => State::Found(d),
                 Ok(WaitEnd::TimedOut { polls }) => State::TimedOut { polls },
@@ -555,20 +713,34 @@ impl Waiters {
             // Wakes anyone blocked in `progress`.
             task_done.notify_waiters();
         });
+        let id = wait.id;
         map.insert(
             id.clone(),
             Waiter {
                 bot: bot.map(str::to_owned),
                 tag: run.to_owned(),
                 account: account.to_owned(),
-                fingerprint,
-                deadline: std::time::Instant::now() + plan.timeout.min(MAX_WAIT),
+                fingerprint: fp,
+                origin: wait.origin,
+                deadline: std::time::Instant::now() + left,
                 state: shared,
                 done,
                 task,
             },
         );
-        Ok(id)
+        id
+    }
+
+    /// The origin wait `id` of `owner` was started on (`Some(None)`: it started
+    /// with no page open); `None` when `owner` has no such wait here.
+    #[must_use]
+    pub fn origin_of(&self, id: &str, owner: WaitOwner<'_>) -> Option<Option<String>> {
+        self.lock()
+            .get(id)
+            .filter(|w| {
+                w.bot.as_deref() == owner.bot && w.tag == owner.run && w.account == owner.account
+            })
+            .map(|w| w.origin.clone())
     }
 
     /// Whether wait `id` has ended (found, timed out or failed) and waits to be collected.
@@ -582,12 +754,26 @@ impl Waiters {
         })
     }
 
-    /// Stop every wait started under `tag` (its run ended or was stopped).
+    /// Stop polling for every wait started under `tag` (its run ended). What is
+    /// written to the store stays: a later run of the bot can take the wait over.
     pub fn cancel_tagged(&self, tag: &str) {
         self.lock().retain(|_, w| {
             let mine = w.tag == tag;
             if mine {
                 w.task.abort();
+            }
+            !mine
+        });
+    }
+
+    /// End every wait started under `tag` for good (the owner stopped the run):
+    /// nothing is left for a later run to take over.
+    pub fn stop_tagged(&self, tag: &str) {
+        self.lock().retain(|id, w| {
+            let mine = w.tag == tag;
+            if mine {
+                w.task.abort();
+                self.store.remove_wait(id);
             }
             !mine
         });
@@ -632,6 +818,8 @@ impl Waiters {
                     let done = std::mem::replace(&mut *guard, State::TimedOut { polls: 0 });
                     drop(guard);
                     map.remove(id);
+                    // Collected: nothing is left to carry over to a later run.
+                    self.store.remove_wait(id);
                     return match done {
                         State::Found(d) => WaitProgress::Finished(WaitEnd::Found(d)),
                         State::TimedOut { polls } => {
@@ -669,9 +857,10 @@ pub struct LinkBasis {
 /// Decide the registrable domain links are judged against.
 ///
 /// `claimed` is the `site` the model passed (optional); `live` the origin the
-/// BROWSER reports for the run's page right now. A verified site needs the live
-/// page: a claimed site that is not the page the browser is on, or no page at
-/// all, leaves no site (only the owner's list can still allow a link).
+/// BROWSER reported for the run's page when the wait STARTED (the page the
+/// sign-up form was submitted on; not where the browser is by the time the mail
+/// comes). A verified site needs that page: a claimed site that is not it, or no
+/// page at all, leaves no site (only the owner's list can still allow a link).
 #[must_use]
 pub fn link_basis(claimed: Option<&str>, live: Option<&str>) -> LinkBasis {
     let live_domain = live.and_then(verify::site_domain);
@@ -679,7 +868,7 @@ pub fn link_basis(claimed: Option<&str>, live: Option<&str>) -> LinkBasis {
     match (claimed_domain, live_domain) {
         (_, None) => LinkBasis {
             site_domain: None,
-            note: "The browser has no page open, so no link was checked as belonging to your sign-up site; open the site's page first. Only domains the owner listed can be followed.".into(),
+            note: "The browser had no page open when the wait started, so no link was checked as belonging to your sign-up site; open the site's page, then call email_wait_for. Only domains the owner listed can be followed.".into(),
         },
         (Some(None), Some(_)) => LinkBasis {
             site_domain: None,
@@ -687,10 +876,10 @@ pub fn link_basis(claimed: Option<&str>, live: Option<&str>) -> LinkBasis {
         },
         (Some(Some(c)), Some(l)) if c != l => LinkBasis {
             site_domain: None,
-            note: format!("`site` ({c}) is not the page the browser is on ({l}); no link was checked as belonging to your sign-up site. Only domains the owner listed can be followed."),
+            note: format!("`site` ({c}) is not the page the browser was on when the wait started ({l}); no link was checked as belonging to your sign-up site. Only domains the owner listed can be followed."),
         },
         (_, Some(l)) => LinkBasis {
-            note: format!("Links are followable only when they are https and on {l}, the site your browser is on."),
+            note: format!("Links are followable only when they are https and on {l}, the site your browser was on when the wait started."),
             site_domain: Some(l),
         },
     }
@@ -831,6 +1020,10 @@ pub fn found_json(
         "from_junk": d.from_junk,
         "codes": v.codes,
         "followable_links": v.followable,
+        // The site those links were judged against (null: only the owner's domain list). The
+        // run loop keeps it with each link it remembers, so a later session follows a link
+        // only while the browser is on that site.
+        "link_site": basis.site_domain,
         "other_links": other,
         "link_check": basis.note,
         "next_step": next,
@@ -844,7 +1037,7 @@ pub fn timed_out_json(polls: u32, waited: Duration) -> Value {
         "found": false,
         "waited_seconds": waited.as_secs(),
         "polls": polls,
-        "note": "No matching mail arrived. Do not guess a code or a link. Check that the sign-up form really went through (for example an error message on the page), and call email_wait_for once more; if it still does not come, tell the user the mail has not arrived.",
+        "note": "No matching mail arrived. Do not guess a code or a link. Check that the sign-up form really went through (for example an error message on the page), and call email_wait_for once more; if it still does not come, tell the user the mail has not arrived. Mail that arrived more than a few minutes before the wait started is ignored (it is an earlier sign-up's): if you submitted the form long ago, pass max_age_minutes.",
     })
 }
 

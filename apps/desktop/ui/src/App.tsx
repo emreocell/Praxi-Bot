@@ -277,8 +277,11 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   }, [activeComputerId]);
   // The first-run wizard is written for this computer's own daemon: never while a host is selected.
   const onboardingBlocked = !onboardingAllowed(activeComputerId);
+  const hostVersionBlocked = hostState?.kind === "version_mismatch" && hostState.blocking;
   // The bots' computer has no bots to show (not set up yet, or not answering): one calm screen, never a blank app.
-  const hostEmpty = onboardingBlocked && phase === "ready" && bots.length === 0;
+  // A connection whose client is withheld (version check pending or blocked) shows the version screen, not this one;
+  // no connection at all is the "not answering" case this screen is for.
+  const hostEmpty = onboardingBlocked && phase === "ready" && (client !== null || conn === null) && bots.length === 0;
   useEffect(() => {
     if (onboardingBlocked && route.kind === "onboarding") {
       setRoute({ kind: "home" });
@@ -380,10 +383,10 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   useLayoutEffect(() => {
     if (!isTauriRuntime()) return;
     const waiting = !settingsLoaded || initialComputer === "waiting" ||
-      (initialComputer === "ready" && (phase === "connecting" || hostState?.kind === "connecting" || (conn && !client)));
+      (initialComputer === "ready" && (phase === "connecting" || hostState?.kind === "connecting" || (conn && !client && !hostVersionBlocked)));
     const offline = initialComputer === "offline" || phase === "error" || !linkSession ||
       hostState?.kind === "offline" || hostState?.kind === "not_paired" ||
-      (hostState?.kind === "version_mismatch" && hostState.blocking);
+      hostVersionBlocked;
     deepLinks.update({
       owner: linkOwner,
       computerId: initialComputer === "ready" ? activeComputerId : null,
@@ -1545,7 +1548,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         {hostEmpty && (route.kind === "home" || route.kind === "chat" || route.kind === "bot") ? (
           <HostEmptyState onNewBot={() => setNewBotOpen(true)} onConnectModel={() => setSettingsOpen("ai")} />
         ) : null}
-        {route.kind === "home" && !hostEmpty ? (
+        {route.kind === "home" && !hostEmpty && !hostVersionBlocked ? (
           <div className={styles.centerPane}>
             <Card padding="lg" className={styles.emptyStateCard}>
               {phase !== "ready" && startup ? (
@@ -1636,7 +1639,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             </Card>
           </div>
         ) : null}
-        {route.kind === "bot" && !hostEmpty ? (
+        {route.kind === "bot" && !hostEmpty && !hostVersionBlocked ? (
           <BotEmptyView
             key={route.botId}
             bot={panelBotView && selectedBot?.id === route.botId ? panelBotView : undefined}
@@ -1660,7 +1663,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             }
           />
         ) : null}
-        {route.kind === "chat" && !hostEmpty ? (
+        {route.kind === "chat" && !hostEmpty && !hostVersionBlocked ? (
           <ChatView
             key={route.chatId}
             chatId={route.chatId}

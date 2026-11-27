@@ -302,8 +302,9 @@ export function diagnose(
   let code: Diagnosis = f.code;
   if (d.includes("unprotected private key") || d.includes("bad permissions")) code = "key_permissions";
   else if (d.includes("passphrase")) code = "key_passphrase";
+  else if (f.step.detail.toLowerCase().includes("only offered password authentication")) code = "password_only";
   else if (f.code === "auth") {
-    code = d.includes("password") ? "password_only" : typed.auth === "agent" ? "auth_agent" : "auth_key";
+    code = typed.auth === "agent" ? "auth_agent" : "auth_key";
   } else if (f.code === "network") {
     if (d.includes("resolve") || d.includes("name or service") || d.includes("no such host")) code = "bad_address";
     else if (d.includes("refused")) code = typed.port !== "22" ? "wrong_port" : "port_refused";

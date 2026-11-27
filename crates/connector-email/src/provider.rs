@@ -128,6 +128,9 @@ pub struct Found {
     /// IMAP UIDVALIDITY of the folder when known. A changed value means every
     /// stored UID refers to different mail.
     pub uid_validity: Option<u32>,
+    /// API mailboxes: pass this as `page_token` to get the page after this one;
+    /// `None` on the last page.
+    pub next_page_token: Option<String>,
 }
 
 fn unsupported<T>(what: &str) -> Result<T, EmailError> {

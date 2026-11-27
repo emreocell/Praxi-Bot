@@ -5,18 +5,19 @@ import { test } from "node:test";
 import { usesEnglishFallback } from "./englishFallback.ts";
 
 // Every strict language must provide English's keys and {{placeholders}}, except feature copy
-// that ships with an explicit English fallback for that language.
+// that ships with an explicit English fallback for that language (see englishFallback.ts and the
+// staged prefixes listed alongside the scaffold locales).
 // A missing key silently shows the English text (or the raw key). Scaffold locales (English copies
 // being translated part by part, listed in scaffold-locales.json) may lag: the app falls back to
 // English for them and scripts/check-i18n.mjs only warns. A locale that leaves that list is strict.
 const localesDir = fileURLToPath(new URL("./locales/", import.meta.url));
-const SCAFFOLD_LOCALES: string[] = JSON.parse(
+const localePolicy: { scaffold: string[]; englishFallbackPrefixes: string[] } = JSON.parse(
   readFileSync(fileURLToPath(new URL("./scaffold-locales.json", import.meta.url)), "utf8"),
-).scaffold;
+);
 const TRANSLATED_LOCALES = readdirSync(localesDir)
   .filter((f) => f.endsWith(".json") && f !== "en.json")
   .map((f) => f.slice(0, -".json".length))
-  .filter((code) => !SCAFFOLD_LOCALES.includes(code))
+  .filter((code) => !localePolicy.scaffold.includes(code))
   .sort();
 const LOCALES = ["en", ...TRANSLATED_LOCALES];
 
@@ -40,7 +41,8 @@ test("the strict locales include tr, de and es", () => {
 
 test("every strict locale has all required English keys and no extras", () => {
   for (const lng of TRANSLATED_LOCALES) {
-    const missing = [...maps.en.keys()].filter((k) => !maps[lng].has(k) && !usesEnglishFallback(lng, k));
+    const missing = [...maps.en.keys()].filter((k) => !maps[lng].has(k) && !usesEnglishFallback(lng, k)
+      && (lng === "tr" || !localePolicy.englishFallbackPrefixes.some((prefix) => k.startsWith(prefix))));
     const extra = [...maps[lng].keys()].filter((k) => !maps.en.has(k));
     assert.deepEqual(missing, [], `${lng} is missing keys: ${missing.slice(0, 10).join(", ")}`);
     assert.deepEqual(extra, [], `${lng} has keys en does not: ${extra.slice(0, 10).join(", ")}`);

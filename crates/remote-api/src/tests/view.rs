@@ -52,7 +52,7 @@ pub(super) async fn setup(
         .await
         .unwrap();
     pair(&host, &client, role).await;
-    let mut proxy = ApiProxy::start_with(client.clone(), host.id(), tuning)
+    let mut proxy = ApiProxy::start_with(client.clone(), host.id(), tuning, None)
         .await
         .unwrap();
     tokio::time::timeout(

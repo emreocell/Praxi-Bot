@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checksDone, runPairChecks, sameRelease, type PairCheckRow, type ServerProbe } from "./serverChecks.ts";
+import { checksDone, runPairChecks, type PairCheckRow, type ServerProbe } from "./serverChecks.ts";
 
 const probe = (over: Partial<ServerProbe> = {}): ServerProbe => ({
   connect: async () => undefined,
-  status: async () => ({ version: "0.1.0", hasDisplay: true }),
-  localVersion: async () => "0.1.0",
+  status: async () => ({ build: { version: "0.1.0", api_version: "1", status: "ok" }, hasDisplay: true }),
+  localVersion: async () => ({ localVersion: "0.1.0", localApiVersion: "1" }),
   canSendModels: async () => true,
   ...over
 });
@@ -47,7 +47,7 @@ test("a status that cannot be read counts as unreachable", async () => {
 test("version, screen and model problems are advice, not failures", async () => {
   const rows = await runPairChecks(
     probe({
-      status: async () => ({ version: "0.0.9", hasDisplay: false }),
+      status: async () => ({ build: { version: "0.0.9", api_version: "1", status: "ok" }, hasDisplay: false }),
       canSendModels: async () => {
         throw new Error("denied");
       }
@@ -58,8 +58,10 @@ test("version, screen and model problems are advice, not failures", async () => 
   assert.ok(checksDone(rows));
 });
 
-test("versions compare by number and ignore the v and the pre-release suffix", () => {
-  assert.ok(sameRelease("v0.1.0-beta.2", "0.1.0"));
-  assert.equal(sameRelease("0.1.0", "0.2.0"), false);
-  assert.equal(sameRelease(null, "0.1.0"), false);
+test("pairing indicates an older prerelease even when the package versions match", async () => {
+  const rows = await runPairChecks(probe({
+    status: async () => ({ build: { version: "0.1.0", api_version: "1", build_id: "v0.1.0-alpha.4", status: "ok" }, hasDisplay: true }),
+    localVersion: async () => ({ localVersion: "0.1.0", localApiVersion: "1", localRelease: "v0.1.0-alpha.5" })
+  }), () => {});
+  assert.deepEqual(states(rows), ["pass", "warn", "pass", "pass"]);
 });

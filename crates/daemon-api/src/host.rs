@@ -5,7 +5,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use axum::{
@@ -27,7 +27,15 @@ const PEER_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 /// At the ceiling, explicit force reuses the ceiling; equal owners still stop both.
 pub const EPOCH_CEILING: u64 = 1_000_000_000;
 pub const MAX_PEER_EPOCH_ADVANCE: u64 = 4096;
-pub const UPDATE_UNIT: &str = "praxi-update.service";
+/// Managed installer paths. The socket and the status file are owned by systemd/root.
+pub const UPDATE_SOCKET: &str = "/run/praxi-update.sock";
+pub const UPDATE_STATUS: &str = "/var/lib/praxi-updates/status.json";
+/// Update requests accepted per window, whoever sends them.
+const MAX_UPDATE_REQUESTS: usize = 3;
+const UPDATE_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// The updater unit is stopped after 40 minutes. A status still saying `running` after this long is
+/// left over from a run that was killed or lost with the machine.
+const UPDATE_RUN_LIMIT: Duration = Duration::from_secs(45 * 60);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -241,6 +249,7 @@ struct LeaderInner {
     network: Mutex<Option<PeerNetwork>>,
     invites: Mutex<std::collections::VecDeque<std::time::Instant>>,
     admin_calls: Mutex<std::collections::VecDeque<std::time::Instant>>,
+    updates: Mutex<std::collections::VecDeque<std::time::Instant>>,
     events: tokio::sync::broadcast::Sender<HostEvent>,
     peer_check_timeout: Mutex<Duration>,
 }
@@ -258,6 +267,7 @@ impl LeaderControl {
             network: Mutex::new(None),
             invites: Mutex::default(),
             admin_calls: Mutex::default(),
+            updates: Mutex::default(),
             events: tokio::sync::broadcast::channel(64).0,
             peer_check_timeout: Mutex::new(PEER_CHECK_TIMEOUT),
         }))
@@ -317,6 +327,28 @@ impl LeaderControl {
             ));
         }
         invites.push_back(now);
+        Ok(())
+    }
+
+    /// Admission for one update request, counted apart from the other administration calls: an
+    /// update restarts the daemon, so a few tries per ten minutes are plenty.
+    pub(crate) fn admit_update(&self) -> Result<(), ApiError> {
+        let mut updates = self.0.updates.lock();
+        let now = std::time::Instant::now();
+        while updates
+            .front()
+            .is_some_and(|time| now.duration_since(*time) >= UPDATE_WINDOW)
+        {
+            updates.pop_front();
+        }
+        if updates.len() >= MAX_UPDATE_REQUESTS {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too_many_requests",
+                "too many update requests; wait a few minutes",
+            ));
+        }
+        updates.push_back(now);
         Ok(())
     }
 
@@ -1080,31 +1112,155 @@ pub(crate) async fn activate(
         .map(Json)
 }
 
-#[utoipa::path(post, operation_id = "host_update", path = "/v1/host/update", tag = "host", security(("bearer" = [])), responses((status = 202), (status = 409, body = crate::error::ErrorBody)))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct HostUpdateStatus {
+    pub state: HostUpdateState,
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostUpdateState {
+    #[default]
+    Idle,
+    Available,
+    Running,
+    Updated,
+    Failed,
+    RolledBack,
+    RollbackFailed,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostUpdateInput {
+    pub tag: String,
+}
+
+pub(crate) fn update_status() -> Option<HostUpdateStatus> {
+    if !cfg!(target_os = "linux") || !Path::new(UPDATE_SOCKET).exists() {
+        return None;
+    }
+    Some(read_update_status(
+        Path::new(UPDATE_STATUS),
+        SystemTime::now(),
+    ))
+}
+
+/// The updater's status file. `running` never outlasts the updater unit: an older one is reported as
+/// `failed`, so the desktop's update button does not stay disabled after a killed run.
+pub(crate) fn read_update_status(path: &Path, now: SystemTime) -> HostUpdateStatus {
+    let Ok(file) = std::fs::File::open(path) else {
+        return HostUpdateStatus::default();
+    };
+    // A file stamped in the future (clock change) counts as just written.
+    let age = file
+        .metadata()
+        .and_then(|meta| meta.modified())
+        .ok()
+        .map(|written| now.duration_since(written).unwrap_or_default());
+    let mut bytes = Vec::new();
+    let read = std::io::Read::read_to_end(&mut std::io::Read::take(file, 4096), &mut bytes);
+    let status = read
+        .ok()
+        .and_then(|_| serde_json::from_slice::<HostUpdateStatus>(&bytes).ok())
+        .unwrap_or_default();
+    if matches!(status.state, HostUpdateState::Running)
+        && age.is_some_and(|age| age > UPDATE_RUN_LIMIT)
+    {
+        return HostUpdateStatus {
+            state: HostUpdateState::Failed,
+            tag: status.tag,
+        };
+    }
+    status
+}
+
+#[utoipa::path(post, operation_id = "host_update", path = "/v1/host/update", tag = "host", security(("bearer" = [])), request_body = HostUpdateInput, responses((status = 202), (status = 409, body = crate::error::ErrorBody), (status = 413, body = crate::error::ErrorBody), (status = 429, body = crate::error::ErrorBody)))]
 pub(crate) async fn update(
     State(s): State<AppState>,
     peer: Option<Extension<crate::PeerIdentity>>,
+    input: Option<Json<HostUpdateInput>>,
 ) -> Result<StatusCode, ApiError> {
-    s.leader().audit(
-        &actor(peer.as_ref()),
-        "host.update",
-        &serde_json::json!({"phase":"requested","unit":UPDATE_UNIT}),
-    )?;
-    if std::env::consts::OS != "linux" || s.leader().config().mode != HostMode::Host {
-        return Err(ApiError::conflict(
-            "updates require Linux host mode and the praxi-update.service unit",
+    let actor = actor(peer.as_ref());
+    // Only a well-formed tag is written to the audit trail; anything else is recorded as absent.
+    let tag = input
+        .map(|Json(input)| input.tag)
+        .filter(|tag| valid_release_tag(tag));
+    let record = |phase: &str, outcome: &str| {
+        s.leader().audit(
+            &actor,
+            "host.update",
+            &serde_json::json!({"phase": phase, "tag": tag, "outcome": outcome}),
+        )
+    };
+    record("requested", "pending")?;
+    let result = request(&s, tag.as_deref()).await;
+    let (phase, outcome) = match &result {
+        Ok(()) => ("accepted", "accepted"),
+        Err((outcome, _)) => ("rejected", *outcome),
+    };
+    // The decision is already made: a failing audit write must not turn an accepted request
+    // into an error (or hide the real reason for a refusal), but it is not silently dropped.
+    if let Err(error) = record(phase, outcome) {
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "could not audit host.update: {}", error.message());
+    }
+    result
+        .map(|()| StatusCode::ACCEPTED)
+        .map_err(|(_, error)| error)
+}
+
+/// Why a request was turned away, as a fixed word for the audit trail, with the answer for the caller.
+async fn request(s: &AppState, tag: Option<&str>) -> Result<(), (&'static str, ApiError)> {
+    if s.leader().config().mode != HostMode::Host || s.safe_mode() || update_status().is_none() {
+        return Err((
+            "unavailable",
+            ApiError::conflict(
+                "managed updates are unavailable; use the verified Linux host installer with --update",
+            ),
         ));
     }
-    // Fixed executable and arguments only. The installer must grant exactly this unit.
-    let result = tokio::process::Command::new("/usr/bin/sudo")
-        .args(["-n", "/usr/bin/systemctl", "start", UPDATE_UNIT])
-        .output()
-        .await
-        .map_err(|_| ApiError::conflict("host updater unavailable; install /usr/bin/sudo and the praxi-update.service sudoers rule"))?;
-    if !result.status.success() {
-        return Err(ApiError::conflict(
-            "could not start praxi-update.service; install its narrowly scoped sudoers rule or run the host updater locally",
+    let Some(tag) = tag else {
+        return Err((
+            "invalid_tag",
+            ApiError::bad_request("update requires a published release tag"),
         ));
+    };
+    s.leader().admit_update().map_err(|e| ("rate_limited", e))?;
+    request_update(tag).await.map_err(|e| ("refused", e))
+}
+
+fn valid_release_tag(tag: &str) -> bool {
+    tag.len() <= 100
+        && tag.starts_with('v')
+        && tag
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
+}
+
+#[cfg(target_os = "linux")]
+async fn request_update(tag: &str) -> Result<(), ApiError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let accepted = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut socket = tokio::net::UnixStream::connect(UPDATE_SOCKET).await?;
+        socket.write_all(tag.as_bytes()).await?;
+        socket.write_all(b"\n").await?;
+        socket.shutdown().await?;
+        socket.read_u8().await
+    })
+    .await;
+    if matches!(accepted, Ok(Ok(b'1'))) {
+        return Ok(());
     }
-    Ok(StatusCode::ACCEPTED)
+    Err(ApiError::conflict(
+        "the updater refused the request; check whether an update is already running or use the verified host installer",
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn request_update(_: &str) -> std::future::Ready<Result<(), ApiError>> {
+    std::future::ready(Err(ApiError::conflict(
+        "managed updates require a Linux host",
+    )))
 }

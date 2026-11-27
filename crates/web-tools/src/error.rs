@@ -35,4 +35,8 @@ pub enum WebError {
     /// A search backend failed.
     #[error("search failed: {0}")]
     Search(String),
+    /// A search engine refused the request as a robot (a bot challenge, a captcha, a block
+    /// page). The text is written in plain words for the owner.
+    #[error("{0}")]
+    Challenge(String),
 }

@@ -104,6 +104,37 @@ pub(super) async fn peer_call(
 }
 
 #[tokio::test]
+async fn managed_update_requires_the_host_admin_pairing() {
+    let r = rig().await;
+    for (peer, expected) in [
+        (
+            Some((r.legacy_key.as_str(), crate::PeerRole::Desktop)),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            Some((r.admin_key.as_str(), crate::PeerRole::Phone)),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            Some((r.admin_key.as_str(), crate::PeerRole::Desktop)),
+            StatusCode::CONFLICT,
+        ),
+    ] {
+        // The test fixture has no systemd updater socket. A conflict shows
+        // the admin reached the handler without granting access to other peers.
+        let response = peer_call(
+            &r.t,
+            peer,
+            Method::POST,
+            "/v1/admin/host-update",
+            Some(json!({"tag":"v0.1.0-alpha.99"})),
+        )
+        .await;
+        assert_eq!(response.status, expected);
+    }
+}
+
+#[tokio::test]
 async fn admin_desktop_stores_the_key_in_the_secret_store_and_nowhere_else() {
     let r = rig().await;
     let path = "/v1/admin/providers/second";

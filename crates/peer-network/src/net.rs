@@ -188,6 +188,8 @@ pub(crate) struct Inner {
     peer_leaders: Mutex<HashMap<PublicKey, LeaderInfo>>,
     pair_slots: Semaphore,
     pair_limits: Mutex<HashMap<PublicKey, PairBucket>>,
+    /// Pairing attempts across all keys: a key that is new every time escapes `pair_limits`.
+    pair_global: Mutex<PairBucket>,
 }
 
 impl Inner {
@@ -336,6 +338,10 @@ impl PeerNetwork {
             peer_leaders: Mutex::new(HashMap::new()),
             pair_slots: Semaphore::new(8),
             pair_limits: Mutex::new(HashMap::new()),
+            pair_global: Mutex::new(PairBucket {
+                tokens: PAIR_GLOBAL_BURST,
+                updated: Instant::now(),
+            }),
         });
         let task = tokio::spawn(accept_loop(inner.clone()));
         Ok(Self {
@@ -702,7 +708,7 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
             conn.close(429u32.into(), b"pairing busy");
             return Ok(());
         };
-        if !allow_pair(&inner.pair_limits, remote) {
+        if !allow_pair(&inner.pair_limits, remote) || !allow_pair_globally(&inner.pair_global) {
             conn.close(429u32.into(), b"pairing rate limit");
             return Ok(());
         }
@@ -758,17 +764,20 @@ async fn handle_incoming(inner: Arc<Inner>, incoming: Incoming) -> Result<()> {
 }
 
 async fn handle_pair(inner: &Arc<Inner>, conn: &Connection, remote: PublicKey) -> Result<()> {
-    let (mut send, mut recv) = conn
-        .accept_bi()
-        .await
-        .map_err(|e| PeerError::Connection(e.to_string()))?;
-    let bytes = tokio::time::timeout(
-        Duration::from_secs(15),
-        read_frame(&mut recv, MAX_PAIR_FRAME),
-    )
+    // A joiner opens its stream and sends the request right after the handshake. One that does
+    // not is holding one of the few pairing slots for nothing: let it go quickly.
+    let (mut send, bytes) = tokio::time::timeout(PAIR_REQUEST_TIMEOUT, async {
+        let (send, mut recv) = conn
+            .accept_bi()
+            .await
+            .map_err(|e| PeerError::Connection(e.to_string()))?;
+        let bytes = read_frame(&mut recv, MAX_PAIR_FRAME)
+            .await?
+            .ok_or_else(|| PeerError::Protocol("empty pairing request".into()))?;
+        Ok::<_, PeerError>((send, bytes))
+    })
     .await
-    .map_err(|_| PeerError::Timeout)??
-    .ok_or_else(|| PeerError::Protocol("empty pairing request".into()))?;
+    .map_err(|_| PeerError::Timeout)??;
     let response = match serde_json::from_slice::<PairRequest>(&bytes) {
         Ok(req) => decide_pairing(inner, remote, req),
         Err(e) => rejected(
@@ -995,10 +1004,34 @@ fn link_end(conn: &Connection, e: &impl std::fmt::Display) -> LinkEnd {
 }
 
 const PAIR_LIMIT_KEYS: usize = 4096;
+/// How long a joiner has, after the handshake, to open its stream and send the pairing request.
+const PAIR_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// Pairing attempts across all keys: a burst, then two a second. Far above what people do; it bounds
+/// what a flood of throw-away keys can make this endpoint spend.
+const PAIR_GLOBAL_BURST: f64 = 32.0;
+const PAIR_GLOBAL_SECS_PER_TOKEN: f64 = 0.5;
 
 struct PairBucket {
     tokens: f64,
     updated: Instant,
+}
+
+fn allow_pair_globally(bucket: &Mutex<PairBucket>) -> bool {
+    let mut bucket = bucket.lock();
+    // Sampled under the lock, like `allow_pair`.
+    let now = Instant::now();
+    allow_pair_globally_at(&mut bucket, now)
+}
+
+fn allow_pair_globally_at(bucket: &mut PairBucket, now: Instant) -> bool {
+    let elapsed = now.saturating_duration_since(bucket.updated).as_secs_f64();
+    bucket.tokens = (bucket.tokens + elapsed / PAIR_GLOBAL_SECS_PER_TOKEN).min(PAIR_GLOBAL_BURST);
+    bucket.updated = bucket.updated.max(now);
+    if bucket.tokens < 1.0 {
+        return false;
+    }
+    bucket.tokens -= 1.0;
+    true
 }
 
 fn allow_pair(limits: &Mutex<HashMap<PublicKey, PairBucket>>, remote: PublicKey) -> bool {
@@ -1236,6 +1269,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn keys_that_are_new_every_time_share_one_pairing_budget() {
+        let start = Instant::now();
+        let mut bucket = PairBucket {
+            tokens: PAIR_GLOBAL_BURST,
+            updated: start,
+        };
+        // Each attempt may come from a different key: the per-key limit never trips.
+        let mut limits = HashMap::new();
+        let mut allowed = 0;
+        for _ in 0..200 {
+            let key = iroh::SecretKey::generate().public();
+            if allow_pair_at(&mut limits, key, start) && allow_pair_globally_at(&mut bucket, start)
+            {
+                allowed += 1;
+            }
+        }
+        assert_eq!(allowed, 32, "a burst, then nothing");
+        // Then two a second, never more than the burst however long it was quiet.
+        let later = start + Duration::from_secs(1);
+        assert!(allow_pair_globally_at(&mut bucket, later));
+        assert!(allow_pair_globally_at(&mut bucket, later));
+        assert!(!allow_pair_globally_at(&mut bucket, later));
+        let much_later = start + Duration::from_secs(3600);
+        let granted = (0..100)
+            .filter(|_| allow_pair_globally_at(&mut bucket, much_later))
+            .count();
+        assert_eq!(granted, 32);
+        // A clock that steps back neither panics nor grants extra attempts.
+        assert!(!allow_pair_globally_at(&mut bucket, start));
+    }
+
     #[tokio::test]
     async fn pairing_semaphore_rejects_busy_and_stalled_handshakes_release_slots() {
         let dir = tempfile::tempdir().unwrap();
@@ -1266,9 +1331,14 @@ mod tests {
         assert!(
             matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(c) if c.error_code.into_inner() == 429)
         );
-        let closed = tokio::time::timeout(Duration::from_secs(20), stalled.closed())
-            .await
-            .unwrap();
+        // A joiner that never sends its request is let go after the short request timeout, not
+        // after the whole 15 s pairing window.
+        let closed = tokio::time::timeout(
+            PAIR_REQUEST_TIMEOUT + Duration::from_secs(3),
+            stalled.closed(),
+        )
+        .await
+        .unwrap();
         assert!(
             matches!(closed, iroh::endpoint::ConnectionError::ApplicationClosed(c) if c.error_code.into_inner() == 400)
         );

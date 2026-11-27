@@ -35,9 +35,13 @@ pub const TOOL_DESCRIBE: &str = "tool_describe";
 ///
 /// This is the single default for both the surface and the agent loop
 /// (`agent_core::DEFAULT_DIRECT_TOOL_LIMIT` is this value): the built-in set
-/// (with `spawn_subagent`, skill and workflow tools) is just over 25, and the
-/// model should see it directly.
-pub const DEFAULT_DISCOVERY_THRESHOLD: usize = 40;
+/// (with `spawn_subagent`, skill and workflow tools) is about 40 on a computer
+/// with a desktop and a browser, and the model should see it directly. The limit
+/// moves with that set, and keeps a few tools of room above it: it was 40 before
+/// `browser_upload`, `browser_downloads`, `browser_reload` and `browser_forward` joined the
+/// set (an exact fit at 44 would flip every bot to discovery with the next tool), so it is 48.
+/// The schema-size test of `builtin-tools` keeps the same kind of room on the byte side.
+pub const DEFAULT_DISCOVERY_THRESHOLD: usize = 48;
 /// Default number of results of `find_tool`.
 pub const DEFAULT_FIND_K: usize = 6;
 /// Upper bound on `k` accepted by `find_tool`.

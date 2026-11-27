@@ -26,11 +26,18 @@ function comparePre(a: string, b: string): number {
     const ny = /^\d+$/.test(y[i]) ? Number(y[i]) : null;
     if (nx !== null && ny !== null) {
       if (nx !== ny) return nx < ny ? -1 : 1;
+    } else if ((nx === null) !== (ny === null)) {
+      return nx === null ? 1 : -1;
     } else if (x[i] !== y[i]) {
       return x[i] < y[i] ? -1 : 1;
     }
   }
   return 0;
+}
+
+/** Older servers may report the published tag only as their build ID. */
+export function reportedRelease(releaseTag?: string | null, buildId?: string | null): string | null {
+  return [releaseTag, buildId].find((tag): tag is string => Boolean(tag && TAG.test(tag))) ?? null;
 }
 
 /** True only when both versions are understood and the server is strictly older than this app. */
@@ -59,17 +66,18 @@ export function updateState(
   server: { version: string; releaseTag?: string | null },
   app: { version: string | null | undefined; releaseTag?: string | null }
 ): UpdateState {
+  const st = server.releaseTag ? parse(server.releaseTag) : null;
+  const at = app.releaseTag ? parse(app.releaseTag) : null;
+  if (st && at) {
+    const order = compareParsed(st, at);
+    return order < 0 ? "older" : order > 0 ? "newer" : "current";
+  }
   if (serverIsOlder(server.version, app.version)) return "older";
   const sv = server.version ? parse(server.version) : null;
   const av = app.version ? parse(app.version) : null;
   if (sv && av && compareParsed(sv, av) > 0) return "newer";
   if (!app.releaseTag) return sv && av ? "current" : "unknown";
-  if (!server.releaseTag) return "unknown";
-  const st = parse(server.releaseTag);
-  const at = parse(app.releaseTag);
-  if (!st || !at) return "unknown";
-  const c = compareParsed(st, at);
-  return c < 0 ? "older" : c > 0 ? "newer" : "current";
+  return "unknown";
 }
 
 /** The progress rows, in order. The installer does download, check, install and restart as one verified run. */

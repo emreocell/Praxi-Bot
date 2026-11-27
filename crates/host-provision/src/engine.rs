@@ -138,7 +138,13 @@ struct InviteOut {
 fn fail_from(id: &'static str, title: &str, e: &TransportError) -> StepResult {
     let hint = match e {
         TransportError::Auth => {
-            "Check the user name (Ubuntu images: ubuntu, Oracle Linux: opc) and pass --key <private key file>, or load the key into ssh-agent (`ssh-add`). Passwords are not supported yet."
+            "Check the user name (Ubuntu images: ubuntu, Oracle Linux: opc) and pass --key <private key file>, or load the key into ssh-agent (`ssh-add`)."
+        }
+        TransportError::KeyPermissions => {
+            "Restrict the key file to your account (Windows: remove inherited access from its ACL; Linux/macOS: chmod 600), or use the pairing code instead."
+        }
+        TransportError::PasswordOnly => {
+            "Enable public-key login on the server, or run the pairing command in the provider's web console."
         }
         TransportError::Network(_) | TransportError::Timeout => {
             "Check the address and port, that the server is running, and that the cloud firewall allows inbound SSH (port 22)."

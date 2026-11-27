@@ -110,6 +110,11 @@ impl MailboxProvider for ImapSmtpProvider {
     }
 
     async fn search(&self, req: &SearchRequest<'_>) -> Result<Found, EmailError> {
+        if req.query.page_token.is_some() {
+            return Err(EmailError::unsupported(
+                "result pages (narrow the search with `since`, `before`, `from` or `subject`)",
+            ));
+        }
         req.query.to_imap()?; // validate before connecting
         crate::imap::check_folder(req.folder)?;
         let folder = req.folder.to_owned();
@@ -127,6 +132,7 @@ impl MailboxProvider for ImapSmtpProvider {
             messages,
             total,
             uid_validity,
+            next_page_token: None,
         })
     }
 

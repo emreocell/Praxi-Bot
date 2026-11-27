@@ -1,7 +1,8 @@
 /* global console, process, URL */
 // Verifies that every locale matches English and that all static t("...") keys exist.
 //
-// Strict locales (en, tr, de, es, ...) must have exactly the keys English has. Scaffold locales
+// Strict locales must have the English keys, except the explicitly staged prefixes that ship
+// in English and Turkish first. Scaffold locales
 // (listed in src/i18n/scaffold-locales.json) are English copies that are translated part by part;
 // a missing key there is only a warning, because the app falls back to English for it
 // (i18n/index.ts: fallbackLng "en") and a translation that lags must never turn main red.
@@ -91,23 +92,28 @@ const defaultScaffoldFile = fileURLToPath(new URL("../src/i18n/scaffold-locales.
 
 // The locale codes that are still scaffolds (see docs/contributing/adding-a-language.md).
 // Without the file every locale is strict.
-export const readScaffoldLocales = (file = defaultScaffoldFile) => {
+const readLocalePolicy = (file = defaultScaffoldFile) => {
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
-    if (error.code === "ENOENT") return []; // no list: every locale is strict
+    if (error.code === "ENOENT") return { scaffold: [], englishFallbackPrefixes: [] };
     throw error;
   }
   if (!Array.isArray(parsed.scaffold) || parsed.scaffold.some((c) => typeof c !== "string")) {
     throw new Error(`${file}: expected {"scaffold": ["<locale code>", ...]}`);
   }
-  return parsed.scaffold;
+  const englishFallbackPrefixes = parsed.englishFallbackPrefixes ?? [];
+  if (!Array.isArray(englishFallbackPrefixes) || englishFallbackPrefixes.some((p) => typeof p !== "string" || !p.endsWith("."))) {
+    throw new Error(`${file}: expected {"englishFallbackPrefixes": ["<key prefix>.", ...]}`);
+  }
+  return { scaffold: parsed.scaffold, englishFallbackPrefixes };
 };
+export const readScaffoldLocales = (file) => readLocalePolicy(file).scaffold;
 
 // Compares every locale file in `localeDir` with en.json. Returns the lines to print instead of
 // printing them, so the rules can be tested: `errors` fail the check, `warnings` never do.
-export const checkLocales = ({ localeDir = defaultLocaleDir, scaffold = readScaffoldLocales() } = {}) => {
+export const checkLocales = ({ localeDir = defaultLocaleDir, scaffold = readScaffoldLocales(), englishFallbackPrefixes = readLocalePolicy().englishFallbackPrefixes } = {}) => {
   const errors = [];
   const warnings = [];
   const read = (file) => JSON.parse(readFileSync(join(localeDir, file), "utf8"));
@@ -151,7 +157,12 @@ export const checkLocales = ({ localeDir = defaultLocaleDir, scaffold = readScaf
     } else {
       for (const key of missing) {
         if (usesEnglishFallback(locale, key)) continue;
-        errors.push(`missing in ${locale}: ${key}`);
+        // The managed server flow ships in English and Turkish first.
+        if (locale !== "tr" && englishFallbackPrefixes.some((prefix) => key.startsWith(prefix))) {
+          warnings.push(`warn missing in ${locale} (English fallback): ${key}`);
+        } else {
+          errors.push(`missing in ${locale}: ${key}`);
+        }
       }
     }
     const localeKinds = new Map(kinds(json));

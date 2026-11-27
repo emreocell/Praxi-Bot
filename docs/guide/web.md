@@ -28,6 +28,8 @@ these tools. For a bot with its own `[tools] allow` list, add `"web_*"` (see
 
 Without configuration, search uses a keyless fallback chain (`duckduckgo` → `duckduckgo_lite` → `bing`), requiring no account or API key. If an upstream returns a bot challenge or rate limit, that backend enters a short cooldown and `web_search` falls through to the next configured backend.
 
+**On a server this chain usually does not work.** DuckDuckGo and Bing treat the addresses of data centres and cloud machines as robots and answer with a robot check instead of results. Praxi recognises these pages (a Cloudflare "Just a moment", a captcha, DuckDuckGo's "bots use DuckDuckGo too", an HTTP 403, 429 or 202) and says so in plain words: "the free search engines refused this computer as a robot", with the fix. A computer at home mostly works, a server mostly does not. The fix is a search provider that is meant to be used by programs; see [Search on a server](#search-on-a-server).
+
 You can configure backends, priority order, API keys, and run a live probe either in **Settings → Web search** in the desktop app or in `<data_dir>/web.toml`. Backends are tried in configured priority order and the first that returns results wins (default order):
 
 1. a [SearXNG](https://docs.searxng.org/) instance you run (`searxng_url`),
@@ -69,6 +71,37 @@ Large pages and feeds are cut to a size the model can read, and the full text
 is saved under `<data_dir>/spill/`. Those files are not cleaned up
 automatically yet; delete old ones by hand if they pile up.
 
+## Search on a server
+
+Pick one search provider, once. Any of these makes `web_search` work on a server:
+
+| Provider | What you need | Notes |
+| --- | --- | --- |
+| Brave Search API | an API key from your Brave Search API account | Hosted. Has a usage limit that depends on your plan. |
+| Tavily | an API key from your Tavily account | Hosted. Built for AI agents. Has a usage limit that depends on your plan. |
+| SearXNG | the address of a SearXNG server | Runs on your own server, no account, no per-search cost. The one-command install is below. |
+
+**In the app:** open **Settings → Web search**, choose the provider, paste the key (or the SearXNG address) and press **Save and test**. The test runs a real search through that provider and tells you if it answered. Keys are stored write-only in the secret store and are never shown again.
+
+**Where you will see the warning:** the Web search page shows a notice when the computer has no screen and no provider is set, `bot doctor` prints a warning on the `web search` line, and the daemon logs the same warning at start. `bot doctor --online` and the **Search** button run a real search; when every free engine refuses, they say "refused this computer as a robot" instead of a bare HTTP code.
+
+### Install SearXNG on the server (one command)
+
+You need Docker on the server. On the server, from a checkout of this repository:
+
+```sh
+sudo bash scripts/install-searxng.sh --allow-latest
+```
+
+Without `--allow-latest` (or a pinned `--image`, below) the script stops before it downloads anything: the container starts as root, so it will not run an image that can change under you unless you say so. It writes `/opt/praxi/searxng/settings.yml` (JSON answers on, a random secret key), starts a container named `praxi-searxng` that listens on `127.0.0.1:8080` only and restarts with the server, asks it one real search and prints the address to give to Praxi: `http://127.0.0.1:8080`. Paste that into **Settings → Web search → SearXNG**, or put it in `web.toml` (`searxng_url`) and restart Praxi.
+
+- `--port <n>` picks another port, `--dir <path>` another settings folder, `--image <ref>` the image to run. Only the official `docker.io/searxng/searxng` is accepted, pinned by digest (`--image docker.io/searxng/searxng@sha256:<64 hex digits>`; pick one you trust on the image's Docker Hub tags page). `--allow-latest` is the alternative: it accepts a moving tag (`latest`, or one you name with `--image docker.io/searxng/searxng:<tag>`), pulls it once, prints the digest it got and runs that exact digest, with the command to pin it next time.
+- Run it again at any time: it replaces the container and keeps your `settings.yml`.
+- `sudo bash scripts/install-searxng.sh --uninstall` removes the container and keeps the settings folder.
+- It does not install Docker. If `docker` is missing the script stops and says so.
+- SearXNG forwards your queries to the engines it uses, from the server's address. If those engines also refuse your server, edit the list of engines in `settings.yml` (see the [SearXNG documentation](https://docs.searxng.org/)).
+- Praxi may only reach a private address (loopback or your LAN) for the one SearXNG address you configure yourself, over `http` or `https` with no user name or password in it. Every redirect that server answers with is checked again as if it were any other address: a redirect to another private address, to a different port, to cloud metadata or link-local space, or to Praxi's own API port is refused.
+
 ## Privacy
 
 Search queries go to the configured backend that handles them (your SearXNG instance, Brave, Tavily, DuckDuckGo, or Bing), and fetched URLs go to the sites they point at, from your machine's IP address. Page fetches (`web_extract`, `web_feed`, `web_sitemap`, `web_metadata`) carry a `User-Agent: Praxi-Bot/<version> (web-tools)` header, while HTML search requests use standard browser `User-Agent` / `Accept` headers so search engines do not serve bot challenges. If query privacy matters to you, point `searxng_url` at an instance you control or remove the `web_*` tools from a bot's `allow` list.
@@ -80,7 +113,8 @@ Search queries go to the configured backend that handles them (your SearXNG inst
   addresses (`169.254.169.254`), and the daemon's own API are refused. The check
   is repeated on every redirect and on the addresses a hostname resolves to, so a
   public page cannot bounce the bot into your network. Only the SearXNG address
-  you configure yourself is allowed to be private.
+  you configure yourself (that host and port, never link-local or metadata
+  space) is allowed to be private; its redirects get the same checks.
 - **Untrusted content.** Everything a page says is data. Each result starts with
   an "untrusted external content" notice, and a bot must not treat instructions
   inside a page as coming from you.
@@ -95,8 +129,17 @@ Search queries go to the configured backend that handles them (your SearXNG inst
     default policy**, exactly like `browser_open`. After the run has read
     untrusted or private content they ask even under a grant or the `full`
     preset, unless that bot setting is on.
-  - All five belong to the `browser` permission category: if you set `browser`
+  - `web_scrape` (only where the optional add-on is installed) is treated like
+    `web_extract`: it contacts any address the model picks, so it asks on every
+    call under the default policy and after a read.
+  - All of them belong to the `browser` permission category: if you set `browser`
     to `deny` for a bot, they are all denied.
+  - In the **Full** preset, a run you started yourself reads the web without a
+    card, `web_scrape` included: it follows the same rule as `web_extract` and
+    `browser_open`. It still asks when the address or query copies the private
+    data of the run, carries a key or a card number, or points at this computer or
+    your network. Money stays always-ask. See
+    [Chatting and approvals](chatting-and-approvals.md).
 
 ### Letting a bot fetch without asking
 

@@ -24,6 +24,9 @@ use crate::serve::{
 const DEFAULT_BRAVE_KEY_NAME: &str = "web/brave";
 const DEFAULT_TAVILY_KEY_NAME: &str = "web/tavily";
 const DEFAULT_TEST_QUERY: &str = "rust programming";
+/// What the Test button reports when every engine refused this computer as a robot (the full
+/// text for the bot, with the fix, is the error the chain itself returns).
+const BLOCKED_PLAIN: &str = "the free search engines refused this computer as a robot";
 const FILE_HEADER: &str = "# Web search & HTTP configuration — edited via Web Search settings or manually.\n# API keys live in the secret store; only secret names belong here.\n\n";
 
 /// Manages `web.toml`, web search API keys in `SecretStore`, and live
@@ -33,6 +36,8 @@ pub struct WebHost {
     daemon_port: u16,
     registry: ToolRegistry,
     secrets: Option<Arc<dyn SecretStore>>,
+    /// This computer has no screen: see [`WebSearchConfigDto::needs_provider`].
+    headless: bool,
     update_lock: tokio::sync::Mutex<()>,
 }
 
@@ -50,8 +55,17 @@ impl WebHost {
             daemon_port,
             registry,
             secrets,
+            headless: crate::serve::is_headless(),
             update_lock: tokio::sync::Mutex::new(()),
         }
+    }
+
+    /// Override the screen probe (tests).
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_headless(mut self, headless: bool) -> Self {
+        self.headless = headless;
+        self
     }
 
     fn secret_present(&self, name: Option<&str>) -> bool {
@@ -121,6 +135,7 @@ impl WebHost {
         }
 
         let config_error = (!warnings.is_empty()).then(|| warnings.join("; "));
+        let needs_provider = crate::serve::keyless_search_on_headless(&cfg, self.headless);
 
         WebSearchConfigDto {
             order,
@@ -132,6 +147,7 @@ impl WebHost {
             duckduckgo_lite,
             bing,
             config_error,
+            needs_provider,
         }
     }
 
@@ -393,25 +409,44 @@ impl WebControl for WebHost {
             .await;
         let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
-        match res {
-            Ok(outcome) => Ok(WebSearchTestReport {
-                ok: true,
-                query,
-                backend: Some(outcome.backend),
-                result_count: outcome.results.len(),
-                elapsed_ms,
-                error: None,
-                fallback_errors: outcome.fallback_errors,
-            }),
-            Err(e) => Ok(WebSearchTestReport {
+        Ok(test_report(query, elapsed_ms, res))
+    }
+}
+
+/// The Test button's answer for one probe. Every engine refusing this computer as a robot is
+/// reported as such (`blocked`), not as a generic failure, so the page can say what to do.
+fn test_report(
+    query: String,
+    elapsed_ms: u64,
+    res: Result<web_tools::SearchOutcome, web_tools::WebError>,
+) -> WebSearchTestReport {
+    match res {
+        Ok(outcome) => WebSearchTestReport {
+            ok: true,
+            query,
+            backend: Some(outcome.backend),
+            result_count: outcome.results.len(),
+            elapsed_ms,
+            error: None,
+            fallback_errors: outcome.fallback_errors,
+            blocked: false,
+        },
+        Err(e) => {
+            let blocked = matches!(e, web_tools::WebError::Challenge(_));
+            WebSearchTestReport {
                 ok: false,
                 query,
                 backend: None,
                 result_count: 0,
                 elapsed_ms,
-                error: Some(e.to_string()),
+                error: Some(if blocked {
+                    BLOCKED_PLAIN.to_owned()
+                } else {
+                    e.to_string()
+                }),
                 fallback_errors: Vec::new(),
-            }),
+                blocked,
+            }
         }
     }
 }
@@ -429,6 +464,74 @@ mod tests {
         crate::serve::register_web(dir, 9999, &reg, Some(&store));
         let host = WebHost::new(dir, 9999, reg.clone(), Some(Arc::clone(&store)));
         (host, store, reg)
+    }
+
+    #[test]
+    fn a_server_with_only_the_free_engines_is_told_to_add_a_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let (host, _, _) = host_with_store(dir.path());
+        // a computer with a screen: the free engines are fine
+        assert!(!host.with_headless(false).get().needs_provider);
+        let (host, _, _) = host_with_store(dir.path());
+        let host = host.with_headless(true);
+        assert!(host.get().needs_provider);
+    }
+
+    #[tokio::test]
+    async fn any_search_provider_clears_the_server_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let (host, _, _) = host_with_store(dir.path());
+        let host = host.with_headless(true);
+        assert!(host.get().needs_provider);
+        let dto = host
+            .update(WebSearchConfigInput {
+                tavily_key: Some("tvly-secret-456".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(!dto.needs_provider);
+        let dto = host
+            .update(WebSearchConfigInput {
+                clear_tavily_key: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(dto.needs_provider);
+        let dto = host
+            .update(WebSearchConfigInput {
+                searxng_url: Some("http://127.0.0.1:8080".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(!dto.needs_provider);
+    }
+
+    #[test]
+    fn a_robot_check_from_every_engine_is_reported_as_blocked() {
+        let blocked = test_report(
+            "rust".into(),
+            12,
+            Err(web_tools::WebError::Challenge(
+                "duckduckgo, bing refused this computer as a robot. long text for the bot".into(),
+            )),
+        );
+        assert!(!blocked.ok);
+        assert!(blocked.blocked);
+        assert_eq!(blocked.error.as_deref(), Some(BLOCKED_PLAIN));
+        assert!(!blocked.error.unwrap().contains("long text for the bot"));
+
+        let other = test_report(
+            "rust".into(),
+            12,
+            Err(web_tools::WebError::Search(
+                "brave rejected the API key".into(),
+            )),
+        );
+        assert!(!other.ok && !other.blocked);
+        assert!(other.error.unwrap().contains("brave rejected the API key"));
     }
 
     #[test]

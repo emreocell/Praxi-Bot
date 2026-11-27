@@ -943,6 +943,22 @@ pub fn web_backend_summary(cfg: &web_tools::WebToolsConfig) -> String {
     }
 }
 
+/// The warning for a server whose only search engines are the free ones.
+pub const SEARCH_PROVIDER_WARNING: &str = "web search has only the free engines (DuckDuckGo, Bing), which usually refuse servers and cloud machines as robots; add a Brave Search or Tavily key, or a SearXNG address, in Settings > Web search (see docs/guide/web.md)";
+
+/// A headless computer (no screen: a server or host) with no search provider configured, so
+/// `web_search` depends on keyless engines that block datacenter addresses.
+#[must_use]
+pub fn keyless_search_on_headless(cfg: &web_tools::WebToolsConfig, headless: bool) -> bool {
+    headless && !cfg.search.has_provider()
+}
+
+/// Whether this process runs without a screen.
+#[must_use]
+pub fn is_headless() -> bool {
+    !browser_cdp::host::has_display()
+}
+
 /// Register the web tools (`web_search`, `web_extract`, ...) into `registry`.
 ///
 /// On by default: no configuration is needed. A broken `web.toml`, or one that
@@ -958,6 +974,9 @@ pub fn register_web(
     let protected = daemon_protected_sockets(daemon_port);
     let cfg = web_tools_config(data_dir, &file, store, &protected, &mut warnings);
     let mut summary = web_backend_summary(&cfg);
+    if keyless_search_on_headless(&cfg, is_headless()) {
+        warnings.push(SEARCH_PROVIDER_WARNING.to_owned());
+    }
     let mut result = builtin_tools::register_web_tools(registry, cfg);
     if let Err(e) = &result {
         warnings.push(format!(

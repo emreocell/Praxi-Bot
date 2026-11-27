@@ -68,13 +68,24 @@ impl Drop for ClosedGuard {
 /// read (the code predates the web tools; it stays because audit consumers know it).
 const FULL_BROWSE_REASON: &str = "mode.full.owner_browse";
 
+/// Audit reason code of a `browser_upload` the Full level let through.
+const FULL_UPLOAD_REASON: &str = "mode.full.owner_upload";
+
+/// The one call that hands a FILE of this computer to a page. It has its own, narrower Full-level
+/// rule ([`Shared::full_upload_waives`]) and is not in [`FULL_BROWSER_CALLS`].
+pub(crate) const FULL_UPLOAD_CALL: &str = "browser_upload";
+
 /// The managed browser's calls that Full lets an owner-started run make after reading a page:
-/// open, go back, click, type, select, press, select text, tabs and the batch. NOT
-/// `browser_eval` (a page script can send anything anywhere) and not the user's own computer
+/// open, go back and forward, reload, click, type, select, press, select text, tabs (including a
+/// new tab on an address, judged like `browser_open`) and the batch. NOT `browser_eval` (a page
+/// script can send anything anywhere), NOT `browser_upload` (it hands a file of this computer
+/// to a page: it has the narrower rule of [`FULL_UPLOAD_CALL`]) and not the user's own computer
 /// (`pc_*`).
-pub(crate) const FULL_BROWSER_CALLS: [&str; 11] = [
+pub(crate) const FULL_BROWSER_CALLS: [&str; 13] = [
     "browser_open",
     "browser_back",
+    "browser_forward",
+    "browser_reload",
     "browser_click",
     "browser_fill",
     "browser_select",
@@ -87,14 +98,17 @@ pub(crate) const FULL_BROWSER_CALLS: [&str; 11] = [
 ];
 
 /// The public-web READ tools (`web-tools`): a search, a page, a feed, a sitemap, a page's
-/// metadata. They follow the same rule as `browser_open` in the Full level: no card for an
+/// metadata, and a page read through the optional scraping add-on (`web_scrape`: clean article
+/// text, a link list, a small crawl of ONE site; it exists only where the owner installed the
+/// add-on, and it obeys robots.txt, never logs in). They follow the same rule as `browser_open` in the Full level: no card for an
 /// owner-started run unless the run holds private data AND read untrusted content and the query
 /// or address carries a private word, a data shape or exceeds the budget. They fetch over HTTP
 /// with the tool's own address guard (private networks refused); they start no program and
 /// type nothing into a page.
-pub(crate) const FULL_WEB_READ_CALLS: [&str; 5] = [
+pub(crate) const FULL_WEB_READ_CALLS: [&str; 6] = [
     "web_search",
     "web_extract",
+    "web_scrape",
     "web_feed",
     "web_sitemap",
     "web_metadata",
@@ -622,7 +636,12 @@ impl Shared {
             if d == Decision::Allow && must_ask && !self.gate_waived(ctx, name, input) {
                 // The owner's Full level: an owner-started run browses after reading a page.
                 if self.full_mode_waives(ctx, name, input) {
-                    return (Decision::Allow, Some(FULL_BROWSE_REASON));
+                    let reason = if name == FULL_UPLOAD_CALL {
+                        FULL_UPLOAD_REASON
+                    } else {
+                        FULL_BROWSE_REASON
+                    };
+                    return (Decision::Allow, Some(reason));
                 }
                 return (Decision::ask(), None);
             }
@@ -1225,8 +1244,8 @@ impl Shared {
     ///   it is small (a form field under 40 characters) and the run's running total sent to
     ///   such places is under a budget. Otherwise it asks, as before.
     ///
-    /// The public-web read tools (`web_search`, `web_extract`, `web_feed`, `web_sitemap`,
-    /// `web_metadata`) follow the same rules as `browser_open`: a query or an address is judged
+    /// The public-web read tools (`web_search`, `web_extract`, `web_scrape`, `web_feed`,
+    /// `web_sitemap`, `web_metadata`) follow the same rules as `browser_open`: a query or an address is judged
     /// like the text and the URL of a browser call on a site the owner did not name (it is never
     /// "the owner's own page"), and a query of [`WEB_QUERY_LIMIT`] characters or more asks once
     /// the run holds private data and read untrusted content.
@@ -1245,11 +1264,14 @@ impl Shared {
         // A subagent (and a helper bot another bot called) keeps the old rule: it never inherits
         // the owner's Full autonomy from the run that started it.
         let web_read = FULL_WEB_READ_CALLS.contains(&name);
+        let upload = name == FULL_UPLOAD_CALL;
         if ctx.parent_run_id.is_some()
             || ctx.delegation().is_some()
-            || !(web_read || FULL_BROWSER_CALLS.contains(&name))
+            || !(web_read || upload || FULL_BROWSER_CALLS.contains(&name))
             || ctx.profile.permissions.mode() != AutonomyMode::Full
             || !self.full_waivers_apply(ctx)
+            // a file of this computer: the owner's own run only, never a mission session
+            || (upload && !self.full_owner_started(ctx))
         {
             return false;
         }
@@ -1259,18 +1281,11 @@ impl Shared {
         if !web_read && self.browser_may_hold_logins(ctx, input) {
             return false;
         }
-        if self.content_class(ctx, name, input).executes
-            || crate::browser_url::opens_non_public(name, input)
-            || taint::input_forbids_egress(input)
-            || taint::input_needs_a_card_to_show(input)
-        {
+        if !self.full_input_is_plain(ctx, name, input) {
             return false;
         }
-        if let Some(r) = &self.cfg.redactor {
-            let mut shown = input.clone();
-            if crate::shared::redact_value(r, &mut shown) {
-                return false;
-            }
+        if upload {
+            return self.full_upload_waives(ctx, input);
         }
         let (urls, texts) = crate::full_autonomy::split_input(input);
         // A key, a card number or an encoded blob is never typed or sent silently.
@@ -1349,6 +1364,55 @@ impl Shared {
         }
         taint.seen.sent += sent;
         true
+    }
+
+    /// The part of the Full level's rule every waived call shares: it starts no program, opens
+    /// no non-public address, hides no character and carries nothing the redactor would change.
+    fn full_input_is_plain(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
+        if self.content_class(ctx, name, input).executes
+            || crate::browser_url::opens_non_public(name, input)
+            || taint::input_forbids_egress(input)
+            || taint::input_needs_a_card_to_show(input)
+        {
+            return false;
+        }
+        let Some(r) = &self.cfg.redactor else {
+            return true;
+        };
+        let mut shown = input.clone();
+        !crate::shared::redact_value(r, &mut shown)
+    }
+
+    /// The owner's Full level for `browser_upload`: a file of the bot's workspace is set on a
+    /// page's file input without a card only when ALL hold (on top of everything
+    /// [`Self::full_mode_waives`] already requires: the owner's own run, the Full level, no
+    /// signed-in profile, nothing hidden in the input):
+    ///
+    /// * the page that owns the input is on a site the OWNER named or approved
+    ///   ([`Self::trusted_host`]): a file is private data, and an untrusted page must never be
+    ///   able to talk the bot into carrying one to a site the owner did not choose. On any other
+    ///   site the upload asks, whatever the run has read so far;
+    /// * the input is exactly a `ref` and one or more paths (nothing else rides along).
+    ///
+    /// What this does NOT waive, because the tool itself enforces it before and after any
+    /// approval: the file rules of `fs_read` (the bot's folders, credentials, daemon data), the
+    /// hard refusal of anything that looks like a secret, the size and count caps, a second look
+    /// at the file right before the browser takes it, and an audit record of every upload (name,
+    /// size, hash, destination origin). The owner's site and form rules (block / ask) are
+    /// decided before this and still win.
+    fn full_upload_waives(&self, ctx: &RunCtx, input: &Value) -> bool {
+        let plain_shape = input.as_object().is_some_and(|o| {
+            o.keys()
+                .all(|k| matches!(k.as_str(), "ref" | "path" | "paths"))
+        });
+        if !plain_shape {
+            return false;
+        }
+        let Some(host) = ctx.page_origin.lock().as_deref().and_then(host_of_origin) else {
+            return false;
+        };
+        let named = self.owner_named_hosts(ctx);
+        self.trusted_host(ctx, &host, &named)
     }
 
     /// The owner's Full level for `shell_run` (the bot's OWN host shell) after the run read
@@ -1541,11 +1605,38 @@ impl Shared {
             "browser_open" => {
                 input.as_object().is_some_and(|o| o.len() == 1)
                     && input.get("url").and_then(Value::as_str).is_some_and(|u| {
-                        u.starts_with("https://") && ctx.mail_links.lock().contains(u)
+                        u.starts_with("https://")
+                            && (ctx.mail_links.lock().contains(u)
+                                || self.restored_link_followable(ctx, u))
                     })
             }
             _ => false,
         }
+    }
+
+    /// A link a session before remembered (not one this run's own `email_wait_for`
+    /// returned) is followed without a card only when all three hold: the browser is
+    /// now on the site the wait that judged it was started on (registrable domain, so
+    /// a stale link of site A is not followed while the run works on site B); it
+    /// passes the verifier again with that site and the owner's domain list as it is
+    /// NOW (a domain the owner removed, or a link that was never same-site, no longer
+    /// opens); and it was remembered with that site. A link remembered with no site
+    /// (only the owner's list allowed it) needs the list alone. Anything else asks.
+    fn restored_link_followable(&self, ctx: &RunCtx, url: &str) -> bool {
+        use builtin_tools::connector_email::verify::{LinkVerdict, classify_link, site_domain};
+        let Some(mail) = self.mail.get() else {
+            return false;
+        };
+        let allow = mail.guard().settings().verification_domains();
+        let page = ctx.landed_origin.lock().as_deref().and_then(site_domain);
+        ctx.restored_mail_links.iter().any(|l| {
+            l.url == url
+                && l.site.as_deref().is_none_or(|s| page.as_deref() == Some(s))
+                && matches!(
+                    classify_link(url, l.site.as_deref(), &allow),
+                    LinkVerdict::Followable(_)
+                )
+        })
     }
 
     /// The taint gate for this call: egress after a read, or a program start

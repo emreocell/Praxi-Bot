@@ -48,6 +48,9 @@ pub struct DoctorEnv<'a> {
     /// Opt-in HTTPS endpoint whose `Date` header is compared with the local
     /// clock (`bot doctor --time-url`). `None` = no network request is made.
     pub time_url: Option<&'a str>,
+    /// This computer has no screen (a server or host): the free search engines usually refuse
+    /// such machines as robots, so `bot doctor` warns when no search provider is set.
+    pub headless: bool,
 }
 
 /// Run every check.  The order of the original `bot doctor` lines is kept;
@@ -875,6 +878,11 @@ fn check_web(env: &DoctorEnv<'_>) -> Check {
         &crate::serve::daemon_protected_sockets(env.port),
         &mut notes,
     );
+    if crate::serve::keyless_search_on_headless(&cfg, env.headless) {
+        // Only the free engines on a server: they usually answer with a robot check. Say so
+        // before the first search fails; `--online` below proves it with a real probe.
+        notes.push(crate::serve::SEARCH_PROVIDER_WARNING.to_owned());
+    }
     let backends = crate::serve::web_backend_summary(&cfg);
     let detail = |extra: String| {
         let mut d = format!("backends: {backends}");
@@ -1302,6 +1310,7 @@ id = "m1"
             detected: None,
             desktop: None,
             time_url: None,
+            headless: false,
         }
     }
 
@@ -1461,6 +1470,7 @@ id = "m1"
             detected: None,
             desktop: None,
             time_url: None,
+            headless: false,
         };
         let checks = run_checks(&e);
         assert_eq!(get(&checks, "secret backend").status, Status::Fail);
@@ -1504,6 +1514,7 @@ id = "m1"
             detected: None,
             desktop: None,
             time_url: None,
+            headless: false,
         };
         let checks = run_checks(&e);
         let err = write_report(&e, &checks, &path).unwrap_err().to_string();
@@ -1597,6 +1608,37 @@ id = "m1"
         let c = get(&checks, "web search");
         assert_eq!(c.status, Status::Warn);
         assert!(c.detail.contains("web.toml"), "{}", c.detail);
+    }
+
+    #[test]
+    fn web_check_warns_on_a_server_that_has_only_the_free_engines() {
+        let d = tempfile::tempdir().unwrap();
+        let (cat, store) = (catalog(), MemStore::default());
+        // a computer with a screen: nothing to warn about
+        let checks = run_checks(&env(d.path(), &cat, &store, free_port()));
+        assert_eq!(get(&checks, "web search").status, Status::Ok);
+        // a server: the free engines block datacenter addresses, say so before a search fails
+        let mut e = env(d.path(), &cat, &store, free_port());
+        e.headless = true;
+        let checks = run_checks(&e);
+        let c = get(&checks, "web search");
+        assert_eq!(c.status, Status::Warn, "{}", c.detail);
+        assert!(c.detail.contains("refuse servers"), "{}", c.detail);
+        assert!(
+            c.hint.as_deref().unwrap_or_default().contains("Settings"),
+            "{:?}",
+            c.hint
+        );
+        // a SearXNG address is a provider: no warning any more
+        std::fs::write(
+            d.path().join(crate::serve::WEB_FILE),
+            "[search]\nsearxng_url = \"http://127.0.0.1:8080\"\n",
+        )
+        .unwrap();
+        let checks = run_checks(&e);
+        let c = get(&checks, "web search");
+        assert_eq!(c.status, Status::Ok, "{}", c.detail);
+        assert!(!c.detail.contains("refuse servers"), "{}", c.detail);
     }
 
     #[test]

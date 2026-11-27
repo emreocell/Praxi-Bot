@@ -349,6 +349,183 @@ pub struct FsTool {
     shared: Arc<Shared>,
 }
 
+/// What tells one version of a file on disk from another: write time, creation time and, where
+/// the system has them, the device, inode and change time. A file replaced by another one (a
+/// rename over it, a link swapped in) or written to differs in at least one of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileStamp {
+    modified: Option<std::time::SystemTime>,
+    created: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    unix: (u64, u64, i64, i64),
+    #[cfg(windows)]
+    windows: (u64, u64),
+}
+
+impl FileStamp {
+    fn of(meta: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        let unix = {
+            use std::os::unix::fs::MetadataExt;
+            (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec())
+        };
+        #[cfg(windows)]
+        let windows = {
+            use std::os::windows::fs::MetadataExt;
+            (meta.creation_time(), meta.last_write_time())
+        };
+        Self {
+            modified: meta.modified().ok(),
+            created: meta.created().ok(),
+            #[cfg(unix)]
+            unix,
+            #[cfg(windows)]
+            windows,
+        }
+    }
+}
+
+/// A file another tool may hand on, vetted exactly like an `fs_read` of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VettedFile {
+    /// The file as the operating system will open it (links resolved).
+    pub path: PathBuf,
+    /// Its size in bytes.
+    pub size: u64,
+    /// Which version of the file was vetted, for [`FileGate::recheck`].
+    pub stamp: FileStamp,
+}
+
+/// The file tools' path rules, lent to tools outside this module (`browser_upload`,
+/// the browser's download folder): the same scope, roots, credential and daemon-data denylist,
+/// other-bot workspace refusal and provenance ledger as `fs_read`, never a second copy of them.
+#[derive(Clone)]
+pub struct FileGate {
+    shared: Arc<Shared>,
+    /// Folders already recorded as outside content, so the ledger is written once, not per call.
+    marked: Arc<parking_lot::Mutex<std::collections::HashSet<PathBuf>>>,
+}
+
+impl FileGate {
+    /// This call's view of the shared rules under the bot's file access scope.
+    fn scoped(&self, bot_id: Option<&str>) -> Arc<Shared> {
+        match &self.shared.access {
+            Some(access) => {
+                let scope = access.scope(bot_id);
+                Arc::new(self.shared.scoped(&scope, bot_id))
+            }
+            None => self.shared.clone(),
+        }
+    }
+
+    /// Judge `raw` the way `fs_read` does (relative paths start in the bot's workspace), then
+    /// require a plain file of at most `max_bytes`. A credential file, daemon data, another
+    /// bot's workspace, a path outside the bot's folders, a link that leaves them, a
+    /// directory and a device are all refused.
+    ///
+    /// # Errors
+    /// The path is refused by the file rules, is not a regular file, or is too large.
+    pub fn vet_file(
+        &self,
+        bot_id: Option<&str>,
+        run: &str,
+        raw: &str,
+        max_bytes: u64,
+    ) -> Result<VettedFile, ToolError> {
+        let sh = self.scoped(bot_id);
+        if sh.roots_unresolved {
+            return Err(denied(ROOT_UNRESOLVED_MSG));
+        }
+        let base = sh.workdir.clone();
+        with_base_dir(base, || {
+            let path = validate_read_path(&sh, raw, run)?;
+            if !is_file_nofollow(&path) {
+                return Err(exec_err(format!("{raw} is not a plain file")));
+            }
+            let meta = fs::metadata(&path).map_err(|e| exec_err(format!("{raw}: {e}")))?;
+            let size = meta.len();
+            if size > max_bytes {
+                return Err(exec_err(format!(
+                    "{raw} is {size} bytes; at most {max_bytes} bytes can be uploaded"
+                )));
+            }
+            Ok(VettedFile {
+                path,
+                size,
+                stamp: FileStamp::of(&meta),
+            })
+        })
+    }
+
+    /// Vet `raw` again, right before the file is used, and require the very same file as
+    /// `before`: same resolved path, size and [`FileStamp`]. Closes the gap between judging a
+    /// path and the browser reading it (a swap, a growth, a link put in its place): the rules
+    /// run again on the CURRENT state and any difference refuses the use.
+    ///
+    /// # Errors
+    /// The path is refused now (see [`Self::vet_file`]), or the file is not the one vetted.
+    pub fn recheck(
+        &self,
+        bot_id: Option<&str>,
+        run: &str,
+        raw: &str,
+        before: &VettedFile,
+        max_bytes: u64,
+    ) -> Result<VettedFile, ToolError> {
+        let now = self.vet_file(bot_id, run, raw, max_bytes)?;
+        if now != *before {
+            return Err(exec_err(format!(
+                "{raw} changed after it was checked (a different file, size or time): it was not uploaded. Look at the file, then ask again"
+            )));
+        }
+        Ok(now)
+    }
+
+    /// The folder `sub` inside the calling bot's own workspace, created when missing. `None`
+    /// when the bot has no workspace, or when the folder is not really inside it (a link left
+    /// there by something else).
+    #[must_use]
+    pub fn workspace_dir(&self, bot_id: Option<&str>, sub: &str) -> Option<PathBuf> {
+        let sh = self.scoped(bot_id);
+        let ws = sh.bot_workspace.clone()?;
+        let dir = ws.join(sub);
+        fs::create_dir_all(&dir).ok()?;
+        let opened = with_base_dir(sh.workdir.clone(), || {
+            validate_path(&sh, &dir.to_string_lossy(), Follow::Content)
+        })
+        .ok()?;
+        // `opened` is the folder the file rules resolved and just proved to be inside the
+        // workspace; that very path (not a string made from it) goes to the browser, only
+        // without the verbatim prefix `final_identity` returns on Windows, which it does not
+        // take. The conversion changes a known drive or UNC prefix and nothing else.
+        (under_dir(&opened, &ws) && is_dir_nofollow(&opened))
+            .then(|| browser_cdp::plain_path(&opened))
+    }
+
+    /// Record `dir` and everything under it as coming from outside (see [`crate::provenance`]).
+    /// Written once per folder for the life of the gate.
+    ///
+    /// Returns whether the mark is in the ledger: `false` when this gate has no ledger, so
+    /// nothing written there can be told from the bot's own files (callers must then not let
+    /// anything land in `dir`).
+    #[must_use]
+    pub fn mark_untrusted_tree(&self, dir: &Path, origin: &str) -> bool {
+        let Some(ledger) = &self.shared.provenance else {
+            return false;
+        };
+        if self.marked.lock().insert(dir.to_path_buf()) {
+            crate::provenance::mark_path(ledger.as_ref(), dir, true, origin);
+        }
+        true
+    }
+
+    /// Whether `path` is untrusted by the ledger or by rule.
+    #[must_use]
+    pub fn is_untrusted(&self, path: &Path) -> bool {
+        crate::provenance::is_untrusted(self.shared.provenance.as_deref(), path)
+    }
+}
+
 /// Apply the same daemon boundary to local writers hosted outside this crate.
 /// The lexical, resolved and opened identities are all checked, including a
 /// missing leaf reached through a symlink. No credential/root check is waived.
@@ -474,6 +651,21 @@ pub(crate) fn tools_scoped(
     home: Option<PathBuf>,
     provenance: Option<Arc<dyn crate::provenance::Provenance>>,
 ) -> Vec<Arc<dyn Tool>> {
+    tools_scoped_with_gate(data_dir, allowed_roots, grants, access, home, provenance).0
+}
+
+/// [`tools_scoped`] that also hands out the [`FileGate`] over the very same scope, roots,
+/// credential rules and provenance ledger, for tools outside this module that must judge a
+/// path exactly as `fs_read` does (`browser_upload`).
+#[must_use]
+pub(crate) fn tools_scoped_with_gate(
+    data_dir: &Path,
+    allowed_roots: &[PathBuf],
+    grants: &[PathBuf],
+    access: Option<Arc<dyn crate::FsAccessProvider>>,
+    home: Option<PathBuf>,
+    provenance: Option<Arc<dyn crate::provenance::Provenance>>,
+) -> (Vec<Arc<dyn Tool>>, FileGate) {
     let shared = shared_state(data_dir, allowed_roots, grants, access, home, provenance);
     let fs = PermissionCategory::Fs;
     let defs: Vec<(Op, ToolSpec)> = vec![
@@ -599,7 +791,12 @@ pub(crate) fn tools_scoped(
             ),
         ),
     ];
-    defs.into_iter()
+    let gate = FileGate {
+        shared: shared.clone(),
+        marked: Arc::default(),
+    };
+    let tools = defs
+        .into_iter()
         .map(|(op, spec)| {
             Arc::new(FsTool {
                 spec,
@@ -607,7 +804,8 @@ pub(crate) fn tools_scoped(
                 shared: shared.clone(),
             }) as Arc<dyn Tool>
         })
-        .collect()
+        .collect();
+    (tools, gate)
 }
 
 #[derive(Deserialize)]

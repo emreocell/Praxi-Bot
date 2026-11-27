@@ -268,10 +268,6 @@ impl AgentMailProvider {
             .body)
     }
 
-    async fn list(&self, query: &[(&str, String)]) -> Result<Vec<MessageWire>, EmailError> {
-        Ok(self.list_page(query).await?.messages)
-    }
-
     async fn list_page(&self, query: &[(&str, String)]) -> Result<ListWire, EmailError> {
         let inbox = self.inbox_id()?;
         let v = self
@@ -534,13 +530,32 @@ impl MailboxProvider for AgentMailProvider {
             }
             None => {}
         }
-        let raw = self.list(&query).await?;
-        let messages: Vec<_> = raw.iter().map(MessageWire::summary).collect();
+        if let Some(token) = q.page_token.as_deref().filter(|t| !t.is_empty()) {
+            if !valid_page_token(token) {
+                return Err(EmailError::Input("invalid page_token".into()));
+            }
+            query.push(("page_token", token.to_owned()));
+        }
+        let listed = self.list_page(&query).await?;
+        let next_page_token = match listed.next_page_token {
+            Some(t) if valid_page_token(&t) => Some(t),
+            Some(_) => return Err(ProviderError::BadResponse.into()),
+            None => None,
+        };
+        // The inbox lists what it sent too; a search is about mail that came in.
+        let own = self.address();
+        let messages: Vec<_> = listed
+            .messages
+            .iter()
+            .filter(|m| m.is_inbound(own))
+            .map(MessageWire::summary)
+            .collect();
         let total = messages.len();
         Ok(Found {
             messages,
             total,
             uid_validity: None,
+            next_page_token,
         })
     }
 

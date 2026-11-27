@@ -1061,7 +1061,8 @@ export class MockApiClient extends ApiClient {
     tavily_key_set: false,
     duckduckgo: true,
     duckduckgo_lite: true,
-    bing: true
+    bing: true,
+    needs_provider: false
   };
   emailChannel: EmailChannelSettings = {
     enabled: false,
@@ -3422,7 +3423,8 @@ export class MockApiClient extends ApiClient {
         result_count: backend ? 5 : 0,
         elapsed_ms: 48,
         error: backend ? null : "no search backend configured",
-        fallback_errors: []
+        fallback_errors: [],
+        blocked: false
       };
     }
     if (!action && method === "GET") {
@@ -3462,7 +3464,8 @@ export class MockApiClient extends ApiClient {
         tavily_key_set,
         duckduckgo,
         duckduckgo_lite,
-        bing
+        bing,
+        needs_provider: cur.needs_provider && active_backends.every((n) => n === "duckduckgo" || n === "duckduckgo_lite" || n === "bing")
       };
       return structuredClone(this.webSearchConfig);
     }

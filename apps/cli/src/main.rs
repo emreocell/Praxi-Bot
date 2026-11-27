@@ -21,6 +21,7 @@ mod email_cmd;
 mod email_host;
 mod homeassistant_host;
 mod host;
+mod host_compat;
 mod host_links;
 mod host_provision;
 mod host_runtime;
@@ -695,6 +696,7 @@ fn secret_backend_label(kind: secret_store::BackendKind) -> &'static str {
 fn proxy_state_label(state: &remote_api::ProxyState) -> String {
     match state {
         remote_api::ProxyState::Connected => "connected".to_owned(),
+        remote_api::ProxyState::Incompatible(reason) => format!("connected, but {reason}"),
         remote_api::ProxyState::Reconnecting => "still connecting".to_owned(),
         remote_api::ProxyState::Unreachable(reason) => format!("unreachable: {reason}"),
     }
@@ -1133,6 +1135,7 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
         detected: detect_cli_accounts(),
         desktop: serve::local_desktop(&mut |_| {}).map(|d| d.capabilities()),
         time_url: c.time_url.as_deref(),
+        headless: serve::is_headless(),
     };
     let checks = doctor::run_checks(&env);
     if cli.json {
@@ -2487,6 +2490,7 @@ mod tests {
             detected: None,
             desktop: None,
             time_url: None,
+            headless: false,
         });
         let prov = checks.iter().find(|c| c.title == "providers").unwrap();
         assert!(prov.detail.contains("no LLM provider"), "{}", prov.detail);

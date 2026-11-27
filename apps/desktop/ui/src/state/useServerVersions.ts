@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApiClient } from "../api/client";
+import { reportedRelease } from "../lib/serverUpdate";
 
 /** What this computer knows about one server's version: a number, "asking", or "could not ask". */
 export type ServerVersion = { state: "loading" } | { state: "known"; version: string; releaseTag: string | null } | { state: "unknown" };
@@ -26,7 +27,7 @@ export function useServerVersions(
         let next: ServerVersion;
         try {
           const got = await api.getHostVersion(id);
-          next = { state: "known", version: got.version, releaseTag: got.release_tag ?? null };
+          next = { state: "known", version: got.version, releaseTag: reportedRelease(got.release_tag, got.build_id) };
         } catch {
           next = { state: "unknown" };
         }

@@ -210,6 +210,9 @@ pub struct AdminCliEngineDto {
     pub installed: bool,
     /// `None` when the CLI offers no safe way to check.
     pub signed_in: Option<bool>,
+    /// Known credential file exists. Its contents and validity were not checked.
+    #[serde(default)]
+    pub credential_file_present: bool,
     pub version: Option<String>,
     /// Command that installs it on the host, when one is known.
     pub install_command: Option<String>,
@@ -594,6 +597,7 @@ pub(crate) async fn cli_engines(
                         cli_provider::AuthState::SignedOut => Some(false),
                         cli_provider::AuthState::Unknown => None,
                     },
+                    credential_file_present: row.detail.as_deref() == Some("auth_metadata_only"),
                     install_command: spec
                         .install()
                         .map(cli_provider::registry::InstallCommand::display),
@@ -824,7 +828,10 @@ pub(crate) async fn install_cli_engine(
             };
             error = result.err();
         }
-        let _ = task.detector().detect(true).await;
+        let rows = task.detector().detect(true).await;
+        if error.is_none() && !rows.iter().any(|row| row.id == spec.id && row.installed) {
+            error = Some("not_detected");
+        }
         if error.is_none() {
             // The entry point as the install flow left it: a later sign-in runs nothing else.
             crate::cli_login::record_install_pin(&task, spec.id).await;
@@ -859,11 +866,24 @@ pub(crate) async fn cli_engine_install_status(
     Ok(Json(install_dto(&s, spec).await))
 }
 
+#[utoipa::path(post, operation_id = "admin_host_update", path = "/v1/admin/host-update", tag = "admin", security(("bearer" = [])), request_body = crate::host::HostUpdateInput,
+    responses((status = 202), (status = 403, body = crate::error::ErrorBody), (status = 409, body = crate::error::ErrorBody)))]
+pub(crate) async fn update_host(
+    State(s): State<AppState>,
+    peer: Option<Extension<PeerIdentity>>,
+    _gate: Gate,
+    crate::routes::ApiJson(input): crate::routes::ApiJson<crate::host::HostUpdateInput>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&s, peer.as_ref().map(|p| &p.0))?;
+    crate::host::update(State(s), peer, Some(Json(input))).await
+}
+
 /// The administration routes with their own, small body limit.
 pub(crate) fn routes() -> axum::Router<AppState> {
     use axum::routing::{get, post, put};
     axum::Router::new()
         .route("/v1/admin/state", get(state))
+        .route("/v1/admin/host-update", post(update_host))
         .route("/v1/admin/cli-engines", get(cli_engines))
         .route(
             "/v1/admin/cli-engines/{id}/install",

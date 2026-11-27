@@ -140,6 +140,10 @@ pub enum TransportError {
     HostKeyChanged,
     #[error("the server rejected the login (key or user)")]
     Auth,
+    #[error("OpenSSH refused an unprotected private key file")]
+    KeyPermissions,
+    #[error("the server only offered password authentication")]
+    PasswordOnly,
     #[error("could not reach the server: {0}")]
     Network(String),
     #[error("the command timed out")]

@@ -32,12 +32,16 @@ Use an independently installed **GitHub CLI 2.80.0 or newer**. The installer
 checks this supported minimum before verification or installation. Its required
 `--source-ref`, `--source-digest`, `--custom-trusted-root`, and signer-policy
 flags are available at that floor. Obtain `gh` from [cli.github.com](https://cli.github.com),
-not from a Praxi release asset.
+not from a Praxi release asset. An installation (everything except `--verify-only`) uses
+`/usr/bin/gh` only, which must belong to root and sit in directories only root can write,
+and runs it with a clean `PATH`, `HOME` and `gh` configuration; a `gh` elsewhere on your
+`PATH` is not used. `--verify-only` keeps using the `gh` on your `PATH`.
 
 The **Linux Server Packages** workflow builds `praxi-linux-x86_64.tar.gz` and
 `praxi-linux-aarch64.tar.gz` with companion `.sha256` files. Final releases
-require attestations from a protected tag. Pre-release attestations come from
-the tag or a manual run on `main` for that tag. A release contains the
+require attestations from a protected tag. The installer accepts only provenance
+whose source ref is the release tag itself (`refs/tags/<tag>`), also for pre-releases;
+a manual run on `main` is not accepted. A release contains the
 archives, the attested `install-linux.sh`, and **`praxi-linux.sigstore.json`**.
 Unsigned branch/manual build artifacts cannot be installed by this installer.
 A checksum checks integrity; it never replaces signed provenance.

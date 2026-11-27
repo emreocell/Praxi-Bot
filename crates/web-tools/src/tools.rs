@@ -277,7 +277,8 @@ pub(crate) fn browser_may_help(e: &WebError) -> bool {
         WebError::Policy(_)
         | WebError::InvalidUrl(_)
         | WebError::Config(_)
-        | WebError::Search(_) => false,
+        | WebError::Search(_)
+        | WebError::Challenge(_) => false,
     }
 }
 

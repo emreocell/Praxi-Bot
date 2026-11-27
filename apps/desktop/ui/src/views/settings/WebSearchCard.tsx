@@ -21,6 +21,15 @@ import { MoreInfo } from "../../components/ChoiceList";
 import { SettingGroup, Switch } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { applyWebSearchUpdate } from "../../lib/webSearchDraft";
+import {
+  PROVIDERS,
+  type ProviderId,
+  clearInput,
+  draftChanged,
+  initialProvider,
+  providerConfigured,
+  saveInput
+} from "../../lib/webSearchProvider";
 import { useDaemon } from "../../state/DaemonContext";
 import styles from "./WebSearchCard.module.css";
 import { humanLine } from "../../lib/humanError";
@@ -63,6 +72,8 @@ export function WebSearchCard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [provider, setProvider] = useState<ProviderId>("brave");
+  const [providerChosen, setProviderChosen] = useState(false);
   const [searxngUrl, setSearxngUrl] = useState("");
   const [braveKey, setBraveKey] = useState("");
   const [tavilyKey, setTavilyKey] = useState("");
@@ -70,6 +81,8 @@ export function WebSearchCard() {
   const [testQuery, setTestQuery] = useState("");
   const [testing, setTesting] = useState(false);
   const [report, setReport] = useState<WebSearchTestReport | null>(null);
+  // Where the report is shown: under the provider that was tested, or under "Try a search".
+  const [reportFor, setReportFor] = useState<"provider" | "chain">("chain");
 
   const applyConfig = useCallback((next: WebSearchConfig) => {
     setConfig(next);
@@ -107,6 +120,13 @@ export function WebSearchCard() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Open on the provider that is already set up (the first one), until the owner picks one.
+  useEffect(() => {
+    if (config && !providerChosen) {
+      setProvider(initialProvider(config));
+    }
+  }, [config, providerChosen]);
 
   const patch = async (input: WebSearchConfigInput, toastMessage?: string) => {
     if (!client) {
@@ -151,56 +171,55 @@ export function WebSearchCard() {
     void patch(body, t("settingsModal.webSearch.toast.saved"));
   };
 
-  const saveCredentials = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!client || !config) {
-      return;
-    }
-    const input: WebSearchConfigInput = {};
-    const trimmedUrl = searxngUrl.trim();
-    if (trimmedUrl !== (config.searxng_url ?? "")) {
-      input.searxng_url = trimmedUrl;
-    }
-    if (braveKey.trim().length > 0) {
-      input.brave_key = braveKey.trim();
-    }
-    if (tavilyKey.trim().length > 0) {
-      input.tavily_key = tavilyKey.trim();
-    }
-    if (
-      input.searxng_url === undefined &&
-      input.brave_key === undefined &&
-      input.tavily_key === undefined
-    ) {
-      return;
-    }
-    setSaving(true);
-    try {
-      const updated = await client.updateWebSearch(input);
-      applyDraft(input, updated);
-      setReport(null);
-      toast.show(t("settingsModal.webSearch.toast.saved"), "success");
-    } catch (err) {
-      toast.show(errorText(err), "danger");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const runTest = async () => {
+  const probe = async (backend?: ProviderId) => {
     if (!client) {
       return;
     }
     setTesting(true);
     try {
       const q = testQuery.trim();
-      const res = await client.testWebSearch(q ? { query: q } : {});
+      const res = await client.testWebSearch({
+        ...(q ? { query: q } : {}),
+        ...(backend ? { backend } : {})
+      });
       setReport(res);
+      setReportFor(backend ? "provider" : "chain");
     } catch (e) {
       toast.show(errorText(e), "danger");
     } finally {
       setTesting(false);
     }
+  };
+
+  const draftValue = (id: ProviderId): string =>
+    (id === "brave" ? braveKey : id === "tavily" ? tavilyKey : searxngUrl).trim();
+
+  /** Save what was typed for the chosen provider, then try a search through it. */
+  const saveProvider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!client || !config) {
+      return;
+    }
+    if (draftChanged(provider, draftValue(provider), config)) {
+      const input = saveInput(provider, draftValue(provider));
+      setSaving(true);
+      try {
+        const updated = await client.updateWebSearch(input);
+        applyDraft(input, updated);
+        setReport(null);
+        toast.show(t("settingsModal.webSearch.toast.saved"), "success");
+      } catch (err) {
+        toast.show(errorText(err), "danger");
+        return;
+      } finally {
+        setSaving(false);
+      }
+    }
+    await probe(provider);
+  };
+
+  const clearProvider = (id: ProviderId) => {
+    void patch(clearInput(id), t("settingsModal.webSearch.toast.providerRemoved"));
   };
 
   const statusText = (id: string, cfg: WebSearchConfig): { text: string; active: boolean } => {
@@ -225,11 +244,39 @@ export function WebSearchCard() {
       : { text: t("settingsModal.webSearch.status.disabled"), active: false };
   };
 
-  const hasCredentialEdits =
-    config !== null &&
-    (searxngUrl.trim() !== (config.searxng_url ?? "") ||
-      braveKey.trim().length > 0 ||
-      tavilyKey.trim().length > 0);
+  const selectedConfigured = config !== null && providerConfigured(provider, config);
+  const selectedHasDraft =
+    config !== null && draftChanged(provider, draftValue(provider), config);
+  const busy = saving || testing;
+
+  const keyField = (
+    id: "brave" | "tavily",
+    value: string,
+    setValue: (v: string) => void,
+    cfg: WebSearchConfig
+  ) => (
+    <div className={formStyles.field}>
+      <label className={formStyles.label} htmlFor={`web-${id}-key`}>
+        {t(`settingsModal.webSearch.${id}KeyLabel`)}
+      </label>
+      <input
+        id={`web-${id}-key`}
+        type="password"
+        className={formStyles.input}
+        value={value}
+        autoComplete="off"
+        placeholder={
+          providerConfigured(id, cfg)
+            ? t("settingsModal.webSearch.keyStoredPlaceholder")
+            : t("settingsModal.webSearch.keyEmptyPlaceholder")
+        }
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <p className={formStyles.hint}>
+        <KeyRound aria-hidden="true" /> {t("settingsModal.webSearch.keyWriteOnlyHint")}
+      </p>
+    </div>
+  );
 
   return (
     <div className={styles.root} data-testid="web-search-card">
@@ -248,8 +295,106 @@ export function WebSearchCard() {
         </p>
       ) : null}
 
+      {config?.needs_provider ? (
+        <p className={styles.configWarning} data-testid="web-search-needs-provider">
+          <TriangleAlert aria-hidden="true" />
+          <span>{t("settingsModal.webSearch.needsProvider")}</span>
+        </p>
+      ) : null}
+
       {config ? (
         <>
+          <Card asChild padding="md" elevated>
+            <form className={styles.card} onSubmit={(e) => void saveProvider(e)}>
+              <h4 className={styles.subheading}>{t("settingsModal.webSearch.providerTitle")}</h4>
+              <p className={styles.subhint}>{t("settingsModal.webSearch.providerHint")}</p>
+
+              <div
+                className={styles.actions}
+                role="group"
+                aria-label={t("settingsModal.webSearch.providerChoice")}
+              >
+                {PROVIDERS.map((id) => (
+                  <Button
+                    key={id}
+                    size="sm"
+                    variant={provider === id ? "primary" : "secondary"}
+                    aria-pressed={provider === id}
+                    data-testid={`web-provider-${id}`}
+                    onClick={() => {
+                      setProvider(id);
+                      setProviderChosen(true);
+                    }}
+                  >
+                    {t(backendLabelKey(id))}
+                    {providerConfigured(id, config)
+                      ? ` · ${t("settingsModal.webSearch.status.active")}`
+                      : ""}
+                  </Button>
+                ))}
+              </div>
+
+              <p className={styles.subhint}>
+                {t(`settingsModal.webSearch.providerHelp.${provider}`)}
+              </p>
+
+              {provider === "brave"
+                ? keyField("brave", braveKey, setBraveKey, config)
+                : null}
+              {provider === "tavily"
+                ? keyField("tavily", tavilyKey, setTavilyKey, config)
+                : null}
+              {provider === "searxng" ? (
+                <div className={formStyles.field}>
+                  <label className={formStyles.label} htmlFor="web-searxng-url">
+                    {t("settingsModal.webSearch.searxngLabel")}
+                  </label>
+                  <input
+                    id="web-searxng-url"
+                    type="url"
+                    className={formStyles.input}
+                    value={searxngUrl}
+                    placeholder="http://127.0.0.1:8080"
+                    autoComplete="off"
+                    onChange={(e) => setSearxngUrl(e.target.value)}
+                  />
+                </div>
+              ) : null}
+
+              <div className={styles.actions}>
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="primary"
+                  disabled={busy || !(selectedHasDraft || selectedConfigured)}
+                  data-testid="web-provider-save-test"
+                >
+                  <PlugZap />
+                  {testing
+                    ? t("settingsModal.webSearch.testing")
+                    : selectedHasDraft
+                      ? t("settingsModal.webSearch.saveAndTest")
+                      : t("settingsModal.webSearch.testProvider")}
+                </Button>
+                {selectedConfigured ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => clearProvider(provider)}
+                  >
+                    <Trash2 />
+                    {provider === "searxng"
+                      ? t("settingsModal.webSearch.clearUrl")
+                      : t("settingsModal.webSearch.clearKey")}
+                  </Button>
+                ) : null}
+              </div>
+
+              {report && reportFor === "provider" ? <TestResult report={report} /> : null}
+            </form>
+          </Card>
+
           <Card padding="md" elevated className={styles.card}>
             <h4 className={styles.subheading}>{t("settingsModal.webSearch.testTitle")}</h4>
             <div className={styles.keyRow}>
@@ -264,9 +409,9 @@ export function WebSearchCard() {
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={testing || saving}
+                disabled={busy}
                 data-testid="web-search-test-btn"
-                onClick={() => void runTest()}
+                onClick={() => void probe()}
               >
                 <PlugZap />
                 {testing
@@ -274,217 +419,108 @@ export function WebSearchCard() {
                   : t("settingsModal.webSearch.test")}
               </Button>
             </div>
-
-            {report ? (
-              <div className={styles.result} data-testid="web-search-test-result">
-                <div
-                  className={[
-                    styles.pill,
-                    report.ok ? styles.pillOk : styles.pillBad
-                  ].join(" ")}
-                >
-                  {report.ok ? (
-                    <CircleCheck aria-hidden="true" />
-                  ) : (
-                    <CircleAlert aria-hidden="true" />
-                  )}
-                  <span>
-                    {report.ok && report.backend
-                      ? t("settingsModal.webSearch.testOk", {
-                          backend: t(backendLabelKey(report.backend)),
-                          count: report.result_count,
-                          ms: report.elapsed_ms
-                        })
-                      : t("settingsModal.webSearch.testFailed", {
-                          ms: report.elapsed_ms,
-                          error: report.error ?? ""
-                        })}
-                  </span>
-                </div>
-                {(report.fallback_errors ?? []).length > 0 ? (
-                  <p className={formStyles.hint}>
-                    {t("settingsModal.webSearch.fallbackNotes", {
-                      details: (report.fallback_errors ?? []).join("; ")
-                    })}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
+            {report && reportFor === "chain" ? <TestResult report={report} /> : null}
           </Card>
 
           <MoreInfo label={t("settingsModal.webSearch.advanced")} testId="web-search-advanced">
             <p>{t("settingsModal.webSearch.note")}</p>
-          <div className={styles.section}>
-            <h4 className={styles.subheading}>{t("settingsModal.webSearch.orderTitle")}</h4>
-            <p className={styles.subhint}>{t("settingsModal.webSearch.orderHint")}</p>
-            <SettingGroup>
-              <ul className={styles.list}>
-              {config.order.map((id, index) => {
-                const status = statusText(id, config);
-                const label = t(backendLabelKey(id));
-                return (
-                  <li key={id} className={styles.row} data-testid={`web-backend-${id}`}>
-                    <div className={styles.rowLeft}>
-                      <span className={styles.rank}>{index + 1}.</span>
-                      <span className={styles.name}>{label}</span>
-                      <span
-                        className={[
-                          styles.badge,
-                          status.active ? styles.badgeActive : ""
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                      >
-                        {status.text}
-                      </span>
-                    </div>
-                    <div className={styles.rowControls}>
-                      {isKeylessBackend(id) ? (
-                        <Switch
-                          checked={config[id]}
-                          onChange={(checked) => toggleKeyless(id, checked)}
-                          disabled={saving}
-                          label={t("settingsModal.webSearch.toggleBackend", { name: label })}
-                        />
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={saving || index === 0}
-                        aria-label={t("settingsModal.webSearch.moveUp", { name: label })} title={t("settingsModal.webSearch.moveUp", { name: label })}
-                        onClick={() => moveBackend(index, -1)}
-                      >
-                        <ArrowUp />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={saving || index === config.order.length - 1}
-                        aria-label={t("settingsModal.webSearch.moveDown", { name: label })} title={t("settingsModal.webSearch.moveDown", { name: label })}
-                        onClick={() => moveBackend(index, 1)}
-                      >
-                        <ArrowDown />
-                      </Button>
-                    </div>
-                  </li>
-                );
-              })}
-              </ul>
-            </SettingGroup>
-          </div>
-
-          <Card asChild padding="md" elevated>
-            <form className={styles.card} onSubmit={(e) => void saveCredentials(e)}>
-            <h4 className={styles.subheading}>{t("settingsModal.webSearch.credentialsTitle")}</h4>
-
-            <div className={formStyles.field}>
-              <label className={formStyles.label} htmlFor="web-searxng-url">
-                {t("settingsModal.webSearch.searxngLabel")}
-              </label>
-              <input
-                id="web-searxng-url"
-                type="url"
-                className={formStyles.input}
-                value={searxngUrl}
-                placeholder="http://127.0.0.1:8080"
-                autoComplete="off"
-                onChange={(e) => setSearxngUrl(e.target.value)}
-              />
-              <p className={formStyles.hint}>{t("settingsModal.webSearch.searxngHint")}</p>
+            <div className={styles.section}>
+              <h4 className={styles.subheading}>{t("settingsModal.webSearch.orderTitle")}</h4>
+              <p className={styles.subhint}>{t("settingsModal.webSearch.orderHint")}</p>
+              <SettingGroup>
+                <ul className={styles.list}>
+                  {config.order.map((id, index) => {
+                    const status = statusText(id, config);
+                    const label = t(backendLabelKey(id));
+                    return (
+                      <li key={id} className={styles.row} data-testid={`web-backend-${id}`}>
+                        <div className={styles.rowLeft}>
+                          <span className={styles.rank}>{index + 1}.</span>
+                          <span className={styles.name}>{label}</span>
+                          <span
+                            className={[
+                              styles.badge,
+                              status.active ? styles.badgeActive : ""
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
+                            {status.text}
+                          </span>
+                        </div>
+                        <div className={styles.rowControls}>
+                          {isKeylessBackend(id) ? (
+                            <Switch
+                              checked={config[id]}
+                              onChange={(checked) => toggleKeyless(id, checked)}
+                              disabled={saving}
+                              label={t("settingsModal.webSearch.toggleBackend", { name: label })}
+                            />
+                          ) : null}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={saving || index === 0}
+                            aria-label={t("settingsModal.webSearch.moveUp", { name: label })}
+                            title={t("settingsModal.webSearch.moveUp", { name: label })}
+                            onClick={() => moveBackend(index, -1)}
+                          >
+                            <ArrowUp />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={saving || index === config.order.length - 1}
+                            aria-label={t("settingsModal.webSearch.moveDown", { name: label })}
+                            title={t("settingsModal.webSearch.moveDown", { name: label })}
+                            onClick={() => moveBackend(index, 1)}
+                          >
+                            <ArrowDown />
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </SettingGroup>
             </div>
-
-            <div className={formStyles.field}>
-              <label className={formStyles.label} htmlFor="web-brave-key">
-                {t("settingsModal.webSearch.braveKeyLabel")}
-              </label>
-              <div className={styles.keyRow}>
-                <input
-                  id="web-brave-key"
-                  type="password"
-                  className={[formStyles.input, styles.keyInput].join(" ")}
-                  value={braveKey}
-                  autoComplete="off"
-                  placeholder={
-                    config.brave_key_set
-                      ? t("settingsModal.webSearch.keyStoredPlaceholder")
-                      : t("settingsModal.webSearch.keyEmptyPlaceholder")
-                  }
-                  onChange={(e) => setBraveKey(e.target.value)}
-                />
-                {config.brave_key_set ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={saving}
-                    onClick={() =>
-                      void patch(
-                        { clear_brave_key: true },
-                        t("settingsModal.webSearch.toast.keyCleared")
-                      )
-                    }
-                  >
-                    <Trash2 />
-                    {t("settingsModal.webSearch.clearKey")}
-                  </Button>
-                ) : null}
-              </div>
-              <p className={formStyles.hint}>
-                <KeyRound aria-hidden="true" /> {t("settingsModal.webSearch.keyWriteOnlyHint")}
-              </p>
-            </div>
-
-            <div className={formStyles.field}>
-              <label className={formStyles.label} htmlFor="web-tavily-key">
-                {t("settingsModal.webSearch.tavilyKeyLabel")}
-              </label>
-              <div className={styles.keyRow}>
-                <input
-                  id="web-tavily-key"
-                  type="password"
-                  className={[formStyles.input, styles.keyInput].join(" ")}
-                  value={tavilyKey}
-                  autoComplete="off"
-                  placeholder={
-                    config.tavily_key_set
-                      ? t("settingsModal.webSearch.keyStoredPlaceholder")
-                      : t("settingsModal.webSearch.keyEmptyPlaceholder")
-                  }
-                  onChange={(e) => setTavilyKey(e.target.value)}
-                />
-                {config.tavily_key_set ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={saving}
-                    onClick={() =>
-                      void patch(
-                        { clear_tavily_key: true },
-                        t("settingsModal.webSearch.toast.keyCleared")
-                      )
-                    }
-                  >
-                    <Trash2 />
-                    {t("settingsModal.webSearch.clearKey")}
-                  </Button>
-                ) : null}
-              </div>
-              <p className={formStyles.hint}>{t("settingsModal.webSearch.tavilyHint")}</p>
-            </div>
-
-            <div className={styles.actions}>
-              <Button
-                type="submit"
-                size="sm"
-                variant="primary"
-                disabled={saving || !hasCredentialEdits}
-              >
-                {t("settingsModal.webSearch.save")}
-              </Button>
-            </div>
-            </form>
-          </Card>
           </MoreInfo>
         </>
+      ) : null}
+    </div>
+  );
+}
+
+/** What a search probe found, in plain words (a robot check gets its own sentence). */
+function TestResult({ report }: { report: WebSearchTestReport }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.result} data-testid="web-search-test-result">
+      <div
+        className={[styles.pill, report.ok ? styles.pillOk : styles.pillBad].join(" ")}
+      >
+        {report.ok ? <CircleCheck aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}
+        <span>
+          {report.ok && report.backend
+            ? t("settingsModal.webSearch.testOk", {
+                backend: t(backendLabelKey(report.backend)),
+                count: report.result_count,
+                ms: report.elapsed_ms
+              })
+            : report.blocked
+              ? t("settingsModal.webSearch.testBlocked", { ms: report.elapsed_ms })
+              : t("settingsModal.webSearch.testFailed", {
+                  ms: report.elapsed_ms,
+                  error: report.error ?? ""
+                })}
+        </span>
+      </div>
+      {(report.fallback_errors ?? []).length > 0 ? (
+        <p className={formStyles.hint}>
+          {t("settingsModal.webSearch.fallbackNotes", {
+            details: (report.fallback_errors ?? []).join("; ")
+          })}
+        </p>
       ) : null}
     </div>
   );

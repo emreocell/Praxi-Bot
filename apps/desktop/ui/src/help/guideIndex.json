@@ -109,6 +109,7 @@
       "Tool filters",
       "How the browser moves",
       "When there is nothing to click by name",
+      "Files and tabs",
       "When a step fails",
       "Using the browser you already have open",
       "Managing bots",
@@ -903,6 +904,8 @@
     "title": "Web tools: search and read pages",
     "headings": [
       "Search backend",
+      "Search on a server",
+      "Install SearXNG on the server (one command)",
       "Privacy",
       "Safety",
       "Letting a bot fetch without asking",

@@ -28,17 +28,19 @@ export function UpdateServerModal({
   open,
   hostId,
   onClose,
-  onDone
+  onDone,
+  showCommands = false
 }: {
   open: boolean;
   hostId: string;
   onClose: () => void;
   onDone?: () => void;
+  showCommands?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <Modal open={open} onClose={onClose} size="md" label={t("updateServer.title")}>
-      {open ? <Content hostId={hostId} onClose={onClose} onDone={onDone} /> : null}
+      {open ? <Content hostId={hostId} onClose={onClose} onDone={onDone} showCommands={showCommands} /> : null}
     </Modal>
   );
 }
@@ -56,14 +58,14 @@ function logText(job: HostSetupJob | null): string {
   return [...lines, ...job.notes].join("\n");
 }
 
-function Content({ hostId, onClose, onDone }: { hostId: string; onClose: () => void; onDone?: () => void }) {
+function Content({ hostId, onClose, onDone, showCommands }: { hostId: string; onClose: () => void; onDone?: () => void; showCommands: boolean }) {
   const { t } = useTranslation();
   const toast = useToast();
   const { client, localApi, hostList, refreshHosts } = useDaemon();
   const api = isMockMode() ? client : localApi;
   const host = hostList?.hosts.find((h) => h.id === hostId);
   const name = host?.name ?? t("updateServer.thisServer");
-  const [phase, setPhase] = useState<Phase>("confirm");
+  const [phase, setPhase] = useState<Phase>(showCommands ? "manual" : "confirm");
   const [job, setJob] = useState<HostSetupJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [noSsh, setNoSsh] = useState(false);

@@ -33,6 +33,8 @@ pub struct SearchResult {
     pub messages: Vec<MessageSummary>,
     /// Total matches in the folder (may exceed `messages.len()`).
     pub total: usize,
+    /// API mailboxes: the `page_token` that returns the next page, when there is one.
+    pub next_page_token: Option<String>,
 }
 
 /// Holds account configs and resolves their credentials lazily.
@@ -566,6 +568,7 @@ impl Scoped<'_> {
         Ok(SearchResult {
             messages: found.messages,
             total: found.total,
+            next_page_token: found.next_page_token,
         })
     }
 

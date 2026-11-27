@@ -104,6 +104,7 @@ pub(super) fn is_page_step(op: Op) -> bool {
             | Op::DismissConsent
             | Op::Act
             | Op::Pointer
+            | Op::Upload
     )
 }
 

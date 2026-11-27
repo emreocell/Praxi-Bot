@@ -57,6 +57,13 @@ const WIDGETS_FORM: &str = "<title>form</title><label>Email <input id=email></la
 const WIDGETS_HUMAN: &str = "<title>human</title><style>body{margin:0}</style><div id=box style='width:30px;height:30px;border:2px solid #000;margin:20px;float:left' \
 onclick=\"this.textContent='x';parent.postMessage('human','*')\"></div><span style='line-height:70px'>I am human</span>";
 
+/// Files in and out: two file inputs (one takes several files) that show what they were given,
+/// download links (a text file, one whose name tries to leave the folder, a 3000
+/// byte one for the size cap), and a link that opens a new tab.
+const FILES: &str = "<title>Files</title><h1>Files</h1><label>Pick <input type=file id=f></label><label>Many <input type=file id=m multiple></label><p id=out>none</p><a href=\"/dl/hello.txt\">Get hello</a> <a href=\"/dl/evil.txt\">Get evil</a> <a href=\"/dl/big.bin\">Get big</a> <a href=\"/second\" target=_blank>Open second</a><script>document.getElementById('f').addEventListener('change',async e=>{const x=e.target.files[0];document.getElementById('out').textContent='picked:'+x.name+':'+await x.text();});document.getElementById('m').addEventListener('change',e=>{document.getElementById('out').textContent='many:'+[...e.target.files].map(f=>f.name).join(',');});</script>";
+
+const SECOND: &str = "<title>Second</title><h1>Second tab</h1><button>Hi</button>";
+
 /// Start the server on a random port; returns the port.
 pub async fn serve() -> u16 {
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -87,8 +94,22 @@ pub async fn serve() -> u16 {
                     "/r1" => redirect("/r2"),
                     "/r2" => redirect("/r3"),
                     "/r3" => "HTTP/1.1 200 OK\r\nContent-Type: image/gif\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+                    p if p.starts_with("/dl/") => {
+                        let (name, body) = match p {
+                            "/dl/hello.txt" => ("hello.txt", "hello download".to_string()),
+                            "/dl/evil.txt" => ("../../evil.txt", "not a path".to_string()),
+                            "/dl/big.bin" => ("big.bin", "x".repeat(3000)),
+                            _ => ("other.bin", String::new()),
+                        };
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                    }
                     p => {
                         let body = match p {
+                            "/files" => FILES,
+                            "/second" => SECOND,
                             "/form" => FORM,
                             "/redir" => REDIR,
                             "/poll" => POLL,

@@ -79,6 +79,7 @@ impl MailboxProvider for Fake {
             messages: m,
             total,
             uid_validity: *self.validity.lock().unwrap(),
+            next_page_token: None,
         })
     }
     async fn get_message(

@@ -2621,6 +2621,11 @@
         "failed": "Couldn't dismiss the cookie banner",
         "running": "Dismissing a cookie banner on a page"
       },
+      "browser_downloads": {
+        "done": "Checked the files the browser downloaded",
+        "failed": "Couldn't check the downloaded files",
+        "running": "Checking the downloaded files"
+      },
       "browser_eval": {
         "done": "Ran a script in the browser",
         "failed": "Didn't run a script in the browser",
@@ -2656,6 +2661,11 @@
         "failed": "Didn't press a key in the browser",
         "running": "Pressing a key in the browser"
       },
+      "browser_reload": {
+        "done": "Reloaded a page",
+        "failed": "Couldn't reload a page",
+        "running": "Reloading a page"
+      },
       "browser_select": {
         "done": "Chose an option on a page",
         "failed": "Didn't choose an option",
@@ -2665,6 +2675,16 @@
         "done": "Selected text on a page",
         "failed": "Didn't select text on a page",
         "running": "Selecting text on a page"
+      },
+      "browser_tabs": {
+        "done": "Worked with browser tabs",
+        "failed": "Couldn't change browser tabs",
+        "running": "Working with browser tabs"
+      },
+      "browser_upload": {
+        "done": "Put a file into a page's form",
+        "failed": "Couldn't upload a file to a page",
+        "running": "Putting a file into a page's form"
       },
       "browser_view": {
         "done": "Looked at a page",
@@ -4597,7 +4617,7 @@
     "connecting": "Connecting to {{name}}…",
     "noModelKey": "{{name}} has no model key yet. You can watch its screen and manage its bots, but chats cannot be answered until a key is added on the host.",
     "notPaired": "{{name}} no longer accepts this computer. Pair again with a new ticket.",
-    "offline": "{{name}} is not answering. Its bots keep running; this app reconnects on its own.",
+    "offline": "{{name}} is offline. Check that the Praxi service is running on the server. This app will retry automatically.",
     "updateApp": "Update needed: this app ({{local}}) is older than {{name}} ({{host}}). Update this app to use {{name}}.",
     "updateHost": "Update needed: {{name}} ({{host}}) is older than this app ({{local}}). Update {{name}} to match this app.",
     "useThisComputer": "Use this computer",
@@ -6344,6 +6364,22 @@
     "username": "Username",
     "value": "Secret value"
   },
+  "serverConnectionStatus": {
+    "available": "Praxi {{tag}} is available for {{name}}. Update this app to the matching release before updating the server.",
+    "credentialFound": "Installed · sign-in file found, sign-in unverified",
+    "denied": "This computer needs administrator access to update {{name}}. Confirm it on the server, or run the update commands there.",
+    "failed": "The update of {{name}} failed. Try again or check the update service logs on the server.",
+    "loginNeeded": "Installed · sign-in needed",
+    "pairCheckVersion": "The releases differ. Select the server to see which device needs an update.",
+    "pairVersion": "This server uses a different pairing protocol. Install the same Praxi release on both devices, then make a new pairing code on the server.",
+    "protocolMismatch": "{{name}} reports {{host}}, but its connection protocol differs from this app. Reinstall the matching release on the server.",
+    "refused": "{{name}} could not start the update. Wait if another update is running, or use the update commands on the server.",
+    "rollback_failed": "The update of {{name}} failed and the previous version did not pass its check. Open the server console and check the Praxi service logs.",
+    "rolled_back": "{{name}} is running its previous version again. Check the update service logs before retrying.",
+    "running": "{{name}} is installing {{tag}}. It will restart and this app will reconnect automatically.",
+    "unidentified": "{{name}} reports {{host}} without a release tag. Update the server to match this app ({{local}}).",
+    "versionMismatch": "Update needed"
+  },
   "serverSignIn": {
     "apiKey": {
       "label": "API key for {{provider}}",
@@ -7405,9 +7441,9 @@
       },
       "braveKeyLabel": "Brave Search API key",
       "clearKey": "Clear key",
+      "clearUrl": "Remove address",
       "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
-      "credentialsTitle": "Self-hosted & API backends",
-      "description": "Lets your bots search the internet. Free search works without any setup.",
+      "description": "Lets your bots search the internet. A server needs a search provider.",
       "fallbackNotes": "Earlier fallback errors before success: {{details}}",
       "keyEmptyPlaceholder": "Enter API key…",
       "keyStoredPlaceholder": "Key stored (enter a new key to replace)",
@@ -7415,11 +7451,19 @@
       "loadError": "Could not load web search settings: {{message}}",
       "moveDown": "Move {{name}} down",
       "moveUp": "Move {{name}} up",
+      "needsProvider": "This computer has no screen and no search provider. The free search engines (DuckDuckGo, Bing) usually refuse servers as robots, so your bots may not find anything. Connect a search provider below.",
       "note": "Search tries the providers below in order until one answers. Changes apply right away.",
       "orderHint": "Move preferred backends up. Keyless fallbacks work without an API key but may occasionally hit upstream rate limits.",
       "orderTitle": "Backend order & fallbacks",
-      "save": "Save changes",
-      "searxngHint": "Base URL of your own SearXNG instance (clear and save to disable).",
+      "providerChoice": "Choose a search provider",
+      "providerHelp": {
+        "brave": "Create a key in your Brave Search API account and paste it here.",
+        "searxng": "The address of your own SearXNG server, for example http://127.0.0.1:8080. The web search guide has a one-command install for a server.",
+        "tavily": "Create a key in your Tavily account and paste it here."
+      },
+      "providerHint": "Bots search the web through a search provider. The free engines often work on a home computer, but they usually block servers, so a server needs one of these.",
+      "providerTitle": "Search provider",
+      "saveAndTest": "Save and test",
       "searxngLabel": "SearXNG URL",
       "status": {
         "active": "Active",
@@ -7427,18 +7471,20 @@
         "needsKey": "Needs API key",
         "needsUrl": "Needs URL"
       },
-      "tavilyHint": "Optional API key for Tavily Search (stored write-only in the secret store).",
       "tavilyKeyLabel": "Tavily Search API key",
       "test": "Search",
+      "testBlocked": "The free search engines refused this computer as a robot ({{ms}} ms). This is common on servers. Connect a search provider above (Brave Search, Tavily or SearXNG) and test again.",
       "testFailed": "Search probe failed ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} answered ({{count}} results in {{ms}} ms)",
       "testOk_one": "{{backend}} answered ({{count}} result in {{ms}} ms)",
+      "testProvider": "Test this provider",
       "testQueryLabel": "Test search query",
       "testTitle": "Try a search",
       "testing": "Searching…",
       "title": "Web search",
       "toast": {
         "keyCleared": "API key removed from secret store",
+        "providerRemoved": "Search provider removed",
         "saved": "Web search settings saved"
       },
       "toggleBackend": "Toggle {{name}}"

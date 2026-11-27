@@ -495,6 +495,54 @@
         ]
       }
     },
+    "/v1/admin/host-update": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "admin_host_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/import/bots": {
       "post": {
         "tags": [
@@ -11191,11 +11239,41 @@
           "host"
         ],
         "operationId": "host_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "202": {
             "description": ""
           },
           "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
             "description": "",
             "content": {
               "application/json": {
@@ -20063,6 +20141,10 @@
             "type": "boolean",
             "description": "The host can run that command itself (a verified, fixed installer)."
           },
+          "credential_file_present": {
+            "type": "boolean",
+            "description": "Known credential file exists. Its contents and validity were not checked."
+          },
           "docs_url": {
             "type": "string"
           },
@@ -26538,6 +26620,12 @@
             "type": "string",
             "description": "HTTP API compatibility version."
           },
+          "build_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "channels_active": {
             "type": "boolean",
             "description": "`true` only when this daemon is the active leader and its automatic\ncomponents (scheduler, channels) are running. `false` on standby."
@@ -26549,6 +26637,24 @@
           "host": {
             "$ref": "#/components/schemas/HostInfo",
             "description": "Capabilities of this host; probes never launch a browser."
+          },
+          "host_update": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HostUpdateStatus",
+                "description": "Managed update capability and the result of the most recent attempt."
+              }
+            ]
+          },
+          "release_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact published release, when known."
           },
           "safe_mode": {
             "type": "boolean",
@@ -27424,6 +27530,47 @@
           },
           "present": {
             "type": "boolean"
+          }
+        }
+      },
+      "HostUpdateInput": {
+        "type": "object",
+        "required": [
+          "tag"
+        ],
+        "properties": {
+          "tag": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HostUpdateState": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "available",
+          "running",
+          "updated",
+          "failed",
+          "rolled_back",
+          "rollback_failed"
+        ]
+      },
+      "HostUpdateStatus": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/HostUpdateState"
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -37103,6 +37250,10 @@
             "type": "boolean",
             "description": "Whether the `DuckDuckGo` Lite fallback is enabled."
           },
+          "needs_provider": {
+            "type": "boolean",
+            "description": "`true` on a computer with no screen (a server or host) that has no search provider\n(Brave, Tavily or `SearXNG`): the free engines usually refuse such machines as robots, so\nthe Settings page asks the owner to add a provider."
+          },
           "order": {
             "type": "array",
             "items": {
@@ -37231,6 +37382,10 @@
               "null"
             ],
             "description": "Backend that answered (`null` when all failed)."
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "`true` when every engine that was tried refused this computer as a robot (a bot\nchallenge or a captcha page), the usual failure of the free engines on a server."
           },
           "elapsed_ms": {
             "type": "integer",

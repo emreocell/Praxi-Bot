@@ -99,6 +99,7 @@ fn quick(timeout_ms: u64) -> WaitPlan {
     WaitPlan {
         timeout: Duration::from_millis(timeout_ms),
         max_age: Duration::from_secs(15 * 60),
+        since: None,
         first_pause: Duration::from_millis(20),
         max_pause: Duration::from_millis(40),
     }

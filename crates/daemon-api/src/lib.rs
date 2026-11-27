@@ -1367,7 +1367,12 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/host/devices/{key}/admin", put(host::set_admin))
         .route("/v1/host/standby", post(host::standby))
         .route("/v1/host/activate", post(host::activate))
-        .route("/v1/host/update", post(host::update))
+        .route(
+            "/v1/host/update",
+            post(host::update).layer(axum::extract::DefaultBodyLimit::max(
+                host_admin::MAX_ADMIN_BODY,
+            )),
+        )
         .route("/v1/health", get(r::health))
         .route("/v1/view/targets", get(v::targets))
         .route("/v1/view/availability", get(v::availability))
@@ -2059,8 +2064,9 @@ pub async fn serve_with_startup(
 }
 
 /// Longest the background startup (`prepare`, peer check, component start) may run
-/// before health reports `degraded`.
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
+/// before health reports `degraded`. The managed updater waits at least this long for a new
+/// release to report ready before it rolls back.
+pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
 
 async fn serve_with_startup_timeout(
     listener: TcpListener,
