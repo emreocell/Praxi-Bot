@@ -510,13 +510,17 @@ export async function flows(ctx) {
     const name = `smoke-http-${Date.now()}`;
     await form.getByLabel('Server URL (HTTP)').fill('https://example.invalid/mcp');
     await form.getByLabel('Name', { exact: true }).fill(name);
+    let created = null;
+    page.on('response', async (r) => {
+      if (r.request().method() === 'POST' && r.url().endsWith('/v1/mcp/servers')) created = `${r.status()} ${(await r.text().catch(() => '')).slice(0, 300)}`;
+    });
     await page.getByTestId('mcp-add').click();
     // The form stays open (fresh) and the new server's row, switched off, shows in the list below it.
     const row = page.getByTestId(`mcp-server-${name}`);
     const alert = form.locator('[role=alert]').first();
     await Promise.race([row.waitFor(T), alert.waitFor(T)]).catch(() => null);
     if (!(await row.count())) {
-      throw new Error(`custom MCP server row missing; form says: ${(await alert.textContent().catch(() => null)) ?? (await form.textContent().catch(() => '')).slice(-200)}`);
+      throw new Error(`custom MCP server row missing; daemon answered: ${created}; form says: ${(await alert.textContent().catch(() => null)) ?? (await form.textContent().catch(() => '')).slice(-200)}`);
     }
     await page.keyboard.press('Escape');
   });
