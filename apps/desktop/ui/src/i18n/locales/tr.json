@@ -6449,7 +6449,10 @@
       "bot": "Bot oluşturulamadı. Hiçbir şey başlatılmadı. Yeniden deneyin.",
       "chat": "Bot oluşturuldu ama sohbeti açılamadı. Yeniden deneyin; ikinci bir bot oluşturulmaz.",
       "check": "Bazı cevaplar eksik. Geri dönüp doldurun.",
-      "message": "Bot ve sohbeti hazır ama görev gönderilemedi. Yeniden deneyin; hiçbir şey iki kez oluşturulmaz."
+      "goal": "Görev metni uzun bir görev için çok uzun. Geri dönüp cevaplarınızı kısaltın. Hiçbir şey oluşturulmadı.",
+      "level": "Bot daha önce başka bir düzeyde oluşturuldu. Devam etmek için o düzeye dönün ya da bu pencereyi kapatıp baştan başlayın.",
+      "message": "Bot ve sohbeti hazır ama görev gönderilemedi. Yeniden deneyin; hiçbir şey iki kez oluşturulmaz.",
+      "mission": "Bot hazır ama uzun görev başlatılamadı. Yeniden deneyin; ikinci bir bot ya da görev oluşturulmaz."
     },
     "hints": {
       "pick": "İstediğiniz şeyi seçin. Hiçbir şey oluşturulmadan önce her şeyi gözden geçirirsiniz.",
@@ -6458,6 +6461,7 @@
     },
     "levelRaised": "Bu hedefin istediğinden ({{level}}) daha serbest bir düzey seçtiniz. Bot size daha seyrek soracak.",
     "levelTitle": "Ne kadar serbest çalışsın",
+    "missionHint": "{{level}} düzeyinde bu hedef uzun bir görev olarak çalışır: yeniden başlatmalarda kaybolmayan bir iş listesiyle bitene kadar sürer. Daha düşük düzeyde tek bir sohbet görevi olarak çalışır.",
     "need": {
       "app": {
         "fix": "Uygulama bağla",
@@ -6492,6 +6496,7 @@
       "bot": "\"{{name}}\" adında yeni bir bot.",
       "folder": "Bot yalnızca {{folder}} içinde okuyup yazabilir.",
       "later": "Botun adını, görünümünü ve ayarlarını sonradan değiştirebilirsiniz.",
+      "mission": "\"{{name}}\" görevi kendi sohbetinde uzun bir görev olarak hemen başlar: bot işi listeler, sormadan sırayla yürütür ve sonunda rapor verir.",
       "ownMail": "Botun için bağladığınız posta kutusunu kullanır, kişisel hesaplarınızı asla.",
       "task": "\"{{name}}\" görevi yeni bir sohbette hemen başlar."
     },

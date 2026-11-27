@@ -61,6 +61,16 @@ export interface RecipeSchedule {
   weekday?: number;
 }
 
+/**
+ * What a long recipe adds when it runs as a mission (only on a bot the owner put on the Full level;
+ * the daemon refuses a mission anywhere else).  `plan` says what one ledger item is, per language;
+ * the bot lists the items itself at the start.  `budgets` are the limits the supervisor enforces.
+ */
+export interface RecipeMission {
+  plan: Record<string, string>;
+  budgets: { max_sessions: number; max_model_steps: number; max_minutes: number };
+}
+
 export interface RecipeText {
   name: string;
   blurb: string;
@@ -76,6 +86,7 @@ export interface Recipe {
   needs: RecipeNeed[];
   questions: RecipeQuestion[];
   schedule?: RecipeSchedule;
+  mission?: RecipeMission;
   text: Record<string, RecipeText>;
 }
 
@@ -90,7 +101,11 @@ const QUESTION_KINDS: readonly QuestionKind[] = ["text", "longtext", "url", "cho
 const FREQUENCIES: readonly string[] = ["daily", "weekdays", "weekly", "monthly"];
 const MAX_GOAL = 4000;
 const MAX_ANSWER = 2000;
-const RECIPE_KEYS = ["id", "icon", "level", "bot", "needs", "questions", "schedule", "text"];
+/** The daemon refuses a mission goal longer than this (`MAX_GOAL_CHARS`). */
+export const MAX_MISSION_GOAL = 4000;
+/** Ceilings for a recipe's own mission budgets: a recipe cannot ask for an open-ended run. */
+const MISSION_BUDGET_MAX = { max_sessions: 200, max_model_steps: 5000, max_minutes: 30 * 24 * 60 } as const;
+const RECIPE_KEYS = ["id", "icon", "level", "bot", "needs", "questions", "schedule", "mission", "text"];
 const QUESTION_KEYS = ["id", "kind", "required", "default", "options", "text"];
 
 type Json = Record<string, unknown>;
@@ -250,6 +265,28 @@ export function validateRecipe(raw: unknown): RecipeCheck {
     }
   }
 
+  if (raw.mission !== undefined) {
+    const m = raw.mission;
+    if (!isObj(m)) {
+      errors.push(`${where}: mission must be an object`);
+    } else {
+      unknownKeys(m, ["plan", "budgets"], `${where}.mission`, errors);
+      if (!isObj(m.plan) || !isStr(m.plan.en) || !Object.values(m.plan).every(isStr)) {
+        errors.push(`${where}.mission: plan needs an "en" text`);
+      }
+      const b = m.budgets;
+      if (!isObj(b)) {
+        errors.push(`${where}.mission: budgets are needed`);
+      } else {
+        unknownKeys(b, Object.keys(MISSION_BUDGET_MAX), `${where}.mission.budgets`, errors);
+        for (const [k, max] of Object.entries(MISSION_BUDGET_MAX)) {
+          const v = b[k];
+          if (!(Number.isInteger(v) && (v as number) >= 1 && (v as number) <= max)) errors.push(`${where}.mission.budgets: ${k} must be a whole number from 1 to ${max}`);
+        }
+      }
+    }
+  }
+
   const text = raw.text;
   if (!isObj(text) || !isObj(text.en)) {
     errors.push(`${where}: text needs an "en" entry`);
@@ -398,6 +435,24 @@ export function fillGoal(book: Pick<RecipeBook, "empty">, recipe: Recipe, answer
  */
 export function buildKickoff(book: Pick<RecipeBook, "empty" | "guidance">, recipe: Recipe, answers: Answers, lang: string): string {
   return `${fillGoal(book, recipe, answers, lang)}\n\n${pickLang(book.guidance, lang)}`;
+}
+
+/**
+ * Does this launch run as a mission?  Only when the recipe describes long work AND the owner
+ * confirmed the Full level: a mission works without asking, so it is the owner's level choice that
+ * allows it, never the recipe's.  Below Full the same task runs as one chat run.
+ */
+export function runsAsMission(recipe: Pick<Recipe, "mission">, level: AutonomyLevel): boolean {
+  return recipe.mission !== undefined && level === "auto";
+}
+
+/**
+ * The mission's goal: the recipe goal with the answers, then what one ledger item is.  Without the
+ * chat guidance (a progress file, "ask me"): the mission ledger and its brief replace those.
+ */
+export function buildMissionGoal(book: Pick<RecipeBook, "empty">, recipe: Recipe, answers: Answers, lang: string): string {
+  const plan = recipe.mission ? pickLang(recipe.mission.plan, lang) : "";
+  return plan ? `${fillGoal(book, recipe, answers, lang)}\n\n${plan}` : fillGoal(book, recipe, answers, lang);
 }
 
 /** The folder the bot should be confined to, if the recipe asks for one. */

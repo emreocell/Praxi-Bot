@@ -48,6 +48,17 @@ jobs and links here.
 The bot may ask its questions once, in one message, at the start. After that it
 decides for itself and writes the decisions down; you read them in the report.
 
+### Or start from a goal
+
+The **Start from a goal** recipes that describe long work (get backlinks, collect leads into a
+spreadsheet, watch competitor pages, a weekly report from your files) run as a mission when you
+set the bot's level to **Full access** in the review step. The bot is created at the level you
+confirm (a recipe never asks for Full itself), the mission gets its own chat, and the app opens
+it, with the progress at the top. On a lower level the same goal is one ordinary chat task, and
+the review step says so. A recipe that repeats (competitor watch, weekly report) starts the
+mission as the first big pass; the schedule then repeats the check as a normal run. Short recipes
+(a daily brief, inbox triage) are never missions.
+
 ### Or just ask in the chat
 
 On a bot at the **Full** level you can also write the job in your own chat (typed

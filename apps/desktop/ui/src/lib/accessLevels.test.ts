@@ -55,7 +55,8 @@ test("the bot editor, the new-bot dialog and Settings choose with the same picke
     "../views/SettingsSections.tsx",
     "../views/firstrun/FreedomStep.tsx",
     "../views/OnboardingView.tsx",
-    "../views/NewBotModal.tsx"
+    "../views/NewBotModal.tsx",
+    "../views/RecipeFlow.tsx"
   ]) {
     const src = read(file);
     assert.match(src, /accessLevelKey\(/, file);

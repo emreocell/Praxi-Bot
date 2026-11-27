@@ -6449,7 +6449,10 @@
       "bot": "The bot could not be created. Nothing was started. Try again.",
       "chat": "The bot was created, but its chat could not be opened. Try again; no second bot will be made.",
       "check": "Some answers are missing. Go back and fill them in.",
-      "message": "The bot and its chat are ready, but the task could not be sent. Try again; nothing is created twice."
+      "goal": "The task text is too long for a mission. Go back and shorten your answers. Nothing was created.",
+      "level": "The bot was already created on another level. Switch back to that level to continue, or close this window and start again.",
+      "message": "The bot and its chat are ready, but the task could not be sent. Try again; nothing is created twice.",
+      "mission": "The bot is ready, but the mission could not be started. Try again; no second bot or mission will be made."
     },
     "hints": {
       "pick": "Pick what you want. You review everything before anything is created.",
@@ -6458,6 +6461,7 @@
     },
     "levelRaised": "You chose a freer level than this goal asks for ({{level}}). The bot will ask you less often.",
     "levelTitle": "How freely it may work",
+    "missionHint": "On {{level}} this goal runs as a mission: a work list that survives restarts and goes on until it is done. On a lower level it runs as one chat task.",
     "need": {
       "app": {
         "fix": "Connect an app",
@@ -6492,6 +6496,7 @@
       "bot": "A new bot named \"{{name}}\".",
       "folder": "The bot can read and write only inside {{folder}}.",
       "later": "You can change the bot's name, look and settings afterwards.",
+      "mission": "The task \"{{name}}\" starts right away as a mission in its own chat: the bot lists the work, goes through it without asking and reports back.",
       "ownMail": "It uses the mailbox you connect for the bot, never your personal accounts.",
       "task": "The task \"{{name}}\" starts right away in a new chat."
     },

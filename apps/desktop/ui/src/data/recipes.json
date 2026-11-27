@@ -100,6 +100,17 @@
           }
         }
       ],
+      "mission": {
+        "plan": {
+          "en": "Mission plan: make one ledger item per website you try (the key is the site's domain), and plan the sites first. Never write passwords in notes or the ledger.",
+          "tr": "Görev planı: denediğin her web sitesi için defterde bir madde aç (anahtar sitenin alan adı olsun) ve önce siteleri planla. Şifreleri notlara ya da deftere asla yazma."
+        },
+        "budgets": {
+          "max_sessions": 40,
+          "max_model_steps": 1200,
+          "max_minutes": 10080
+        }
+      },
       "text": {
         "en": {
           "name": "Get backlinks for my site",
@@ -332,6 +343,17 @@
           }
         }
       ],
+      "mission": {
+        "plan": {
+          "en": "Mission plan: this mission is the first pass only. Make one ledger item per page (the key is the page address): read it and save the baseline to the notes file. Later checks run on their own schedule, not in this mission.",
+          "tr": "Görev planı: bu görev yalnızca ilk turdur. Her sayfa için defterde bir madde aç (anahtar sayfa adresi olsun): sayfayı oku ve başlangıç bilgisini not dosyasına kaydet. Sonraki kontroller bu görevde değil, kendi zamanlamasında çalışır."
+        },
+        "budgets": {
+          "max_sessions": 20,
+          "max_model_steps": 600,
+          "max_minutes": 2880
+        }
+      },
       "text": {
         "en": {
           "name": "Monitor competitor prices and pages",
@@ -420,6 +442,17 @@
           }
         }
       ],
+      "mission": {
+        "plan": {
+          "en": "Mission plan: make one ledger item per website in the list (the key is the site's address). Write each row to the file as soon as its site is done, and name the sites you could not read in the final report.",
+          "tr": "Görev planı: listedeki her web sitesi için defterde bir madde aç (anahtar sitenin adresi olsun). Bir sitenin işi bitince satırını hemen dosyaya yaz; okuyamadığın siteleri son raporda belirt."
+        },
+        "budgets": {
+          "max_sessions": 30,
+          "max_model_steps": 900,
+          "max_minutes": 4320
+        }
+      },
       "text": {
         "en": {
           "name": "Collect leads from a website list into a spreadsheet",
@@ -491,6 +524,17 @@
           }
         }
       ],
+      "mission": {
+        "plan": {
+          "en": "Mission plan: make one ledger item per subfolder or group of changed files you need to read, then a last item to write the report file. Do not change or delete any existing file.",
+          "tr": "Görev planı: okuman gereken her alt klasör ya da değişen dosya grubu için defterde bir madde aç, en sona da rapor dosyasını yazma maddesini ekle. Mevcut hiçbir dosyayı değiştirme ya da silme."
+        },
+        "budgets": {
+          "max_sessions": 20,
+          "max_model_steps": 600,
+          "max_minutes": 1440
+        }
+      },
       "text": {
         "en": {
           "name": "Weekly report from my files",

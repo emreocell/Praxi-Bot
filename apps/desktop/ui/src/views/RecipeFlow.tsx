@@ -22,7 +22,8 @@ import formStyles from "../components/Form.module.css";
 import { Modal } from "../components/Modal";
 import { Segmented, Switch } from "../components/SettingsUi";
 import { hasRealModel } from "../demo/demoEngine";
-import { AUTONOMY_LEVELS, type AutonomyLevel, formatModelRef, resolveAutoExecutorRef } from "../lib/botProfile";
+import { accessLevelKey } from "../lib/accessLevels";
+import { AUTONOMY_LEVELS, type AutonomyLevel, autonomyToPreset, formatModelRef, resolveAutoExecutorRef } from "../lib/botProfile";
 import { humanLine } from "../lib/humanError";
 import { type LaunchProgress, launchRecipe, type LaunchStage } from "../lib/recipeLaunch";
 import { BOOK } from "../lib/recipeBook";
@@ -40,7 +41,8 @@ import {
   questionText,
   recipeBotName,
   recipeFolder,
-  recipeText
+  recipeText,
+  runsAsMission
 } from "../lib/recipes";
 import { useDaemon } from "../state/DaemonContext";
 import { useEngineConsent } from "../state/EngineConsent";
@@ -73,6 +75,11 @@ function stepsFor(recipe: Recipe | null): Step[] {
 function needKey(need: RecipeNeed): "model" | "browser" | "emailOwn" | "emailInbox" | "app" {
   if (need.kind === "email") return need.purpose === "own" ? "emailOwn" : "emailInbox";
   return need.kind;
+}
+
+/** The shared access-level name ("Full access", "Balanced", "Careful") of a recipe level. */
+function levelKey(level: AutonomyLevel): string {
+  return accessLevelKey(autonomyToPreset(level));
 }
 
 function Flow({
@@ -200,6 +207,7 @@ function Flow({
       }
       await Promise.allSettled([refreshBots(), refreshChats()]);
       if (res.schedule === "failed") toast.show(t("recipes.scheduleFailed"), "info");
+      // A mission opens in its own chat, where its progress shows above the conversation.
       onDone(res.botId, res.chatId);
     } catch (e) {
       setError(humanLine(e));
@@ -217,6 +225,7 @@ function Flow({
   const steps = stepsFor(recipe);
   const text = recipe ? recipeText(recipe, lang) : null;
   const folder = recipe ? recipeFolder(recipe, answers) : null;
+  const asMission = recipe ? runsAsMission(recipe, level) : false;
 
   return (
     <form className={styles.form} onSubmit={handleSubmit} noValidate data-step={step} data-testid="recipe-flow">
@@ -288,22 +297,27 @@ function Flow({
               <h3 id="recipe-create-title" className={styles.sectionTitle}>{t("recipes.createTitle")}</h3>
               <ul className={styles.facts} data-testid="recipe-preview">
                 <li>{t("recipes.preview.bot", { name: recipeBotName(recipe, lang) })}</li>
-                <li>{t("recipes.preview.task", { name: text.name })}</li>
+                <li>{t(asMission ? "recipes.preview.mission" : "recipes.preview.task", { name: text.name })}</li>
                 {folder ? <li>{t("recipes.preview.folder", { folder })}</li> : null}
                 {recipe.needs.some((n) => n.kind === "email" && n.purpose === "own") ? <li>{t("recipes.preview.ownMail")}</li> : null}
               </ul>
-              <Field label={t("recipes.levelTitle")} hint={t(`newBot.autonomyHints.${level}`)}>
+              <Field label={t("recipes.levelTitle")} hint={t(`${levelKey(level)}.line`)}>
                 <Segmented
                   label={t("recipes.levelTitle")}
                   value={level}
-                  options={AUTONOMY_LEVELS.map((l) => ({ value: l, label: t(`newBot.autonomyLevels.${l}`), testId: `recipe-level-${l}` }))}
+                  options={AUTONOMY_LEVELS.map((l) => ({ value: l, label: t(`${levelKey(l)}.name`), testId: `recipe-level-${l}` }))}
                   onChange={setLevel}
                 />
               </Field>
               {levelRaised(recipe, level) ? (
                 <Callout tone="warning" role="status">
-                  <span data-testid="recipe-level-raised">{t("recipes.levelRaised", { level: t(`newBot.autonomyLevels.${recipe.level}`) })}</span>
+                  <span data-testid="recipe-level-raised">{t("recipes.levelRaised", { level: t(`${levelKey(recipe.level)}.name`) })}</span>
                 </Callout>
+              ) : null}
+              {recipe.mission && !asMission ? (
+                <p className={styles.intro} data-testid="recipe-mission-hint">
+                  {t("recipes.missionHint", { level: t(`${levelKey("auto")}.name`) })}
+                </p>
               ) : null}
               {recipe.schedule ? (
                 <div className={styles.repeat}>

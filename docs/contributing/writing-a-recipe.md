@@ -21,6 +21,7 @@ versioned (`schema_version: 1`) and validated at load by `validateRecipe` in
 | `needs` | What must be connected: `model`, `browser`, `email` (`purpose`: `own` for the bot's own mailbox, `inbox` for the owner's inbox to read) or `app` (`apps`: names or slugs to look for, `label`: text per language). Add `"optional": true` for a need that should not block starting. |
 | `questions` | Asked once, in order. `kind`: `text`, `longtext`, `url`, `choice` (with `options` and a label per option) or `folder` (at most one; the bot is then confined to that folder). Each has `required`, an optional `default` and `text` per language (`label`, `hint`, `placeholder`). |
 | `schedule` | Optional: `freq` (`daily`, `weekdays`, `weekly`, `monthly`), `time` (`HH:MM`) and `weekday` (0 = Sunday, weekly only). The owner can turn it off or change the time in the review step. |
+| `mission` | Optional, for long multi-item work: `plan` (per language; what one ledger item is, appended to the goal) and `budgets` (`max_sessions`, `max_model_steps`, `max_minutes`, whole numbers under fixed ceilings). See "Missions" below. |
 | `text` | Per language: `name`, `blurb` and `goal`. |
 
 ## Rules the validator enforces
@@ -39,10 +40,26 @@ versioned (`schema_version: 1`) and validated at load by `validateRecipe` in
 2. The review step checks the needs against what is really connected (model, browser, mailboxes,
    apps). A missing need has a button that opens the screen that fixes it; the answers are kept.
    "Could not check" is never shown as ready and never blocks.
-3. One button creates the bot at the confirmed level, opens a chat, sends the goal followed by the
-   shared autonomy guidance (`guidance` in the file) and, if the owner kept the repeat on, creates a
-   schedule that repeats the same message. A retry after a failure continues where it stopped and
-   never creates a second bot.
+3. One button creates the bot at the confirmed level and starts the task (a chat run or a mission,
+   see below). If the owner kept the repeat on, it also creates a schedule that repeats the goal
+   followed by the shared autonomy guidance (`guidance` in the file) as a normal run. A retry after
+   a failure continues where it stopped and never creates a second bot or mission; a retry at
+   another level than the bot was created with is refused.
 
-There is no mission object yet (see [the Missions ADR](../design/missions-adr.md)); until there is,
-the task runs as a normal chat run with the guidance text.
+## Missions
+
+A recipe with a `mission` block describes long work (many sites, pages or files). It runs as a
+[mission](../guide/missions.md) **only when the owner confirmed the Full level** in the review step:
+a mission works without asking, the daemon refuses to start one on a bot below Full, and a recipe can
+never ask for Full itself. At Ask or Balanced the same recipe runs as one chat task (goal + guidance),
+and the review step says so.
+
+For a mission the flow calls `POST /v1/missions` with the filled goal followed by the recipe's `plan`
+(no chat guidance: the ledger and the daemon's brief replace the progress file), the recipe name as
+title and the recipe's `budgets`. The daemon makes the mission's own chat and the app opens it, where
+the progress shows. The bot lists the ledger items itself; `plan` tells it what one item is. The goal
+must stay under 4000 characters with all answers filled in; the flow checks this before it creates anything.
+
+A recipe with both `mission` and `schedule` starts the mission as the first, big pass; the schedule
+keeps repeating the goal as a normal run (a schedule cannot start a mission). Say so in `plan`
+("this mission is the first pass only"). Short recipes (a daily brief, inbox triage) have no `mission`.
