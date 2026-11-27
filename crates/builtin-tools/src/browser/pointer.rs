@@ -159,7 +159,13 @@ impl BrowserTool {
         let opts = parse::<PointerIn>(input)?.opts()?;
         let d = Arc::clone(&self.shared.driver);
         let (action, label) = gate_action(&opts);
-        let permit = self.gate(run_id, action, label).await?;
+        // A pointer acts by coordinates, so it could land on the check: only a move or a
+        // scroll, which can neither click nor type, touches nothing.
+        let reach = match &opts.act {
+            PointerAct::Move | PointerAct::Scroll { .. } => crate::handover::Reach::Nothing,
+            _ => crate::handover::Reach::Anywhere,
+        };
+        let permit = self.gate(run_id, action, label, reach).await?;
         if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
             return Ok(fresh);
         }

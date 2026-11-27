@@ -4,10 +4,12 @@
 //!
 //! * **CAPTCHA** (`kind: "captcha"`): the page shows a "prove you are human"
 //!   check. The bot may try a simple one itself, at most [`CAPTCHA_OWN_ATTEMPTS`]
-//!   actions per challenge (see [`HandoverHub::captcha_action`]); after that, or for a
+//!   actions per challenge (see [`HandoverHub::captcha_action_at`]); after that, or for a
 //!   behavioural one, it hands over: the owner takes control in the live view,
 //!   solves it and presses "Done". The daemon then checks that the check is gone
-//!   before the run resumes. No solver service, no evasion plugin.
+//!   before the run resumes. No solver service, no evasion plugin. Only the check
+//!   itself and the submit that needs its token are gated: filling the ordinary
+//!   fields of a form that merely embeds a CAPTCHA is never counted or refused.
 //! * **One-time code** (`kind: "code"`): the page wants a 2FA code. The owner types
 //!   it into a card the app draws; the daemon types it into the page like a secret.
 //!   The code never reaches the model, the journal, the audit log or any log, and
@@ -332,15 +334,88 @@ pub fn detect(snapshot: &str) -> Option<Challenge> {
     None
 }
 
+/// What a browser action reaches, as far as the CAPTCHA budget is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach<'a> {
+    /// A named element (`e12`) that is clicked, filled or selected.
+    Element(&'a str),
+    /// A named element that is only looked at (hover): it counts only on the check itself.
+    Look(&'a str),
+    /// Acts where the focus is or by coordinates, so it could land on the check
+    /// (Enter, Space, a pointer click, a script): counted like the check itself.
+    Anywhere,
+    /// Touches no element (leaving the page, switching a tab, scrolling).
+    Nothing,
+}
+
+/// What a snapshot element is, for the CAPTCHA budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Touch {
+    /// The check itself, or something inside its frame.
+    Check,
+    /// An ordinary field of the form: text, select, checkbox, radio.
+    Field,
+    /// A link: it leaves the page, it cannot solve the check or send the form.
+    Link,
+    /// Anything else that acts (a button): it may send the form.
+    Submit,
+    /// The ref is not in the snapshot.
+    Unknown,
+}
+
+/// A line that names the check or one of its prompts.
+fn names_check(low: &str) -> bool {
+    CAPTCHA_WIDGETS.iter().any(|m| low.contains(m))
+        || CAPTCHA_STRONG.iter().any(|m| low.contains(m))
+        || CAPTCHA_HARD.iter().any(|m| low.contains(m))
+}
+
+fn indent(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+/// Classify the element `target` of `snapshot`. The element is part of the check when its own
+/// line names the check or one of its frames (an iframe that names a CAPTCHA service) holds it.
+/// A page that merely embeds a widget does not turn its other fields into the check.
+fn touch(snapshot: &str, target: &str) -> Touch {
+    let lines: Vec<&str> = snapshot.lines().collect();
+    let Some(at) = lines
+        .iter()
+        .position(|l| parts(l).0.as_deref() == Some(target))
+    else {
+        return Touch::Unknown;
+    };
+    if names_check(&lines[at].to_lowercase()) {
+        return Touch::Check;
+    }
+    let mut depth = indent(lines[at]);
+    // Line 0 is the page title (its address may say "captcha"): never a frame.
+    for line in lines.iter().take(at).skip(1).rev() {
+        let d = indent(line);
+        if d < depth {
+            depth = d;
+            if parts(line).1.eq_ignore_ascii_case("iframe") && names_check(&line.to_lowercase()) {
+                return Touch::Check;
+            }
+        }
+    }
+    match parts(lines[at]).1.to_ascii_lowercase().as_str() {
+        "textbox" | "searchbox" | "spinbutton" | "combobox" | "listbox" | "option" | "checkbox"
+        | "radio" | "switch" | "slider" => Touch::Field,
+        "link" => Touch::Link,
+        _ => Touch::Submit,
+    }
+}
+
 /// The notice appended to a snapshot that shows `challenge`; `seen` counts the
 /// looks at a CAPTCHA so far (this one included). Written by the daemon.
 #[must_use]
 pub fn notice(challenge: &Challenge, seen: u32) -> String {
     match challenge {
         Challenge::Captcha { hard } if !*hard && seen <= CAPTCHA_OWN_ATTEMPTS => format!(
-            "[Praxi notice] This page shows a CAPTCHA (a check that wants proof of a human). If you can see images and it is a simple one (an \"I'm not a robot\" checkbox or an easy picture or text puzzle) you may try it yourself, as an ordinary user would: attempt {seen} of {CAPTCHA_OWN_ATTEMPTS}. Never use a solving service or tricks. If it does not work, or you cannot see images, call browser_handover with kind \"captcha\"."
+            "[Praxi notice] This page shows a CAPTCHA (a check that wants proof of a human). If you can see images and it is a simple one (an \"I'm not a robot\" checkbox or an easy picture or text puzzle) you may try it yourself, as an ordinary user would: attempt {seen} of {CAPTCHA_OWN_ATTEMPTS}. Filling the other fields of the form is free; only the check itself and the submit button count as attempts. Never use a solving service or tricks. If it does not work, or you cannot see images, call browser_handover with kind \"captcha\"."
         ),
-        Challenge::Captcha { .. } => "[Praxi notice] This page shows a CAPTCHA you must not try to solve yourself (it is a behavioural or picture puzzle, or your own attempts are used up). Call browser_handover with kind \"captcha\" now: the owner takes control, solves it, and the run continues.".to_owned(),
+        Challenge::Captcha { .. } => "[Praxi notice] This page shows a CAPTCHA you must not try to solve yourself (it is a behavioural or picture puzzle, or your own attempts are used up). You may still fill the ordinary fields of the form, but it cannot be submitted until the check is solved. Call browser_handover with kind \"captcha\": the owner takes control, solves it, and the run continues.".to_owned(),
         Challenge::Code { field } => format!(
             "[Praxi notice] This page asks for a one-time code (2FA){}. Do NOT ask the owner to type the code in chat and do not guess one: call browser_handover with kind \"code\". The owner enters it in a private card and Praxi types it into the page; you never see it.",
             field
@@ -524,7 +599,7 @@ impl HandoverHub {
         });
     }
 
-    /// Admit one own action on the page at `origin`, never an unbounded batch or a third attempt.
+    /// Admit one own action that may land on the check ([`Reach::Anywhere`]).
     ///
     /// # Errors
     /// Refuses hard challenges and actions after the second own attempt at this site.
@@ -534,18 +609,54 @@ impl HandoverHub {
         origin: Option<&str>,
         snapshot: &str,
     ) -> Result<(), String> {
-        if let Some(Challenge::Captcha { hard }) = detect(snapshot) {
-            let key = site_key(origin);
-            return self.with_budget(run_id, |b| {
-                let n = b.attempts.entry(key).or_default();
-                if hard || *n >= CAPTCHA_OWN_ATTEMPTS {
-                    return Err("CAPTCHA own attempts exhausted: hand over with browser_handover(kind: captcha) before any further browser action".to_owned());
-                }
-                *n += 1;
-                Ok(())
-            });
+        self.captcha_action_at(run_id, origin, snapshot, Reach::Anywhere)
+    }
+
+    /// Admit one own action on the page at `origin`, never an unbounded batch or a third attempt.
+    ///
+    /// Only the check and the submit that needs its token are gated. Filling, selecting or
+    /// ticking an ordinary field of a form that embeds a CAPTCHA, following a link, hovering or
+    /// leaving the page is admitted and never counted. A button (the submit) is refused while a
+    /// hard check is on the page and otherwise costs one of the own attempts, so a text puzzle
+    /// cannot be guessed over and over by typing an answer and submitting it.
+    ///
+    /// # Errors
+    /// Refuses hard challenges and actions after the second own attempt at this site.
+    pub fn captcha_action_at(
+        &self,
+        run_id: &str,
+        origin: Option<&str>,
+        snapshot: &str,
+        reach: Reach<'_>,
+    ) -> Result<(), String> {
+        let Some(Challenge::Captcha { hard }) = detect(snapshot) else {
+            return Ok(());
+        };
+        let kind = match reach {
+            Reach::Nothing => return Ok(()),
+            Reach::Anywhere => Touch::Check,
+            Reach::Element(r) => touch(snapshot, r),
+            Reach::Look(r) => match touch(snapshot, r) {
+                Touch::Check => Touch::Check,
+                _ => return Ok(()),
+            },
+        };
+        match kind {
+            Touch::Field | Touch::Link => return Ok(()),
+            Touch::Submit if hard => {
+                return Err("this page's CAPTCHA is not solved, so its form cannot be sent: fill the ordinary fields if you like, but hand over with browser_handover(kind: captcha) before submitting".to_owned());
+            }
+            Touch::Check | Touch::Submit | Touch::Unknown => {}
         }
-        Ok(())
+        let key = site_key(origin);
+        self.with_budget(run_id, |b| {
+            let n = b.attempts.entry(key).or_default();
+            if hard || *n >= CAPTCHA_OWN_ATTEMPTS {
+                return Err("CAPTCHA own attempts exhausted: hand over with browser_handover(kind: captcha) before any further browser action on the check or the submit".to_owned());
+            }
+            *n += 1;
+            Ok(())
+        })
     }
 
     /// Number of the next permitted own attempt at `origin` (observations do not consume it).

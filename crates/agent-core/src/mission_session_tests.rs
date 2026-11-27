@@ -910,6 +910,46 @@ async fn a_captcha_gives_up_only_that_item_and_the_session_carries_on() {
 }
 
 #[tokio::test]
+async fn captcha_give_ups_never_use_up_the_per_run_handover_limit() {
+    let keys = ["a.example", "b.example", "c.example", "d.example"];
+    let w = world(&keys);
+    // Every site throws a CAPTCHA; the limit allows two handovers per run.
+    let mut script = Vec::new();
+    for (n, key) in keys.iter().enumerate() {
+        script.push(calls(&[(
+            &format!("d{n}"),
+            "mission_item",
+            json!({"key": key, "status": "doing"}),
+        )]));
+        script.push(calls(&[(
+            &format!("h{n}"),
+            "browser_handover",
+            json!({"kind": "captcha"}),
+        )]));
+    }
+    script.push(text("Done: every site needed a person."));
+    let fake = Fake::new(script);
+    let lp = lp_with(&w, &fake, |c| c.max_handovers_per_run = 2);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // All four items are given up with the CAPTCHA reason; none was refused as "too often".
+    let failed = w.store.items(&w.mission, Some(ItemStatus::Failed)).unwrap();
+    assert_eq!(failed.len(), 4, "{failed:?}");
+    assert!(
+        failed
+            .iter()
+            .all(|i| i.last_error.as_deref().unwrap().contains("CAPTCHA"))
+    );
+    let tools = crate::tests::tool_messages(&without_ledger(fake.request(8)));
+    assert!(
+        !tools.iter().any(|t| t.contains("asked for help too often")),
+        "{tools:?}"
+    );
+}
+
+#[tokio::test]
 async fn without_a_single_doing_item_the_model_is_told_to_park_it_itself() {
     let w = world(&["a.example", "b.example"]);
     let fake = Fake::new(vec![

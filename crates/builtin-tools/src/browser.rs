@@ -26,6 +26,7 @@ use tool_registry::{
 use crate::control::{ActionPermit, ControlRequest, DesktopControlGate};
 use crate::files::FileGate;
 use crate::fill_secret::{Source, names_a_secret, refused, scrub, source};
+use crate::handover::Reach;
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
 mod act;
@@ -426,6 +427,33 @@ pub fn view_line(attached: bool) -> &'static str {
         "[view: visible to the user in the live view]"
     } else {
         "[view: NOT visible to the user (no live view attached); this is the assistant's own browser, do not say they can see it]"
+    }
+}
+
+/// What a key press can reach for the CAPTCHA budget: moving focus or editing text cannot
+/// solve a check or send a form; Enter, Space and everything else act on the focused control,
+/// which could be the check or the submit button.
+pub(crate) fn key_reach(key: &str) -> Reach<'static> {
+    let last = key.rsplit('+').next().unwrap_or(key).trim();
+    if matches!(
+        last.to_ascii_lowercase().as_str(),
+        "tab"
+            | "escape"
+            | "esc"
+            | "arrowup"
+            | "arrowdown"
+            | "arrowleft"
+            | "arrowright"
+            | "home"
+            | "end"
+            | "pageup"
+            | "pagedown"
+            | "backspace"
+            | "delete"
+    ) {
+        Reach::Nothing
+    } else {
+        Reach::Anywhere
     }
 }
 
@@ -3036,6 +3064,7 @@ impl BrowserTool {
         run_id: &str,
         action: &str,
         label: String,
+        reach: Reach<'_>,
     ) -> Result<ActionPermit, ToolError> {
         let permit = if let Some(gate) = self.shared.control.as_ref() {
             let request = ControlRequest {
@@ -3096,7 +3125,7 @@ impl BrowserTool {
                 .await
                 .and_then(|u| origin_of(&u));
             crate::handover::handover_hub()
-                .captcha_action(run_id, origin.as_deref(), &snapshot)
+                .captcha_action_at(run_id, origin.as_deref(), &snapshot, reach)
                 .map_err(exec_err)?;
         }
         Ok(permit)
@@ -3220,7 +3249,9 @@ impl BrowserTool {
                 {
                     return Ok(kept);
                 }
-                let permit = self.gate(run_id, "open", i.url.clone()).await?;
+                let permit = self
+                    .gate(run_id, "open", i.url.clone(), Reach::Nothing)
+                    .await?;
                 if permit.needs_observation()
                     || self
                         .shared
@@ -3296,7 +3327,9 @@ impl BrowserTool {
             }
             Op::Click => {
                 let i: RefIn = parse(input)?;
-                let permit = self.gate(run_id, "click", i.r#ref.clone()).await?;
+                let permit = self
+                    .gate(run_id, "click", i.r#ref.clone(), Reach::Element(&i.r#ref))
+                    .await?;
                 if permit.needs_observation()
                     || self
                         .shared
@@ -3336,7 +3369,9 @@ impl BrowserTool {
             Op::Fill => {
                 let what = source(&input, "text")?;
                 let i: FillIn = parse(input)?;
-                let permit = self.gate(run_id, "type", i.r#ref.clone()).await?;
+                let permit = self
+                    .gate(run_id, "type", i.r#ref.clone(), Reach::Element(&i.r#ref))
+                    .await?;
                 if permit.needs_observation()
                     || self
                         .shared
@@ -3389,7 +3424,9 @@ impl BrowserTool {
             }
             Op::Select => {
                 let i: SelectIn = parse(input)?;
-                let permit = self.gate(run_id, "click", i.r#ref.clone()).await?;
+                let permit = self
+                    .gate(run_id, "click", i.r#ref.clone(), Reach::Element(&i.r#ref))
+                    .await?;
                 if permit.needs_observation()
                     || self
                         .shared
@@ -3433,7 +3470,9 @@ impl BrowserTool {
                         "no earlier batch step named an element for this key; the key was NOT pressed",
                     ));
                 }
-                let permit = self.gate(run_id, "key", i.key.clone()).await?;
+                let permit = self
+                    .gate(run_id, "key", i.key.clone(), key_reach(&i.key))
+                    .await?;
                 if permit.needs_observation()
                     || self
                         .shared
@@ -3469,7 +3508,12 @@ impl BrowserTool {
                 let i: ScrollIn = parse(input)?;
                 let opts = i.opts()?;
                 let permit = self
-                    .gate(run_id, "scroll", opts.r.clone().unwrap_or_default())
+                    .gate(
+                        run_id,
+                        "scroll",
+                        opts.r.clone().unwrap_or_default(),
+                        Reach::Nothing,
+                    )
                     .await?;
                 if permit.needs_observation()
                     || self
@@ -3503,7 +3547,9 @@ impl BrowserTool {
             }
             Op::Hover => {
                 let i: HoverIn = parse(input)?;
-                let permit = self.gate(run_id, "hover", i.r#ref.clone()).await?;
+                let permit = self
+                    .gate(run_id, "hover", i.r#ref.clone(), Reach::Look(&i.r#ref))
+                    .await?;
                 if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                     return Ok(fresh);
                 }
@@ -3516,7 +3562,7 @@ impl BrowserTool {
                 let i: SelectTextIn = parse(input)?;
                 let opts = i.opts()?;
                 let what = opts.r.clone().unwrap_or_else(|| "text".to_owned());
-                let permit = self.gate(run_id, "click", what).await?;
+                let permit = self.gate(run_id, "click", what, Reach::Nothing).await?;
                 if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                     return Ok(fresh);
                 }
@@ -3527,7 +3573,7 @@ impl BrowserTool {
             }
             Op::DismissConsent => {
                 let permit = self
-                    .gate(run_id, "click", "consent dialog".to_owned())
+                    .gate(run_id, "click", "consent dialog".to_owned(), Reach::Nothing)
                     .await?;
                 if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                     return Ok(fresh);
@@ -3558,7 +3604,9 @@ impl BrowserTool {
             }
             Op::Back => {
                 let i: BackIn = parse(input)?;
-                let permit = self.gate(run_id, "key", "back".to_owned()).await?;
+                let permit = self
+                    .gate(run_id, "key", "back".to_owned(), Reach::Nothing)
+                    .await?;
                 if permit.needs_observation()
                     || self
                         .shared
@@ -3598,7 +3646,9 @@ impl BrowserTool {
                 match act {
                     tabs::TabsAct::List => d.tabs(None).await,
                     tabs::TabsAct::Switch(n) => {
-                        let permit = self.gate(run_id, "tab", format!("tab {n}")).await?;
+                        let permit = self
+                            .gate(run_id, "tab", format!("tab {n}"), Reach::Nothing)
+                            .await?;
                         if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                             return Ok(fresh);
                         }
@@ -3608,7 +3658,9 @@ impl BrowserTool {
                             .map_err(exec_err)?
                     }
                     tabs::TabsAct::Close(n) => {
-                        let permit = self.gate(run_id, "tab", format!("close tab {n}")).await?;
+                        let permit = self
+                            .gate(run_id, "tab", format!("close tab {n}"), Reach::Nothing)
+                            .await?;
                         if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                             return Ok(fresh);
                         }
@@ -3632,6 +3684,7 @@ impl BrowserTool {
                                 run_id,
                                 "open",
                                 url.clone().unwrap_or_else(|| "new tab".into()),
+                                Reach::Nothing,
                             )
                             .await?;
                         if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
@@ -3654,7 +3707,9 @@ impl BrowserTool {
                     },
                     self.op == Op::Forward,
                 );
-                let permit = self.gate(run_id, "key", label.to_owned()).await?;
+                let permit = self
+                    .gate(run_id, "key", label.to_owned(), Reach::Nothing)
+                    .await?;
                 if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
                     return Ok(fresh);
                 }
@@ -3702,7 +3757,7 @@ impl BrowserTool {
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
-                let permit = self.gate(run_id, "eval", label).await?;
+                let permit = self.gate(run_id, "eval", label, Reach::Anywhere).await?;
                 if permit.needs_observation()
                     || self
                         .shared

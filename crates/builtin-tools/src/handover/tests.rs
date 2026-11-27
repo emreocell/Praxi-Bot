@@ -740,3 +740,215 @@ fn text_of(out: &tool_registry::ToolOutput) -> String {
         _ => panic!(),
     }
 }
+
+// ── Forms that merely embed a CAPTCHA ───────────────────────────────────────
+
+/// A sign-up form with an hCaptcha frame beside ordinary fields.
+const HCAPTCHA_FORM: &str = "# Sign up (https://forum.example/signup)\n  [e1] textbox \"Email\"\n  [e2] textbox \"Username\"\n  [e3] combobox \"Country\"\n  [e4] checkbox \"I accept the terms\"\n  iframe \"Widget containing checkbox for hCaptcha security challenge\"\n    [e5] checkbox \"hCaptcha checkbox\"\n  [e6] button \"Create account\"\n  [e7] link \"Privacy policy\"";
+
+/// The same form with a reCAPTCHA checkbox (a simple check the bot may try).
+const RECAPTCHA_FORM: &str = "# Sign up (https://shop.example/signup)\n  [e1] textbox \"Email\"\n  [e2] textbox \"Display name\"\n  [e3] textbox \"Website\"\n  [e4] textbox \"About you\"\n  iframe \"reCAPTCHA\"\n    [e5] checkbox \"I'm not a robot\"\n  [e6] button \"Create account\"";
+
+#[tokio::test]
+async fn an_hcaptcha_iframe_does_not_stop_the_form_from_being_filled() {
+    let page = Page::new(HCAPTCHA_FORM, "https://forum.example/signup");
+    let context = ctx("form-hcaptcha");
+    let fill = tool(&page, "browser_fill");
+    // Many ordinary fields, more than any own-attempt budget: all admitted.
+    for _ in 0..4 {
+        fill.call(&context, json!({"ref":"e1","text":"bot@agentmail.example"}))
+            .await
+            .unwrap();
+        fill.call(&context, json!({"ref":"e2","text":"praxi_bot"}))
+            .await
+            .unwrap();
+    }
+    tool(&page, "browser_select")
+        .call(&context, json!({"ref":"e3","value":"TR"}))
+        .await
+        .unwrap();
+    let click = tool(&page, "browser_click");
+    click.call(&context, json!({"ref":"e4"})).await.unwrap();
+    click.call(&context, json!({"ref":"e7"})).await.unwrap();
+    tool(&page, "browser_press")
+        .call(&context, json!({"key":"Tab"}))
+        .await
+        .unwrap();
+    tool(&page, "browser_back")
+        .call(&context, json!({}))
+        .await
+        .unwrap();
+    assert_eq!(
+        handover_hub().next_captcha_attempt(&context.run_id, Some("https://forum.example")),
+        1,
+        "none of that touched the check"
+    );
+    // The check itself is a hard one: never tried by the bot.
+    let err = click.call(&context, json!({"ref":"e5"})).await.unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    // The submit needs the solved token: refused, and the reason is plain.
+    let err = click.call(&context, json!({"ref":"e6"})).await.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cannot be sent") && msg.contains("browser_handover"),
+        "{msg}"
+    );
+    let err = tool(&page, "browser_press")
+        .call(&context, json!({"key":"Enter"}))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    // Filling still works after the refusals.
+    fill.call(&context, json!({"ref":"e1","text":"bot@agentmail.example"}))
+        .await
+        .unwrap();
+    handover_hub().forget(&context.run_id);
+}
+
+#[tokio::test]
+async fn filling_fields_next_to_a_recaptcha_never_spends_its_two_attempts() {
+    let page = Page::new(RECAPTCHA_FORM, "https://shop.example/signup");
+    let context = ctx("form-recaptcha");
+    let fill = tool(&page, "browser_fill");
+    for r in ["e1", "e2", "e3", "e4", "e1", "e2"] {
+        fill.call(&context, json!({"ref": r, "text": "x"}))
+            .await
+            .unwrap();
+    }
+    let site = Some("https://shop.example");
+    assert_eq!(
+        handover_hub().next_captcha_attempt(&context.run_id, site),
+        1
+    );
+    let click = tool(&page, "browser_click");
+    // The check is attempt 1 and the submit is attempt 2: a form still goes through.
+    click.call(&context, json!({"ref":"e5"})).await.unwrap();
+    click.call(&context, json!({"ref":"e6"})).await.unwrap();
+    // Nothing is left for a third try at the check or for sending the form again...
+    assert!(click.call(&context, json!({"ref":"e5"})).await.is_err());
+    assert!(click.call(&context, json!({"ref":"e6"})).await.is_err());
+    // ...but the ordinary fields stay usable, so a parked page can still be left tidy.
+    fill.call(&context, json!({"ref":"e1","text":"x"}))
+        .await
+        .unwrap();
+    handover_hub().forget(&context.run_id);
+}
+
+#[tokio::test]
+async fn a_pointer_click_or_a_script_on_a_captcha_page_still_counts_but_a_move_does_not() {
+    let page = Page::new(RECAPTCHA_FORM, "https://shop.example/signup");
+    let context = ctx("form-pointer");
+    let pointer = tool(&page, "browser_pointer");
+    pointer
+        .call(&context, json!({"action":"move","x":10,"y":10}))
+        .await
+        .unwrap();
+    pointer
+        .call(&context, json!({"action":"scroll","x":10,"y":10,"dy":300}))
+        .await
+        .unwrap();
+    assert_eq!(
+        handover_hub().next_captcha_attempt(&context.run_id, Some("https://shop.example")),
+        1
+    );
+    for _ in 0..2 {
+        pointer
+            .call(&context, json!({"action":"click","x":10,"y":10}))
+            .await
+            .unwrap();
+    }
+    let err = pointer
+        .call(&context, json!({"action":"click","x":10,"y":10}))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    let err = tool(&page, "browser_eval")
+        .call(&context, json!({"js":"document.forms[0].submit()"}))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("browser_handover"), "{err}");
+    handover_hub().forget(&context.run_id);
+}
+
+#[test]
+fn only_the_check_and_the_buttons_are_gated_by_element() {
+    let hub = HandoverHub::default();
+    let at = |reach| {
+        hub.captcha_action_at(
+            "run-reach",
+            Some("https://forum.example"),
+            HCAPTCHA_FORM,
+            reach,
+        )
+    };
+    // Fields, a checkbox of the form, a link, a hover on a field, leaving the page: free.
+    for r in ["e1", "e2", "e3", "e4", "e7"] {
+        assert!(at(Reach::Element(r)).is_ok(), "{r}");
+    }
+    assert!(at(Reach::Look("e2")).is_ok());
+    assert!(
+        at(Reach::Look("e6")).is_ok(),
+        "hovering a button sends nothing"
+    );
+    assert!(at(Reach::Nothing).is_ok());
+    // The check (inside the frame), the submit and "anywhere" are not.
+    assert!(at(Reach::Element("e5")).is_err());
+    assert!(
+        at(Reach::Look("e5")).is_err(),
+        "pointing at the check is an action on it"
+    );
+    assert!(at(Reach::Element("e6")).is_err());
+    assert!(at(Reach::Anywhere).is_err());
+    // A ref the page does not have is treated as the worst case.
+    let soft = |reach| {
+        hub.captcha_action_at(
+            "run-reach-soft",
+            Some("https://shop.example"),
+            RECAPTCHA_FORM,
+            reach,
+        )
+    };
+    assert!(soft(Reach::Element("e99")).is_ok());
+    assert!(soft(Reach::Element("e99")).is_ok());
+    assert!(soft(Reach::Element("e99")).is_err());
+    // A page without a challenge never gates anything.
+    assert!(
+        hub.captcha_action_at("run-reach-none", None, LOGIN_PAGE, Reach::Element("e3"))
+            .is_ok()
+    );
+    hub.forget("run-reach");
+    hub.forget("run-reach-soft");
+}
+
+#[test]
+fn a_captcha_word_in_the_address_or_a_wide_container_does_not_turn_fields_into_the_check() {
+    let hub = HandoverHub::default();
+    let page = "# Sign up (https://forum.example/recaptcha-demo/signup)\n  group \"Sign up, protected by reCAPTCHA\"\n    [e1] textbox \"Email\"\n  iframe \"reCAPTCHA challenge\"\n    [e2] checkbox \"I'm not a robot\"\n  [e3] textbox \"Name\"";
+    assert_eq!(detect(page), Some(Challenge::Captcha { hard: false }));
+    for _ in 0..5 {
+        for r in ["e1", "e3"] {
+            hub.captcha_action_at("run-wide", None, page, Reach::Element(r))
+                .unwrap();
+        }
+    }
+    assert!(
+        hub.captcha_action_at("run-wide", None, page, Reach::Element("e2"))
+            .is_ok()
+    );
+    hub.forget("run-wide");
+}
+
+#[tokio::test]
+async fn the_notice_tells_the_model_that_filling_is_free() {
+    let page = Page::new(RECAPTCHA_FORM, "https://shop.example/signup");
+    let snap = tool(&page, "browser_snapshot");
+    let out = snap.call(&ctx("form-notice"), json!({})).await.unwrap();
+    let ContentPart::Text { text } = &out.content[0] else {
+        panic!()
+    };
+    assert!(
+        text.contains("attempt 1 of 2") && text.contains("Filling the other fields"),
+        "{text}"
+    );
+    handover_hub().forget("form-notice");
+}

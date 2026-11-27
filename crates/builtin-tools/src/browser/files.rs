@@ -468,7 +468,14 @@ impl BrowserTool {
             .collect::<Vec<_>>()
             .join(", ");
         let d: Arc<dyn BrowserDriver> = Arc::clone(&self.shared.driver);
-        let permit = self.gate(run_id, "upload", label.clone()).await?;
+        let permit = self
+            .gate(
+                run_id,
+                "upload",
+                label.clone(),
+                crate::handover::Reach::Element(&r),
+            )
+            .await?;
         if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
             return Ok(fresh);
         }

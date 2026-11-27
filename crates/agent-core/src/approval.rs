@@ -3621,8 +3621,12 @@ impl Shared {
             );
         }
         // The per-run limit counts parked handovers of a mission too: a page that throws a
-        // CAPTCHA at every item cannot make a session park without end.
-        {
+        // 2FA prompt at every item cannot make a session park without end. A CAPTCHA in a
+        // mission is different: it asks nobody for anything, it only gives that one item up
+        // (a failed item, never retried), so a run over many sites with a CAPTCHA each must
+        // reach the later items instead of being refused after the fourth.
+        let gives_up_only = ctx.mission.is_some() && kind == HandoverKind::Captcha;
+        if !gives_up_only {
             let mut st = ctx.state.lock();
             if st.handovers >= self.cfg.max_handovers_per_run {
                 drop(st);

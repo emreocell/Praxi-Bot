@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 use tool_registry::{Effect, OutputExposure, PermissionCategory, ToolError, ToolSpec};
 
 use super::{BrowserDriver, BrowserTool};
+use crate::handover::Reach;
 use crate::util::{exec_err, parse, spec};
 
 /// `browser_attach` input.
@@ -119,7 +120,12 @@ impl BrowserTool {
             return d.detach().await.map_err(exec_err);
         }
         let permit = self
-            .gate(run_id, "open", "the owner's own browser".to_owned())
+            .gate(
+                run_id,
+                "open",
+                "the owner's own browser".to_owned(),
+                Reach::Nothing,
+            )
             .await?;
         if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
             return Ok(fresh);
