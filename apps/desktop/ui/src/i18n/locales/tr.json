@@ -840,6 +840,66 @@
       "title": "Composio",
       "waiting": "Tarayıcıda seni bekliyor…"
     },
+    "composioHub": {
+      "accountConnected": "Composio hesabı bağlı",
+      "accountHint": "Uygulamaları görmek ve bağlamak için Composio hesabını bir kez bağla.",
+      "actionsEmpty": "Botlar bu uygulamada işlem yapamıyor.",
+      "actionsLoading": "İşlemler yükleniyor…",
+      "actionsNeedAccount": "Bu uygulamadaki işlemleri görmek için Composio hesabını bağla.",
+      "actionsTitle": "Botların yapabilecekleri",
+      "authorizationVerified": "Composio, uygulama izninin geçerli olduğunu doğruladı.",
+      "back": "Tüm uygulamalar",
+      "connection": "Uygulama bağlantısı",
+      "disconnectConfirm": "Bu uygulamanın bağlantısı kesilsin mi?",
+      "linkAccount": "Composio hesabını bağla",
+      "loginFailed": "Composio bağlantısı tamamlanamadı. Tekrar dene.",
+      "mcpServers": "MCP sunucuları",
+      "pauseAccess": "Bot erişimini duraklat",
+      "remoteServers": "Uzak MCP sunucuları",
+      "resumeAccess": "Bot erişimini aç",
+      "signOutHint": "Hesabı yeniden bağlayana kadar botlar Composio uygulamalarını kullanamaz.",
+      "summaries": {
+        "airtable": "Veri tabanlarını, tabloları ve kayıtları yönet.",
+        "asana": "Görevleri ve projeleri yönet.",
+        "discord": "Sunucuları, kanalları ve mesajları yönet.",
+        "dropbox": "Dosyaları ve paylaşılan klasörleri yönet.",
+        "facebook": "Sayfaları, gönderileri ve istatistikleri yönet.",
+        "github": "Kod depoları, iş kayıtları ve birleştirme istekleriyle çalış.",
+        "gitlab": "Kod depoları ve birleştirme istekleriyle çalış.",
+        "gmail": "E-postaları oku, ara ve gönder.",
+        "googlecalendar": "Takvim etkinliklerini gör ve oluştur.",
+        "googledocs": "Belgeler oluştur ve düzenle.",
+        "googledrive": "Dosya ve klasörleri bul, düzenle.",
+        "googlesheets": "E-tabloları oku ve güncelle.",
+        "hubspot": "Kişileri, satış süreçlerini ve pazarlamayı yönet.",
+        "instagram": "Gönderileri, medyayı ve hesap istatistiklerini yönet.",
+        "jira": "İş kayıtlarını ve sprintleri yönet.",
+        "linear": "İş kayıtlarını, projeleri ve çalışma döngülerini yönet.",
+        "linkedin": "Profilleri, gönderileri ve şirket sayfalarını yönet.",
+        "microsoft_teams": "Sohbetlere ve kanallara eriş.",
+        "notion": "Sayfalar, veri tabanları ve notlarla çalış.",
+        "one_drive": "OneDrive dosyalarını bul ve yönet.",
+        "outlook": "E-postalara ve takvime eriş.",
+        "quickbooks": "Faturaları, giderleri ve muhasebe kayıtlarını yönet.",
+        "reddit": "Toplulukları gez ve gönderi paylaş.",
+        "salesforce": "Potansiyel müşterileri, hesapları ve satış fırsatlarını yönet.",
+        "shopify": "Ürünleri, siparişleri ve müşterileri yönet.",
+        "slack": "Kanalları oku ve mesaj gönder.",
+        "spotify": "Çalma listeleri, oynatma ve müzik kitaplığıyla çalış.",
+        "stripe": "Ödemeleri, müşterileri ve faturaları yönet.",
+        "supabase": "Veri tabanlarını ve projeleri yönet.",
+        "telegram": "Sohbetleri ve bot mesajlarını yönet.",
+        "tiktok": "Videolara ve hesap bilgilerine eriş.",
+        "todoist": "Görevleri ve projeleri yönet.",
+        "trello": "Panoları, listeleri ve kartları yönet.",
+        "twitter": "X’te gönderi ara, oku ve paylaş.",
+        "whatsapp": "WhatsApp Business mesajlarını oku ve gönder.",
+        "youtube": "Videoları, kanalları ve oynatma listelerini yönet.",
+        "zoom": "Toplantılara ve kayıtlara eriş."
+      },
+      "useKey": "Proje API anahtarı kullan",
+      "yourApps": "Uygulamaların"
+    },
     "connect": "Bağlan",
     "connectApp": "{{name}} uygulamasını bağla",
     "connectNow": "Bağlan",
@@ -2646,10 +2706,20 @@
         "failed": "Bilgisayarda yazılmadı",
         "running": "Bilgisayarda yazılıyor"
       },
+      "doc_edit": {
+        "done": "Belge güncellendi",
+        "failed": "Belge güncellenemedi",
+        "running": "Belge güncelleniyor"
+      },
       "doc_read": {
         "done": "Belge okundu",
         "failed": "Belge okunamadı",
         "running": "Belge okunuyor"
+      },
+      "doc_write": {
+        "done": "Belge yazıldı",
+        "failed": "Belge yazılamadı",
+        "running": "Belge yazılıyor"
       },
       "email_draft": {
         "done": "E-posta taslağı hazırlandı",
@@ -2710,6 +2780,16 @@
         "done": "Bir araç kullandı",
         "failed": "Bir araç kullanamadı",
         "running": "Bir araç kullanıyor"
+      },
+      "git_change": {
+        "done": "Kod deposu değiştirildi",
+        "failed": "Kod deposu değiştirilmedi",
+        "running": "Kod deposu değiştiriliyor"
+      },
+      "git_read": {
+        "done": "Kod deposuna bakıldı",
+        "failed": "Kod deposuna bakılamadı",
+        "running": "Kod deposuna bakılıyor"
       },
       "knowledge_search": {
         "done": "Bilgi kaynaklarında arandı",

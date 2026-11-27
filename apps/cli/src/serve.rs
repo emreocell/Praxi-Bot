@@ -317,6 +317,15 @@ fn build_agent_with_skills(
     let mut tools = BuiltinConfig::new(storage.data_dir().to_path_buf(), Arc::new(gate));
     tools.desktop.clone_from(&desktop);
     tools.dynamic_desktop = dynamic_desktop;
+    // On-device OCR for set-of-marks when the accessibility tree is weak. Only if the model
+    // files are already on this computer; nothing is downloaded at start-up.
+    tools.ocr = builtin_tools::default_ocr(storage.data_dir());
+    // Documents (PDF, Word, Excel, PowerPoint, CSV, JSON) and git/process tools, under the same
+    // per-bot file access rules as `fs_*`; the permission engine gates them by category and effect.
+    tools.optional_tools = builtin_tools::OptionalTools {
+        documents: true,
+        developer: true,
+    };
     tools.fill_secrets = fill_secrets;
     let secret_requests = secret_requests_enabled(
         &std::fs::read_to_string(data_dir.join("host.toml")).unwrap_or_default(),
@@ -2567,6 +2576,74 @@ order = [\"bing\", \"tavily\", \"bogus\", \"duckduckgo\"]
                 .check_url(&url::Url::parse("http://127.0.0.1:47000/").unwrap())
                 .is_err()
         );
+    }
+
+    /// The document and developer tools are offered to bots, with the category and effect the
+    /// permission engine gates them by. A refactor that drops the wiring fails here.
+    #[test]
+    fn bots_get_document_and_developer_tools_with_the_right_metadata() {
+        use tool_registry::{Effect, PermissionCategory};
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(Storage::open(dir.path()).unwrap());
+        let agent = build_agent(&storage, Providers::unconfigured(), dir.path(), None);
+        let registry = agent.tool_registry();
+        let spec = |name: &str| {
+            registry
+                .get(name)
+                .unwrap_or_else(|| panic!("{name} is not registered"))
+                .spec()
+                .clone()
+        };
+        let reads = [
+            "pdf_extract",
+            "docx_read",
+            "xlsx_read",
+            "pptx_read",
+            "csv_read",
+            "json_query",
+            "git_status",
+            "git_diff",
+            "git_log",
+            "git_show",
+        ];
+        let writes = [
+            "docx_write",
+            "docx_append",
+            "xlsx_write",
+            "xlsx_append_rows",
+            "xlsx_update_cells",
+            "csv_transform",
+            "doc_convert",
+            "doc_preview",
+            "git_branch",
+            "git_commit",
+        ];
+        for name in reads {
+            let s = spec(name);
+            assert_eq!(
+                (s.category, s.effect),
+                (PermissionCategory::Fs, Effect::Read),
+                "{name}"
+            );
+            assert!(s.content.reads_private, "{name} reads private data");
+            assert!(s.is_valid(), "{name}");
+        }
+        for name in writes {
+            let s = spec(name);
+            assert_eq!(
+                (s.category, s.effect),
+                (PermissionCategory::Fs, Effect::Write),
+                "{name}"
+            );
+            assert!(s.is_valid(), "{name}");
+        }
+        let process = spec("process_list");
+        assert_eq!(
+            (process.category, process.effect),
+            (PermissionCategory::System, Effect::Read)
+        );
+        // The file tools are still there next to them.
+        assert!(registry.get("fs_write").is_some());
     }
 
     /// `serve()` builds its skill index only through

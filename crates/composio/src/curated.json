@@ -9,15 +9,15 @@
    "group": "communication"
   },
   {
-   "slug": "googlecalendar",
-   "name": "Google Calendar",
-   "description": "Check and create calendar events.",
-   "group": "productivity"
-  },
-  {
    "slug": "googledrive",
    "name": "Google Drive",
    "description": "Find and manage files and folders.",
+   "group": "productivity"
+  },
+  {
+   "slug": "googlecalendar",
+   "name": "Google Calendar",
+   "description": "Check and create calendar events.",
    "group": "productivity"
   },
   {
@@ -45,9 +45,9 @@
    "group": "social"
   },
   {
-   "slug": "linkedin",
-   "name": "LinkedIn",
-   "description": "Profile, posts and company pages.",
+   "slug": "facebook",
+   "name": "Facebook",
+   "description": "Pages, posts and insights.",
    "group": "social"
   },
   {
@@ -55,6 +55,60 @@
    "name": "X",
    "description": "Search, read and post on X.",
    "group": "social"
+  },
+  {
+   "slug": "linkedin",
+   "name": "LinkedIn",
+   "description": "Profile, posts and company pages.",
+   "group": "social"
+  },
+  {
+   "slug": "youtube",
+   "name": "YouTube",
+   "description": "Videos, channels and playlists.",
+   "group": "social"
+  },
+  {
+   "slug": "tiktok",
+   "name": "TikTok",
+   "description": "Videos and account data.",
+   "group": "social"
+  },
+  {
+   "slug": "whatsapp",
+   "name": "WhatsApp Business",
+   "description": "Send and read WhatsApp Business messages.",
+   "group": "communication"
+  },
+  {
+   "slug": "shopify",
+   "name": "Shopify",
+   "description": "Products, orders and customers.",
+   "group": "business"
+  },
+  {
+   "slug": "hubspot",
+   "name": "HubSpot",
+   "description": "Contacts, deals and marketing.",
+   "group": "business"
+  },
+  {
+   "slug": "trello",
+   "name": "Trello",
+   "description": "Boards, lists and cards.",
+   "group": "productivity"
+  },
+  {
+   "slug": "asana",
+   "name": "Asana",
+   "description": "Tasks and projects.",
+   "group": "productivity"
+  },
+  {
+   "slug": "jira",
+   "name": "Jira",
+   "description": "Issues and sprints.",
+   "group": "dev"
   },
   {
    "slug": "discord",
@@ -69,33 +123,27 @@
    "group": "communication"
   },
   {
-   "slug": "whatsapp",
-   "name": "WhatsApp",
-   "description": "Send and read WhatsApp Business messages.",
-   "group": "communication"
+   "slug": "dropbox",
+   "name": "Dropbox",
+   "description": "Files and shared folders.",
+   "group": "productivity"
   },
   {
-   "slug": "youtube",
-   "name": "YouTube",
-   "description": "Videos, channels and playlists.",
-   "group": "social"
+   "slug": "one_drive",
+   "name": "OneDrive",
+   "description": "Find and manage files in OneDrive.",
+   "group": "productivity"
+  },
+  {
+   "slug": "outlook",
+   "name": "Outlook",
+   "description": "Email and calendar from Microsoft.",
+   "group": "communication"
   },
   {
    "slug": "spotify",
    "name": "Spotify",
    "description": "Playlists, playback and library.",
-   "group": "social"
-  },
-  {
-   "slug": "facebook",
-   "name": "Facebook",
-   "description": "Pages, posts and insights.",
-   "group": "social"
-  },
-  {
-   "slug": "tiktok",
-   "name": "TikTok",
-   "description": "Videos and account data.",
    "group": "social"
   },
   {
@@ -117,12 +165,6 @@
    "group": "productivity"
   },
   {
-   "slug": "outlook",
-   "name": "Outlook",
-   "description": "Email and calendar from Microsoft.",
-   "group": "communication"
-  },
-  {
    "slug": "microsoft_teams",
    "name": "Microsoft Teams",
    "description": "Teams chats and channels.",
@@ -135,27 +177,9 @@
    "group": "productivity"
   },
   {
-   "slug": "trello",
-   "name": "Trello",
-   "description": "Boards, lists and cards.",
-   "group": "productivity"
-  },
-  {
-   "slug": "asana",
-   "name": "Asana",
-   "description": "Tasks and projects.",
-   "group": "productivity"
-  },
-  {
    "slug": "linear",
    "name": "Linear",
    "description": "Issues, projects and cycles.",
-   "group": "dev"
-  },
-  {
-   "slug": "jira",
-   "name": "Jira",
-   "description": "Issues and sprints.",
    "group": "dev"
   },
   {
@@ -183,18 +207,6 @@
    "group": "finance"
   },
   {
-   "slug": "shopify",
-   "name": "Shopify",
-   "description": "Products, orders and customers.",
-   "group": "business"
-  },
-  {
-   "slug": "hubspot",
-   "name": "HubSpot",
-   "description": "Contacts, deals and marketing.",
-   "group": "business"
-  },
-  {
    "slug": "salesforce",
    "name": "Salesforce",
    "description": "Leads, accounts and opportunities.",
@@ -205,12 +217,6 @@
    "name": "Zoom",
    "description": "Meetings and recordings.",
    "group": "communication"
-  },
-  {
-   "slug": "dropbox",
-   "name": "Dropbox",
-   "description": "Files and shared folders.",
-   "group": "productivity"
   },
   {
    "slug": "todoist",

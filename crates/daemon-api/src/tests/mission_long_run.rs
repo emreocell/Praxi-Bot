@@ -10,8 +10,10 @@
 //! Scenarios (ADR numbering where one exists):
 //! * "continues without asking": the model keeps asking "shall I continue?" and the task still
 //!   gets done, across several sessions (the 40-step wall is gone);
-//! * A3 "parks a blocked item and continues": a CAPTCHA blocks one site, the rest go on, the
-//!   owner answers once and the mission finishes;
+//! * A3 "a CAPTCHA does not stop the mission": a CAPTCHA gives up one site (nobody can solve it
+//!   from the ledger), the rest go on and the mission finishes;
+//! * "start from a chat": the owner's request on a Full bot becomes a mission through
+//!   `mission_create`, and the supervisor finishes it past the step wall;
 //! * A9 "stops at budget": the session budget, the model-call budget and the deadline end the
 //!   mission as `blocked` with the exact numbers;
 //! * A5 "restart": the daemon shuts down in the middle (the real `shutdown()` order, the
@@ -72,6 +74,9 @@ struct Behaviour {
     /// The item to park with `mission_wait` (the arguments besides `item`) instead of finishing
     /// it, until a brief says the wait is over.
     park: Option<(String, Value)>,
+    /// In the owner's own chat (no mission brief) the model starts a mission with
+    /// `mission_create` when it is offered the tool.
+    create_from_chat: bool,
 }
 
 struct ReactiveModel {
@@ -201,6 +206,21 @@ impl ReactiveModel {
             .filter_map(|m| m.content.as_str())
             .find(|t| t.starts_with("MISSION BRIEF"))
         else {
+            let offered = req
+                .tools
+                .iter()
+                .any(|t| t["function"]["name"] == "mission_create");
+            let called = req
+                .messages
+                .iter()
+                .any(|m| m.role == MessageRole::Assistant && !m.tool_calls.is_empty());
+            if self.behaviour.create_from_chat && offered && !called {
+                return vec![tool_call(
+                    1,
+                    "mission_create",
+                    &json!({"title": "Backlinks"}),
+                )];
+            }
             return text("Done: nothing to do.");
         };
         if self.behaviour.idle {
@@ -621,7 +641,7 @@ async fn continues_without_asking_across_sessions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_captcha_parks_one_item_the_rest_continue_and_the_owner_answers_once() {
+async fn a_captcha_gives_up_one_item_the_rest_continue_and_the_mission_finishes() {
     let dir = tempfile::tempdir().unwrap();
     let behaviour = Behaviour {
         plan: sites(5),
@@ -630,58 +650,82 @@ async fn a_captcha_parks_one_item_the_rest_continue_and_the_owner_answers_once()
     };
     let w = world(dir.path(), &behaviour, 40, None);
     let id = start(&w, GOAL, Budgets::default());
+    // Nobody can solve a CAPTCHA from the ledger, so the owner is not asked: the item is given
+    // up with the reason and the mission does not end up waiting for a person.
     let end = w.supervisor.drive(&id).await.unwrap();
-    assert_eq!(end, MissionState::Blocked);
+    assert_eq!(end, MissionState::Done);
     let p = w.store.progress(&id).unwrap();
     assert_eq!(
-        (p.done, p.blocked),
-        (4, 1),
-        "four sites registered, one parked"
+        (p.done, p.blocked, p.failed),
+        (4, 0, 1),
+        "four sites registered, one given up"
     );
-    let blocked = w.store.items(&id, Some(ItemStatus::Blocked)).unwrap();
-    assert_eq!(blocked[0].key, "site-3.example");
-    assert!(
-        blocked[0]
-            .blocked_reason
-            .as_deref()
-            .unwrap()
-            .contains("CAPTCHA")
-    );
+    let failed = w.store.items(&id, Some(ItemStatus::Failed)).unwrap();
+    assert_eq!(failed[0].key, "site-3.example");
+    assert!(failed[0].last_error.as_deref().unwrap().contains("CAPTCHA"));
     let m = w.store.get(&id).unwrap().unwrap();
-    assert_eq!(
-        m.digest.as_ref().unwrap().blocked.len(),
-        1,
-        "one entry for the owner"
-    );
+    let digest = m.digest.as_ref().unwrap();
+    assert!(digest.blocked.is_empty(), "nothing the owner must answer");
+    assert_eq!(digest.failed.len(), 1, "the report lists the given-up site");
     // No handover card was shown: nobody waited.
     let audit = w.storage.list_audit(w.user).unwrap();
     assert!(!audit.iter().any(|a| a.action == "handover.requested"));
-    assert!(audit.iter().any(|a| a.action == "handover.parked"));
+    assert!(audit.iter().any(|a| a.action == "handover.given_up"));
+}
 
-    // The owner answers once ("I solved it"): the item goes back and the mission finishes.
-    let released = w
-        .supervisor
-        .answer_blocked(
-            &id,
-            &[(
-                "site-3.example".into(),
-                "I solved the CAPTCHA, try again".into(),
-            )],
-        )
-        .unwrap();
-    assert_eq!(released, 1);
-    let behaviour_after = Behaviour {
-        captcha: HashSet::new(),
-        ..behaviour
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chat_request_on_full_becomes_a_mission_the_supervisor_then_finishes() {
+    let dir = tempfile::tempdir().unwrap();
+    let behaviour = Behaviour {
+        plan: sites(5),
+        create_from_chat: true,
+        ..Behaviour::default()
     };
-    let w2 = world(
-        dir.path(),
-        &behaviour_after,
-        40,
-        Some((w.user, w.bot, w.chat)),
+    // A short session (6 model calls): the job needs several sessions, which a plain chat turn
+    // (one run, one step wall) could not give it.
+    let w = world(dir.path(), &behaviour, 6, None);
+    // The owner types the request in their own chat, as the desktop app records it.
+    let agent_core::Delivery::NewTurn(run) = w
+        .agent
+        .send_user_message_from(w.chat, GOAL, agent_core::MessageMode::Steer, "owner")
+        .unwrap()
+    else {
+        panic!("the chat had no run, so a new turn starts");
+    };
+    w.agent.wait(run).await.unwrap();
+    let list = w.store.list(&w.user.to_string()).unwrap();
+    assert_eq!(list.len(), 1, "the model started one mission");
+    let mission = &list[0];
+    assert_eq!(mission.goal_text, GOAL, "the owner's own words");
+    assert_eq!(mission.state, MissionState::Running);
+    assert_ne!(mission.chat_id, w.chat.to_string(), "it has its own chat");
+    // The owner's chat is only the request and the reply: the work happens in the mission.
+    let in_chat = w.storage.list_messages(w.chat).unwrap();
+    assert!(
+        in_chat
+            .iter()
+            .all(|m| !m.content.starts_with("MISSION BRIEF")),
+        "no mission session ran in the owner's chat"
     );
-    assert_eq!(w2.supervisor.drive(&id).await.unwrap(), MissionState::Done);
-    assert_eq!(w2.store.progress(&id).unwrap().done, 5);
+
+    // The supervisor takes it from here: session after session, past the step wall.
+    let end = w.supervisor.drive(&mission.id).await.unwrap();
+    assert_eq!(end, MissionState::Done);
+    let after = w.store.get(&mission.id).unwrap().unwrap();
+    assert!(after.sessions > 1, "{} sessions", after.sessions);
+    assert_eq!(w.store.progress(&mission.id).unwrap().done, 5);
+    let mission_chat = ChatId(uuid::Uuid::parse_str(&after.chat_id).unwrap());
+    let report = w
+        .storage
+        .list_messages(mission_chat)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert!(
+        report.content.contains("Mission finished"),
+        "{}",
+        report.content
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

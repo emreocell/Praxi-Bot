@@ -898,7 +898,9 @@ dependencies = [
  "connector-email",
  "desktop-api",
  "desktop-windows",
+ "dev-tools",
  "directories",
+ "doc-tools",
  "fs4",
  "globset",
  "iana-time-zone",
@@ -10360,7 +10362,10 @@ dependencies = [
  "ocrs",
  "rten",
  "rten-imageproc",
+ "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.21",
+ "tracing",
  "windows 0.61.3",
 ]
 

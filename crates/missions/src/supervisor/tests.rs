@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 
 use super::*;
-use crate::model::Budgets;
+use crate::model::{Budgets, MAX_ITEM_CUTS};
 use crate::store::{ItemUpdate, NewItem, NewMission};
 
 struct ManualClock(AtomicI64);
@@ -460,22 +460,32 @@ async fn an_empty_ledger_gets_planned_in_the_first_session() {
     assert!(h.runner.briefs.lock()[0].contains("THE LEDGER IS EMPTY"));
 }
 
+fn guard_stop(steps: u32) -> SessionResult {
+    SessionResult {
+        end: SessionEnd::GuardStop,
+        model_steps: steps,
+        cost_usd: 0.0,
+    }
+}
+
+/// The first open item of the ledger.
+fn first_open(store: &MissionStore, mission: &str) -> String {
+    store
+        .items(mission, None)
+        .unwrap()
+        .into_iter()
+        .find(|i| i.status.is_open())
+        .unwrap()
+        .key
+}
+
 #[tokio::test]
-async fn items_left_doing_are_requeued_then_given_up() {
-    // The model marks the item doing and never finishes it (runs out of steps).
+async fn items_the_model_abandons_are_requeued_then_given_up() {
+    // The model marks the item doing and ends the session itself without finishing it.
     let script: Box<Script> = Box::new(|_, req, store| {
-        let it = store
-            .items(&req.mission_id, None)
-            .unwrap()
-            .into_iter()
-            .find(|i| i.status.is_open())
-            .unwrap();
-        set(store, &req.mission_id, &it.key, ItemStatus::Doing, None);
-        SessionResult {
-            end: SessionEnd::GuardStop,
-            model_steps: 40,
-            cost_usd: 0.0,
-        }
+        let key = first_open(store, &req.mission_id);
+        set(store, &req.mission_id, &key, ItemStatus::Doing, None);
+        ok(5)
     });
     let h = harness(sites(1), Budgets::default(), script);
     assert_eq!(h.sup.drive(&h.mission).await.unwrap(), MissionState::Done);
@@ -483,6 +493,59 @@ async fn items_left_doing_are_requeued_then_given_up() {
     assert_eq!(it.status, ItemStatus::Failed);
     assert_eq!(it.attempts, MAX_ITEM_ATTEMPTS);
     assert_eq!(h.runner.calls.load(Ordering::SeqCst), MAX_ITEM_ATTEMPTS);
+}
+
+#[tokio::test]
+async fn a_session_the_step_guard_cut_does_not_burn_an_attempt() {
+    // One long item takes four sessions: the guard cuts the first three while the item is
+    // still `doing`, the fourth finishes it. With every cut counted as a failed attempt the
+    // fourth start would be refused ("started 3 times without a result").
+    let script: Box<Script> = Box::new(|n, req, store| {
+        let key = first_open(store, &req.mission_id);
+        set(store, &req.mission_id, &key, ItemStatus::Doing, None);
+        if n < MAX_ITEM_CUTS {
+            return guard_stop(40);
+        }
+        set(store, &req.mission_id, &key, ItemStatus::Done, None);
+        ok(10)
+    });
+    let h = harness(sites(1), Budgets::default(), script);
+    assert_eq!(h.sup.drive(&h.mission).await.unwrap(), MissionState::Done);
+    let it = &h.store.items(&h.mission, None).unwrap()[0];
+    assert_eq!(it.status, ItemStatus::Done);
+    assert_eq!(it.attempts, 1, "only the session that finished it counts");
+    assert_eq!(h.runner.calls.load(Ordering::SeqCst), MAX_ITEM_CUTS);
+}
+
+#[tokio::test]
+async fn an_item_that_eats_whole_sessions_is_given_up_on_its_own_cap_not_the_missions() {
+    // The first item eats every session; the second is fine and gets done once the first is
+    // given up. The mission neither stalls nor blocks.
+    let script: Box<Script> = Box::new(|_, req, store| {
+        let key = first_open(store, &req.mission_id);
+        set(store, &req.mission_id, &key, ItemStatus::Doing, None);
+        if key == "site-0.example" {
+            return guard_stop(40);
+        }
+        set(store, &req.mission_id, &key, ItemStatus::Done, None);
+        ok(5)
+    });
+    let h = harness(sites(2), Budgets::default(), script);
+    assert_eq!(h.sup.drive(&h.mission).await.unwrap(), MissionState::Done);
+    let items = h.store.items(&h.mission, None).unwrap();
+    assert_eq!(items[0].status, ItemStatus::Failed);
+    assert!(
+        items[0]
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("whole sessions"),
+        "{:?}",
+        items[0].last_error
+    );
+    assert_eq!(items[0].attempts, 0, "cuts never counted as attempts");
+    assert_eq!(items[1].status, ItemStatus::Done);
+    assert_eq!(h.runner.calls.load(Ordering::SeqCst), MAX_ITEM_CUTS + 1);
 }
 
 #[tokio::test]

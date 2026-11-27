@@ -88,6 +88,8 @@ impl Shared {
         }
         let mission: &[&str] = if ctx.mission.is_some() {
             &missions::tools::MISSION_TOOL_NAMES
+        } else if self.mission_create_offered(ctx) {
+            &[crate::mission_start::MISSION_CREATE]
         } else {
             &[]
         };
@@ -141,6 +143,7 @@ impl Shared {
         if CORE.contains(&name)
             || active.contains(&name)
             || (ctx.mission.is_some() && missions::tools::is_mission_tool(name))
+            || (name == crate::mission_start::MISSION_CREATE && self.mission_create_offered(ctx))
         {
             return Ok(false);
         }

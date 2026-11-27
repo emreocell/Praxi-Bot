@@ -11,8 +11,8 @@
 import type { ComposioApp, ComposioTest } from "../api/types.ts";
 
 /**
- * Apps the daemon knows a safe test for (the daemon's `probe.rs`; it refuses any other app with a
- * plain sentence, so a stale entry here only shows a button that explains itself).
+ * Apps with an additional, vetted read-only probe. Other apps can check
+ * their authorization without executing an action.
  */
 export const TESTABLE_APPS: readonly string[] = ["googledrive", "gmail", "googlecalendar", "github"];
 
@@ -23,7 +23,7 @@ export function isTestable(slug: string): boolean {
 /** What the test of one app shows. */
 export type AppTestState =
   | { status: "running" }
-  | { status: "ok"; account: string | null; items: string[] }
+  | { status: "ok"; account: string | null; items: string[]; authorizationOnly?: boolean }
   | { status: "failed"; title: string; hint: string; details: string };
 
 export interface TestFailure {
@@ -51,7 +51,8 @@ export async function runAppTest(
     end = {
       status: "ok",
       account: found.account?.trim() ? found.account : null,
-      items: found.items.filter((i) => i.trim() !== "").slice(0, 3)
+      items: found.items.filter((i) => i.trim() !== "").slice(0, 3),
+      ...(found.authorization_only ? { authorizationOnly: true } : {})
     };
   } catch (e) {
     const f = deps.describe(e);

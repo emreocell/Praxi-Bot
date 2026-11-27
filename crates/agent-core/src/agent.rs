@@ -1015,6 +1015,11 @@ impl AgentLoop {
             missions::mission_of_kind(&run.kind).map(str::to_owned)
         });
         let registry = self.sh.tools.clone();
+        // `mission_create` is the chat-side door into missions; it is not one of the session
+        // tools (it is offered only to the owner's Full-level chat, see `mission_start`).
+        registry.register(Arc::new(crate::mission_start::tool(Arc::downgrade(
+            &self.sh,
+        ))));
         missions::tools::tools(store, &resolve, clock, checks)
             .into_iter()
             .filter(|t| registry.register(Arc::clone(t)))

@@ -34,6 +34,8 @@ use tool_registry::{
 use crate::checkpoint::CheckpointStore;
 use crate::util::{exec_err, finish_text, parse, spec};
 
+mod guarded;
+
 // Host restores exclude daemon file mutations from preview through commit.
 // Readers remain available; external applications are checked via after-hashes.
 type MutationLocks = std::collections::HashMap<PathBuf, std::sync::Weak<parking_lot::RwLock<()>>>;
@@ -396,16 +398,15 @@ pub(crate) fn tools_bounded(
     tools_scoped(data_dir, allowed_roots, grants, None, None, None)
 }
 
-/// Like [`tools_bounded`] with a per-bot scope source and the home directory.
-#[must_use]
-pub(crate) fn tools_scoped(
+/// The state every file tool shares: roots, grants, checkpoints and the per-bot scope source.
+fn shared_state(
     data_dir: &Path,
     allowed_roots: &[PathBuf],
     grants: &[PathBuf],
     access: Option<Arc<dyn crate::FsAccessProvider>>,
     home: Option<PathBuf>,
     provenance: Option<Arc<dyn crate::provenance::Provenance>>,
-) -> Vec<Arc<dyn Tool>> {
+) -> Arc<Shared> {
     let drives = DriveCache::new();
     let (allowed_roots, roots_unresolved) = match prepare_roots(allowed_roots, &drives) {
         Ok(roots) => (roots, false),
@@ -413,7 +414,7 @@ pub(crate) fn tools_scoped(
     };
     let grants = prepare_grants(grants);
     let data_dir = canonical_data_dir(data_dir);
-    let shared = Arc::new(Shared {
+    Arc::new(Shared {
         checkpoints: CheckpointStore::new(&data_dir),
         spill_dir: data_dir.join("spill"),
         data_dir,
@@ -428,7 +429,52 @@ pub(crate) fn tools_scoped(
         workspaces_root: None,
         bot_workspace: None,
         bot_id: None,
-    });
+    })
+}
+
+/// The document tools (`doc-tools`) and, with `dev`, the developer tools (`dev-tools`),
+/// behind the same path rules, scope and checkpoints as the file tools.
+#[must_use]
+pub(crate) fn guarded_tools(
+    data_dir: &Path,
+    allowed_roots: &[PathBuf],
+    grants: &[PathBuf],
+    access: Option<Arc<dyn crate::FsAccessProvider>>,
+    home: Option<PathBuf>,
+    provenance: Option<Arc<dyn crate::provenance::Provenance>>,
+    which: OptionalTools,
+) -> Vec<Arc<dyn Tool>> {
+    let shared = shared_state(data_dir, allowed_roots, grants, access, home, provenance);
+    let mut all = Vec::new();
+    if which.documents {
+        all.extend(guarded::office_tools(&shared));
+    }
+    if which.developer {
+        all.extend(guarded::developer_tools(&shared));
+    }
+    all
+}
+
+/// Which of the optional, path-guarded tool families to offer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OptionalTools {
+    /// PDF, DOCX, XLSX, PPTX, CSV and JSON tools (`doc-tools`).
+    pub documents: bool,
+    /// git tools and `process_list` (`dev-tools`).
+    pub developer: bool,
+}
+
+/// Like [`tools_bounded`] with a per-bot scope source and the home directory.
+#[must_use]
+pub(crate) fn tools_scoped(
+    data_dir: &Path,
+    allowed_roots: &[PathBuf],
+    grants: &[PathBuf],
+    access: Option<Arc<dyn crate::FsAccessProvider>>,
+    home: Option<PathBuf>,
+    provenance: Option<Arc<dyn crate::provenance::Provenance>>,
+) -> Vec<Arc<dyn Tool>> {
+    let shared = shared_state(data_dir, allowed_roots, grants, access, home, provenance);
     let fs = PermissionCategory::Fs;
     let defs: Vec<(Op, ToolSpec)> = vec![
         (

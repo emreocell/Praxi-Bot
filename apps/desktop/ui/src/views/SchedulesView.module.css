@@ -51,6 +51,7 @@
 
 /* The page header sits straight on the wallpaper (no plate), where muted ink misses 4.5:1 on a light theme. */
 :global(:root[data-veil="on"]) .subtitle,
+:global(:root[data-veil="on"]) .explain,
 :global(:root[data-veil="on"]) .headerGhost {
   color: var(--color-text);
 }
@@ -591,7 +592,8 @@
 .rowDoes {
   margin: var(--space-0);
   font-size: var(--font-size-ui-sm);
-  color: var(--color-text-muted);
+  /* The card is translucent over the wallpaper: muted ink can dip below 4.5:1. */
+  color: var(--color-text-secondary);
 }
 
 .rowWhen {
@@ -628,7 +630,7 @@
 }
 
 .lastResult[data-tone="failed"] {
-  color: var(--color-danger);
+  color: color-mix(in srgb, var(--color-danger) 75%, var(--color-text));
 }
 
 .lastResult[data-tone="failed"] i {

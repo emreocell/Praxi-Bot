@@ -135,7 +135,7 @@ impl ControlTarget {
 }
 
 /// Context supplied to every tool call.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ToolContext {
     /// The run that invoked the tool.
     pub run_id: String,

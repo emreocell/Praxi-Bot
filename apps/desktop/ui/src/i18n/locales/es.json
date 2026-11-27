@@ -2646,10 +2646,20 @@
         "failed": "No pudo escribir en el equipo",
         "running": "Escribiendo en el equipo"
       },
+      "doc_edit": {
+        "done": "Actualizó un documento",
+        "failed": "No pudo actualizar el documento",
+        "running": "Actualizando un documento"
+      },
       "doc_read": {
         "done": "Leyó un documento",
         "failed": "No pudo leer el documento",
         "running": "Leyendo un documento"
+      },
+      "doc_write": {
+        "done": "Escribió un documento",
+        "failed": "No pudo escribir el documento",
+        "running": "Escribiendo un documento"
       },
       "email_draft": {
         "done": "Redactó un correo",
@@ -2710,6 +2720,16 @@
         "done": "Usó una herramienta",
         "failed": "No pudo usar una herramienta",
         "running": "Usando una herramienta"
+      },
+      "git_change": {
+        "done": "Cambió un repositorio de código",
+        "failed": "No cambió el repositorio de código",
+        "running": "Cambiando un repositorio de código"
+      },
+      "git_read": {
+        "done": "Miró un repositorio de código",
+        "failed": "No pudo mirar el repositorio de código",
+        "running": "Mirando un repositorio de código"
       },
       "knowledge_search": {
         "done": "Buscó en las fuentes de conocimiento",

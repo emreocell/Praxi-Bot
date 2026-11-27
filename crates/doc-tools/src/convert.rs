@@ -581,6 +581,24 @@ fn default_output(path: &str, suffix: &str) -> String {
         .into_owned()
 }
 
+/// Where `doc_convert` writes when the caller names no `output_path`: next to `path`, with
+/// the extension of the target format `to`. A caller that vets output paths asks here first,
+/// so the default is judged like any other destination.
+#[must_use]
+pub fn default_convert_output(path: &str, to: &str) -> String {
+    let to = to.trim().trim_start_matches('.').to_ascii_lowercase();
+    default_output(path, &format!(".{to}"))
+}
+
+/// The folder `doc_preview` writes its PNG files to when the caller names no `output_dir`:
+/// the folder of the document (empty when `path` has none).
+#[must_use]
+pub fn default_preview_dir(path: &str) -> String {
+    Path::new(path)
+        .parent()
+        .map_or_else(String::new, |p| p.to_string_lossy().into_owned())
+}
+
 fn check_free(cfg: &DocToolsConfig, out: &str, overwrite: bool) -> Result<(), ToolError> {
     confine(cfg, out)?;
     if Path::new(out).exists() && !overwrite {
@@ -745,7 +763,7 @@ pub fn run_convert(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
     let out_path = i
         .output_path
         .clone()
-        .unwrap_or_else(|| default_output(&i.path, &format!(".{to}")));
+        .unwrap_or_else(|| default_convert_output(&i.path, &to));
     if ext_of(&out_path) != to {
         return Err(invalid(format!("output_path must end in .{to}")));
     }
@@ -947,11 +965,10 @@ pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
         return Err(invalid("no pages requested"));
     }
     let dpi = i.dpi.unwrap_or(cfg.convert.preview_dpi).clamp(50, 200);
-    let out_dir = i.output_dir.clone().unwrap_or_else(|| {
-        Path::new(&i.path)
-            .parent()
-            .map_or_else(String::new, |p| p.to_string_lossy().into_owned())
-    });
+    let out_dir = i
+        .output_dir
+        .clone()
+        .unwrap_or_else(|| default_preview_dir(&i.path));
     let stem = Path::new(&i.path)
         .file_stem()
         .and_then(|s| s.to_str())

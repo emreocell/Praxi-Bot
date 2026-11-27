@@ -377,8 +377,8 @@ async fn a_mission_never_reaches_the_owners_computer_or_other_bots() {
 }
 
 #[tokio::test]
-async fn an_approval_nobody_answers_pauses_the_session_instead_of_expiring() {
-    let w = world(&["a.example"]);
+async fn an_approval_nobody_answers_parks_that_item_and_the_session_carries_on() {
+    let w = world(&["a.example", "b.example"]);
     let pay = Arc::new(with_class(
         "pay",
         tool_registry::Effect::Destructive,
@@ -387,8 +387,18 @@ async fn an_approval_nobody_answers_pauses_the_session_instead_of_expiring() {
         "paid",
     ));
     let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
         calls(&[("c1", "pay", json!({"amount": 5}))]),
-        text("never reached"),
+        calls(&[(
+            "c2",
+            "mission_item",
+            json!({"key": "b.example", "status": "done", "result": "account created"}),
+        )]),
+        text("Done: one site registered, one needs the owner."),
     ]);
     let mut config = cfg(Policy::full());
     config.schedule_approval_timeout = std::time::Duration::from_millis(200);
@@ -400,14 +410,144 @@ async fn an_approval_nobody_answers_pauses_the_session_instead_of_expiring() {
         profile(FULL),
         config,
     );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    lp.enable_missions(&w.store, &clock);
     let run = lp
         .run_mission_session(w.env.chat, &w.mission, "brief")
         .unwrap();
-    // Money always asks; nobody answers; the session pauses (resumable) and the mission
-    // supervisor reads that as "needs the owner", it does not carry on past the card.
-    assert_eq!(lp.wait(run).await.unwrap(), RunState::Paused);
+    // Money always asks and nobody answers: only the item being worked on waits for the owner.
+    // The run is not paused (the supervisor would block the whole mission), it goes on.
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert_eq!(pay.count.load(std::sync::atomic::Ordering::SeqCst), 0);
-    assert_eq!(fake.n_requests(), 1);
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].key, "a.example");
+    let reason = blocked[0].blocked_reason.as_deref().unwrap();
+    assert!(
+        reason.contains("pay") && reason.contains("needs your approval"),
+        "{reason}"
+    );
+    assert!(!blocked[0].live_only, "the owner may answer it");
+    assert_eq!(w.store.progress(&w.mission).unwrap().done, 1);
+    let tools = crate::tests::tool_messages(&without_ledger(fake.request(2)));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.contains("parked as blocked") && t.contains("Take the next open item")),
+        "{tools:?}"
+    );
+    let audit = w.env.storage.list_audit(w.env.user).unwrap();
+    assert!(audit.iter().any(|a| a.action == "approval.parked"));
+    assert!(audit.iter().any(|a| a.action == "approval.item_parked"));
+    assert!(!audit.iter().any(|a| a.action == "approval.timed_out"));
+}
+
+#[tokio::test]
+async fn an_approval_with_no_single_doing_item_tells_the_model_to_park_it_itself() {
+    let w = world(&["a.example", "b.example"]);
+    let pay = Arc::new(with_class(
+        "pay",
+        tool_registry::Effect::Destructive,
+        PermissionCategory::Money,
+        tool_registry::ContentClass::none(),
+        "paid",
+    ));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "pay", json!({"amount": 5}))]),
+        text("ok"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.schedule_approval_timeout = std::time::Duration::from_millis(100);
+    let lp = make_loop(
+        &w.env.storage,
+        w.env.bot,
+        &fake,
+        &[t(&pay)],
+        profile(FULL),
+        config,
+    );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    lp.enable_missions(&w.store, &clock);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let tools = crate::tests::tool_messages(&without_ledger(fake.request(1)));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.contains("Mark the item you are working on as blocked")),
+        "{tools:?}"
+    );
+    assert_eq!(pay.count.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn the_same_call_after_a_parked_approval_is_refused_without_a_new_card() {
+    let w = world(&["a.example", "b.example"]);
+    let pay = Arc::new(with_class(
+        "pay",
+        tool_registry::Effect::Destructive,
+        PermissionCategory::Money,
+        tool_registry::ContentClass::none(),
+        "paid",
+    ));
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
+        calls(&[("c1", "pay", json!({"amount": 5}))]),
+        // The model tries the very same payment again, and a third time.
+        calls(&[("c2", "pay", json!({"amount": 5}))]),
+        calls(&[("c3", "pay", json!({"amount": 5}))]),
+        text("moving on"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.schedule_approval_timeout = std::time::Duration::from_millis(100);
+    let lp = make_loop(
+        &w.env.storage,
+        w.env.bot,
+        &fake,
+        &[t(&pay)],
+        profile(FULL),
+        config,
+    );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    lp.enable_missions(&w.store, &clock);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(pay.count.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let audit = w.env.storage.list_audit(w.env.user).unwrap();
+    let count = |action: &str| audit.iter().filter(|a| a.action == action).count();
+    assert_eq!(count("approval.parked"), 1, "one card only");
+    assert_eq!(count("approval.repeat_refused"), 2);
+    let tools = crate::tests::tool_messages(&without_ledger(fake.request(3)));
+    assert!(
+        tools.iter().any(|t| t.contains("will not be asked again")),
+        "{tools:?}"
+    );
+}
+
+#[test]
+fn a_zero_schedule_wait_gives_a_mission_the_mission_wait_not_an_instant_park() {
+    use crate::approval::{MISSION_APPROVAL_WAIT, mission_approval_wait};
+    use std::time::Duration;
+    assert_eq!(mission_approval_wait(Duration::ZERO), MISSION_APPROVAL_WAIT);
+    assert_eq!(
+        mission_approval_wait(Duration::from_secs(30 * 60)),
+        MISSION_APPROVAL_WAIT
+    );
+    assert_eq!(
+        mission_approval_wait(Duration::from_secs(10)),
+        Duration::from_secs(10)
+    );
 }
 
 struct SecretTool(tool_registry::ToolSpec);
@@ -577,8 +717,8 @@ async fn a_two_factor_code_item_is_parked_for_a_live_owner_and_never_asks_for_th
 #[tokio::test]
 async fn parked_handovers_count_against_the_per_run_limit() {
     let w = world(&["a.example", "b.example", "c.example"]);
-    // A tool that raises a CAPTCHA on every call.
-    let handover = |id: &str| calls(&[(id, "browser_handover", json!({"kind": "captcha"}))]);
+    // A tool that asks for a 2FA code on every call.
+    let handover = |id: &str| calls(&[(id, "browser_handover", json!({"kind": "code"}))]);
     let fake = Fake::new(vec![
         calls(&[(
             "d1",
@@ -603,7 +743,7 @@ async fn parked_handovers_count_against_the_per_run_limit() {
     let mut config = cfg(Policy::full());
     config.max_handovers_per_run = 2;
     let lp = make_loop(&w.env.storage, w.env.bot, &fake, &[], profile(FULL), config);
-    lp.sh.tools.register(captcha_tool());
+    lp.sh.tools.register(code_tool());
     for tool in builtin_tools::meta::tools() {
         lp.sh.tools.register(tool);
     }
@@ -714,7 +854,7 @@ async fn an_ordinary_chat_of_the_same_bot_does_not_get_the_mission_tools() {
 }
 
 #[tokio::test]
-async fn a_captcha_parks_only_that_item_and_the_session_carries_on() {
+async fn a_captcha_gives_up_only_that_item_and_the_session_carries_on() {
     let w = world(&["a.example", "b.example"]);
     // The model starts on a.example, hits a CAPTCHA, then finishes b.example.
     let fake = Fake::new(vec![
@@ -741,25 +881,31 @@ async fn a_captcha_parks_only_that_item_and_the_session_carries_on() {
         t0.elapsed() < std::time::Duration::from_secs(5),
         "nobody waited for the owner"
     );
-    let a = w
-        .store
-        .items(&w.mission, Some(ItemStatus::Blocked))
-        .unwrap();
+    // Nobody can solve a CAPTCHA from the ledger: the item is given up with the reason (the
+    // report lists it), not parked for an owner who could only skip it.
+    assert_eq!(
+        w.store
+            .items(&w.mission, Some(ItemStatus::Blocked))
+            .unwrap()
+            .len(),
+        0
+    );
+    let a = w.store.items(&w.mission, Some(ItemStatus::Failed)).unwrap();
     assert_eq!(a.len(), 1);
     assert_eq!(a[0].key, "a.example");
-    assert!(a[0].blocked_reason.as_deref().unwrap().contains("CAPTCHA"));
+    assert!(a[0].last_error.as_deref().unwrap().contains("CAPTCHA"));
     assert_eq!(w.store.progress(&w.mission).unwrap().done, 1);
     // The model was told in plain words to move on.
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(2)));
     assert!(
         tools
             .iter()
-            .any(|t| t.contains("parked as blocked") && t.contains("Take the next open item")),
+            .any(|t| t.contains("is given up") && t.contains("Take the next open item")),
         "{tools:?}"
     );
     // No handover card was ever shown.
     let audit = w.env.storage.list_audit(w.env.user).unwrap();
-    assert!(audit.iter().any(|a| a.action == "handover.parked"));
+    assert!(audit.iter().any(|a| a.action == "handover.given_up"));
     assert!(!audit.iter().any(|a| a.action == "handover.requested"));
 }
 
@@ -786,7 +932,7 @@ async fn without_a_single_doing_item_the_model_is_told_to_park_it_itself() {
     assert!(
         tools
             .iter()
-            .any(|t| t.contains("Mark the item you are working on as blocked")),
+            .any(|t| t.contains("Mark the item you are working on as failed")),
         "{tools:?}"
     );
 }

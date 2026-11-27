@@ -76,7 +76,7 @@ for (const url of [
 
 test("openComposioLink opens an allowed connect URL in a plain browser", async () => {
   installWindow();
-  const url = "https://connect.composio.dev/link?x=1";
+  const url = "https://connect.composio.dev/link/lk_1?x=1";
   assert.equal(await openComposioLink(url), true);
   assert.deepEqual(calls, [[url, ...OPEN_ARGS]]);
 });
@@ -90,7 +90,12 @@ test("openComposioLink opens an allowed dashboard URL in a plain browser", async
 
 test("openComposioLink refuses other URLs", async () => {
   installWindow();
-  for (const url of ["https://example.com", "http://connect.composio.dev/link", "javascript:alert(1)"]) {
+  for (const url of [
+    "https://example.com",
+    "http://connect.composio.dev/link/x",
+    "https://connect.composio.dev/link?x=1",
+    "javascript:alert(1)"
+  ]) {
     assert.equal(await openComposioLink(url), false, url);
   }
   assert.deepEqual(calls, []);

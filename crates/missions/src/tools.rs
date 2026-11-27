@@ -21,7 +21,7 @@ use crate::brief::data_value;
 use crate::error::MissionError;
 use crate::model::{
     DEFAULT_TIMEOUT_MINUTES, ItemStatus, MAX_AFTER_SECS, MAX_TIMEOUT_MINUTES, MIN_AFTER_SECS,
-    Mission, MissionState, clip,
+    Mission, MissionState, clip, mentions_captcha,
 };
 use crate::store::{ItemUpdate, MissionStore, NewItem};
 use crate::supervisor::Clock;
@@ -102,7 +102,7 @@ pub fn tools(
         "status":{"type":"string","enum":["doing","done","blocked","failed","skipped","todo"]},
         "result":{"type":"string","description":"Evidence of what was achieved (done)."},
         "error":{"type":"string","description":"What went wrong (failed)."},
-        "reason":{"type":"string","description":"What the owner must do or answer (blocked): CAPTCHA, 2FA code, payment, a question."}
+        "reason":{"type":"string","description":"What the owner must do or answer (blocked): 2FA code, payment, a question. A CAPTCHA is not blocked: mark the item failed with the CAPTCHA as the error."}
     },"required":["key","status"]});
     let note_schema = json!({"type":"object","properties":{
         "kind":{"type":"string","enum":["decision","learned","warning"]},
@@ -378,11 +378,20 @@ impl MissionTool {
 
     fn item(&self, m: &Mission, input: Value) -> Result<String, ToolError> {
         let i: ItemIn = serde_json::from_value(input).map_err(invalid)?;
-        let status = ItemStatus::parse(i.status.trim()).ok_or_else(|| {
+        let mut status = ItemStatus::parse(i.status.trim()).ok_or_else(|| {
             ToolError::InvalidInput(
                 "status must be todo, doing, done, blocked, failed or skipped".into(),
             )
         })?;
+        let (mut error, mut reason) = (i.error, i.reason);
+        // Policy: a CAPTCHA is not something the owner can answer from the list, and a mission
+        // has no live hand-over, so the item is given up with the reason, not parked.
+        let captcha =
+            status == ItemStatus::Blocked && reason.as_deref().is_some_and(mentions_captcha);
+        if captcha {
+            status = ItemStatus::Failed;
+            error = error.or(reason.take());
+        }
         let it = self
             .store
             .update_item(
@@ -391,8 +400,8 @@ impl MissionTool {
                 &ItemUpdate {
                     status: Some(status),
                     result: i.result,
-                    error: i.error,
-                    blocked_reason: i.reason,
+                    error,
+                    blocked_reason: reason,
                     live_only: None,
                 },
                 false,
@@ -408,7 +417,11 @@ impl MissionTool {
             p.blocked,
             p.open()
         );
-        if it.status == ItemStatus::Blocked {
+        if captcha {
+            s.push_str(
+                " A CAPTCHA cannot be solved here, so the item is given up with that reason (the report lists it). Do not retry the site: take the next item now.",
+            );
+        } else if it.status == ItemStatus::Blocked {
             s.push_str(" It is parked for the owner. Do not wait: take the next item now.");
         } else if p.open() > 0 {
             s.push_str(" Take the next open item now; do not ask whether to continue.");
@@ -739,11 +752,41 @@ mod tests {
             &f,
             "mission_item",
             "run-1",
-            json!({"key":"a.com","status":"blocked","reason":"CAPTCHA"}),
+            json!({"key":"a.com","status":"blocked","reason":"needs a card payment"}),
         )
         .await
         .unwrap();
         assert!(r.contains("parked for the owner") && r.contains("next item"));
+    }
+
+    #[tokio::test]
+    async fn a_captcha_is_given_up_with_its_reason_not_parked_for_the_owner() {
+        let f = fixture();
+        call(
+            &f,
+            "mission_plan",
+            "run-1",
+            json!({"items":[{"key":"a.com","title":"x"},{"key":"b.com","title":"y"}]}),
+        )
+        .await
+        .unwrap();
+        let r = call(
+            &f,
+            "mission_item",
+            "run-1",
+            json!({"key":"a.com","status":"blocked","reason":"hCaptcha on the sign-up form"}),
+        )
+        .await
+        .unwrap();
+        assert!(r.contains("CAPTCHA") && r.contains("given up"), "{r}");
+        let items = f.store.items(&f.mission, None).unwrap();
+        assert_eq!(items[0].status, ItemStatus::Failed);
+        assert_eq!(
+            items[0].last_error.as_deref(),
+            Some("hCaptcha on the sign-up form")
+        );
+        assert_eq!(items[0].blocked_reason, None);
+        assert_eq!(f.store.progress(&f.mission).unwrap().blocked, 0);
     }
 
     #[tokio::test]

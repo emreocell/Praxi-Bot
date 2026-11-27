@@ -1,88 +1,50 @@
 # Connecting apps (the Apps dialog)
 
-The **Apps** dialog in the desktop app connects Praxi to external services
-(such as Linear, Notion, Stripe, Atlassian, GitLab, or hundreds of apps through
-Composio) and to local or custom [MCP servers](mcp-servers.md).
+Open **Apps** from the left rail or the command palette (`Ctrl/Cmd+K`).
+The main view connects apps through Composio. **MCP servers** opens the
+settings for direct, local and custom MCP connections.
 
-Open it from the **Apps** button at the bottom of the left rail (it shows up to
-five logos of connected MCP servers when the rail is wide, or a grid icon when
-narrow), or through the command palette (`Ctrl/Cmd+K`).
+## Connect Composio once
 
-At the top of the dialog you have:
+At the top of **Apps**, choose **Connect Composio** to sign in in your system
+browser, or choose **Use a project API key**. The daemon validates the key and
+stores it in its secret store. When Composio supplies the organization or
+project name, the account card shows **Connected as** followed by that name.
 
-- **Search apps** — filters connected apps and the discovery list by name or
-  description.
-- **Advanced** — switches between the main Apps view and the advanced view for
-  custom MCP servers, local developer servers, token-based services, and
-  Composio account settings.
+## Connect and manage an app
 
-![The Apps dialog: connected apps at the top, category chips, and the Discover grid](images/apps/apps-main.png)
+1. Find an app in **Discover**. Popular apps appear first. Use search, the
+   category filters and **Show more** to browse the catalog.
+2. Open the app's page to see its actions and select **Connect**.
+3. Finish authorization in your browser. Praxi checks the authorization with
+   Composio until it succeeds or expires.
 
-## Three ways apps connect
+This also works when the bots run on a paired host. The browser opens on the
+desktop you use, Composio receives the response, and the host polls Composio
+over HTTPS. The browser never needs to reach the host.
 
-> **Google (Gmail, Drive, Calendar) with your own Google account setup:** under
-> **Advanced** there is a guided setup that connects Google's own MCP servers
-> with a client you create yourself. See [Google Workspace](google-workspace.md).
-> The one-click Gmail, Drive and Calendar tiles in the main list use Composio and
-> need no setup.
+Open the app again under **Your apps** to test, disconnect or change bot
+access. Praxi displays the account name when Composio supplies an alias or a
+read-only test identifies it. **Test connection** checks the bound
+authorization. Gmail, Google Drive, Google Calendar and GitHub also have
+read-only tests that can show a name or up to three samples to the owner.
+Bot access and approval rules apply to the tools exposed by Praxi's existing
+Composio integration. Tool inputs and results pass through Composio.
 
-### 1. Direct OAuth apps
+Use **Sign out of Composio** on the account card to suspend access to all
+Composio apps. Praxi keeps your app settings, including bot access.
 
-Remote HTTP MCP servers in the built-in catalog that need no API key appear
-directly in **Discover** on the main screen (for example **Atlassian**,
-**GitLab**, **Linear**, **Notion**, and **Stripe**).
+## MCP servers
 
-1. Click **Connect** on the app tile.
-2. Your system browser opens the provider's sign-in and consent page.
-3. Finish signing in in the browser. Once the daemon receives the callback, the
-   app moves into **Connected**.
+Choose **MCP servers** in the top bar for direct and self-managed connections:
 
-Direct OAuth apps talk straight to the vendor's remote MCP server with no
-intermediary. They also work when Praxi runs on a server: see
-[Praxi runs on a server](#oauth-sign-in-is-stuck-on-waiting-for-the-browser-sign-in). If a service is available both directly and through Composio,
-Praxi shows only the direct tile so each product appears once.
-
-### 2. Composio apps
-
-The rest of the **Discover** grid lists third-party integrations available
-through Composio. Filter them with the category chips (**All**,
-**Communication**, **Social**, **Productivity**, **Dev**, **Finance**,
-**Business**) or the search box, and use **Show more** to load additional pages.
-
-Clicking **Connect** opens a small progress sheet anchored to the tile:
-
-- **First time (Step 1 of 2):** Praxi opens the one-time free Composio sign-in
-  in your browser. When that finishes, the same flow automatically continues to
-  the app's own consent page (**Step 2 of 2**) without pressing **Connect**
-  again.
-- **Already linked (Step 1 of 1):** Praxi opens the app's consent page right
-  away.
-
-When the app's page is finished the tile becomes **Connected**, and for Google
-Drive, Gmail, Google Calendar and GitHub Praxi makes one read-only call by
-itself and shows **Connected as `<account>`** (the account name or address the
-app reports). **Manage → Test connection** repeats that call at any time and
-lists up to three examples: file names for Drive, subjects for Gmail, calendar
-names for Calendar. The examples are shown only to you; no bot sees them.
-
-The connect works the same when the bots run on a paired host: the app's page
-opens in the browser of the computer you are sitting at, Composio receives the
-answer, and the host only asks Composio whether the account is active. Nothing
-is copied between computers by hand.
-
-> **Privacy note:** For Composio-backed apps, tool inputs and results pass
-> through Composio's servers. Praxi's permission engine still asks you before
-> actions that change or send data (see
-> [Chatting and approvals](chatting-and-approvals.md)).
-
-If you prefer to use your own Composio project key instead of the browser login,
-open **Advanced → Composio → Use my own project key**. The key is checked
-immediately, stored in your OS keychain, and never shown again.
-
-### 3. Advanced: MCP servers and token-based services
-
-Click **Advanced** in the top bar for developer and self-managed connections:
-
+- **Remote MCP servers:** Install a direct OAuth server such as Atlassian,
+  Linear, Notion or Stripe, then finish sign-in in your browser. Manage
+  existing remote servers here.
+- **Google with your own setup:** a guided setup that connects Google's own MCP
+  servers (Gmail, Drive, Calendar) with a client you create yourself. See
+  [Google Workspace](google-workspace.md). The Gmail, Drive and Calendar apps in
+  the main list use Composio and need no setup.
 - **Custom MCP server:** Add a `Stdio` (local command plus optional `KEY=value`
   environment lines) or `HTTP` (server URL) MCP server by hand, and pick which
   bots may use it. See [MCP servers](mcp-servers.md) for the underlying
@@ -102,24 +64,11 @@ Click **Advanced** in the top bar for developer and self-managed connections:
 
 ![The Advanced view, starting with the form for a custom MCP server](images/apps/apps-advanced.png)
 
-## What "Connected" means
+## MCP server status
 
-The **Connected** section at the top of the main screen shows only **settled**
-remote connections:
-
-- **Direct OAuth / remote HTTP MCP servers** after sign-in completes (or that
-  are already saved in `mcp.toml`). While a brand-new OAuth sign-in is still in
-  progress, the app stays as a **Signing in** tile in **Discover** with a
-  **Cancel** button rather than appearing in **Connected**. If you cancel or do
-  not finish within **10 minutes**, Praxi deletes the unfinished server entry
-  automatically.
-- **Composio apps** whose state is **Connected** (`active`) or **Sign-in
-  expired** (`expired`). An unfinished Composio sign-in (**Signing in** or
-  **Not finished**) stays in **Discover** with **Cancel** or **Retry** until
-  Composio confirms the account is active.
-
-Local stdio servers do not appear in the main **Connected** section; manage them
-under **Advanced → Local developer servers**.
+A new direct OAuth connection stays in **Signing in** until authorization
+finishes. If you cancel or it times out after five minutes, Praxi removes
+the unfinished server entry.
 
 Status badges on MCP servers mean:
 
@@ -134,8 +83,7 @@ Status badges on MCP servers mean:
 
 ## Managing connections and signing out
 
-Hover or focus any row in **Connected** (or under **Advanced → Local developer
-servers**) and click **Manage**. Rows that need attention (such as `Error`,
+Under **MCP servers**, hover or focus a connected server row and click **Manage**. Rows that need attention (such as `Error`,
 `Sign-in required`, `Sign-in expired`, or `Quarantined`) always keep **Manage**
 visible.
 
@@ -168,29 +116,11 @@ Inside **Manage** you can:
 
 ![The Manage panel of a connected app: bot access, the trust question, tools, and Test connection](images/apps/apps-manage.png)
 
-### Composio apps
-
-Inside **Manage** on a Composio row you can:
-
-- **Turn off** / **Turn on** (when **Connected**): temporarily disables or
-  re-enables the app's tools without removing your OAuth link.
-- **Reconnect** / **Retry** (when **Sign-in expired** or **Not finished**):
-  reopens the consent flow in your browser.
-- **Who can use this app**: all bots, or only the bots you tick. A bot that is
-  not ticked does not get the app's tools at all. Choose **Save** to apply it.
-- **Test connection** (Drive, Gmail, Calendar, GitHub): one read-only call that
-  names the account and shows a few examples.
-- **Disconnect**: asks for confirmation and disconnects the app. If the remote
-  side could not be removed automatically, Praxi tells you it was removed
-  locally and reminds you to remove it in the Composio dashboard too.
-
-To disconnect your Composio account itself (whether linked via browser login or
-a project key), open **Advanced → Composio** and click **Sign out of Composio**.
-
 ## Per-bot access
 
-Each MCP server (including direct OAuth apps) can be shared with all bots or
-restricted to specific bots. Connected rows show up to four bot avatars (plus
+Each Composio app and MCP server can be shared with all bots or restricted to
+specific bots. For Composio, open the app page, choose who can use it and click
+**Save**. The following controls apply to MCP servers. Connected rows show up to four bot avatars (plus
 `+n` when more bots have access) alongside **All bots**, **No bots**, or
 **Bots: …**.
 
@@ -238,13 +168,12 @@ A few important rules:
 
 ### Composio sign-in is stuck or the catalog will not refresh
 
-- **Stuck on "Signing in" or the progress sheet:** the flow times out after
-  **10 minutes**. Click **Cancel** on the tile or sheet to clear the pending
-  state, then click **Connect** (or **Retry**) to start again.
+- **Stuck on "Signing in":** the flow times out after **10 minutes**. Open the
+  app page and choose **Cancel**, then **Connect** to start again.
 - **"The app list could not be refreshed: showing the saved one":** you are
   offline, Composio is rate-limiting requests, or your Composio sign-in expired.
-  Click **Retry** once you are back online; if sign-in expired, open
-  **Advanced → Composio → Sign out of Composio** and link again.
+  Click **Try again** once you are back online. If sign-in expired, link again
+  from the Composio account card.
 
 ### "The page for an app could not be prepared"
 
@@ -257,8 +186,8 @@ The connect sheet names the reason, and **Details** shows the exact text:
   one saved before): **Disconnect** the app, then **Connect** again.
 - **Composio is busy / could not be reached:** wait a minute, check the
   connection of the computer the bots run on, then **Try again**.
-- **Composio no longer accepts the sign-in:** the sheet offers **Sign in to
-  Composio again** and carries on to the app by itself.
+- **Composio no longer accepts the sign-in:** return to the account card and
+  link Composio again, then retry from the app page.
 
 ### A local MCP server shows "Error" or "Quarantined"
 

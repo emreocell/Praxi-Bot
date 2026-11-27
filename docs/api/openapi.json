@@ -7389,7 +7389,7 @@
         "tags": [
           "composio"
         ],
-        "summary": "Test a connected app with one fixed read-only call (Drive: the account and\nthree file names; Gmail: the address and three subjects; GitHub: the user).\nThe result is for the owner's screen; no bot and no model sees it.",
+        "summary": "Verify the bound authorization and run a fixed read-only probe where available.\nThe result is for the owner's screen; no bot and no model sees it.",
         "operationId": "composio_test",
         "parameters": [
           {
@@ -7414,7 +7414,7 @@
             }
           },
           "422": {
-            "description": "not connected, or no quick test for this app",
+            "description": "not connected or no supported probe action",
             "content": {
               "application/json": {
                 "schema": {
@@ -7635,6 +7635,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ComposioCatalogDto"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/composio/toolkits/{slug}/actions": {
+      "get": {
+        "tags": [
+          "composio"
+        ],
+        "summary": "The actions a toolkit offers to bots once connected.",
+        "operationId": "composio_actions",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Toolkit slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ComposioActionDto"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -22456,6 +22516,24 @@
           "failed"
         ]
       },
+      "ComposioActionDto": {
+        "type": "object",
+        "description": "A catalog action available after connecting a toolkit.",
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Short description from Composio."
+          },
+          "name": {
+            "type": "string",
+            "description": "Action name, scoped to the toolkit."
+          }
+        }
+      },
       "ComposioAppDto": {
         "type": "object",
         "description": "A connected (or connecting) app.",
@@ -22468,6 +22546,13 @@
           "tools"
         ],
         "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display identity of the bound account, when available."
+          },
           "bots": {
             "type": [
               "array",
@@ -22628,7 +22713,8 @@
             "type": "boolean",
             "description": "New value."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "ComposioKeyInput": {
         "type": "object",
@@ -22641,7 +22727,8 @@
             "type": "string",
             "description": "The Composio project API key."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "ComposioLinkMode": {
         "type": "string",
@@ -22702,13 +22789,20 @@
           "key_setup_url"
         ],
         "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the linked organization or project."
+          },
           "configured": {
             "type": "boolean",
             "description": "Praxi is linked to Composio (the credential itself is never returned)."
           },
           "key_setup_url": {
             "type": "string",
-            "description": "Where an owner who wants their own project key creates it (advanced)."
+            "description": "Where the owner can create a Composio project key."
           },
           "login_expired": {
             "type": "boolean",
@@ -22722,7 +22816,7 @@
       },
       "ComposioTestDto": {
         "type": "object",
-        "description": "`POST /v1/composio/apps/{slug}/test`: what a one-call read-only test found.\nShown to the owner only; the text comes from the app and is never trusted.",
+        "description": "`POST /v1/composio/apps/{slug}/test`: result of the authorization check or read-only probe.\nShown to the owner only; the text comes from the app and is never trusted.",
         "required": [
           "items"
         ],
@@ -22733,6 +22827,10 @@
               "null"
             ],
             "description": "The account the app is connected as (address or user name), when the app says."
+          },
+          "authorization_only": {
+            "type": "boolean",
+            "description": "Only the active authorization record was checked."
           },
           "items": {
             "type": "array",

@@ -2786,7 +2786,7 @@ export class MockApiClient extends ApiClient {
       case "POST /composio":
       case "PUT /composio":
       case "DELETE /composio":
-        return ok(this.composio(method, seg, opts.body));
+        return ok(this.composio(method, seg, opts));
       case "GET /components":
       case "POST /components":
         return ok(this.components(method, seg));
@@ -3471,12 +3471,15 @@ export class MockApiClient extends ApiClient {
 
   // Review states: `?composio=connected` (linked, two apps connected) or `?composio=waiting`
   // (linked, one app waiting in the browser). Default: not linked, nothing connected.
-  private mockComposioMode: "none" | "login" =
+  private mockComposioMode: "none" | "login" | "project_key" =
     typeof window !== "undefined" && ["connected", "waiting"].includes(new URLSearchParams(window.location.search).get("composio") ?? "") ? "login" : "none";
   private mockLoginPolls = 0;
   private mockComposioApps: ComposioApp[] = typeof window === "undefined" ? [] : (() => {
     const mode = new URLSearchParams(window.location.search).get("composio");
-    const app = (slug: string, name: string, state: ComposioApp["state"], tools: number): ComposioApp => ({ slug, name, state, enabled: true, native_first: false, bots: null, tools });
+    const app = (slug: string, name: string, state: ComposioApp["state"], tools: number): ComposioApp => ({
+      slug, name, state, enabled: true, native_first: false, bots: null, tools,
+      account: state === "active" ? "demo@example.test" : null
+    });
     if (mode === "connected") return [app("gmail", "Gmail", "active", 12), app("github", "GitHub", "active", 31)];
     if (mode === "waiting") return [app("gmail", "Gmail", "active", 12), app("asana", "Asana", "pending", 0)];
     return [];
@@ -3512,10 +3515,12 @@ export class MockApiClient extends ApiClient {
   }
 
   /** Review-state stand-in for `/v1/composio/*` (no network, no key). */
-  private composio(method: string, seg: string[], body: unknown): unknown {
+  private composio(method: string, seg: string[], {
+    body, query
+  }: { body?: unknown; query?: Record<string, string | number | null | undefined> }): unknown {
     const [, sub, slug, action] = seg;
     const configured = this.mockComposioMode !== "none";
-    const status = { configured, mode: this.mockComposioMode, key_setup_url: "https://platform.composio.dev/", login_expired: false };
+    const status = { configured, mode: this.mockComposioMode, key_setup_url: "https://platform.composio.dev/", login_expired: false, account: configured ? "Demo Workspace" : null };
     const kit = (s: string, name: string, description: string, group: string): ComposioToolkit => ({
       slug: s, name, description, categories: [], tools_count: 24, group, logo: null,
       native_first: false, state: "not_connected", enabled: false
@@ -3535,31 +3540,50 @@ export class MockApiClient extends ApiClient {
       return { state: "pending" };
     }
     if (sub === "key") {
-      this.mockComposioMode = method === "PUT" ? "login" : "none";
-      return { ...status, configured: this.mockComposioMode !== "none", mode: this.mockComposioMode };
+      this.mockComposioMode = method === "PUT" ? "project_key" : "none";
+      return this.composio("GET", ["composio"], {});
     }
     if (sub === "toolkits") {
+      if (action === "actions") {
+        if (!configured) throw new ApiError(409, "composio_not_configured", "Composio is not connected");
+        switch (slug) {
+          case "gmail": return [
+            { name: "fetch_emails", description: "Find messages in the mailbox." },
+            { name: "send_email", description: "Send a message from the connected mailbox." }
+          ];
+          case "github": return [
+            { name: "list_repository_issues", description: "List issues in a repository." },
+            { name: "create_an_issue", description: "Open an issue in a repository." }
+          ];
+          default: return [];
+        }
+      }
       const all = [
         kit("gmail", "Gmail", "Read, search and send email.", "communication"),
+        kit("googledrive", "Google Drive", "Find and manage files and folders.", "productivity"),
         kit("googlecalendar", "Google Calendar", "Check and create calendar events.", "productivity"),
         kit("github", "GitHub", "Repositories, issues and pull requests.", "dev"),
         kit("slack", "Slack", "Read channels and post messages.", "communication"),
+        kit("notion", "Notion", "Pages, databases and notes.", "productivity"),
         kit("instagram", "Instagram", "Posts, media and account insights.", "social"),
         kit("linkedin", "LinkedIn", "Profile, posts and company pages.", "social"),
         kit("twitter", "X", "Search, read and post on X.", "social"),
         kit("discord", "Discord", "Servers, channels and messages.", "communication"),
         kit("youtube", "YouTube", "Videos, channels and playlists.", "social"),
         kit("spotify", "Spotify", "Playlists, playback and library.", "social"),
-        kit("googledrive", "Google Drive", "Find and manage files and folders.", "productivity"),
         kit("hubspot", "HubSpot", "Contacts, deals and marketing.", "business"),
         kit("quickbooks", "QuickBooks", "Invoices, expenses and accounting.", "finance"),
         kit("monday", "Monday", "Boards, items and updates.", "business"),
         kit("stripe", "Stripe", "Payments, customers and invoices.", "finance"),
         kit("asana", "Asana", "Tasks, projects and teams.", "productivity")
       ];
-      const q = new URLSearchParams(seg.slice(2).join("")).get("x");
-      void q;
-      return { items: all, next_cursor: null, source: configured ? "cache" : "bundled", updated_at: null, refreshing: false, error: null };
+      const search = String(query?.search ?? "").trim().toLowerCase();
+      const filtered = all.filter((item) => (!query?.group || item.group === query.group) &&
+        [item.slug, item.name, item.description].some((value) => value.toLowerCase().includes(search)));
+      const start = Number(query?.cursor ?? 0);
+      const end = start + Number(query?.limit ?? 12);
+      return { items: filtered.slice(start, end), next_cursor: end < filtered.length ? String(end) : null,
+        source: configured ? "cache" : "bundled", updated_at: null, refreshing: false, error: null };
     }
     if (sub === "apps" && !slug) {
       return structuredClone(this.mockComposioApps);
@@ -3567,9 +3591,11 @@ export class MockApiClient extends ApiClient {
     if (sub === "apps" && slug) {
       const i = this.mockComposioApps.findIndex((a) => a.slug === slug);
       if (action === "connect") {
-        const app: ComposioApp = { slug, name: slug, state: "pending", enabled: true, native_first: false, bots: null, tools: 0 };
+        if (!configured) throw new ApiError(409, "composio_not_configured", "Composio is not connected");
+        const name = ({ gmail: "Gmail", github: "GitHub", googledrive: "Google Drive", googlecalendar: "Google Calendar" } as Record<string, string>)[slug] ?? slug;
+        const app: ComposioApp = { slug, name, state: "pending", enabled: true, native_first: false, bots: this.mockComposioApps[i]?.bots ?? null, tools: 0 };
         if (i < 0) { this.mockComposioApps.push(app); } else { this.mockComposioApps[i] = app; }
-        return { redirect_url: "https://connect.composio.dev/link/mock", expires_at: "" };
+        return { redirect_url: "https://app.composio.dev/link/lt_mock", expires_at: "" };
       }
       if (i < 0) {
         throw new ApiError(404, "not_found", `app ${slug} not found`);
@@ -3580,9 +3606,13 @@ export class MockApiClient extends ApiClient {
       }
       if (action === "enabled") {
         this.mockComposioApps[i] = { ...this.mockComposioApps[i], enabled: (body as { enabled: boolean }).enabled };
+      } else if (action === "bots") {
+        this.mockComposioApps[i] = { ...this.mockComposioApps[i], bots: (body as { bots: string[] | null }).bots };
+      } else if (action === "test") {
+        return { account: this.mockComposioApps[i].account, items: [], authorization_only: true };
       } else if (this.mockComposioApps[i].state === "pending") {
         // The user finished in the browser.
-        this.mockComposioApps[i] = { ...this.mockComposioApps[i], state: "active", tools: 6 };
+        this.mockComposioApps[i] = { ...this.mockComposioApps[i], state: "active", tools: 6, account: "demo@example.test" };
       }
       return this.mockComposioApps[i];
     }

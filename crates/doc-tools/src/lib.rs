@@ -9,6 +9,10 @@
 //! | `docx_write`    | write      | create a `.docx` from headings/paragraphs/tables   |
 //! | `xlsx_read`     | read       | sheets, ranges and typed cells (`.xlsx/.xlsb/.xls`) |
 //! | `xlsx_write`    | write      | create an `.xlsx` with typed cells and formulas    |
+//! | `xlsx_append_rows`  | write  | add rows to an existing `.xlsx`, rest kept as is   |
+//! | `xlsx_update_cells` | write  | set cells of an existing `.xlsx`, rest kept as is  |
+//! | `docx_append`   | write      | add blocks to the end of an existing `.docx`       |
+//! | `pptx_read`     | read       | text of each slide of a `.pptx`                    |
 //! | `csv_read`      | read       | paged CSV/TSV reading                              |
 //! | `csv_transform` | read/write | filter / select / sort / group / limit pipeline    |
 //! | `json_query`    | read       | JSONPath (RFC 9535) query over a file or inline    |
@@ -33,9 +37,9 @@
 //!
 //! These two tools run LibreOffice and `pdftoppm` on untrusted documents and fail closed
 //! unless the host sets [`ConvertConfig::output_root`] (the bot workspace) and
-//! [`ConvertConfig::read_guard`] (the `fs_read` path rule). No daemon crate registers them
-//! with such a configuration yet; `DocToolsConfig::default()` leaves both unset, so the
-//! tools exist in the registry but refuse every call until the wiring sets them.
+//! [`ConvertConfig::read_guard`] (the `fs_read` path rule). `DocToolsConfig::default()`
+//! leaves both unset, so the tools refuse every call until the host sets them; the daemon
+//! does so per call in `builtin-tools`.
 //!
 //! Network isolation is mandatory too: on Linux the converters run in a network-less
 //! sandbox (bubblewrap or `unshare`) and the tools fail closed when none works, unless the
@@ -65,12 +69,15 @@ mod convert_tests;
 mod convert_vet;
 mod csv_tools;
 mod docx;
+mod docx_edit;
 mod json_query;
+mod ooxml;
 mod pdf;
 mod pdf_budget;
 mod pdf_cmap;
 mod pptx;
 mod xlsx;
+mod xlsx_edit;
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -83,7 +90,7 @@ use tool_registry::{
 };
 
 pub use common::Reply;
-pub use convert::ConvertConfig;
+pub use convert::{ConvertConfig, default_convert_output, default_preview_dir};
 
 /// Extract an already-authorized PDF or DOCX snapshot without reopening a path.
 /// The caller owns path authorization and supplies a display label, never an
@@ -410,22 +417,39 @@ pub struct DocToolsConfig {
     pub convert: ConvertConfig,
 }
 
-type GuardFn = dyn Fn(&str) -> Result<(), String> + Send + Sync + std::panic::RefUnwindSafe;
+type GuardFn = dyn Fn(&str, u64) -> Result<(), String> + Send + Sync + std::panic::RefUnwindSafe;
 
 /// A path check supplied by the embedder; `Err` carries the refusal reason.
 #[derive(Clone)]
 pub struct WriteGuard(Arc<GuardFn>);
 
 impl WriteGuard {
-    /// Wrap a check.
+    /// Wrap a check of the path alone.
     pub fn new(
         check: impl Fn(&str) -> Result<(), String> + Send + Sync + std::panic::RefUnwindSafe + 'static,
+    ) -> Self {
+        Self(Arc::new(move |path, _bytes| check(path)))
+    }
+
+    /// Wrap a check that also sees how many bytes the write adds to the folder (the new size
+    /// less the size of the file it replaces, `0` for a read check), so a workspace quota is
+    /// judged against the real size and not only against what is already there.
+    pub fn sized(
+        check: impl Fn(&str, u64) -> Result<(), String>
+        + Send
+        + Sync
+        + std::panic::RefUnwindSafe
+        + 'static,
     ) -> Self {
         Self(Arc::new(check))
     }
 
     pub(crate) fn check(&self, path: &str) -> Result<(), String> {
-        (self.0)(path)
+        (self.0)(path, 0)
+    }
+
+    pub(crate) fn check_sized(&self, path: &str, added_bytes: u64) -> Result<(), String> {
+        (self.0)(path, added_bytes)
     }
 }
 
@@ -483,6 +507,10 @@ pub fn tools(cfg: &DocToolsConfig) -> Vec<Arc<dyn Tool>> {
         (docx::write_spec(), docx::run_write),
         (xlsx::read_spec(), xlsx::run_read),
         (xlsx::write_spec(), xlsx::run_write),
+        (xlsx_edit::append_spec(), xlsx_edit::run_append),
+        (xlsx_edit::update_spec(), xlsx_edit::run_update),
+        (docx_edit::append_spec(), docx_edit::run_append),
+        (pptx::read_spec(), pptx::run_read),
         (csv_tools::read_spec(), csv_tools::run_read),
         (csv_tools::transform_spec(), csv_tools::run_transform),
         (json_query::spec(), json_query::run),
@@ -508,12 +536,16 @@ pub fn register(registry: &ToolRegistry, cfg: &DocToolsConfig) {
 }
 
 /// Names of all tools in this crate.
-pub const TOOL_NAMES: [&str; 10] = [
+pub const TOOL_NAMES: [&str; 14] = [
     "pdf_extract",
     "docx_read",
     "docx_write",
     "xlsx_read",
     "xlsx_write",
+    "xlsx_append_rows",
+    "xlsx_update_cells",
+    "docx_append",
+    "pptx_read",
     "csv_read",
     "csv_transform",
     "json_query",
@@ -537,9 +569,13 @@ pub(crate) fn mk_spec(
         content: match name {
             // Documents can carry prompt injection and are private files.
             "pdf_extract" | "docx_read" | "xlsx_read" | "csv_read" | "csv_transform"
-            | "json_query" | "doc_preview" => tool_registry::ContentClass::untrusted_private(),
-            // The model already holds the document it is writing.
-            "docx_write" | "xlsx_write" | "doc_convert" => tool_registry::ContentClass::none(),
+            | "json_query" | "doc_preview" | "pptx_read" => {
+                tool_registry::ContentClass::untrusted_private()
+            }
+            // The model already holds the document it is writing; the edit tools only
+            // report what they changed, never what the file held.
+            "docx_write" | "xlsx_write" | "doc_convert" | "xlsx_append_rows"
+            | "xlsx_update_cells" | "docx_append" => tool_registry::ContentClass::none(),
             _ => tool_registry::ContentClass::unspecified(),
         },
     }
@@ -605,6 +641,32 @@ mod tests {
         assert!(!reg.get("docx_write").unwrap().spec().content.reads_private);
         assert!(!reg.get("xlsx_write").unwrap().spec().content.reads_private);
         assert_eq!(reg.get("pdf_extract").unwrap().spec().effect, Effect::Read);
+    }
+
+    #[test]
+    fn edit_and_read_tools_carry_the_right_metadata() {
+        let reg = ToolRegistry::new();
+        register(&reg, &DocToolsConfig::default());
+        for name in ["xlsx_append_rows", "xlsx_update_cells", "docx_append"] {
+            let spec = reg.get(name).unwrap().spec().clone();
+            assert_eq!(spec.effect, Effect::Write, "{name}");
+            assert_eq!(spec.category, PermissionCategory::Fs, "{name}");
+            assert!(
+                !spec.content.reads_private,
+                "{name} must not echo file content"
+            );
+            assert!(
+                spec.input_schema["required"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|f| f == "path")
+            );
+        }
+        let pptx = reg.get("pptx_read").unwrap().spec().clone();
+        assert_eq!(pptx.effect, Effect::Read);
+        assert_eq!(pptx.category, PermissionCategory::Fs);
+        assert!(pptx.content.ingests_untrusted && pptx.content.reads_private);
     }
 
     #[test]

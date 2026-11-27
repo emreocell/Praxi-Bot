@@ -39,6 +39,11 @@ pub const DEFAULT_TIMEOUT_MINUTES: u64 = 60;
 pub const MAX_TIMEOUT_MINUTES: u64 = 3 * 24 * 60;
 /// Longest text a wake carries from the outside (a webhook body, a mail summary), in characters.
 pub const MAX_WAKE_PAYLOAD_CHARS: usize = 4096;
+/// Sessions the step guard cut, or something interrupted (a crash, a restart, a provider
+/// error), while one item was being worked on, before the item is given up. Neither burns an
+/// attempt (an item may need more than one session), but an item that eats this many whole
+/// sessions without being settled is stuck.
+pub const MAX_ITEM_CUTS: u32 = 4;
 
 /// Where a mission is in its life.
 ///
@@ -472,6 +477,17 @@ pub fn mentions_code(reason: &str) -> bool {
     ]
     .iter()
     .any(|w| r.contains(w))
+}
+
+/// The text of a blocked reason is about a CAPTCHA. Nobody can pass one by typing an answer into
+/// the ledger, and a mission has no live hand-over, so such an item is given up with the reason
+/// rather than parked for the owner.
+#[must_use]
+pub fn mentions_captcha(reason: &str) -> bool {
+    let r = reason.to_lowercase();
+    ["captcha", "turnstile", "i am not a robot"]
+        .iter()
+        .any(|w| r.contains(w))
 }
 
 /// The text is (or is mostly) a one-time code: a short answer that holds a run of 4 to 10

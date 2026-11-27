@@ -137,9 +137,9 @@ Every app of `crates/composio/src/curated.json` was looked up in Simple Icons 16
 
 | Pinned app | Result | Why |
 | --- | --- | --- |
-| LinkedIn, Microsoft Outlook, Microsoft Teams, Salesforce | No bundled mark | Not in Simple Icons 16.36.0 (the project removed them), and no vendor licence for redistributing their artwork is verified here. They show the logo the daemon fetched from Composio's catalog and cached; until the catalog was read, or when it has none, their **initials on a neutral tile** (the old generic puzzle-piece glyph is gone). |
+| LinkedIn, OneDrive, Microsoft Outlook, Microsoft Teams, Salesforce | Composio catalog logo or initials | Simple Icons 16.36.0 has no matching marks. Praxi displays the validated catalog logo supplied by Composio when available, with initials as a fallback. |
 
-`brandIcons.test.ts` names these four, so a new pinned app without a mark fails the test and
+`brandIcons.test.ts` names these five, so a new pinned app without a mark fails the test and
 has to be added to this audit. Catalog apps that are not pinned follow the same rule.
 
 ## Open maintainer note

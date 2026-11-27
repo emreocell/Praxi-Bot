@@ -37,6 +37,7 @@ mod loops;
 mod mail_prompt;
 mod memory;
 mod mention;
+mod mission_start;
 pub mod page_guard;
 mod profile;
 mod router;
@@ -76,6 +77,8 @@ mod full_mode_tests;
 mod mail_tests;
 #[cfg(test)]
 mod mission_session_tests;
+#[cfg(test)]
+mod mission_start_tests;
 #[cfg(test)]
 mod mode_tests;
 #[cfg(test)]

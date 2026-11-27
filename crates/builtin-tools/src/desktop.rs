@@ -38,6 +38,70 @@ use secret_store::{FillSecrets, SecretValue, sanitize_label};
 /// An OCR engine usable from tools.
 pub type SharedOcr = Arc<dyn OcrEngine + Send + Sync>;
 
+/// The on-device OCR engine for set-of-marks, from the model files already in `models/ocrs`
+/// inside the daemon's `data_dir` (the folder the file tools refuse to write; see
+/// [`vision::OcrModelPaths::model_dir_in`]; `PRAXI_OCR_MODEL_DIR` overrides it when it is an
+/// absolute path).
+///
+/// Nothing is downloaded here: with no model files this is `None`, the desktop tools then say
+/// that no OCR engine is configured and keep working from the accessibility tree. Model files
+/// are untrusted input, so they are only used when they pass
+/// [`vision::OcrModelPaths::verify`] (regular files, no links, size cap, pinned SHA-256);
+/// otherwise this is `None` too, with one warning.
+#[must_use]
+pub fn default_ocr(data_dir: &Path) -> Option<SharedOcr> {
+    let Some(dir) = vision::OcrModelPaths::model_dir_in(data_dir) else {
+        tracing::warn!("OCR is off: the data directory is not an absolute path");
+        return None;
+    };
+    ocr_from_dir(&dir)
+}
+
+/// Like [`default_ocr`] for the model files in `dir`.
+#[must_use]
+pub fn ocr_from_dir(dir: &std::path::Path) -> Option<SharedOcr> {
+    ocr_from_dir_with(dir, vision::ocr::ModelDigests::pinned())
+}
+
+/// [`ocr_from_dir`] with explicit accepted digests (the pinned ones in production).
+fn ocr_from_dir_with(dir: &Path, digests: vision::ocr::ModelDigests) -> Option<SharedOcr> {
+    let paths = vision::OcrModelPaths::from_dir(dir);
+    if !paths.exists() {
+        return None;
+    }
+    if let Err(e) = paths.verify_with(&digests) {
+        tracing::warn!("OCR is off, the model files were refused: {e}");
+        return None;
+    }
+    Some(Arc::new(LazyOcr {
+        paths,
+        digests,
+        engine: std::sync::OnceLock::new(),
+    }))
+}
+
+/// Loads the models on the first screenshot that needs them, not at start-up, so a daemon
+/// that never meets a weak accessibility tree pays nothing. The files are vetted again when
+/// they are read (loading uses exactly the bytes that were hashed), so a file replaced after
+/// start-up is refused. A model that fails to load is reported once and then reads as "no text
+/// found".
+struct LazyOcr {
+    paths: vision::OcrModelPaths,
+    digests: vision::ocr::ModelDigests,
+    engine: std::sync::OnceLock<Option<vision::OcrsEngine>>,
+}
+
+impl OcrEngine for LazyOcr {
+    fn recognize(&self, img: &vision::RgbImage) -> Vec<vision::TextBox> {
+        let engine = self.engine.get_or_init(|| {
+            vision::OcrsEngine::from_paths_with_digests(&self.paths, &self.digests)
+                .map_err(|e| tracing::warn!("OCR models could not be loaded: {e}"))
+                .ok()
+        });
+        engine.as_ref().map_or_else(Vec::new, |e| e.recognize(img))
+    }
+}
+
 /// Timing knobs for the desktop tools.
 #[derive(Debug, Clone, Copy)]
 pub struct DesktopSettings {
@@ -2967,6 +3031,45 @@ mod tests {
                 vision::TextBox::new("Cancel".into(), BoundingBox::new(100, 20, 60, 20), 0.9),
             ]
         }
+    }
+
+    #[test]
+    fn ocr_is_offered_only_when_the_model_files_exist_and_a_broken_model_reads_as_no_text() {
+        use sha2::{Digest, Sha256};
+        let dir = tempfile::tempdir().unwrap();
+        assert!(ocr_from_dir(dir.path()).is_none(), "no models, no engine");
+        let paths = vision::OcrModelPaths::from_dir(dir.path());
+        std::fs::write(&paths.detection_model, b"not a model").unwrap();
+        assert!(ocr_from_dir(dir.path()).is_none(), "one file is not enough");
+        std::fs::write(&paths.recognition_model, b"not a model").unwrap();
+        assert!(
+            ocr_from_dir(dir.path()).is_none(),
+            "files that are not the pinned models are refused, not loaded"
+        );
+
+        // Files that do match the accepted digests are offered; one that is not a loadable
+        // model then reads as no text, without a retry or a panic.
+        let digest = format!("{:x}", Sha256::digest(b"not a model"));
+        let digests = vision::ocr::ModelDigests {
+            detection: vec![digest.clone()],
+            recognition: vec![digest],
+        };
+        let ocr = ocr_from_dir_with(dir.path(), digests.clone()).expect("digests match");
+        let wrong = vision::ocr::ModelDigests {
+            detection: vec!["0".repeat(64)],
+            ..digests
+        };
+        assert!(
+            ocr_from_dir_with(dir.path(), wrong).is_none(),
+            "one wrong digest is enough to refuse"
+        );
+        let img = image::RgbImage::from_pixel(64, 32, image::Rgb([255, 255, 255]));
+        assert_eq!(ocr.recognize(&img).len(), 0);
+        assert_eq!(
+            ocr.recognize(&img).len(),
+            0,
+            "second call does not retry or panic"
+        );
     }
 
     #[tokio::test]

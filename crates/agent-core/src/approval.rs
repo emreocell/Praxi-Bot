@@ -118,11 +118,37 @@ pub(crate) const STOPPED_REASON: &str = "denied: stopped by you";
 /// The desktop app matches this text (`REDIRECT_DENY_REASON` in the UI): keep them equal.
 pub(crate) const REDIRECTED_REASON: &str = "denied: the owner wrote a new message instead";
 
+/// How long a mission session waits for an approval card before it parks the item instead
+/// (capped by [`LoopConfig::schedule_approval_timeout`](crate::LoopConfig)). The owner of an
+/// unattended mission is not at the screen by definition; the card stays open for a short
+/// while for the case that they are, then only this one item waits.
+pub(crate) const MISSION_APPROVAL_WAIT: std::time::Duration =
+    std::time::Duration::from_secs(5 * 60);
+
+/// How long a mission session waits for one approval card: the configured schedule wait, but
+/// never longer than [`MISSION_APPROVAL_WAIT`]. A zero setting means "no limit", so it gets the
+/// mission wait too, never an instant park (`min(0, ..)` would deny every card at once).
+pub(crate) fn mission_approval_wait(configured: std::time::Duration) -> std::time::Duration {
+    if configured.is_zero() {
+        MISSION_APPROVAL_WAIT
+    } else {
+        configured.min(MISSION_APPROVAL_WAIT)
+    }
+}
+
+/// What identifies "the same call" for a parked approval: the tool and the card's summary.
+fn park_key(name: &str, summary: &str) -> String {
+    format!("{name}\u{1f}{summary}")
+}
+
 /// How a wait for the user ended.
 enum Waited {
     Verdict(Result<Verdict, oneshot::error::RecvError>),
     /// A schedule-started run: nobody answered, the run is asked to pause.
     Paused,
+    /// A mission session: nobody answered an approval card, so the call is denied and the item
+    /// being worked on is parked; the session carries on with the next item.
+    Parked,
     /// Nobody answered within the approval timeout: the call is denied as expired.
     Expired,
 }
@@ -431,6 +457,12 @@ impl Shared {
         if name == crate::delegation::ASK_BOT && ctx.initiator != InitiatorKind::Human {
             return (Decision::Deny, None);
         }
+        // Starting a mission from a chat is for the owner's own Full-level chat only (there the
+        // owner's request is the confirmation: the Full level's policy then lets this local
+        // Meta tool run without a card).
+        if name == crate::mission_start::MISSION_CREATE && !self.mission_create_offered(ctx) {
+            return (Decision::Deny, None);
+        }
         // The user's own computer only serves runs the owner started by
         // hand: never a schedule, webhook, channel, routine or external
         // agent, and never a run whose message came in through Telegram, the
@@ -441,7 +473,8 @@ impl Shared {
         // Document converters are shell-free writers too. In particular a
         // one-column CSV can be a valid SKILL.md or workflow/config document.
         let output_field = match name {
-            "docx_write" | "xlsx_write" => Some("path"),
+            "docx_write" | "xlsx_write" | "docx_append" | "xlsx_append_rows"
+            | "xlsx_update_cells" => Some("path"),
             "csv_transform" | "doc_convert" => Some("output_path"),
             "doc_preview" => Some("output_dir"),
             _ => None,
@@ -554,6 +587,22 @@ impl Shared {
                 InitiatorKind::ExternalAgent | InitiatorKind::ExternalSchedule
             )
         {
+            if d == Decision::Allow {
+                d = Decision::ask();
+            }
+            return (d, None);
+        }
+        // A commit (under the owner's identity) or a branch switch (it rewrites work tree files)
+        // after the run read untrusted content asks on every level but the owner's Full, where
+        // only money asks: the lane, a plain policy allow and a remembered grant sit below this.
+        // Like the egress gate, a standing "always" does not waive it. "The owner's Full" is
+        // the Full level's usual waiver rule: a run the owner started, not a webhook, a schedule,
+        // a channel message, a mission session, a subagent or a helper bot.
+        let owner_full = ctx.profile.permissions.mode() == AutonomyMode::Full
+            && ctx.parent_run_id.is_none()
+            && ctx.delegation().is_none()
+            && self.full_owner_started(ctx);
+        if taint::git_mutation(name, input) && !owner_full && ctx.taint.lock().exposure.untrusted {
             if d == Decision::Allow {
                 d = Decision::ask();
             }
@@ -2034,7 +2083,12 @@ impl Shared {
     /// blocks the mission for the owner).  Any other run waits at most
     /// [`LoopConfig::approval_timeout`](crate::LoopConfig) (zero = no limit);
     /// then the call is denied as expired and the run carries on.
-    async fn wait_verdict(&self, ctx: &RunCtx, rx: oneshot::Receiver<Verdict>) -> Waited {
+    async fn wait_verdict(
+        &self,
+        ctx: &RunCtx,
+        rx: oneshot::Receiver<Verdict>,
+        park_item: bool,
+    ) -> Waited {
         // A card parked after Stop (a parallel call) is closed at once.
         if self.run_is_stopped(ctx.run_id) {
             self.deny_open_for_stop(ctx.run_id);
@@ -2058,9 +2112,24 @@ impl Shared {
             );
             return Waited::Expired;
         }
-        let limit = self.cfg.schedule_approval_timeout;
+        // An approval in a mission blocks the one item it belongs to, not the whole mission.
+        let park = park_item && ctx.initiator == InitiatorKind::Mission;
+        let limit = if park {
+            mission_approval_wait(self.cfg.schedule_approval_timeout)
+        } else {
+            self.cfg.schedule_approval_timeout
+        };
         if let Ok(v) = tokio::time::timeout(limit, rx).await {
             return Waited::Verdict(v);
+        }
+        if park {
+            self.audit(
+                ctx,
+                "system",
+                "approval.parked",
+                &json!({ "timeout_secs": limit.as_secs() }),
+            );
+            return Waited::Parked;
         }
         self.approval_paused.lock().insert(ctx.run_id);
         self.audit(
@@ -2520,6 +2589,24 @@ impl Shared {
                 );
             }
         }
+        // A mission item whose approval nobody gave in time was parked: the same call again is
+        // refused here, without a second card (the model would otherwise retry it every turn and
+        // fill the owner's screen with the same question).
+        let park_key_of_call = park_key(name, &summary);
+        if ctx.initiator == InitiatorKind::Mission
+            && ctx.parked_calls.lock().contains(&park_key_of_call)
+        {
+            self.audit(
+                ctx,
+                "system",
+                "approval.repeat_refused",
+                &json!({"tool": name}),
+            );
+            return Err(Some(format!(
+                "{name} was already asked about in this session and nobody approved it in time; it will not be asked again. Move on to the next open item; the owner can allow it and release the item."
+            )));
+        }
+        let summary_for_park = truncate_utf8(&summary, 160).to_owned();
         let (approval_id, mut guard, rx) = self.park(
             ctx,
             call_id,
@@ -2555,13 +2642,31 @@ impl Shared {
                 details,
             }),
         );
-        let waited = self.wait_verdict(ctx, rx).await;
+        let waited = self.wait_verdict(ctx, rx, true).await;
         guard.resume();
         let verdict = match waited {
             Waited::Verdict(v) => v,
             Waited::Paused => {
                 let _ = self.storage.decide_approval(approval_id, "expired");
                 return Err(Some("nobody approved in time; the run is paused".into()));
+            }
+            Waited::Parked => {
+                let _ = self.storage.decide_approval(approval_id, "expired");
+                self.emit(
+                    ctx,
+                    Event::ToolCallDenied(ToolCallDenied {
+                        run_id: ctx.run_id,
+                        call_id,
+                        denied_by: ctx.user_id,
+                        reason: Some(EXPIRED_REASON.into()),
+                    }),
+                );
+                ctx.parked_calls.lock().insert(park_key_of_call);
+                return Err(Some(self.park_item_for_approval(
+                    ctx,
+                    name,
+                    &summary_for_park,
+                )));
             }
             Waited::Expired => {
                 let _ = self.storage.decide_approval(approval_id, "expired");
@@ -2758,11 +2863,11 @@ impl Shared {
                 options,
             }),
         );
-        let waited = self.wait_verdict(ctx, rx).await;
+        let waited = self.wait_verdict(ctx, rx, false).await;
         guard.resume();
         let verdict = match waited {
             Waited::Verdict(v) => v,
-            Waited::Paused => {
+            Waited::Paused | Waited::Parked => {
                 let _ = self.storage.decide_approval(approval_id, "expired");
                 return Err(Some("nobody answered in time; the run is paused".into()));
             }
@@ -2950,6 +3055,19 @@ fn mission_refusal_text(why: &str) -> String {
     )
 }
 
+/// What the model reads when a CAPTCHA ends the work on an item of a mission: the item is
+/// given up (nobody can solve it from the ledger), the session moves on.
+fn mission_give_up_text(key: Option<&str>, reason: &str) -> String {
+    match key {
+        Some(key) => format!(
+            "Not waiting: this is a mission, so a person is not asked right now, and a CAPTCHA cannot be solved from the ledger. Item {key:?} is given up ({reason}); the report lists it. Do not retry the site. Take the next open item now."
+        ),
+        None => format!(
+            "Not waiting: this is a mission, so a person is not asked right now, and a CAPTCHA cannot be solved from the ledger. Mark the item you are working on as failed with mission_item (error: {reason}), do not retry the site, and take the next open item now."
+        ),
+    }
+}
+
 /// What the model reads when a mission session parks an item for the owner instead of waiting.
 fn mission_park_text(key: Option<&str>, reason: &str) -> String {
     match key {
@@ -2996,7 +3114,24 @@ impl Shared {
         builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
         let site = truncate_utf8(&card.site, 80);
         let reason = match kind {
-            HandoverKind::Captcha => format!("a CAPTCHA on {site} has to be solved by the owner"),
+            HandoverKind::Captcha => {
+                // Policy: nobody can solve a CAPTCHA from a mission (no live hand-over, and a
+                // typed answer does not pass it), so the item is given up with the reason, not
+                // parked for an owner who could only skip it.
+                let reason = format!("a CAPTCHA on {site}; Praxi does not solve CAPTCHAs");
+                let key = self.mission_store.read().clone().and_then(|s| {
+                    s.give_up_sole_doing_item(mission, &reason, storage::now_ms())
+                        .ok()
+                        .flatten()
+                });
+                self.audit(
+                    ctx,
+                    "system",
+                    "handover.given_up",
+                    &json!({"kind": kind, "site": card.site, "item": key}),
+                );
+                return (mission_give_up_text(key.as_deref(), &reason), true);
+            }
             // A one-time code is never typed into a mission answer (it would sit in the ledger
             // and reach the model): the owner finishes this step live on the site or skips it.
             HandoverKind::Code => format!(
@@ -3021,6 +3156,32 @@ impl Shared {
             &json!({"kind": kind, "site": card.site, "item": key}),
         );
         (mission_park_text(key.as_deref(), &reason), true)
+    }
+
+    /// An approval nobody gave in time in a mission session: the call is denied and the item
+    /// being worked on is parked with what the owner has to allow. The session carries on with
+    /// the next item; only this item waits (the mission is not paused).
+    fn park_item_for_approval(&self, ctx: &RunCtx, name: &str, summary: &str) -> String {
+        let Some(mission) = ctx.mission.as_deref() else {
+            return "nobody approved in time".to_owned();
+        };
+        let reason = format!(
+            "{name} needs your approval and nobody gave it in time ({}). Allow it in the bot's permissions, then answer \"retry\"; or skip this item",
+            truncate_utf8(summary, 120)
+        );
+        let store = self.mission_store.read().clone();
+        let key = store.and_then(|s| {
+            s.block_sole_doing_item(mission, &reason, false, storage::now_ms())
+                .ok()
+                .flatten()
+        });
+        self.audit(
+            ctx,
+            "system",
+            "approval.item_parked",
+            &json!({"tool": name, "item": key}),
+        );
+        mission_park_text(key.as_deref(), &reason)
     }
 
     /// A credential the bot needs in a mission session: park the item being worked on, like a

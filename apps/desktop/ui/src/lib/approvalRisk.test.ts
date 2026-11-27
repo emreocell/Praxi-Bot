@@ -24,6 +24,15 @@ test("writing a file or changing a bot is a change; a tool the tiers do not know
   assert.equal(approvalRisk("some_new_tool", {}), null);
 });
 
+test("document and git tools: reading looks, editing and committing change", () => {
+  for (const tool of ["docx_read", "xlsx_read", "pptx_read", "csv_read", "git_diff", "git_status"]) {
+    assert.equal(approvalRisk(tool, { path: "a" }), "read", tool);
+  }
+  for (const tool of ["docx_write", "docx_append", "xlsx_write", "xlsx_append_rows", "xlsx_update_cells", "git_commit"]) {
+    assert.equal(approvalRisk(tool, { path: "a" }), "change", tool);
+  }
+});
+
 test("data that leaves the computer is a send even when the tool name is plain", () => {
   assert.equal(
     approvalRisk("web_extract", { url: "https://example.com" }, { kind: "egress", host: "example.com", read: ["file a"], payload: "x" }),

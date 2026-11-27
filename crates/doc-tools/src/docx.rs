@@ -77,6 +77,7 @@ pub(crate) fn parse_document_xml(xml: &[u8]) -> Result<Vec<Block>, ToolError> {
             .map_err(|e| exec(format!("invalid document.xml: {e}")))?;
         match ev {
             Event::Eof => break,
+            Event::DocType(_) => return Err(crate::ooxml::doctype_refused()),
             Event::Empty(e) => match e.local_name().as_ref() {
                 "pStyle" if in_p => style = attr_val(&e, "val"),
                 "tab" if in_p => para.push('\t'),
@@ -448,10 +449,18 @@ fn para_xml(style: Option<&str>, text: &str, bold: bool) -> String {
     format!("<w:p>{ppr}{}</w:p>", run_xml(text, bold))
 }
 
-fn table_xml(rows: &[Vec<String>], header: bool) -> String {
+/// Table borders written into a table itself, for a document without a `TableGrid` style.
+const INLINE_BORDERS: &str = "<w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders>";
+
+fn table_xml(rows: &[Vec<String>], header: bool, table_grid: bool) -> String {
     let width = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
-    let mut out = String::from(
-        "<w:tbl><w:tblPr><w:tblStyle w:val=\"TableGrid\"/><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr><w:tblGrid>",
+    let (style, borders) = if table_grid {
+        ("<w:tblStyle w:val=\"TableGrid\"/>", "")
+    } else {
+        ("", INLINE_BORDERS)
+    };
+    let mut out = format!(
+        "<w:tbl><w:tblPr>{style}<w:tblW w:w=\"0\" w:type=\"auto\"/>{borders}</w:tblPr><w:tblGrid>"
     );
     for _ in 0..width {
         out.push_str("<w:gridCol w:w=\"2000\"/>");
@@ -493,13 +502,83 @@ fn styles_xml() -> String {
     s
 }
 
-pub(crate) fn build_docx(blocks: &[WBlock]) -> Result<Vec<u8>, ToolError> {
+/// Which styles the document the blocks go into defines (a new document defines them all).
+#[derive(Clone, Copy)]
+pub(crate) struct StyleSupport {
+    pub headings: bool,
+    pub table_grid: bool,
+}
+
+/// Longest text one heading, paragraph, bullet or table cell may hold.
+const MAX_TEXT_CHARS: usize = 100_000;
+/// Most text all blocks of one call may hold together.
+const MAX_TOTAL_TEXT_CHARS: usize = 10_000_000;
+/// Most paragraphs plus table cells one call may make.
+const MAX_UNITS: usize = 100_000;
+
+/// Refuse blocks that would expand into an oversized part, before any XML is built: too much
+/// text in one paragraph or cell or in all, or too many paragraphs and cells (a table is as
+/// wide as its widest row in every row, so a short request can describe a huge table).
+fn check_block_size(blocks: &[WBlock]) -> Result<(), ToolError> {
+    let mut chars = 0usize;
+    let mut text = |t: &str| -> Result<(), ToolError> {
+        let n = t.chars().count();
+        if n > MAX_TEXT_CHARS {
+            return Err(invalid(format!(
+                "a paragraph, bullet or table cell holds more than {MAX_TEXT_CHARS} characters"
+            )));
+        }
+        chars = chars.saturating_add(n);
+        if chars > MAX_TOTAL_TEXT_CHARS {
+            return Err(invalid(format!(
+                "the blocks hold more than {MAX_TOTAL_TEXT_CHARS} characters in total"
+            )));
+        }
+        Ok(())
+    };
+    let mut units = 0usize;
+    for block in blocks {
+        match block {
+            WBlock::Heading { text: t, .. } | WBlock::Paragraph { text: t, .. } => {
+                units = units.saturating_add(1);
+                text(t)?;
+            }
+            WBlock::Bullets { items } => {
+                units = units.saturating_add(items.len());
+                for item in items {
+                    text(item)?;
+                }
+            }
+            WBlock::Table { rows, .. } => {
+                let width = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+                units = units.saturating_add(rows.len().saturating_mul(width));
+                for cell in rows.iter().flatten() {
+                    text(cell)?;
+                }
+            }
+        }
+        if units > MAX_UNITS {
+            return Err(invalid(format!(
+                "the blocks make more than {MAX_UNITS} paragraphs and table cells"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// WordprocessingML for `blocks`.
+pub(crate) fn blocks_xml(blocks: &[WBlock], styles: StyleSupport) -> Result<String, ToolError> {
+    check_block_size(blocks)?;
     let mut body = String::new();
     for b in blocks {
         match b {
             WBlock::Heading { text, level } => {
                 let l = (*level).clamp(1, 6);
-                body.push_str(&para_xml(Some(&format!("Heading{l}")), text, false));
+                if styles.headings {
+                    body.push_str(&para_xml(Some(&format!("Heading{l}")), text, false));
+                } else {
+                    body.push_str(&para_xml(None, text, true));
+                }
             }
             WBlock::Paragraph { text, bold } => body.push_str(&para_xml(None, text, *bold)),
             WBlock::Bullets { items } => {
@@ -511,12 +590,23 @@ pub(crate) fn build_docx(blocks: &[WBlock]) -> Result<Vec<u8>, ToolError> {
                 if rows.is_empty() {
                     return Err(invalid("table needs at least one row"));
                 }
-                body.push_str(&table_xml(rows, *header));
+                body.push_str(&table_xml(rows, *header, styles.table_grid));
                 // Word requires a paragraph between adjacent tables / after the last table.
                 body.push_str("<w:p/>");
             }
         }
     }
+    Ok(body)
+}
+
+pub(crate) fn build_docx(blocks: &[WBlock]) -> Result<Vec<u8>, ToolError> {
+    let body = blocks_xml(
+        blocks,
+        StyleSupport {
+            headings: true,
+            table_grid: true,
+        },
+    )?;
     let document = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
     );
@@ -702,6 +792,67 @@ mod tests {
         assert_eq!(result.data["omitted_cells"], 1);
         assert_eq!(result.data["truncated"], true);
         assert!(serde_json::to_vec(&result.data).unwrap().len() <= MAX_READ_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn blocks_are_bounded_before_any_xml_is_built() {
+        let styles = StyleSupport {
+            headings: true,
+            table_grid: true,
+        };
+        let long = || "x".repeat(MAX_TEXT_CHARS + 1);
+        let para = |text: String| WBlock::Paragraph { text, bold: false };
+        // One paragraph, heading, bullet or table cell over the per-text limit.
+        for block in [
+            para(long()),
+            WBlock::Heading {
+                text: long(),
+                level: 1,
+            },
+            WBlock::Bullets {
+                items: vec![long()],
+            },
+            WBlock::Table {
+                rows: vec![vec![long()]],
+                header: true,
+            },
+        ] {
+            let err = blocks_xml(&[block], styles).unwrap_err();
+            assert!(err.to_string().contains("characters"), "{err}");
+        }
+        blocks_xml(&[para("x".repeat(MAX_TEXT_CHARS))], styles).unwrap();
+        // A table is as wide as its widest row in every row: a short request must not expand
+        // into a huge table.
+        let mut rows = vec![vec![String::new(); 1000]];
+        rows.extend((0..100).map(|_| Vec::new()));
+        let table = WBlock::Table {
+            rows,
+            header: false,
+        };
+        let err = blocks_xml(&[table], styles).unwrap_err();
+        assert!(
+            err.to_string().contains("paragraphs and table cells"),
+            "{err}"
+        );
+        let bullets = WBlock::Bullets {
+            items: vec![String::new(); MAX_UNITS + 1],
+        };
+        assert!(blocks_xml(&[bullets], styles).is_err());
+        // All the text together is bounded too.
+        let all: Vec<WBlock> = (0..=MAX_TOTAL_TEXT_CHARS / MAX_TEXT_CHARS)
+            .map(|_| para("x".repeat(MAX_TEXT_CHARS)))
+            .collect();
+        let err = blocks_xml(&all, styles).unwrap_err();
+        assert!(err.to_string().contains("in total"), "{err}");
+    }
+
+    #[test]
+    fn a_doctype_in_the_document_is_refused_when_reading() {
+        let err = parse_document_xml(
+            br#"<!DOCTYPE d [<!ENTITY a "b">]><w:document xmlns:w="x"><w:body/></w:document>"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("DOCTYPE is not allowed"), "{err}");
     }
 
     #[test]

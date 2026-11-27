@@ -31,6 +31,14 @@ test("an empty account name is no account, and an empty list is still a pass", a
   assert.deepEqual(end, { status: "ok", account: null, items: [] });
 });
 
+test("an authorization-only check is identified separately from an action probe", async () => {
+  const end = await runAppTest({
+    test: async () => ({ account: "Team inbox", items: [], authorization_only: true }),
+    describe
+  }, "slack", () => {});
+  assert.deepEqual(end, { status: "ok", account: "Team inbox", items: [], authorizationOnly: true });
+});
+
 test("a failed test says why in plain words and never throws", async () => {
   const end = await runAppTest(
     {
@@ -48,7 +56,7 @@ test("a failed test says why in plain words and never throws", async () => {
 test("only an app that just finished signing in is tested by itself", () => {
   const before = [app("googledrive", "pending"), app("gmail", "active"), app("slack", "pending")];
   const after = [app("googledrive", "active"), app("gmail", "active"), app("slack", "active")];
-  // Drive just became active; Gmail was already active when the list loaded; Slack has no test.
+  // Drive just became active; Gmail was already active; Slack has no action probe.
   assert.deepEqual(appsToTestNow(before, after, {}), ["googledrive"]);
   // Never twice, never for a switched-off or still-pending app.
   assert.deepEqual(appsToTestNow(before, after, { googledrive: { status: "running" } }), []);

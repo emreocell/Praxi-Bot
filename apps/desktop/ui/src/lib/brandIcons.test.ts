@@ -140,5 +140,5 @@ test('the pinned Composio apps without a bundled mark are exactly the audited on
     readFileSync(new URL('../../../../../crates/composio/src/curated.json', import.meta.url), 'utf8')
   ) as { popular: { slug: string; name: string }[] };
   const missing = curated.popular.filter((p) => !brandIcon(p.name).known || !brandIcon(p.slug).known).map((p) => p.slug);
-  assert.deepEqual(missing.sort(), ['linkedin', 'microsoft_teams', 'outlook', 'salesforce']);
+  assert.deepEqual(missing.sort(), ['linkedin', 'microsoft_teams', 'one_drive', 'outlook', 'salesforce']);
 });

@@ -337,7 +337,7 @@ pub fn build_brief(input: &BriefInput<'_>) -> String {
          1. Work alone, without asking. Never write \"shall I continue?\" or \"want me to do the next one?\": take the next item, finish it, then the next, until you run out of items or steps. \
          You have about {} model calls in this session; running out is normal, the next session continues from this brief.\n\
          2. Record every outcome as you go with mission_item: done (with one line of evidence), failed (with the error), or blocked (with what you need from the owner). Mark an item doing when you start it.\n\
-         3. A CAPTCHA, a 2FA code, a payment or a question only the owner can answer blocks THAT item only. Mark it blocked with the reason and go on with the next item. Never wait for the owner in the middle of the mission.\n\
+         3. A 2FA code, a payment or a question only the owner can answer blocks THAT item only. Mark it blocked with the reason and go on with the next item. Never wait for the owner in the middle of the mission. A CAPTCHA cannot be solved by anyone here: mark that item failed (error: the CAPTCHA) and go on, do not retry the site.\n\
          4. Do not pay for anything and do not move money. Park that item as blocked.\n\
          5. Write decisions down with mission_note (pinned for the ones later sessions need). Use mission_status to see this brief again.\n\
          6. When no open item is left, call mission_complete. The runtime checks the goal; it will tell you what is missing.\n\

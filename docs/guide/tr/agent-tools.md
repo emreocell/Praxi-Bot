@@ -26,3 +26,19 @@ Botun iki küçük yardımcı aracı her zaman vardır, ama yalnızca gerektiği
 İkisi de yalnızca botun verdiği metin üzerinde hesap yapar ve saati okur. Dosya açamaz, ağı kullanamaz, program çalıştıramaz. Bu yüzden hiçbir zaman onay istemez ve dışarıya bir şey gönderme sayılmaz. İfadelerin uzunluğu ve derinliği sınırlıdır, düz aritmetik olmayan her şey reddedilir.
 
 Bir CSV, JSON ya da PDF dosyasını okumak (`csv_read`, `json_query`, `pdf_extract`) yalnızca izin verdiğin klasörlerde çalışır ve özel veri okuma sayılır: bot az önce bir web sayfası ya da e-posta okuduysa, veriyi dışarı gönderecek her şey önce sana sorar.
+
+## Belgeler ve kod depoları
+
+Botlar yalnızca metin değil, Word, Excel ve PowerPoint dosyalarını da okuyup yazabilir. `docx_read`, `xlsx_read`, `pptx_read`, `pdf_extract`, `csv_read` ve `json_query` okur; `docx_write`, `xlsx_write` ve `csv_transform` yeni dosya oluşturur. Üç araç ise var olan bir dosyanın geri kalanına dokunmadan onu değiştirir:
+
+* `xlsx_append_rows` bir sayfanın son satırından sonra satır ekler.
+* `xlsx_update_cells` tek tek hücreleri adresiyle (`B2`) ayarlar. Hücre kendi biçimini korur.
+* `docx_append` bir Word belgesinin sonuna başlık, paragraf, liste ve tablo ekler.
+
+Diğer sayfalar, stiller, sütun genişlikleri ve görseller olduğu gibi kalır. Sınırlar: araçlar Excel tablolarını genişletmez, formülleri yeniden hesaplamaz (dosyayı açınca Excel yapar) ve makro dosyalarını (`.xlsm`, `.docm`) ile eski `.xls` / `.doc` dosyalarını reddeder. `fs_write` gibi, her değişiklikten önce bir geri alma noktası kaydedilir.
+
+Bunların hepsi `fs_read` ve `fs_write` ile aynı dosya erişimi ayarına uyar: “Yalnızca klasör” erişimi olan bir bot klasörlerinin dışındaki bir belgeyi açamaz ya da değiştiremez; kimlik bilgilerine ve Praxi’nin kendi verisine de bu yoldan erişilemez. `doc_convert` ve `doc_preview` (Office’ten PDF’ye, sayfa görüntüleri) ayrıca bilgisayarda LibreOffice ve ağdan yalıtılmış bir korumalı ortam ister, yalnızca botun çalışma alanına yazar; bunlar yoksa söyler ve hiçbir şey yapmaz.
+
+Geliştirici araçları da vardır: `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch` ve `git_commit` `git`’i doğrudan çalıştırır (kabuk üzerinden değil, kancalar kapalı). “Yalnızca klasör” erişiminde depo botun klasörlerinin içinde olmalıdır; “Bu bilgisayar” erişiminde, kimlik bilgisi ya da ayar klasörlerinin ya da başka bir botun çalışma alanının içinde olmayan her depo olabilir. `fs_read`’in reddettiği dosyalar (kimlik bilgileri, anahtarlar, `.env` dosyaları, araç ayarları) `git_diff`, `git_show` ve `git_status` çıktısında yer almaz; `git_commit` böyle bir dosyayı kaydedecekse hiçbir şey eklemeden durur (yol olarak `.` da kabul etmez). Bir commit ya da dal değiştirme, botun klasör boyutu sınırından sayılır, mümkün olduğunda git dosyalarının geri alma noktasını kaydeder ve bot güvenilmeyen içerik okuduktan sonra Tam seviyesi dışındaki her seviyede önce sorar. `process_list` çalışan her programı gösterdiği için yalnızca “Bu bilgisayar” erişimi olan botlara verilir ve döndürdüğü metin güvenilmeyen metin sayılır. Bir depoyu okumak, dosya okumak gibi özel veri okuma sayılır.
+
+OCR model dosyaları bilgisayarda zaten kuruluysa (Praxi’nin veri klasörünün içindeki `models/ocrs` klasöründe ya da `PRAXI_OCR_MODEL_DIR` ile gösterilen klasörde; bu mutlak bir yol olmalıdır), bir uygulamanın erişilebilirlik ağacı zayıf olduğunda masaüstü araçları ekrandaki yazıyı da okur ve bulduklarını numaralandırır (`mark:3`); böylece bot ona tıklayabilir. Praxi yalnızca düz dosya olan (bağlantı olmayan), boyut sınırı içinde kalan ve yayımlanmış SHA-256 özetleriyle eşleşen model dosyalarını kullanır; başka her dosya reddedilir. Model dosyaları yoksa ya da reddedilirse hiçbir şey değişmez: araçlar OCR motoru ayarlanmadığını söyler.

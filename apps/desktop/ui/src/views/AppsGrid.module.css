@@ -4,14 +4,25 @@
 .chip:hover { background-color: var(--color-surface-elevated); color: var(--color-text); }
 .chipOn { border-color: var(--color-accent); color: var(--color-text); background-color: var(--color-surface-active); }
 
-.anchor { position: relative; }
-.link { display: flex; flex-direction: column; gap: var(--space-3); max-width: var(--size-content-max); padding: var(--space-4); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background-color: color-mix(in srgb, var(--color-surface-active) 55%, transparent); }
-.linkHead { display: flex; align-items: flex-start; gap: var(--space-3); font-size: var(--font-size-sm); color: var(--color-text); }
-.linkHead svg { flex-shrink: 0; width: var(--size-icon); height: var(--size-icon); margin-top: var(--space-1); color: var(--color-accent-text); }
-.linkHead p { margin: var(--space-1) var(--space-0) var(--space-0); }
-.notice { display: flex; align-items: flex-start; gap: var(--space-2); margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); line-height: var(--line-height-normal); }
-.notice svg { flex-shrink: 0; width: var(--size-icon-sm); height: var(--size-icon-sm); margin-top: var(--space-1); }
-
+.cardButton { width: 100%; border: 0; padding: var(--space-3) var(--space-2); border-radius: inherit; background: none; text-align: start; cursor: pointer; }
+.cardButton:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+.cardArrow { flex-shrink: 0; width: var(--size-icon-sm); height: var(--size-icon-sm); color: var(--color-text-muted); }
+.accountCard { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background-color: var(--color-surface-active); }
+.accountRow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.accountIcon { display: grid; place-items: center; width: var(--size-control-md); height: var(--size-control-md); border-radius: var(--radius-md); background-color: var(--color-surface-elevated); color: var(--color-accent-text); }
+.accountIcon svg { width: var(--size-icon); height: var(--size-icon); }
+.accountCopy { flex: 1; min-width: var(--space-0); overflow-wrap: anywhere; }
+.accountTitle, .sectionTitle { margin: var(--space-0); font-size: var(--font-size-sm); color: var(--color-text); }
+.keyForm { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); max-width: var(--size-content-max); }
+.appPage { display: flex; flex-direction: column; gap: var(--space-5); }
+.appHeader { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-2) var(--space-0); }
+.appTitle { margin: var(--space-0); font-size: var(--font-size-lg); color: var(--color-text); }
+.appTitle:focus { outline: none; }
+.appSummary { margin: var(--space-1) var(--space-0) var(--space-0); font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.appSection { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-4); border-top: var(--size-border) solid var(--color-border); }
+.actionList { margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.actionItem { padding: var(--space-3) var(--space-0); border-bottom: var(--size-border) solid var(--color-border); font-size: var(--font-size-sm); color: var(--color-text); overflow-wrap: anywhere; }
+.actionItem p { margin: var(--space-1) var(--space-0) var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 
 .quiet { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 

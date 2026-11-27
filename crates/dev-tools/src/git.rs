@@ -127,6 +127,18 @@ impl GitRunner {
             .args(["-c", "commit.gpgSign=false"])
             .args(["-c", "tag.gpgSign=false"])
             .args(["-c", "log.showSignature=false"])
+            // `.git/config` is a file the bot can write: pin what shapes the output the
+            // diff/status filter parses (names must be relative to the top level and carry the
+            // plain `a/` `b/` prefixes), and keep git from starting a detached `gc` after a
+            // commit, which would run outside the checkpoint, the budget and the timeout.
+            .args(["-c", "diff.relative=false"])
+            .args(["-c", "diff.noprefix=false"])
+            .args(["-c", "diff.mnemonicPrefix=false"])
+            .args(["-c", "diff.srcPrefix=a/"])
+            .args(["-c", "diff.dstPrefix=b/"])
+            .args(["-c", "diff.submodule=short"])
+            .args(["-c", "gc.auto=0"])
+            .args(["-c", "maintenance.auto=false"])
             // A null device cannot become a directory populated by another
             // process, unlike the former predictable temporary directory.
             .args([

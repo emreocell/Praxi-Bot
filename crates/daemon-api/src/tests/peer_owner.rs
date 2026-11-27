@@ -655,15 +655,21 @@ async fn a_paired_device_cannot_read_or_steer_a_mission_but_the_admin_desktop_ca
     r.net.shutdown().await;
 }
 
-/// Opening an app to every bot, and a live test that reads mail subjects and
-/// file names, are owner actions: an unconfirmed desktop on a host is sent to the
-/// confirmation step, the confirmed administrator desktop gets through.
+/// The administrator desktop can see account identity and manage app access.
+/// A desktop without host administration must complete owner confirmation.
 #[tokio::test]
-async fn the_app_bots_and_test_routes_need_the_confirmed_admin_desktop_on_a_host() {
+async fn app_management_and_identity_routes_need_the_confirmed_admin_desktop_on_a_host() {
     let r = rig().await;
     let legacy = (r.legacy_key.as_str(), PeerRole::Desktop);
     let admin = (r.admin_key.as_str(), PeerRole::Desktop);
     for (method, path, body) in [
+        (Method::GET, "/v1/composio", None),
+        (Method::GET, "/v1/composio/apps", None),
+        (Method::GET, "/v1/composio/apps/github", None),
+        (Method::GET, "/v1/composio/toolkits?search=git", None),
+        (Method::GET, "/v1/composio/toolkits/github/actions", None),
+        (Method::GET, "/v1/composio/logos/github", None),
+        (Method::GET, "/v1/composio/login", None),
         (
             Method::PUT,
             "/v1/composio/apps/github/bots",

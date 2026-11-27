@@ -150,6 +150,8 @@ impl ContentTaint {
             || !self.exposure.untrusted
             || effect == tool_registry::Effect::Read
             || matches!(name, "shell_run" | "fs_delete" | "notes_write")
+            // Listing branches changes nothing.
+            || (name == "git_branch" && !git_mutation(name, input))
             || name.starts_with("pc_")
             || name.starts_with("browser_")
             || !matches!(
@@ -177,7 +179,10 @@ impl ContentTaint {
         use protocol::PermissionCategory as C;
         let category = match name {
             "fs_write" | "fs_edit" | "fs_move" | "checkpoint_restore" | "docx_write"
-            | "xlsx_write" | "csv_transform" | "doc_convert" | "doc_preview" => C::Fs,
+            | "xlsx_write" | "docx_append" | "xlsx_append_rows" | "xlsx_update_cells"
+            | "csv_transform" | "doc_convert" | "doc_preview" | "git_commit" | "git_branch" => {
+                C::Fs
+            }
             "script_run" => C::Script,
             n if n.starts_with("desktop_") => C::Desktop,
             // `note_write` decides on the name alone for this one; the category is not read.
@@ -479,9 +484,10 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
     match name {
         "fs_read" | "fs_list" | "fs_search" | "fs_write" | "fs_edit" | "fs_move" | "fs_delete"
         | "checkpoint_list" | "checkpoint_restore" | "pdf_extract" | "docx_read" | "docx_write"
-        | "xlsx_read" | "xlsx_write" | "csv_read" | "csv_transform" | "json_query"
-        | "doc_convert" | "doc_preview" | "git_status" | "git_diff" | "git_log" | "git_show"
-        | "git_branch" | "git_commit" => {
+        | "docx_append" | "xlsx_read" | "xlsx_write" | "xlsx_append_rows" | "xlsx_update_cells"
+        | "pptx_read" | "csv_read" | "csv_transform" | "json_query" | "doc_convert"
+        | "doc_preview" | "git_status" | "git_diff" | "git_log" | "git_show" | "git_branch"
+        | "git_commit" => {
             format!("file {}", str_field("path").unwrap_or("a file"))
         }
         "email_read" | "email_search" | "email_list_folders" | "email_download_attachment" => {
@@ -856,6 +862,17 @@ pub(crate) fn call_can_egress(name: &str, class: ContentClass, input: &Value) ->
             .is_some_and(|text| !text.is_empty());
     }
     true
+}
+
+/// A git call that changes the repository: a commit (made under the owner's identity), or a
+/// branch created or switched (a switch rewrites files in the work tree). Listing branches and
+/// every read-only git tool are not.
+pub(crate) fn git_mutation(name: &str, input: &Value) -> bool {
+    match name {
+        "git_commit" => true,
+        "git_branch" => input.get("action").and_then(Value::as_str) != Some("list"),
+        _ => false,
+    }
 }
 
 /// Any string [`protocol::approval_text::scrub`] would shorten.
@@ -1847,6 +1864,31 @@ mod hashed_history_tests {
         let mut parent = ContentTaint::default();
         parent.inherit(&taint);
         assert!(parent.code_written_after_untrusted);
+    }
+
+    #[test]
+    fn a_rebuilt_run_remembers_a_git_change_after_an_untrusted_read_but_not_a_listing() {
+        let step = |name: &str, args: Value| json!({"tool_calls": [{"id": "c1", "name": name, "arguments": args.to_string()}]});
+        for (name, args, marks) in [
+            (
+                "git_commit",
+                json!({"paths": ["a.txt"], "message": "m"}),
+                true,
+            ),
+            ("git_branch", json!({"action": "switch", "name": "x"}), true),
+            ("git_branch", json!({"action": "create", "name": "x"}), true),
+            ("git_branch", json!({"action": "list"}), false),
+        ] {
+            let mut taint = ContentTaint::default();
+            observe_history_step(&mut taint, "tools", &json!({}), Some(&page_step()));
+            observe_history_step(
+                &mut taint,
+                "model",
+                &json!({}),
+                Some(&step(name, args.clone())),
+            );
+            assert_eq!(taint.code_written_after_untrusted, marks, "{name} {args}");
+        }
     }
 
     #[test]

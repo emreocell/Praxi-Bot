@@ -10,17 +10,16 @@ Some apps are called **MCP servers**. That is only a technical name for "a plug-
 
 1. Click **Apps** in the left rail.
 2. Use **Search apps** or the category chips to find the app. Apps you can add are under **Discover**.
-3. Press **Connect** on the app.
+3. Open the app's page and press **Connect**.
 4. A page opens in your browser. Sign in there and allow access. Then go back to Praxi.
-5. The app moves to **Connected**.
+5. The app shows **Connected** and appears under **Your apps**.
 
-For some apps, Praxi first asks you to sign in once to a free service called Composio. After that it opens the app's own page by itself. You see "Step 1 of 2" and "Step 2 of 2".
-
-> **Picture:** the **Apps** window with **Search apps**, **Discover** and **Connected**.
+Connect your Composio account once at the top of **Apps**, in your browser or with a project API key. Then open the page for an app and select **Connect** to authorize that app in your browser.
 
 ## Who can use the app
 
-Press **Manage** on a connected app. Under **Who can use this app** choose:
+Open a connected app's page. For a direct MCP server, choose **Manage** under
+**MCP servers**. Under **Who can use this app** choose:
 
 - **All bots**, or
 - **Only these bots**, and tick the bots. Then press **Save**.

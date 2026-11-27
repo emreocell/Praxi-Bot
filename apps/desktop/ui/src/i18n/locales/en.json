@@ -840,6 +840,66 @@
       "title": "Composio",
       "waiting": "Waiting for you in the browser…"
     },
+    "composioHub": {
+      "accountConnected": "Composio account connected",
+      "accountHint": "Connect a Composio account once to browse and connect apps.",
+      "actionsEmpty": "There are no actions available for bots in this app.",
+      "actionsLoading": "Loading actions…",
+      "actionsNeedAccount": "Connect your Composio account to see this app’s actions.",
+      "actionsTitle": "What bots can do",
+      "authorizationVerified": "Composio confirmed the authorization is active.",
+      "back": "All apps",
+      "connection": "App connection",
+      "disconnectConfirm": "Disconnect this app?",
+      "linkAccount": "Connect Composio",
+      "loginFailed": "Could not finish connecting Composio. Try again.",
+      "mcpServers": "MCP servers",
+      "pauseAccess": "Pause bot access",
+      "remoteServers": "Remote MCP servers",
+      "resumeAccess": "Resume bot access",
+      "signOutHint": "Bots will lose access to Composio apps until you reconnect the account.",
+      "summaries": {
+        "airtable": "Bases, tables and records.",
+        "asana": "Tasks and projects.",
+        "discord": "Servers, channels and messages.",
+        "dropbox": "Files and shared folders.",
+        "facebook": "Pages, posts and insights.",
+        "github": "Repositories, issues and pull requests.",
+        "gitlab": "Repositories and merge requests.",
+        "gmail": "Read, search and send email.",
+        "googlecalendar": "Check and create calendar events.",
+        "googledocs": "Create and edit documents.",
+        "googledrive": "Find and manage files and folders.",
+        "googlesheets": "Read and update spreadsheets.",
+        "hubspot": "Contacts, deals and marketing.",
+        "instagram": "Posts, media and account insights.",
+        "jira": "Issues and sprints.",
+        "linear": "Issues, projects and cycles.",
+        "linkedin": "Profile, posts and company pages.",
+        "microsoft_teams": "Teams chats and channels.",
+        "notion": "Pages, databases and notes.",
+        "one_drive": "Find and manage files in OneDrive.",
+        "outlook": "Email and calendar from Microsoft.",
+        "quickbooks": "Invoices, expenses and accounting.",
+        "reddit": "Browse and post to subreddits.",
+        "salesforce": "Leads, accounts and opportunities.",
+        "shopify": "Products, orders and customers.",
+        "slack": "Read channels and post messages.",
+        "spotify": "Playlists, playback and library.",
+        "stripe": "Payments, customers and invoices.",
+        "supabase": "Databases and project management.",
+        "telegram": "Chats and bot messages.",
+        "tiktok": "Videos and account data.",
+        "todoist": "Tasks and projects.",
+        "trello": "Boards, lists and cards.",
+        "twitter": "Search, read and post on X.",
+        "whatsapp": "Send and read WhatsApp Business messages.",
+        "youtube": "Videos, channels and playlists.",
+        "zoom": "Meetings and recordings."
+      },
+      "useKey": "Use a project API key",
+      "yourApps": "Your apps"
+    },
     "connect": "Connect",
     "connectApp": "Connect {{name}}",
     "connectNow": "Connect",
@@ -2646,10 +2706,20 @@
         "failed": "Didn't type on the computer",
         "running": "Typing on the computer"
       },
+      "doc_edit": {
+        "done": "Updated a document",
+        "failed": "Couldn't update a document",
+        "running": "Updating a document"
+      },
       "doc_read": {
         "done": "Read a document",
         "failed": "Couldn't read a document",
         "running": "Reading a document"
+      },
+      "doc_write": {
+        "done": "Wrote a document",
+        "failed": "Couldn't write a document",
+        "running": "Writing a document"
       },
       "email_draft": {
         "done": "Drafted an email",
@@ -2710,6 +2780,16 @@
         "done": "Used a tool",
         "failed": "Couldn't use a tool",
         "running": "Using a tool"
+      },
+      "git_change": {
+        "done": "Changed a code repository",
+        "failed": "Didn't change a code repository",
+        "running": "Changing a code repository"
+      },
+      "git_read": {
+        "done": "Looked at a code repository",
+        "failed": "Couldn't look at a code repository",
+        "running": "Looking at a code repository"
       },
       "knowledge_search": {
         "done": "Searched knowledge sources",

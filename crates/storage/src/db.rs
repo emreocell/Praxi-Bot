@@ -1676,6 +1676,45 @@ impl Storage {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// Texts of the user messages delivered into `run`, oldest first (the one that started it
+    /// first).
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn run_user_message_texts(&self, run: RunId) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT content FROM messages WHERE run_id = ?1 AND role = 'user' AND superseded = 0              ORDER BY created_at_ms, id",
+        )?;
+        let rows = stmt.query_map(params![run.to_string()], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// The first live user message delivered into `run` with where it came from: its text, its
+    /// recorded source and whether the content it was written after was untrusted. `None`
+    /// when the run has none.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn run_first_user_message(&self, run: RunId) -> Result<Option<(String, String, bool)>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT content, source, exposure_untrusted FROM messages \
+                 WHERE run_id = ?1 AND role = 'user' AND superseded = 0 \
+                 ORDER BY created_at_ms, id LIMIT 1",
+                params![run.to_string()],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)? != 0,
+                    ))
+                },
+            )
+            .optional()?)
+    }
+
     /// Texts of the user messages of `chat` that the owner typed in the desktop app.
     ///
     /// # Errors

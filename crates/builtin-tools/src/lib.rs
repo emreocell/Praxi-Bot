@@ -82,8 +82,10 @@ pub use checkpoint::{
 pub use control::{
     ActionPermit, ControlRequest, DesktopControlGate, OBSERVATION_DISCARDED, PermitValidator,
 };
-pub use desktop::{DesktopSettings, SharedOcr, resolve_input_target};
-pub use files::{try_with_exclusive_file_access, with_checkpoint_access, workspace_refusal};
+pub use desktop::{DesktopSettings, SharedOcr, default_ocr, ocr_from_dir, resolve_input_target};
+pub use files::{
+    OptionalTools, try_with_exclusive_file_access, with_checkpoint_access, workspace_refusal,
+};
 pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
 pub use handover::{
     BROWSER_HANDOVER, CAPTCHA_OWN_ATTEMPTS, HANDOVER_CARD_KIND, HandoverCard, HandoverError,
@@ -172,6 +174,9 @@ pub struct BuiltinConfig {
     /// The daemon's redactor, which knows the vault's values: `shell_interactive` masks what a
     /// program prints with it before the bot sees it. `None` = the key-shape patterns only.
     pub output_redactor: Option<pty_shell::OutputRedactor>,
+    /// Document tools (PDF, DOCX, XLSX, PPTX, CSV, JSON) and developer tools (git, process
+    /// list). They follow the same file access rules as `fs_*`. All off by default.
+    pub optional_tools: OptionalTools,
     /// Late-bound mail connector: the host binds it once the mail accounts are
     /// loaded (`email` above, when set, binds it here too). `email_wait_for` and
     /// `account_register` use it; the run loop reads the same handle.
@@ -262,6 +267,7 @@ impl BuiltinConfig {
             account_register: account_register::AccountRegisterConfig::default(),
             provenance: None,
             output_redactor: None,
+            optional_tools: OptionalTools::default(),
             mail: Arc::new(connector_email::MailHandle::new()),
             page_origin: Arc::new(connector_email::PageOriginSlot::new()),
         }
@@ -342,9 +348,20 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         &cfg.fs_allowed_roots,
         &cfg.fs_granted_paths,
         cfg.fs_access.clone(),
-        fs_home,
+        fs_home.clone(),
         cfg.provenance.clone(),
     ));
+    if cfg.optional_tools != OptionalTools::default() {
+        all.extend(files::guarded_tools(
+            &cfg.data_dir,
+            &cfg.fs_allowed_roots,
+            &cfg.fs_granted_paths,
+            cfg.fs_access.clone(),
+            fs_home,
+            cfg.provenance.clone(),
+            cfg.optional_tools,
+        ));
+    }
     all.push(shell::tool_with_provenance_and_access(
         &cfg.data_dir,
         cfg.provenance.clone(),

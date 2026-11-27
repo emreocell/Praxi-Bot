@@ -2,8 +2,9 @@
 //! [`ComposioControl`] trait the embedder implements (see
 //! `apps/cli/src/composio_host.rs`).  The daemon holds no Composio state.
 //!
-//! Every route is owner-only: the local bearer token, or a paired Desktop
-//! peer.  Phone, node and host peers are refused for every method.
+//! Catalog and logo reads require authentication. Account identities, action
+//! previews and credential installation also require owner proof. Phone,
+//! node and host peers are refused for every method.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -29,11 +30,11 @@ pub enum ComposioConnState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ComposioLinkMode {
-    /// Not linked: the first Connect starts the one-time browser login.
+    /// No Composio account linked.
     None,
     /// Linked through the browser login (no key was typed or copied).
     Login,
-    /// The owner's own Composio project key (advanced).
+    /// The owner's own Composio project key.
     ProjectKey,
 }
 
@@ -74,16 +75,19 @@ pub struct ComposioStatusDto {
     pub configured: bool,
     /// How it is linked.
     pub mode: ComposioLinkMode,
-    /// Where an owner who wants their own project key creates it (advanced).
+    /// Where the owner can create a Composio project key.
     pub key_setup_url: String,
     /// Composio refused the saved credential (401/403) and nothing renewed it:
     /// the owner has to sign in to Composio again, a retry cannot succeed.
     #[serde(default)]
     pub login_expired: bool,
+    /// Display name of the linked organization or project.
+    pub account: Option<String>,
 }
 
 /// Body of `PUT /v1/composio/key`.  Write-only.
 #[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComposioKeyInput {
     /// The Composio project API key.
     pub value: String,
@@ -171,6 +175,17 @@ pub struct ComposioAppDto {
     pub bots: Option<Vec<String>>,
     /// Direct tools currently offered to the model.
     pub tools: u32,
+    /// Display identity of the bound account, when available.
+    pub account: Option<String>,
+}
+
+/// A catalog action available after connecting a toolkit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ComposioActionDto {
+    /// Action name, scoped to the toolkit.
+    pub name: String,
+    /// Short description from Composio.
+    pub description: String,
 }
 
 /// `POST /v1/composio/apps/{slug}/connect`: the one-time consent link.
@@ -184,6 +199,7 @@ pub struct ComposioConnectDto {
 
 /// Body of `PUT /v1/composio/apps/{slug}/enabled`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComposioEnabledInput {
     /// New value.
     pub enabled: bool,
@@ -211,10 +227,13 @@ where
     Option::<T>::deserialize(d)
 }
 
-/// `POST /v1/composio/apps/{slug}/test`: what a one-call read-only test found.
+/// `POST /v1/composio/apps/{slug}/test`: result of the authorization check or read-only probe.
 /// Shown to the owner only; the text comes from the app and is never trusted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ComposioTestDto {
+    /// Only the active authorization record was checked.
+    #[serde(default)]
+    pub authorization_only: bool,
     /// The account the app is connected as (address or user name), when the app says.
     pub account: Option<String>,
     /// Up to three samples: file names, mail subjects, calendar names.
@@ -260,7 +279,7 @@ pub struct ComposioLogo {
 #[async_trait]
 pub trait ComposioControl: Send + Sync {
     /// Link status.
-    fn status(&self) -> ComposioStatusDto;
+    async fn status(&self) -> ComposioStatusDto;
     /// Start the one-time browser login.
     ///
     /// # Errors
@@ -289,6 +308,11 @@ pub trait ComposioControl: Send + Sync {
         &self,
         query: ComposioCatalogQuery,
     ) -> Result<ComposioCatalogDto, ComposioControlError>;
+    /// List the toolkit's catalog actions using the same filter as bot discovery.
+    ///
+    /// # Errors
+    /// Unsupported toolkit or failed discovery.
+    async fn actions(&self, slug: &str) -> Result<Vec<ComposioActionDto>, ComposioControlError>;
     /// The cached or freshly fetched logo of an app; `Ok(None)` when none is known.
     ///
     /// # Errors
@@ -322,7 +346,7 @@ pub trait ComposioControl: Send + Sync {
     /// # Errors
     /// [`ComposioControlError`].
     async fn disconnect(&self, slug: &str) -> Result<ComposioDisconnectDto, ComposioControlError>;
-    /// Prove an app works with one fixed read-only call.
+    /// Check the bound authorization and run a fixed read-only probe where available.
     ///
     /// # Errors
     /// [`ComposioControlError`].

@@ -11,9 +11,9 @@ use secret_store::{MemoryStore, SecretStore};
 use serde_json::json;
 use tower::ServiceExt;
 
-use super::{call, send, setup};
+use super::{call, call_token_only, send, setup};
 use crate::composio::{
-    ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
+    ComposioActionDto, ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
     ComposioConnectDto, ComposioControl, ComposioControlError, ComposioDisconnectDto,
     ComposioLinkMode, ComposioLoginDto, ComposioLoginState, ComposioLoginStatusDto,
     ComposioStatusDto, ComposioTestDto,
@@ -39,6 +39,7 @@ impl Fake {
 
 fn app(slug: &str) -> ComposioAppDto {
     ComposioAppDto {
+        account: Some("octocat".into()),
         slug: slug.into(),
         name: slug.into(),
         state: ComposioConnState::Active,
@@ -51,8 +52,9 @@ fn app(slug: &str) -> ComposioAppDto {
 
 #[async_trait]
 impl ComposioControl for Fake {
-    fn status(&self) -> ComposioStatusDto {
+    async fn status(&self) -> ComposioStatusDto {
         ComposioStatusDto {
+            account: None,
             configured: self.calls.load(Ordering::SeqCst) > 0,
             mode: ComposioLinkMode::None,
             key_setup_url: "https://platform.composio.dev/".into(),
@@ -106,6 +108,14 @@ impl ComposioControl for Fake {
         self.calls.fetch_add(1, Ordering::SeqCst);
         vec![app("github")]
     }
+
+    async fn actions(&self, _: &str) -> Result<Vec<ComposioActionDto>, ComposioControlError> {
+        self.before("composio.actions_viewed");
+        Ok(vec![ComposioActionDto {
+            name: "list_issues".into(),
+            description: "List repository issues".into(),
+        }])
+    }
     async fn app(&self, slug: &str) -> Result<ComposioAppDto, ComposioControlError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(app(slug))
@@ -152,12 +162,20 @@ impl ComposioControl for Fake {
     async fn test(&self, slug: &str) -> Result<ComposioTestDto, ComposioControlError> {
         self.before("composio.app_test");
         self.calls.fetch_add(1, Ordering::SeqCst);
-        if slug == "slack" {
-            return Err(ComposioControlError::Invalid("no quick test".into()));
+        if slug == "expired" {
+            return Err(ComposioControlError::Invalid(
+                "the app is not connected".into(),
+            ));
         }
+        let authorization_only = slug == "slack";
         Ok(ComposioTestDto {
+            authorization_only,
             account: Some("me@example.com".into()),
-            items: vec!["Budget".into()],
+            items: if authorization_only {
+                vec![]
+            } else {
+                vec!["Budget".into()]
+            },
         })
     }
 
@@ -180,6 +198,7 @@ fn routes() -> Vec<(Method, &'static str, Option<serde_json::Value>)> {
         (Method::PUT, "/v1/composio/key", Some(json!({"value": KEY}))),
         (Method::DELETE, "/v1/composio/key", None),
         (Method::GET, "/v1/composio/toolkits?search=ins", None),
+        (Method::GET, "/v1/composio/toolkits/github/actions", None),
         (Method::GET, "/v1/composio/apps", None),
         (Method::GET, "/v1/composio/apps/github", None),
         (Method::POST, "/v1/composio/apps/github/connect", None),
@@ -263,6 +282,29 @@ async fn every_route_needs_the_token_and_works_for_the_local_owner() {
 }
 
 #[tokio::test]
+async fn identities_catalog_logos_action_previews_and_login_poll_require_owner_proof_even_for_head()
+{
+    let t = setup();
+    t.state.set_composio(Arc::new(Fake::default()));
+    for path in [
+        "/v1/composio",
+        "/v1/composio/apps",
+        "/v1/composio/apps/github",
+        "/v1/composio/toolkits?search=ins",
+        "/v1/composio/toolkits/github/actions",
+        "/v1/composio/logos/gmail",
+        "/v1/composio/login",
+    ] {
+        for method in [Method::GET, Method::HEAD] {
+            let denied = call_token_only(&t, method.clone(), path, None).await;
+            assert_eq!(denied.status, StatusCode::FORBIDDEN, "{method} {path}");
+            let allowed = call(&t, method.clone(), path, None).await;
+            assert_eq!(allowed.status, StatusCode::OK, "{method} {path}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn mutations_write_an_audit_row_first_and_never_the_key() {
     let t = setup();
     let state = t.state.clone();
@@ -288,6 +330,7 @@ async fn mutations_write_an_audit_row_first_and_never_the_key() {
         "composio.app_enabled",
         "composio.app_bots",
         "composio.app_test",
+        "composio.actions_viewed",
         "composio.disconnected",
     ] {
         assert!(actions.contains(&want), "{want} missing in {actions:?}");
@@ -430,7 +473,10 @@ async fn failed_audit_prevents_every_mutation_dispatch() {
     t.state.set_composio(fake.clone());
     let db = rusqlite::Connection::open(t._dir.path().join("bot.db")).unwrap();
     db.execute_batch("CREATE TRIGGER fail_composio_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;").unwrap();
-    for (method, path, body) in routes().into_iter().filter(|(m, _, _)| *m != Method::GET) {
+    for (method, path, body) in routes()
+        .into_iter()
+        .filter(|(m, path, _)| *m != Method::GET || path.ends_with("/actions"))
+    {
         let r = call(&t, method, path, body).await;
         assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
     }
@@ -462,7 +508,11 @@ async fn the_test_and_bot_routes_return_the_account_and_the_chosen_bots_and_name
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.json()["account"], "me@example.com");
     assert_eq!(r.json()["items"], json!(["Budget"]));
-    let refused = call(&t, Method::POST, "/v1/composio/apps/slack/test", None).await;
+    let authorization = call(&t, Method::POST, "/v1/composio/apps/slack/test", None).await;
+    assert_eq!(authorization.status, StatusCode::OK);
+    assert_eq!(authorization.json()["authorization_only"], true);
+    assert_eq!(authorization.json()["items"], json!([]));
+    let refused = call(&t, Method::POST, "/v1/composio/apps/expired/test", None).await;
     assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(refused.json()["error"]["code"], "bad_composio_request");
     let bots = json!({"bots": ["11111111-1111-1111-1111-111111111111"]});

@@ -26,6 +26,17 @@ test("known builtin tools get a stable key, icon and chips", () => {
 });
 
 
+test("document and git tools get plain step wording, edits apart from reads", () => {
+  assert.equal(describeTool("xlsx_read", { path: "/a/b/book.xlsx" }).key, "chat.step.doc_read");
+  assert.deepEqual(describeTool("xlsx_read", { path: "/a/b/book.xlsx" }).chips, [{ text: "book.xlsx" }]);
+  assert.equal(describeTool("docx_write", { path: "r.docx" }).key, "chat.step.doc_write");
+  for (const n of ["docx_append", "xlsx_append_rows", "xlsx_update_cells"]) {
+    assert.equal(describeTool(n, { path: "r" }).key, "chat.step.doc_edit", n);
+  }
+  assert.equal(describeTool("git_diff", {}).key, "chat.step.git_read");
+  assert.equal(describeTool("git_commit", {}).key, "chat.step.git_change");
+});
+
 test("MCP tools name the app and the action", () => {
   const s = describeTool("github.search_pull_requests", { query: "is:closed" }, (n) =>
     n === "github" ? "GitHub" : null

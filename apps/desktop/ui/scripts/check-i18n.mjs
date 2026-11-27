@@ -10,6 +10,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { usesEnglishFallback } from "../src/i18n/englishFallback.ts";
 
 // Values a locale may leave identical to English. A non-English value that equals the English
 // one is reported as a warning ("warn ..."), because it often means the string was copied and
@@ -148,7 +149,10 @@ export const checkLocales = ({ localeDir = defaultLocaleDir, scaffold = readScaf
       }
       for (const key of missing) warnings.push(`warn missing in ${locale} (scaffold): ${key}`);
     } else {
-      for (const key of missing) errors.push(`missing in ${locale}: ${key}`);
+      for (const key of missing) {
+        if (usesEnglishFallback(locale, key)) continue;
+        errors.push(`missing in ${locale}: ${key}`);
+      }
     }
     const localeKinds = new Map(kinds(json));
     for (const [key, kind] of enKinds) {

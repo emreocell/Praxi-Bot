@@ -940,6 +940,9 @@ pub(crate) struct RunCtx {
     /// that tool's own structured result, never from model text. In memory, per
     /// run; not copied to a sub-agent.
     pub mail_links: Mutex<HashSet<String>>,
+    /// Approval calls (tool + card summary) of this mission session whose card expired and
+    /// parked the item: the same call is refused without a new card. In memory, per run.
+    pub parked_calls: Mutex<HashSet<String>>,
 }
 
 /// "Allow this tool for this task": one tool, this run, at most the exposure
@@ -2236,6 +2239,7 @@ impl Shared {
             tool_grants: Mutex::new(Vec::new()),
             page_origin: Mutex::new(None),
             mail_links: Mutex::new(HashSet::new()),
+            parked_calls: Mutex::new(HashSet::new()),
         });
         Ok(Arc::clone(self.runs.lock().entry(run.id).or_insert(ctx)))
     }
