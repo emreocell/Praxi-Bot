@@ -8,6 +8,8 @@ use std::path::{Component, Path, PathBuf};
 use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
 use cap_std::fs::{Dir, OpenOptions};
 
+use serde::{Deserialize, Serialize};
+
 use super::{DocumentFormat, DocumentInput};
 use crate::{MemoryError, Result};
 
@@ -174,17 +176,70 @@ fn path_within(path: &Path, parent: &Path) -> bool {
 }
 
 fn safe_name(name: &str) -> bool {
-    let lowered = name.to_ascii_lowercase();
-    let json = std::path::Path::new(&lowered)
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
     !name.is_empty()
         && !name.starts_with('.')
         && !name.ends_with(['.', ' '])
         && !name.contains(['\\', ':', '\0'])
         && !name.chars().any(char::is_control)
-        && !(json && (lowered.contains("credentials") || lowered.starts_with("client_secret")))
-        && !matches!(
+        && !secret_name(name)
+}
+
+/// Words that, as a whole word of a file name, say the file holds credentials
+/// ("passwords.txt", "`api_keys.md`", "sifreler.docx"). Whole words only, so
+/// "secretary-minutes.docx" is not caught.
+const SECRET_WORDS: &[&str] = &[
+    "password",
+    "passwords",
+    "passwd",
+    "secret",
+    "secrets",
+    "credential",
+    "credentials",
+    "apikey",
+    "apikeys",
+    "sifre",
+    "sifreler",
+    "şifre",
+    "şifreler",
+    "parola",
+    "parolalar",
+];
+
+/// A file name that looks like it holds secrets: key and certificate stores,
+/// dot-env files, token files and credential exports. Such files are never
+/// indexed and are reported to the owner as skipped.
+fn secret_name(name: &str) -> bool {
+    // Turkish "İ" lowercases to "i" plus a combining dot; drop the dot so
+    // "ŞİFRELER" matches "şifreler".
+    let lowered = name.to_lowercase().replace('\u{307}', "");
+    let extension = Path::new(&lowered)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let words: Vec<&str> = lowered
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let json = extension == "json";
+    (json && (lowered.contains("credentials") || lowered.starts_with("client_secret")))
+        || lowered == ".env"
+        || lowered.starts_with(".env.")
+        || extension == "env"
+        || ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]
+            .iter()
+            .any(|key| lowered.starts_with(key))
+        || matches!(
+            extension,
+            "pem" | "key" | "p12" | "pfx" | "jks" | "keystore" | "kdbx" | "ppk" | "gpg" | "pgp"
+        )
+        || words.iter().any(|word| SECRET_WORDS.contains(word))
+        || words.windows(2).any(|pair| {
+            matches!(
+                (pair[0], pair[1]),
+                ("api" | "private" | "secret", "key" | "keys")
+            )
+        })
+        || matches!(
             lowered.as_str(),
             "api-token"
                 | "owner-key"
@@ -209,6 +264,13 @@ fn safe_name(name: &str) -> bool {
                 | "key4.db"
                 | "login data"
                 | "local state"
+                | ".netrc"
+                | "_netrc"
+                | ".npmrc"
+                | ".pypirc"
+                | ".pgpass"
+                | ".git-credentials"
+                | ".htpasswd"
         )
 }
 
@@ -222,6 +284,9 @@ fn supported(path: &Path) -> bool {
                     | "txt"
                     | "pdf"
                     | "docx"
+                    | "xlsx"
+                    | "csv"
+                    | "tsv"
                     | "html"
                     | "htm"
                     | "rs"
@@ -250,12 +315,72 @@ fn supported(path: &Path) -> bool {
         })
 }
 
+/// Why a file or folder inside the selection is not indexed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipReason {
+    /// The name or location looks like it holds secrets (keys, dot-env files,
+    /// credential exports, browser profiles).
+    Secret,
+    /// A supported file larger than the per-file input limit.
+    TooLarge,
+}
+
+/// One skipped entry that is worth telling the owner about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedFile {
+    /// Path relative to the selected folder; folders end in `/`.
+    pub locator: String,
+    /// Why it was left out.
+    pub reason: SkipReason,
+}
+
+/// What a folder scan left out. Secret-looking and oversized entries are named
+/// (up to [`MAX_LISTED_SKIPS`]); hidden and unsupported ones are only counted.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkipSummary {
+    /// Named skipped entries, secret-looking ones first-come.
+    pub listed: Vec<SkippedFile>,
+    /// Secret-looking files and folders (all of them, not only the listed ones).
+    pub secret: usize,
+    /// Supported files over the size limit.
+    pub too_large: usize,
+    /// Hidden entries, links and dependency/build folders.
+    pub hidden: usize,
+    /// Files of a type that is not indexed.
+    pub unsupported: usize,
+}
+
+/// Most skipped entries named individually.
+pub const MAX_LISTED_SKIPS: usize = 50;
+
+/// Result of walking a selected folder: files to index and what was left out.
+#[derive(Default)]
+struct Scan {
+    files: Vec<(String, u64)>,
+    skipped: SkipSummary,
+}
+
+impl Scan {
+    fn skip(&mut self, locator: String, reason: SkipReason) {
+        match reason {
+            SkipReason::Secret => self.skipped.secret += 1,
+            SkipReason::TooLarge => self.skipped.too_large += 1,
+        }
+        if self.skipped.listed.len() < MAX_LISTED_SKIPS {
+            self.skipped.listed.push(SkippedFile { locator, reason });
+        }
+    }
+}
+
 /// A user-selected file or folder. Only names are collected; document bytes
 /// are read individually. The open capability survives path replacement.
 pub struct SelectedSource {
     root: Dir,
     display: PathBuf,
     files: Vec<String>,
+    sizes: Vec<u64>,
+    skipped: SkipSummary,
 }
 
 impl SelectedSource {
@@ -270,14 +395,17 @@ impl SelectedSource {
         }
         if folder {
             let root = plain_directory(path)?;
-            let mut files = Vec::new();
+            let mut scan = Scan::default();
             let mut visited = 0;
-            collect(&root, &canonical, "", &mut files, &mut visited, 0)?;
-            files.sort();
+            collect(&root, &canonical, "", &mut scan, &mut visited, 0)?;
+            scan.files.sort();
+            let (files, sizes) = scan.files.into_iter().unzip();
             Ok(Self {
                 root,
                 display: canonical,
                 files,
+                sizes,
+                skipped: scan.skipped,
             })
         } else {
             let parent = path
@@ -307,6 +435,8 @@ impl SelectedSource {
                     .ok_or_else(|| invalid("file has no parent"))?
                     .to_owned(),
                 files: vec![name.to_owned()],
+                sizes: vec![meta.len()],
+                skipped: SkipSummary::default(),
             })
         }
     }
@@ -344,10 +474,65 @@ impl SelectedSource {
         Self::open(&selected, folder)
     }
 
+    /// Cheap check, with no directory scan, that a folder could be chosen on
+    /// this host: an absolute local path, not a credential or browser-profile
+    /// folder, and neither the daemon's data directory nor a folder around it.
+    /// A folder picker uses it to grey out entries; choosing still goes through
+    /// [`SelectedSource::open_on_host`].
+    #[must_use]
+    pub fn folder_allowed_on_host(path: &Path, data_dir: &Path) -> bool {
+        let Ok(canonical) = canonical_source_path(path) else {
+            return false;
+        };
+        let Ok(state) = normal_local_prefix(data_dir) else {
+            return false;
+        };
+        !protected_path(&canonical)
+            && !path_within(&canonical, &state)
+            && !path_within(&state, &canonical)
+    }
+
     /// Stable, relative locators for paging and removal detection.
     #[must_use]
     pub fn files(&self) -> &[String] {
         &self.files
+    }
+
+    /// What the scan left out (secret-looking, oversized, hidden, unsupported).
+    #[must_use]
+    pub fn skipped(&self) -> &SkipSummary {
+        &self.skipped
+    }
+
+    /// The files that would be indexed, with sizes, counts per type and a rough
+    /// time estimate. Reads no document bytes.
+    #[must_use]
+    pub fn preview(&self) -> FolderPreview {
+        let mut preview = FolderPreview {
+            skipped: self.skipped.clone(),
+            ..FolderPreview::default()
+        };
+        let mut office_bytes = 0_u64;
+        let mut text_bytes = 0_u64;
+        for (locator, &bytes) in self.files.iter().zip(&self.sizes) {
+            let kind = file_kind(locator);
+            *preview.by_type.entry(kind.to_owned()).or_default() += 1;
+            preview.total_bytes += bytes;
+            if matches!(kind, "pdf" | "docx" | "xlsx" | "web") {
+                office_bytes += bytes;
+            } else {
+                text_bytes += bytes;
+            }
+            if preview.files.len() < MAX_PREVIEW_FILES {
+                preview.files.push(PreviewFile {
+                    locator: locator.clone(),
+                    bytes,
+                });
+            }
+        }
+        preview.file_count = self.files.len();
+        preview.estimated_seconds = estimate_seconds(self.files.len(), text_bytes, office_bytes);
+        preview
     }
 
     /// Extract one selected file. PDF/DOCX citations explicitly identify
@@ -356,6 +541,34 @@ impl SelectedSource {
     /// # Errors
     /// Unselected locator, symlink, oversized or malformed document.
     pub fn read(&self, locator: &str) -> Result<DocumentInput> {
+        let (bytes, mtime_ms) = self.read_bytes(locator)?;
+        let relative = Path::new(locator);
+        let title = self.display.join(relative).display().to_string();
+        let extension = relative
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let (content, format) = extract(&extension, &title, &bytes)?;
+        Ok(DocumentInput {
+            // Live exact-secret redaction can change multiline spans. All
+            // citations refer to these indexed bytes, never guessed offsets
+            // in the original file (including Markdown and code).
+            locator: format!("{locator}#extracted-text"),
+            title,
+            format,
+            content,
+            mtime_ms,
+        })
+    }
+
+    /// The raw bytes of one selected file (at most [`MAX_SOURCE_BYTES`]) and its
+    /// modification time, read through the same no-follow capability as
+    /// indexing. Used to open a cited file.
+    ///
+    /// # Errors
+    /// Unselected locator, symlink, special or oversized file.
+    pub fn read_bytes(&self, locator: &str) -> Result<(Vec<u8>, Option<i64>)> {
         if self
             .files
             .binary_search_by(|s| s.as_str().cmp(locator))
@@ -399,36 +612,76 @@ impl SelectedSource {
         if bytes.len() > MAX_SOURCE_BYTES {
             return Err(invalid("source exceeds input byte limit"));
         }
-        let title = self.display.join(relative).display().to_string();
-        let extension = relative
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let (content, format) = extract(&extension, &title, &bytes)?;
         let mtime_ms = metadata
             .modified()
             .ok()
             .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
             .and_then(|d| i64::try_from(d.as_millis()).ok());
-        Ok(DocumentInput {
-            // Live exact-secret redaction can change multiline spans. All
-            // citations refer to these indexed bytes, never guessed offsets
-            // in the original file (including Markdown and code).
-            locator: format!("{locator}#extracted-text"),
-            title,
-            format,
-            content,
-            mtime_ms,
-        })
+        Ok((bytes, mtime_ms))
     }
+}
+
+/// Most files named in a [`FolderPreview`]; totals always cover all of them.
+pub const MAX_PREVIEW_FILES: usize = 200;
+
+/// One file a folder selection would index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewFile {
+    /// Path relative to the selected folder.
+    pub locator: String,
+    /// Size in bytes.
+    pub bytes: u64,
+}
+
+/// What selecting a folder would read, before anything is indexed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderPreview {
+    /// The first [`MAX_PREVIEW_FILES`] files, in path order.
+    pub files: Vec<PreviewFile>,
+    /// All files that would be indexed.
+    pub file_count: usize,
+    /// Their total size in bytes.
+    pub total_bytes: u64,
+    /// File count per kind (`pdf`, `docx`, `xlsx`, `text`, `web`, `code`).
+    pub by_type: std::collections::BTreeMap<String, usize>,
+    /// What is left out, and why.
+    pub skipped: SkipSummary,
+    /// Rough indexing time on a typical computer, in seconds.
+    pub estimated_seconds: u64,
+}
+
+/// Coarse kind of a file by its extension, for counts and time estimates.
+fn file_kind(locator: &str) -> &'static str {
+    match Path::new(locator)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "pdf" => "pdf",
+        "docx" => "docx",
+        "xlsx" => "xlsx",
+        "html" | "htm" => "web",
+        "md" | "markdown" | "txt" | "csv" | "tsv" => "text",
+        _ => "code",
+    }
+}
+
+/// A deliberately rough figure for the owner ("about 2 minutes"): about 30 ms
+/// of overhead per file, plain text at about 8 MiB/s and PDF, Word, Excel and
+/// web pages at about 1 MiB/s. Embedding (optional) is separate and not included.
+fn estimate_seconds(files: usize, text_bytes: u64, office_bytes: u64) -> u64 {
+    const MIB: u64 = 1024 * 1024;
+    let millis = files as u64 * 30 + text_bytes * 1000 / (8 * MIB) + office_bytes * 1000 / MIB;
+    millis.div_ceil(1000)
 }
 
 fn collect(
     dir: &Dir,
     display: &Path,
     prefix: &str,
-    files: &mut Vec<String>,
+    scan: &mut Scan,
     visited: &mut usize,
     depth: usize,
 ) -> Result<()> {
@@ -447,26 +700,43 @@ fn collect(
             .file_name()
             .into_string()
             .map_err(|_| invalid("source has a non-UTF8 name"))?;
-        if !safe_name(&name) || matches!(name.as_str(), "node_modules" | "target" | "vendor") {
-            continue;
-        }
         let kind = entry.file_type()?;
-        if kind.is_symlink() {
-            continue;
-        }
         let locator = if prefix.is_empty() {
             name.clone()
         } else {
             format!("{prefix}/{name}")
         };
-        if protected_path(&display.join(&locator)) {
+        // Secret-looking names are named to the owner, whatever their type.
+        if secret_name(&name) || protected_path(&display.join(&locator)) {
+            scan.skip(
+                if kind.is_dir() {
+                    format!("{locator}/")
+                } else {
+                    locator
+                },
+                SkipReason::Secret,
+            );
+            continue;
+        }
+        if !safe_name(&name)
+            || matches!(name.as_str(), "node_modules" | "target" | "vendor")
+            || kind.is_symlink()
+        {
+            scan.skipped.hidden += 1;
             continue;
         }
         if kind.is_dir() {
             let child = dir.open_dir_nofollow(&name)?;
-            collect(&child, display, &locator, files, visited, depth + 1)?;
+            collect(&child, display, &locator, scan, visited, depth + 1)?;
         } else if kind.is_file() && supported(Path::new(&name)) {
-            files.push(locator);
+            let bytes = entry.metadata()?.len();
+            if bytes > MAX_SOURCE_BYTES as u64 {
+                scan.skip(locator, SkipReason::TooLarge);
+            } else {
+                scan.files.push((locator, bytes));
+            }
+        } else if kind.is_file() {
+            scan.skipped.unsupported += 1;
         }
     }
     Ok(())
@@ -487,6 +757,17 @@ fn extract(extension: &str, title: &str, bytes: &[u8]) -> Result<(String, Docume
                 .map_err(|_| invalid("document extraction failed"))?;
             (reply.markdown, DocumentFormat::Markdown)
         }
+        "xlsx" => {
+            let cfg = doc_tools::DocToolsConfig {
+                max_input_bytes: MAX_SOURCE_BYTES as u64,
+                ..doc_tools::DocToolsConfig::default()
+            };
+            let sheets = doc_tools::spreadsheet_text(&cfg, bytes, MAX_TEXT_BYTES)
+                .map_err(|_| invalid("spreadsheet extraction failed"))?;
+            // A title heading puts the file name above each sheet heading, so a
+            // citation can name the sheet.
+            (format!("# {title}\n\n{sheets}"), DocumentFormat::Markdown)
+        }
         "html" | "htm" => {
             let html =
                 std::str::from_utf8(bytes).map_err(|_| invalid("text source must be UTF-8"))?;
@@ -500,7 +781,7 @@ fn extract(extension: &str, title: &str, bytes: &[u8]) -> Result<(String, Docume
                 .to_owned();
             let format = match extension {
                 "md" | "markdown" => DocumentFormat::Markdown,
-                "txt" => DocumentFormat::PlainText,
+                "txt" | "csv" | "tsv" => DocumentFormat::PlainText,
                 _ => DocumentFormat::Code,
             };
             (text, format)
@@ -509,7 +790,28 @@ fn extract(extension: &str, title: &str, bytes: &[u8]) -> Result<(String, Docume
     if content.len() > MAX_TEXT_BYTES {
         return Err(invalid("extracted text exceeds index byte limit"));
     }
+    // Redaction works line by line and only recognizes the header line of a
+    // private key, so the key body would be indexed. Refuse the whole file.
+    if has_private_key(&content) {
+        return Err(invalid(PRIVATE_KEY_REFUSAL));
+    }
     Ok((redact_source(&content), format))
+}
+
+/// Message of the refusal for a file that contains a private key.
+pub const PRIVATE_KEY_REFUSAL: &str = "file contains a private key";
+
+/// Whether this error is the refusal of a file that contains a private key.
+#[must_use]
+pub fn is_private_key_refusal(error: &MemoryError) -> bool {
+    matches!(error, MemoryError::Invalid(message) if message == PRIVATE_KEY_REFUSAL)
+}
+
+fn has_private_key(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("-----BEGIN") && line.contains("PRIVATE KEY")
+    })
 }
 
 /// Redact known credential patterns while preserving extracted line numbers.
@@ -708,6 +1010,164 @@ mod tests {
                 .contains("| 1 | 2 |")
         );
         assert!(selected.read("../outside.txt").is_err());
+    }
+
+    #[test]
+    fn preview_names_what_it_will_read_and_what_it_leaves_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("taxes")).unwrap();
+        std::fs::create_dir_all(root.join(".ssh")).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join("notes.md"), "# Notes\nhello").unwrap();
+        std::fs::write(root.join("taxes/return.txt"), "income 100").unwrap();
+        std::fs::write(root.join("photo.jpg"), [0_u8; 10]).unwrap();
+        std::fs::write(root.join(".env"), "TOKEN=abc").unwrap();
+        std::fs::write(root.join("passwords.txt"), "bank: hunter2").unwrap();
+        std::fs::write(root.join("server.pem"), "x").unwrap();
+        std::fs::write(root.join(".ssh/id_rsa"), "x").unwrap();
+        std::fs::write(root.join(".git/config"), "x").unwrap();
+        let preview = SelectedSource::open(root, true).unwrap().preview();
+        assert_eq!(preview.file_count, 2);
+        let names: Vec<_> = preview.files.iter().map(|f| f.locator.as_str()).collect();
+        assert_eq!(names, ["notes.md", "taxes/return.txt"]);
+        assert_eq!(preview.total_bytes, 13 + 10);
+        assert_eq!(preview.by_type.get("text"), Some(&2));
+        assert_eq!(preview.skipped.unsupported, 1);
+        // `.git` is hidden (counted); the credential folder and secret-looking
+        // files are named so the owner can see them.
+        assert_eq!(preview.skipped.hidden, 1);
+        assert_eq!(preview.skipped.secret, 4);
+        let secret: Vec<_> = preview
+            .skipped
+            .listed
+            .iter()
+            .filter(|skip| skip.reason == SkipReason::Secret)
+            .map(|skip| skip.locator.as_str())
+            .collect();
+        for expected in [".env", "passwords.txt", "server.pem", ".ssh/"] {
+            assert!(secret.contains(&expected), "{expected} in {secret:?}");
+        }
+        assert!(preview.estimated_seconds >= 1);
+    }
+
+    #[test]
+    fn only_whole_secret_words_make_a_name_secret_looking() {
+        for name in [
+            "passwords.txt",
+            "My Passwords.docx",
+            "api_keys.md",
+            "private-key.txt",
+            "sifreler.xlsx",
+            "ŞİFRELER.txt",
+            ".env.production",
+            "backup.kdbx",
+            "id_ed25519",
+            "aws-credentials.csv",
+        ] {
+            assert!(secret_name(name), "{name}");
+        }
+        for name in [
+            "secretary-minutes.docx",
+            "passwordless-login-design.md",
+            "keynote.pdf",
+            "environment.md",
+            "monkey.txt",
+            "report.pdf",
+        ] {
+            assert!(!secret_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn oversized_files_are_listed_as_skipped_and_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("small.txt"), "ok").unwrap();
+        let big = std::fs::File::create(dir.path().join("huge.pdf")).unwrap();
+        big.set_len(MAX_SOURCE_BYTES as u64 + 1).unwrap();
+        let source = SelectedSource::open(dir.path(), true).unwrap();
+        assert_eq!(source.files(), &["small.txt"]);
+        assert_eq!(source.skipped().too_large, 1);
+        assert_eq!(
+            source.skipped().listed,
+            [SkippedFile {
+                locator: "huge.pdf".into(),
+                reason: SkipReason::TooLarge
+            }]
+        );
+        assert!(source.read("huge.pdf").is_err());
+    }
+
+    #[test]
+    fn a_file_with_a_private_key_is_refused_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = "Deploy notes\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n";
+        std::fs::write(dir.path().join("deploy.md"), key).unwrap();
+        std::fs::write(dir.path().join("fine.md"), "Deploy notes only").unwrap();
+        let source = SelectedSource::open(dir.path(), true).unwrap();
+        let error = source.read("deploy.md").unwrap_err();
+        assert!(is_private_key_refusal(&error));
+        assert!(source.read("fine.md").is_ok());
+        // A pasted page is held to the same rule.
+        assert!(saved_web("https://example.com/k", key, false).is_err());
+    }
+
+    #[test]
+    fn spreadsheets_and_csv_files_are_indexed_with_sheet_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("budget.xlsx");
+        let cfg = doc_tools::DocToolsConfig::default();
+        let write = doc_tools::tools(&cfg)
+            .into_iter()
+            .find(|tool| tool.spec().name == "xlsx_write")
+            .unwrap();
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(write.call(
+                &tool_registry::ToolContext::default(),
+                serde_json::json!({"path": book.to_str().unwrap(), "sheets": [
+                    {"name": "Rent", "rows": [["landlord", 900], ["deposit", 1800]], "header": false},
+                    {"name": "Food", "rows": [["groceries", 300]], "header": false}
+                ]}),
+            ))
+            .unwrap();
+        std::fs::write(
+            dir.path().join("contacts.csv"),
+            "name,phone\nAda,555-0100\n",
+        )
+        .unwrap();
+        let source = SelectedSource::open(dir.path(), true).unwrap();
+        assert_eq!(source.files(), &["budget.xlsx", "contacts.csv"]);
+        let sheet = source.read("budget.xlsx").unwrap();
+        assert_eq!(sheet.format, DocumentFormat::Markdown);
+        assert!(sheet.content.contains("## Rent"));
+        assert!(sheet.content.contains("landlord | 900"));
+        assert!(sheet.content.contains("## Food"));
+        let csv = source.read("contacts.csv").unwrap();
+        assert_eq!(csv.format, DocumentFormat::PlainText);
+        assert!(csv.content.contains("Ada,555-0100"));
+        let preview = source.preview();
+        assert_eq!(preview.by_type.get("xlsx"), Some(&1));
+    }
+
+    #[test]
+    fn folder_picker_greys_out_credential_and_daemon_state_folders() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let docs = root.path().join("docs");
+        let ssh = root.path().join(".ssh");
+        for dir in [&data, &docs, &ssh] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        assert!(SelectedSource::folder_allowed_on_host(&docs, &data));
+        assert!(!SelectedSource::folder_allowed_on_host(&ssh, &data));
+        assert!(!SelectedSource::folder_allowed_on_host(&data, &data));
+        assert!(!SelectedSource::folder_allowed_on_host(root.path(), &data));
+        assert!(!SelectedSource::folder_allowed_on_host(
+            Path::new("relative"),
+            &data
+        ));
     }
 
     #[test]

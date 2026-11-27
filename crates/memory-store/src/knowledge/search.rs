@@ -50,39 +50,47 @@ impl KnowledgeStore {
         let sources = serde_json::to_string(&request.source_ids)?;
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT c.id,c.source_id,c.document_id,s.label,d.locator,c.section,c.line_start,c.line_end,s.trust,c.body,bm25(chunks_fts,3.0,2.0,1.0),d.title
+            "SELECT c.id,c.source_id,c.document_id,s.label,d.locator,c.section,c.line_start,c.line_end,s.trust,c.body,bm25(chunks_fts,3.0,2.0,1.0),d.title,s.kind,s.locator
              FROM chunks_fts JOIN chunks c ON c.rowid=chunks_fts.rowid
              JOIN sources s ON s.id=c.source_id JOIN documents d ON d.id=c.document_id
              WHERE chunks_fts MATCH ?1 AND s.enabled=1
              AND (?2='[]' OR c.source_id IN (SELECT value FROM json_each(?2)))
+             AND (?4=0 OR s.kind IN ('\"file\"','\"folder\"'))
              ORDER BY bm25(chunks_fts,3.0,2.0,1.0),d.locator,c.ordinal,c.id LIMIT ?3")?;
         let mut hits = stmt
-            .query_map(params![query, sources, sql_int(CANDIDATES)?], |row| {
-                let source_trust = match row.get::<_, String>(8)?.as_str() {
-                    "user" => Trust::User,
-                    _ => Trust::Untrusted,
-                };
-                let hit = SearchHit {
-                    id: uuid_at(row, 0)?,
-                    source_id: uuid_at(row, 1)?,
-                    document_id: uuid_at(row, 2)?,
-                    source_label: row.get(3)?,
-                    locator: row.get(4)?,
-                    section: row.get(5)?,
-                    line_start: integer_at(row, 6)?,
-                    line_end: integer_at(row, 7)?,
-                    source_trust,
-                    content: row.get(9)?,
-                    score: -row.get::<_, f64>(10)?,
-                };
-                let title: String = row.get(11)?;
-                let words: HashSet<_> =
-                    normalized_terms(&format!("{title}\n{}\n{}", hit.section, hit.content))
-                        .into_iter()
-                        .collect();
-                let matches = terms.iter().filter(|term| words.contains(*term)).count();
-                Ok((hit, matches))
-            })?
+            .query_map(
+                params![query, sources, sql_int(CANDIDATES)?, request.files_only],
+                |row| {
+                    let source_trust = match row.get::<_, String>(8)?.as_str() {
+                        "user" => Trust::User,
+                        _ => Trust::Untrusted,
+                    };
+                    let mut hit = SearchHit {
+                        id: uuid_at(row, 0)?,
+                        source_id: uuid_at(row, 1)?,
+                        document_id: uuid_at(row, 2)?,
+                        source_label: row.get(3)?,
+                        locator: row.get(4)?,
+                        section: row.get(5)?,
+                        line_start: integer_at(row, 6)?,
+                        line_end: integer_at(row, 7)?,
+                        path: None,
+                        page: None,
+                        citation: None,
+                        source_trust,
+                        content: row.get(9)?,
+                        score: -row.get::<_, f64>(10)?,
+                    };
+                    hit.attach_citation(&row.get::<_, String>(12)?, &row.get::<_, String>(13)?);
+                    let title: String = row.get(11)?;
+                    let words: HashSet<_> =
+                        normalized_terms(&format!("{title}\n{}\n{}", hit.section, hit.content))
+                            .into_iter()
+                            .collect();
+                    let matches = terms.iter().filter(|term| words.contains(*term)).count();
+                    Ok((hit, matches))
+                },
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         hits.retain(|(_, matches)| *matches >= required_matches);
         // Prefer evidence covering more of the meaningful query. A short

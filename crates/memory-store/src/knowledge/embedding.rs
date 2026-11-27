@@ -407,13 +407,13 @@ impl KnowledgeEmbeddingService {
         // Reranking may have yielded while a source was disabled, deleted, or
         // reindexed. Refresh exact IDs and metadata; never return a stale body.
         let conn = self.store.conn();
-        let mut statement=conn.prepare("SELECT c.id,c.source_id,c.document_id,s.label,d.locator,c.section,c.line_start,c.line_end,s.trust,c.body
+        let mut statement=conn.prepare("SELECT c.id,c.source_id,c.document_id,s.label,d.locator,c.section,c.line_start,c.line_end,s.trust,c.body,s.kind,s.locator
             FROM chunks c JOIN sources s ON s.id=c.source_id JOIN documents d ON d.id=c.document_id WHERE c.id=?1 AND s.enabled=1")?;
         let mut current = Vec::with_capacity(hits.len());
         for hit in hits {
             if let Some(hit) = statement
                 .query_row([hit.id.to_string()], |row| {
-                    Ok(SearchHit {
+                    let mut hit = SearchHit {
                         id: super::store::uuid_at(row, 0)?,
                         source_id: super::store::uuid_at(row, 1)?,
                         document_id: super::store::uuid_at(row, 2)?,
@@ -422,6 +422,9 @@ impl KnowledgeEmbeddingService {
                         section: row.get(5)?,
                         line_start: super::store::integer_at(row, 6)?,
                         line_end: super::store::integer_at(row, 7)?,
+                        path: None,
+                        page: None,
+                        citation: None,
                         source_trust: if row.get::<_, String>(8)? == "user" {
                             Trust::User
                         } else {
@@ -429,7 +432,9 @@ impl KnowledgeEmbeddingService {
                         },
                         content: row.get(9)?,
                         score: hit.score,
-                    })
+                    };
+                    hit.attach_citation(&row.get::<_, String>(10)?, &row.get::<_, String>(11)?);
+                    Ok(hit)
                 })
                 .optional()?
             {

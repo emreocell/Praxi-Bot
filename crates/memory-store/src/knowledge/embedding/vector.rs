@@ -293,9 +293,10 @@ impl KnowledgeEmbeddingService {
         let (count, min_dims, max_dims):(i64,Option<i64>,Option<i64>)=self.store.conn().query_row(
             "SELECT COUNT(*),MIN(dimensions),MAX(dimensions) FROM (SELECT e.dimensions FROM knowledge_embeddings e JOIN sources s ON s.id=e.source_id
              WHERE e.profile=?1 AND s.enabled=1 AND (?2='[]' OR e.source_id IN(SELECT value FROM json_each(?2)))
+             AND (?4=0 OR s.kind IN ('\"file\"','\"folder\"'))
              AND (e.remote=0 OR json_extract(s.remote_embedding_json,'$.profile_fingerprint')=?1)
              AND EXISTS(SELECT 1 FROM knowledge_meta WHERE key='embedding_profile' AND value=?1) LIMIT ?3)",
-            params![self.fingerprint,sources,super::super::store::sql_int(self.config.max_scan_vectors.saturating_add(1))?],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+            params![self.fingerprint,sources,super::super::store::sql_int(self.config.max_scan_vectors.saturating_add(1))?,request.files_only],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
         Ok((
             usize::try_from(count).map_err(|_| invalid("embedding count overflow"))?,
             min_dims
@@ -324,9 +325,10 @@ fn semantic_candidates(
         let mut statement=conn.prepare(
                 "SELECT e.chunk_id,e.vector,e.dimensions FROM knowledge_embeddings e JOIN sources s ON s.id=e.source_id
                  WHERE e.profile=?1 AND s.enabled=1 AND (?2='[]' OR e.source_id IN(SELECT value FROM json_each(?2)))
+                 AND (?3=0 OR s.kind IN ('\"file\"','\"folder\"'))
                  AND (e.remote=0 OR json_extract(s.remote_embedding_json,'$.profile_fingerprint')=?1)
                  AND EXISTS(SELECT 1 FROM knowledge_meta WHERE key='embedding_profile' AND value=?1) ORDER BY e.chunk_id")?;
-        let mut rows = statement.query(params![fingerprint, sources])?;
+        let mut rows = statement.query(params![fingerprint, sources, request.files_only])?;
         let mut index = 0;
         while let Some(row) = rows.next()? {
             if cancel.is_cancelled() {
@@ -372,12 +374,12 @@ fn semantic_candidates(
         .map(|Reverse(score)| score)
         .collect::<Vec<_>>();
     ranks.sort_by(|left, right| right.cmp(left));
-    let mut statement=conn.prepare("SELECT c.id,c.source_id,c.document_id,s.label,d.locator,c.section,c.line_start,c.line_end,s.trust,c.body
+    let mut statement=conn.prepare("SELECT c.id,c.source_id,c.document_id,s.label,d.locator,c.section,c.line_start,c.line_end,s.trust,c.body,s.kind,s.locator
             FROM chunks c JOIN sources s ON s.id=c.source_id JOIN documents d ON d.id=c.document_id WHERE c.id=?1 AND s.enabled=1")?;
     let mut hits = Vec::with_capacity(ranks.len());
     for rank in ranks {
         let hit = statement.query_row([rank.id], |row| {
-            Ok(SearchHit {
+            let mut hit = SearchHit {
                 id: uuid_at(row, 0)?,
                 source_id: uuid_at(row, 1)?,
                 document_id: uuid_at(row, 2)?,
@@ -386,6 +388,9 @@ fn semantic_candidates(
                 section: row.get(5)?,
                 line_start: integer_at(row, 6)?,
                 line_end: integer_at(row, 7)?,
+                path: None,
+                page: None,
+                citation: None,
                 source_trust: if row.get::<_, String>(8)? == "user" {
                     Trust::User
                 } else {
@@ -393,7 +398,9 @@ fn semantic_candidates(
                 },
                 content: row.get(9)?,
                 score: rank.score,
-            })
+            };
+            hit.attach_citation(&row.get::<_, String>(10)?, &row.get::<_, String>(11)?);
+            Ok(hit)
         })?;
         hits.push(hit);
     }
