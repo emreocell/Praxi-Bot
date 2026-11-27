@@ -419,6 +419,56 @@ enum Round {
     Failed(String),
 }
 
+/// One summariser call: the reply text and the model that wrote it. `Err` is what the round
+/// ends with (`Idle`: no model that can be asked).
+async fn ask(
+    sh: &Arc<Shared>,
+    ctx: &RunCtx,
+    input: &str,
+    private: bool,
+) -> Result<(String, String), Round> {
+    let cfg = &sh.cfg.history_summary;
+    let Ok(profile) = sh.profile_for(ctx.bot_id) else {
+        return Err(Round::Failed("the bot has no usable profile".into()));
+    };
+    let Some(model) = pick_model(&profile, private) else {
+        return Err(Round::Idle);
+    };
+    let model_ref = ModelRef(model.clone());
+    let provider = sh
+        .providers
+        .read()
+        .pick(&model_ref)
+        .map_err(|e| Round::Failed(e.to_string()))?;
+    let mut req = ChatRequest::new(
+        model_ref,
+        vec![
+            Message::text(MessageRole::System, SYSTEM),
+            Message::text(MessageRole::User, input),
+        ],
+    );
+    req.max_tokens = Some(MAX_TOKENS);
+    req.temperature = Some(0.0);
+    req.json_mode = true;
+    let prompt_hint = u64::try_from((input.len() + SYSTEM.len()) / 3).ok();
+    let mut call = crate::usage::CallGuard::start_with_prompt(
+        sh,
+        ctx,
+        &model,
+        crate::CallPurpose::Summary,
+        prompt_hint,
+    )
+    .map_err(Round::Failed)?;
+    let reply = tokio::time::timeout(
+        cfg.call_timeout,
+        crate::router::collect_model_text(provider.as_ref(), req, &mut call),
+    )
+    .await
+    .map_err(|_| Round::Failed("the summariser took too long".into()))?
+    .map_err(|e| Round::Failed(e.to_string()))?;
+    Ok((reply, model))
+}
+
 async fn round(sh: &Arc<Shared>, ctx: &RunCtx) -> Round {
     let cfg = &sh.cfg.history_summary;
     let (chat, bot) = (ctx.chat_id, ctx.bot_id);
@@ -441,63 +491,43 @@ async fn round(sh: &Arc<Shared>, ctx: &RunCtx) -> Round {
         );
     }
     let input = input_json(sh, bot, prior.as_ref(), &fold, &mut carried);
-    let Ok(profile) = sh.profile_for(bot) else {
-        return Round::Failed("the bot has no usable profile".into());
-    };
-    let Some(model) = pick_model(&profile, carried.private) else {
-        return Round::Idle;
-    };
-    let model_ref = ModelRef(model.clone());
-    let provider = match sh.providers.read().pick(&model_ref) {
-        Ok(p) => p,
-        Err(e) => return Round::Failed(e.to_string()),
-    };
-    let mut req = ChatRequest::new(
-        model_ref,
-        vec![
-            Message::text(MessageRole::System, SYSTEM),
-            Message::text(MessageRole::User, input.clone()),
-        ],
-    );
-    req.max_tokens = Some(MAX_TOKENS);
-    req.temperature = Some(0.0);
-    req.json_mode = true;
-    let prompt_hint = u64::try_from((input.len() + SYSTEM.len()) / 3).ok();
-    let mut call = match crate::usage::CallGuard::start_with_prompt(
-        sh,
-        ctx,
-        &model,
-        crate::CallPurpose::Summary,
-        prompt_hint,
-    ) {
-        Ok(c) => c,
-        Err(e) => return Round::Failed(e),
-    };
-    let reply = match tokio::time::timeout(
-        cfg.call_timeout,
-        crate::router::collect_model_text(provider.as_ref(), req, &mut call),
-    )
-    .await
-    {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Round::Failed(e.to_string()),
-        Err(_) => return Round::Failed("the summariser took too long".into()),
+    let (reply, model) = match ask(sh, ctx, &input, carried.private).await {
+        Ok(r) => r,
+        Err(end) => return end,
     };
     let Some(content) = render(&reply, cfg.max_summary_bytes) else {
         return Round::Failed("the summariser did not return a usable summary".into());
     };
-    let content = sh.redact(content);
-    // The chat may have changed while the model worked: an edit that drops the summary, or a
-    // folded message that was replaced. Then this round's text no longer matches the chat.
+    store(
+        sh,
+        ctx,
+        prior.as_ref(),
+        &fold,
+        carried,
+        sh.redact(content),
+        &model,
+    )
+}
+
+/// Write the round's summary, unless the chat changed while the model worked (an edit that
+/// dropped the summary, a folded message that was replaced): then the text no longer matches.
+fn store(
+    sh: &Shared,
+    ctx: &RunCtx,
+    prior: Option<&ChatSummary>,
+    fold: &[storage::Message],
+    carried: Carried,
+    content: String,
+    model: &str,
+) -> Round {
+    let chat = ctx.chat_id;
     let now = sh.storage.get_chat_summary(chat).ok().flatten();
-    let same_prior =
-        now.as_ref().map(ChatSummary::cursor) == prior.as_ref().map(ChatSummary::cursor);
-    let after = prior.as_ref().map(ChatSummary::cursor);
+    let same_prior = now.as_ref().map(ChatSummary::cursor) == prior.map(ChatSummary::cursor);
     let still_live = sh
         .storage
-        .list_dialogue_after(chat, after, fold.len())
+        .list_dialogue_after(chat, prior.map(ChatSummary::cursor), fold.len())
         .is_ok_and(|live| {
-            live.len() == fold.len() && live.iter().zip(&fold).all(|(a, b)| a.id == b.id)
+            live.len() == fold.len() && live.iter().zip(fold).all(|(a, b)| a.id == b.id)
         });
     if !same_prior || !still_live {
         return Round::Idle;
@@ -512,18 +542,15 @@ async fn round(sh: &Arc<Shared>, ctx: &RunCtx) -> Round {
         covered_until_ms: last.created_at_ms,
         covered_until_id: last.id,
         covered_messages: prior
-            .as_ref()
             .map_or(0, |p| p.covered_messages)
             .saturating_add(folded),
-        rounds: prior.as_ref().map_or(0, |p| p.rounds).saturating_add(1),
-        first_message_ms: prior
-            .as_ref()
-            .map_or(first.created_at_ms, |p| p.first_message_ms),
+        rounds: prior.map_or(0, |p| p.rounds).saturating_add(1),
+        first_message_ms: prior.map_or(first.created_at_ms, |p| p.first_message_ms),
         exposure_untrusted: carried.untrusted,
         exposure_private: carried.private,
         exposure_sources: carried.sources,
-        model: model.clone(),
-        created_at_ms: prior.as_ref().map_or(ms, |p| p.created_at_ms),
+        model: model.to_owned(),
+        created_at_ms: prior.map_or(ms, |p| p.created_at_ms),
         updated_at_ms: ms,
     };
     if let Err(e) = sh.storage.put_chat_summary(&summary) {
