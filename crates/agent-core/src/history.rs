@@ -234,6 +234,14 @@ pub(crate) fn chat_provenance(
             private_texts.push(m.content.clone());
         }
         for label in m.exposure_sources {
+            // A stored label is a name, not a decision: the own-inbox label declassifies only
+            // on a message that did NOT hold private data when it was stored (the bit comes
+            // from `Shared::own_inbox_call`: identity and kind, at the call). On a private
+            // message the same words are read as the owner's mailbox.
+            let label = match label.strip_prefix(crate::taint::OWN_INBOX_LABEL_PREFIX) {
+                Some(rest) if m.exposure_private => format!("mailbox {rest}"),
+                _ => label,
+            };
             if !label.is_empty() && !sources.iter().any(|s| s == &label) {
                 sources.push(label);
             }

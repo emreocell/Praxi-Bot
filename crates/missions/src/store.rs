@@ -35,6 +35,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0002_item_cuts.sql"),
     ),
     ("0003_wakes", include_str!("../migrations/0003_wakes.sql")),
+    (
+        "0004_sent_chars",
+        include_str!("../migrations/0004_sent_chars.sql"),
+    ),
 ];
 
 mod waits;
@@ -508,6 +512,38 @@ impl MissionStore {
             [id],
         )?;
         Ok(n == 1)
+    }
+
+    /// Count `chars` characters sent to places the owner did not name against the mission's
+    /// ceiling of `ceiling` (all sessions together). `true` and counted when the total stays at
+    /// or below it; `false` and nothing counted otherwise, or when the mission does not exist.
+    /// One statement, so two calls at once cannot both take the last of the budget.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn take_send_budget(&self, id: &str, chars: u64, ceiling: u64) -> Result<bool> {
+        let (Ok(chars), Ok(ceiling)) = (i64::try_from(chars), i64::try_from(ceiling)) else {
+            return Ok(false);
+        };
+        let n = self.conn().execute(
+            "UPDATE missions SET sent_chars = sent_chars + ?2 WHERE id = ?1 AND sent_chars + ?2 <= ?3",
+            params![id, chars, ceiling],
+        )?;
+        Ok(n == 1)
+    }
+
+    /// Characters the mission's sessions have sent so far (see [`Self::take_send_budget`]).
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn sent_chars(&self, id: &str) -> Result<u64> {
+        let n: Option<i64> = self
+            .conn()
+            .query_row("SELECT sent_chars FROM missions WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        Ok(u64::try_from(n.unwrap_or(0)).unwrap_or(0))
     }
 
     /// Whether `bot_id` has a mission that is running (its `mission_*` tools are visible then).
@@ -2102,6 +2138,43 @@ mod tests {
         let m = s.create(&new_mission(&[]), 1).unwrap();
         assert!(s.take_question_slot(&m.id).unwrap());
         assert!(!s.take_question_slot(&m.id).unwrap());
+    }
+
+    #[test]
+    fn the_send_ceiling_is_one_total_for_the_mission_kept_in_its_row() {
+        let s = store();
+        let m = s.create(&new_mission(&[]), 1).unwrap();
+        let other = s.create(&new_mission(&[]), 1).unwrap();
+        assert_eq!(s.sent_chars(&m.id).unwrap(), 0);
+        assert!(s.take_send_budget(&m.id, 600, 1000).unwrap());
+        // Over the ceiling counts nothing; what is left can still be taken.
+        assert!(!s.take_send_budget(&m.id, 401, 1000).unwrap());
+        assert_eq!(s.sent_chars(&m.id).unwrap(), 600);
+        assert!(s.take_send_budget(&m.id, 400, 1000).unwrap());
+        assert!(!s.take_send_budget(&m.id, 1, 1000).unwrap());
+        // Another mission and an unknown one are not touched by it.
+        assert_eq!(s.sent_chars(&other.id).unwrap(), 0);
+        assert!(!s.take_send_budget("no-such-mission", 1, 1000).unwrap());
+        // Sessions do not reset it: it is a column of the mission, not of a session.
+        let session = s.begin_session(&m.id, 5).unwrap();
+        s.set_session_run(session, "run-2").unwrap();
+        assert_eq!(s.sent_chars(&m.id).unwrap(), 1000);
+    }
+
+    #[test]
+    fn the_send_total_survives_reopening_the_database() {
+        let dir = std::env::temp_dir().join(format!("missions-sent-{}", uuid::Uuid::now_v7()));
+        let path = dir.join("missions.db");
+        let id = {
+            let s = MissionStore::open(&path).unwrap();
+            let m = s.create(&new_mission(&[]), 1).unwrap();
+            assert!(s.take_send_budget(&m.id, 7, 10).unwrap());
+            m.id
+        };
+        let s = MissionStore::open(&path).unwrap();
+        assert_eq!(s.sent_chars(&id).unwrap(), 7);
+        assert!(!s.take_send_budget(&id, 4, 10).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

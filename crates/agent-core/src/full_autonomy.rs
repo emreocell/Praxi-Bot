@@ -43,6 +43,13 @@ pub(crate) const SITE_SEND_BUDGET: usize = 1500;
 /// 40 steps cannot reach it by browsing one address per step, so it only bounds a long run (or a
 /// raised step limit) that sprays small pieces over many sites the model chose.
 pub(crate) const RUN_SEND_BUDGET: usize = 4 * SITE_SEND_BUDGET;
+/// What ALL sessions of one mission may send to places the owner did not name together: three
+/// runs' worth. It is kept with the mission (`missions::MissionStore::take_send_budget`), not in
+/// a session, because every session starts with an empty [`SeenText`]: without it a mission of
+/// many sessions would get a fresh run budget each time, and text the model paraphrased into the
+/// ledger (which loses its hashes) could leave in pieces at the pace of one session after another.
+/// Above it every further call that sends to such a place asks.
+pub(crate) const MISSION_SEND_BUDGET: usize = 3 * RUN_SEND_BUDGET;
 /// Text typed into a page that is not the owner's must be shorter than this: a field value or a
 /// short profile description, not a paragraph.
 pub(crate) const FOREIGN_TEXT_LIMIT: usize = 240;

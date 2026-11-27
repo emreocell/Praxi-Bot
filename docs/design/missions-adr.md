@@ -121,7 +121,7 @@ audited tree.
 | 8 | Mail wake | partial (in flight) | `scheduler/src/watch.rs` (2-minute header polling, `Trigger::Email` at `model.rs:469`), PR #869 (rule registry, quiet hours, limits 10/h 50/day per rule, bounded queue of 100 events / 48 KB, events fenced with `untrusted_data_block_capped`) | Wake starts a one-off prompt run, not a mission continuation. No "wait for this reply" registration. |
 | 9 | Trigger-fed runs are untrusted | exists | `agent-core/src/shared.rs:1384-1396` (`ExternalSchedule` kind), `docs/schedule-triggers-prechecks.md` ("once-only approval floor on **every tool**") | **Blocker for missions**: a run woken by mail or webhook asks for approval on every tool, so it cannot work unattended. A new trust class is needed (section 8). |
 | 10 | Full level is owner-started only | exists | `agent-core/src/approval.rs:1124-1136` (`full_mode_waives`), `:3526-3551` (`owner_started_run`: every user message source must be `owner`/`peer_admin`), `permission-engine/src/modes.rs:21` | A schedule, webhook, mail, channel or subagent run never gets Full. A wake-started mission session would ask for everything. |
-| 11 | Egress/private-data volume caps | exists | `agent-core/src/full_autonomy.rs` (`SITE_SEND_BUDGET` 1500 chars per site, `RUN_SEND_BUDGET` four sites' worth per run, foreign text limit 240) | Scoped per site since the backlink walkthrough (one run-wide total of 1500 ran out after three to five sites of a sign-up task); sessions reset it, which is acceptable because the SeenText/taint rules stay per run. The caps only apply to a run that holds the owner's private data and read untrusted content (see 8.1a). |
+| 11 | Egress/private-data volume caps | exists | `agent-core/src/full_autonomy.rs` (`SITE_SEND_BUDGET` 1500 chars per site, `RUN_SEND_BUDGET` four sites' worth per run, foreign text limit 240) | Scoped per site (registrable domain, so sub-domains share one bucket) since the backlink walkthrough (one run-wide total of 1500 ran out after three to five sites of a sign-up task). A run's counters start empty in every session, so the mission also has one send ceiling (`MISSION_SEND_BUDGET`, three runs' worth) that is stored with the mission (`missions.sent_chars`, `MissionStore::take_send_budget`) and that no session resets; the SeenText/taint rules stay per run. The caps only apply to a run that holds the owner's private data and read untrusted content (see 8.1a). |
 | 12 | Subagents | partial | `agent-core/src/subagent.rs:44-46` (`MAX_DEPTH` 2, `MAX_CHILDREN` 3), `:47` (15 steps default); children never inherit Full (`approval.rs:1126-1129`) | Fine for a research helper; not for a worker that signs up on a site. |
 | 13 | Bot-to-bot delegation | partial | `agent-core/src/delegation.rs:1-26` (depth 1, one helper per root run, 4 KiB payload, 8 steps, 60 s, read-only tools, approval per call) | Designed as "ask a colleague". Missions need a scoped worker bot that can act. |
 | 14 | Spending limits | exists | `agent-core/src/bot_limits.rs`, `bot-spending-limits-adr.md` (per bot, day/week/month, reserve-then-reconcile before every call) | No per-mission limit. A runaway mission can eat the whole bot limit (and then stops everything else the bot does). |
@@ -402,7 +402,18 @@ still asks wherever it asked after a page read), not the owner's private data. I
 bot's own (not foreign text), and `email_wait_for` returns no mail body. An IMAP/SMTP mailbox, an
 account every bot may use and any other bot's account remain private reads. Accepted residual:
 private data the owner e-mails to the bot's own AgentMail inbox is not tracked as private; put it
-in a file or in memory instead.
+in a file or in memory instead. The decision is made at the call from the account's identity and
+kind (bound or shared with the bot AND `AgentMail`), never from a label: a stored `own inbox ...`
+label only counts on a message that was not private when it was stored, and its folder part is
+`A-Za-z0-9_-` (1 to 32 characters) or `INBOX`. The same test gates the Full-level sign-up waiver
+(`email_search`, `email_read`, `email_list_folders`, `email_mark_read`, `email_wait_for`), so an
+IMAP mailbox bound to the bot and an inbox every bot may use keep asking.
+
+The mail listing a quarantined run gets (`email_search`) is a table of ids, dates, senders and
+short subjects, framed as untrusted data. An id appears only in the strict shape `email_read`
+takes back (`A-Za-z0-9._+=@-`, optionally inside one `<>` pair, at most 120 characters), and
+`email_read` / `email_mark_read` / `email_download_attachment` refuse any other `message_id`.
+Subjects such as "Confirm your account" stay: the bot finds its verification mail by them.
 
 ### 8.2 The new trust class (the hard part)
 

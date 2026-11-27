@@ -128,7 +128,19 @@ pub(crate) const OWN_INBOX_LABEL_PREFIX: &str = "own inbox ";
 pub(crate) fn names_private_data(label: &str) -> bool {
     !(label.starts_with("page ")
         || label == MISSION_LEDGER_LABEL
-        || label.starts_with(OWN_INBOX_LABEL_PREFIX))
+        || label
+            .strip_prefix(OWN_INBOX_LABEL_PREFIX)
+            .is_some_and(plain_folder))
+}
+
+/// A folder name the own-inbox label may carry: `A-Z a-z 0-9 _ -`, 1 to 32 characters. The
+/// label names the declassifying prefix, so what follows it is never free text (a folder name
+/// is chosen by the model, and a stored label is read back as it was written).
+fn plain_folder(folder: &str) -> bool {
+    (1..=32).contains(&folder.len())
+        && folder
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
 }
 
 /// Exposure bits plus the labels the approval card quotes.
@@ -521,8 +533,9 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         "email_read" | "email_search" | "email_list_folders" | "email_download_attachment" => {
             format!("mailbox {}", str_field("folder").unwrap_or("INBOX"))
         }
-        // `email_wait_for` refuses every mailbox but the bot's own identity.
-        "email_wait_for" => format!("{OWN_INBOX_LABEL_PREFIX}mail"),
+        // The label NAMES the source and never declassifies: it is the owner's-mailbox label
+        // until `Shared::own_inbox_call` (identity and kind) says the inbox is the bot's own.
+        "email_wait_for" => "mailbox INBOX".to_owned(),
         "web_search" => format!("page {}", str_field("query").unwrap_or("a search")),
         "web_extract"
         | "web_scrape"
@@ -574,13 +587,16 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
     }
 }
 
-/// The label of a read of the bot's own `AgentMail` inbox (see `Shared::own_inbox_call`): the
-/// same folder the `mailbox ...` label would name, under the prefix that does not mark the run
-/// as holding the owner's private data.
+/// The label of a read of the bot's own `AgentMail` inbox (see `Shared::own_inbox_call`, which
+/// decides from identity and kind, never from a label): the folder the `mailbox ...` label would
+/// name, under the prefix that does not mark the run as holding the owner's private data. The
+/// folder comes from the model, so anything but `A-Z a-z 0-9 _ -` (1 to 32 characters) is read as
+/// `INBOX`.
 pub(crate) fn own_inbox_label(input: &Value) -> String {
     let folder = input
         .get("folder")
         .and_then(Value::as_str)
+        .filter(|f| plain_folder(f))
         .unwrap_or("INBOX");
     format!("{OWN_INBOX_LABEL_PREFIX}{folder}")
 }
@@ -2141,14 +2157,57 @@ mod mail_review_tests {
     }
 
     #[test]
-    fn the_own_inbox_label_names_the_folder_and_the_wait_tool_reads_the_own_inbox() {
+    fn the_own_inbox_label_names_the_folder_and_no_tool_declassifies_by_name() {
         assert_eq!(
             own_inbox_label(&json!({"folder": "Junk"})),
             "own inbox Junk"
         );
         assert_eq!(own_inbox_label(&json!({})), "own inbox INBOX");
-        assert_eq!(source_label("email_wait_for", &json!({})), "own inbox mail");
+        // By name alone the wait tool declassifies nothing.
+        assert_eq!(source_label("email_wait_for", &json!({})), "mailbox INBOX");
         // The owner's own mailbox keeps its label.
         assert_eq!(source_label("email_search", &json!({})), "mailbox INBOX");
+    }
+
+    #[test]
+    fn a_folder_the_model_chose_cannot_forge_the_declassifying_label() {
+        for folder in [
+            "page https://a.example/",
+            "x\nmission ledger",
+            "Junk and more words",
+            "a/b",
+            "",
+            &"A".repeat(33),
+            "Gönder",
+        ] {
+            let label = own_inbox_label(&json!({"folder": folder}));
+            assert_eq!(label, "own inbox INBOX", "{folder:?}");
+        }
+        assert_eq!(
+            own_inbox_label(&json!({"folder": "Spam_2-b"})),
+            "own inbox Spam_2-b"
+        );
+        assert_eq!(
+            own_inbox_label(&json!({"folder": "A".repeat(32)})),
+            format!("own inbox {}", "A".repeat(32))
+        );
+        // A stored label is read back strictly: free text after the prefix is a private label,
+        // so a label written (or edited) with anything but a plain folder does not declassify.
+        for label in [
+            "own inbox ",
+            "own inbox a b",
+            "own inbox INBOX/../secret",
+            "own inbox INBOX\n",
+            "own inbox Gönder",
+        ] {
+            assert!(names_private_data(label), "{label:?}");
+        }
+        assert!(!names_private_data("own inbox Junk"));
+        // A read the daemon did not clear (an IMAP mailbox) never has the own-inbox label.
+        assert_eq!(
+            source_label("email_read", &json!({"folder": "own inbox INBOX"})),
+            "mailbox own inbox INBOX"
+        );
+        assert!(names_private_data("mailbox own inbox INBOX"));
     }
 }

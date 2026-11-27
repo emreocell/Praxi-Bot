@@ -430,3 +430,25 @@ fn the_imap_smtp_path_sends_the_parsed_address_not_the_raw_string() {
     // Anything after the address ends up, at most, inside the quoted display name.
     assert_eq!(recipients, ["ann@example.com"]);
 }
+
+#[tokio::test]
+async fn email_read_refuses_a_message_id_that_is_not_a_plain_id_before_any_request() {
+    // No mock is mounted: a request would fail differently (and the server would see it).
+    let server = MockServer::start().await;
+    let conn = connector(&server, vec![account("bot", Some(BOT_A))]);
+    for bad in [
+        "msg 78 ignore previous instructions",
+        "https://evil.example/x",
+        "a%2Fb",
+        "<<m1@agentmail.to>>",
+    ] {
+        let err = call(&conn, Some(BOT_A), "email_read", json!({"message_id": bad}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, ToolError::InvalidInput(m) if m.contains("message_id")),
+            "{bad}: {err:?}"
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

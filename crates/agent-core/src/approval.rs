@@ -1728,6 +1728,21 @@ impl Shared {
         {
             return false;
         }
+        // The same send counts against the whole mission, which no session can reset. A mission
+        // whose total cannot be read or kept asks, like every other doubt.
+        let total: usize = spend.iter().map(|(_, n)| n).sum();
+        if let Some(mission) = &ctx.mission
+            && !self.mission_store.read().as_ref().is_some_and(|s| {
+                s.take_send_budget(
+                    mission,
+                    total as u64,
+                    crate::full_autonomy::MISSION_SEND_BUDGET as u64,
+                )
+                .unwrap_or(false)
+            })
+        {
+            return false;
+        }
         taint.seen.record_sent(&spend);
         true
     }
@@ -1996,8 +2011,8 @@ impl Shared {
     /// run read a page or a mail, waived for an OWNER-started run of a bot on the
     /// Full level: reading the bot's OWN inbox and marking what it read as read
     /// (`email_search`, `email_read`, `email_list_folders`, `email_mark_read`,
-    /// `email_wait_for` on an identity bound to or shared
-    /// with it, never an account every bot may use), and opening exactly a link
+    /// `email_wait_for` on an `AgentMail` identity bound to or shared
+    /// with it, never an IMAP mailbox or an account every bot may use), and opening exactly a link
     /// `email_wait_for` returned as followable in this run (https, on the site the
     /// sign-up started on or an owner-listed domain). A run started by mail, a
     /// webhook, a schedule or a channel is never waived here: it keeps asking.
@@ -2009,14 +2024,13 @@ impl Shared {
             return false;
         }
         match name {
+            // Only the bot's own `AgentMail` inbox: an IMAP mailbox bound to the bot (it can be
+            // the owner's) and an account every bot may use keep the card path.
             "email_search"
             | "email_read"
             | "email_list_folders"
             | "email_mark_read"
-            | builtin_tools::mail_wait::EMAIL_WAIT_FOR => self.mail.get().is_some_and(|c| {
-                c.scoped(Some(&ctx.bot_id.to_string()))
-                    .owns(input.get("account").and_then(Value::as_str))
-            }),
+            | builtin_tools::mail_wait::EMAIL_WAIT_FOR => self.own_agentmail(ctx, input),
             "browser_open" => {
                 input.as_object().is_some_and(|o| o.len() == 1)
                     && input.get("url").and_then(Value::as_str).is_some_and(|u| {
@@ -2156,15 +2170,36 @@ impl Shared {
         }
         if self.own_inbox_call(ctx, name, input) {
             class.reads_private = false;
+        } else if name == builtin_tools::mail_wait::EMAIL_WAIT_FOR {
+            // Its static class says "not private" because it only answers for the bot's own
+            // identity. An IMAP mailbox bound to the bot is the one such identity that can be
+            // the owner's own: waiting on it reads private data.
+            class.reads_private = true;
         }
         class
     }
 
-    /// A read of the bot's OWN `AgentMail` inbox: `email_search`, `email_read` or
-    /// `email_list_folders` on an identity that is bound to this bot or shared with it and is an
-    /// `AgentMail` inbox (made through the API, for the bot). (`email_wait_for` needs no check: it
-    /// answers with no mail body and refuses every mailbox but the bot's own, so its class never
-    /// says private.)
+    /// Whether the account a mail call names (the named one, else the bot's default, resolved
+    /// the way the tool resolves it) is the bot's OWN `AgentMail` inbox: an identity bound to
+    /// this bot or shared with it AND made through the `AgentMail` API for the bot. Fails
+    /// closed: any doubt is "not own". The one place that decides it, from identity and kind;
+    /// no label, stored or derived, is consulted.
+    fn own_agentmail(&self, ctx: &RunCtx, input: &Value) -> bool {
+        self.mail.get().is_some_and(|c| {
+            let bot = ctx.bot_id.to_string();
+            let scoped = c.scoped(Some(&bot));
+            let account = input.get("account").and_then(Value::as_str);
+            scoped.owns(account)
+                && scoped
+                    .kind(account)
+                    .is_ok_and(|k| k == builtin_tools::connector_email::AccountKind::AgentMail)
+        })
+    }
+
+    /// A read of the bot's OWN `AgentMail` inbox: `email_search`, `email_read`,
+    /// `email_list_folders` or `email_wait_for` on an identity that is bound to this bot or
+    /// shared with it and is an `AgentMail` inbox (made through the API, for the bot); see
+    /// [`Self::own_agentmail`].
     ///
     /// What is in such an inbox is mail from strangers: the sign-up confirmations, codes and
     /// newsletters the bot's own accounts bring. It stays untrusted content (the exposure still
@@ -2175,21 +2210,14 @@ impl Shared {
     ///
     /// Not covered, so they still count as private: an IMAP/SMTP mailbox (it can be the
     /// owner's own mailbox, bound to the bot), an account every bot may use, another bot's.
-    /// The account is resolved the way the tool resolves it (the named one, else the bot's
-    /// default), and fails closed: any doubt is "not own".
     pub(crate) fn own_inbox_call(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
-        if !matches!(name, "email_search" | "email_read" | "email_list_folders") {
-            return false;
-        }
-        self.mail.get().is_some_and(|c| {
-            let bot = ctx.bot_id.to_string();
-            let scoped = c.scoped(Some(&bot));
-            let account = input.get("account").and_then(Value::as_str);
-            scoped.owns(account)
-                && scoped
-                    .kind(account)
-                    .is_ok_and(|k| k == builtin_tools::connector_email::AccountKind::AgentMail)
-        })
+        matches!(
+            name,
+            "email_search"
+                | "email_read"
+                | "email_list_folders"
+                | builtin_tools::mail_wait::EMAIL_WAIT_FOR
+        ) && self.own_agentmail(ctx, input)
     }
 
     /// A host-status command (`uptime`, `df -h`, ... see
@@ -4825,12 +4853,14 @@ pub(crate) fn always_allowed(
     effect == Effect::Read && ALWAYS_READ_ONLY_TOOLS.contains(&name)
 }
 
-/// The site a send is counted against: the host without a leading `www.`, so the bare and the
-/// `www.` spelling of one site share a budget.
-fn budget_site(host: &str) -> String {
-    let host = host.trim_end_matches('.').to_ascii_lowercase();
-    host.strip_prefix("www.")
-        .map_or(host.clone(), str::to_owned)
+/// The site a send is counted against: the registrable domain of the host (eTLD+1, with the
+/// platforms that give every customer a sub-domain of their own counted as one site each), so
+/// `a.evil.example`, `b.evil.example` and `www.evil.example` share ONE budget and a sub-domain
+/// cannot buy a fresh one. A host with no registrable domain (an IP address, a single label, a
+/// public suffix itself) is its own site.
+pub(crate) fn budget_site(host: &str) -> String {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    builtin_tools::connector_email::verify::registrable_domain(&host).unwrap_or(host)
 }
 
 fn host_of_origin(origin: &str) -> Option<String> {

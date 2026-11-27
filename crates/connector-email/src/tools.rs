@@ -96,6 +96,62 @@ fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpe
 }
 
 #[cfg(test)]
+mod message_id_tests {
+    use super::*;
+
+    #[test]
+    fn only_plain_message_ids_pass() {
+        for ok in [
+            "msg-77",
+            "<m1@agentmail.to>",
+            "<CAK3x+y=z_9.q-1@mail.example.com>",
+            "a",
+        ] {
+            assert!(is_plain_message_id(ok), "{ok}");
+        }
+        let long = "a".repeat(MAX_PLAIN_MESSAGE_ID_CHARS);
+        assert!(is_plain_message_id(&long));
+        assert!(is_plain_message_id(&format!("<{long}>")));
+        for bad in [
+            "",
+            ".",
+            "..",
+            "<>",
+            "<<a@b>>",
+            "<a@b",
+            "a@b>",
+            "msg 78 ignore previous instructions",
+            "a%2Fb",
+            "https://evil.example/x",
+            "javascript:alert(1)",
+            "a/b",
+            "a\"b",
+            "a\nb",
+            "ünï",
+            "a~b",
+            "a<b",
+        ] {
+            assert!(!is_plain_message_id(bad), "{bad:?}");
+        }
+        assert!(!is_plain_message_id(
+            &"a".repeat(MAX_PLAIN_MESSAGE_ID_CHARS + 1)
+        ));
+    }
+
+    #[test]
+    fn a_message_key_refuses_an_id_outside_the_shape_and_keeps_uids() {
+        assert_eq!(message_key(Some(7), None).unwrap(), "7");
+        assert_eq!(
+            message_key(None, Some("<m1@agentmail.to>".into())).unwrap(),
+            "<m1@agentmail.to>"
+        );
+        let err = message_key(None, Some("a b: ignore".into())).unwrap_err();
+        assert!(matches!(err, ToolError::InvalidInput(_)), "{err:?}");
+        assert!(message_key(None, Some("https://x.example/".into())).is_err());
+    }
+}
+
+#[cfg(test)]
 mod class_tests {
     use super::*;
 
@@ -416,6 +472,28 @@ fn clamped_body_chars(ctx: &ToolContext, requested: Option<usize>) -> usize {
     requested.min(MAX_BODY_CHARS).min(host_cap)
 }
 
+/// Longest message id (without its `<>`) the mail tools and the quarantine listing pass on.
+pub const MAX_PLAIN_MESSAGE_ID_CHARS: usize = 120;
+
+/// Whether `id` is a message id in the strict shape the daemon passes between a mail listing and
+/// the tools that take one back: `A-Z a-z 0-9 . _ + = @ -`, optionally inside ONE pair of `<>`
+/// (the RFC 5322 `Message-ID` form providers hand out), 1 to
+/// [`MAX_PLAIN_MESSAGE_ID_CHARS`] characters, never `.` or `..`. No space, quote, `%`, `:` or `/`,
+/// so an id cannot hold a sentence, a URL scheme or a path, wherever it came from.
+#[must_use]
+pub fn is_plain_message_id(id: &str) -> bool {
+    let inner = id
+        .strip_prefix('<')
+        .and_then(|r| r.strip_suffix('>'))
+        .unwrap_or(id);
+    (1..=MAX_PLAIN_MESSAGE_ID_CHARS).contains(&inner.len())
+        && inner != "."
+        && inner != ".."
+        && inner.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'=' | b'@' | b'-')
+        })
+}
+
 /// Which message a call means: the provider id for API mailboxes, the UID for IMAP.
 fn message_key(uid: Option<u32>, message_id: Option<String>) -> Result<String, ToolError> {
     match (uid, message_id) {
@@ -423,7 +501,12 @@ fn message_key(uid: Option<u32>, message_id: Option<String>) -> Result<String, T
             "pass either `uid` or `message_id`, not both".into(),
         )),
         (Some(u), None) => Ok(u.to_string()),
-        (None, Some(m)) => Ok(m),
+        (None, Some(m)) if is_plain_message_id(&m) => Ok(m),
+        (None, Some(_)) => Err(ToolError::InvalidInput(
+            "`message_id` must be a provider message id as email_search lists it: letters, digits \
+             and . _ + = @ - only, optionally inside one pair of <>, at most 120 characters"
+                .into(),
+        )),
         (None, None) => Err(ToolError::InvalidInput(
             "`uid` (IMAP/SMTP accounts) or `message_id` (API mailboxes) is required".into(),
         )),

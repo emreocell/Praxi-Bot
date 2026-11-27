@@ -92,6 +92,28 @@ impl Kit {
                     ContentClass::all(),
                     &listing,
                 )),
+                // As the connector declares them.
+                Arc::new(with_class(
+                    "email_read",
+                    Effect::Read,
+                    m,
+                    ContentClass::all(),
+                    r#"{"message":{"subject":"Confirm your account"}}"#,
+                )),
+                Arc::new(with_class(
+                    "email_list_folders",
+                    Effect::Read,
+                    m,
+                    ContentClass::declared(false, true, true),
+                    r#"{"folders":["INBOX"]}"#,
+                )),
+                Arc::new(with_class(
+                    "email_mark_read",
+                    Effect::Write,
+                    m,
+                    ContentClass::egress(),
+                    r#"{"read":true}"#,
+                )),
                 real("fs_read", Effect::Read, PermissionCategory::Fs, CUSTOMERS),
             ],
         }
@@ -389,17 +411,42 @@ async fn an_address_that_is_not_the_bots_own_is_still_judged_like_any_text() {
     assert_eq!(card.map(|c| c.0), Some("browser_fill".to_owned()));
 }
 
+/// The owner's own mailbox over IMAP, bound to the bot.
+fn imap_bound(w: &World) -> Vec<builtin_tools::connector_email::AccountConfig> {
+    let mut a = account(
+        "owner-mail",
+        Some(w.env.bot.to_string()),
+        "me@example.org",
+        SendMode::Ask,
+    );
+    a.kind = AccountKind::ImapSmtp;
+    a.inbox_id = None;
+    a.imap.host = "imap.example.org".into();
+    a.smtp.host = "smtp.example.org".into();
+    vec![a]
+}
+
+/// An `AgentMail` inbox every bot may use (not bound to this one).
+fn shared_pool(_: &World) -> Vec<builtin_tools::connector_email::AccountConfig> {
+    vec![account("pool-mail", None, OWN, SendMode::Ask)]
+}
+
 /// What a mission session that read mail through `email_search` (any card is approved once) holds
 /// afterwards: untrusted content, the owner's private data, and whether pages are quarantined.
 async fn taint_after_mail_read(
     accounts: impl FnOnce(&World) -> Vec<builtin_tools::connector_email::AccountConfig>,
 ) -> (bool, bool, bool) {
+    taint_after_mail_call("email_search", json!({"folder": "INBOX"}), accounts).await
+}
+
+async fn taint_after_mail_call(
+    tool: &'static str,
+    input: Value,
+    accounts: impl FnOnce(&World) -> Vec<builtin_tools::connector_email::AccountConfig>,
+) -> (bool, bool, bool) {
     let w = world(&["a.example"]);
     let kit = Kit::new();
-    let script = vec![
-        calls(&[("m", "email_search", json!({"folder": "INBOX"}))]),
-        text("done"),
-    ];
+    let script = vec![calls(&[("m", tool, input)]), text("done")];
     let (lp, _fake) = session_loop(&w, &kit, script, accounts);
     let mut rx = lp.subscribe();
     let run = lp
@@ -418,7 +465,7 @@ async fn taint_after_mail_read(
         }
     }
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    assert_eq!(kit.count("email_search"), 1);
+    assert_eq!(kit.count(tool), 1);
     let record = w.env.storage.get_run(run).unwrap().unwrap();
     let ctx = lp.sh.ctx(&record).unwrap();
     // The lock is not held across `quarantined`, which takes it too.
@@ -440,24 +487,230 @@ async fn reading_the_bots_own_agentmail_inbox_is_untrusted_but_not_private() {
 async fn reading_an_imap_mailbox_bound_to_the_bot_is_still_private() {
     // It can be the owner's own mailbox: private, so pages go through the reader and screenshots
     // are held back.
-    let imap = |w: &World| {
-        let mut a = account(
-            "owner-mail",
-            Some(w.env.bot.to_string()),
-            "me@example.org",
-            SendMode::Ask,
-        );
-        a.kind = AccountKind::ImapSmtp;
-        a.inbox_id = None;
-        a.imap.host = "imap.example.org".into();
-        a.smtp.host = "smtp.example.org".into();
-        vec![a]
-    };
-    assert_eq!(taint_after_mail_read(imap).await, (true, true, true));
+    assert_eq!(taint_after_mail_read(imap_bound).await, (true, true, true));
 }
 
 #[tokio::test]
 async fn reading_an_inbox_every_bot_may_use_is_still_private() {
-    let shared = |_: &World| vec![account("pool-mail", None, OWN, SendMode::Ask)];
-    assert_eq!(taint_after_mail_read(shared).await, (true, true, true));
+    assert_eq!(taint_after_mail_read(shared_pool).await, (true, true, true));
+}
+
+#[tokio::test]
+async fn waiting_on_an_imap_mailbox_bound_to_the_bot_is_a_private_read_but_not_on_its_own_inbox() {
+    // `email_wait_for` answers for any identity the bot owns; only the AgentMail one is the
+    // bot's own inbox. An IMAP mailbox bound to it can be the owner's.
+    let wait = || json!({"block_seconds": 1});
+    assert_eq!(
+        taint_after_mail_call("email_wait_for", wait(), own_inbox).await,
+        (true, false, false)
+    );
+    assert_eq!(
+        taint_after_mail_call("email_wait_for", wait(), imap_bound).await,
+        (true, true, true)
+    );
+}
+
+/// What asks first in a session that read a page and then makes this call on a mail account:
+/// the tool of the first card, `None` when nothing asked.
+async fn first_card_after_a_page(
+    tool: &'static str,
+    input: Value,
+    accounts: impl FnOnce(&World) -> Vec<builtin_tools::connector_email::AccountConfig>,
+) -> Option<String> {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[("x", "web_extract", json!({"url": "https://dir-0.example/"}))]),
+        calls(&[("m", tool, input)]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, accounts);
+    run_to_card(&lp, &w, "brief").await.map(|c| c.0)
+}
+
+fn mail_calls() -> Vec<(&'static str, Value)> {
+    vec![
+        ("email_search", json!({"folder": "INBOX"})),
+        ("email_read", json!({"message_id": "msg-77"})),
+        ("email_list_folders", json!({})),
+        ("email_mark_read", json!({"message_id": "msg-77"})),
+        ("email_wait_for", json!({"block_seconds": 1})),
+    ]
+}
+
+#[tokio::test]
+async fn the_sign_up_waiver_covers_only_the_bots_own_agentmail_inbox() {
+    // After a page read, the bot's own AgentMail inbox is read, marked and waited on without a
+    // card; the owner's IMAP mailbox bound to the bot and an inbox every bot may use keep the
+    // card path, for every call the waiver names.
+    for (tool, input) in mail_calls() {
+        assert_eq!(
+            first_card_after_a_page(tool, input.clone(), own_inbox).await,
+            None,
+            "{tool} on the bot's own AgentMail inbox"
+        );
+        assert_eq!(
+            first_card_after_a_page(tool, input.clone(), imap_bound)
+                .await
+                .as_deref(),
+            Some(tool),
+            "{tool} on an IMAP mailbox bound to the bot"
+        );
+        assert_eq!(
+            first_card_after_a_page(tool, input, shared_pool)
+                .await
+                .as_deref(),
+            Some(tool),
+            "{tool} on an inbox every bot may use"
+        );
+    }
+}
+
+/// Spend `chars` of the mission's send ceiling, as earlier sessions would have.
+fn spend_mission(w: &World, chars: usize) {
+    assert!(
+        w.store
+            .take_send_budget(&w.mission, chars as u64, u64::MAX / 2)
+            .unwrap()
+    );
+}
+
+/// One sign-up in a session that holds the owner's private data (the budgets only meter such a
+/// run): read the customer list, read a directory page, open the sign-up page, type a profile
+/// text. Returns the card (tool) if one was needed.
+async fn sign_up_card(w: &World, kit: &Kit) -> Option<String> {
+    let script = vec![
+        calls(&[("r", "fs_read", json!({"path": "customers.csv"}))]),
+        calls(&[("x", "web_extract", json!({"url": "https://dir-0.example/"}))]),
+        calls(&[(
+            "o",
+            "browser_open",
+            json!({"url": "https://dir-0.example/signup?plan=free"}),
+        )]),
+        calls(&[("b", "browser_fill", json!({"ref": "e2", "text": BIO}))]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(w, kit, script, own_inbox);
+    run_to_card(&lp, w, "brief").await.map(|c| c.0)
+}
+
+#[tokio::test]
+async fn the_mission_send_ceiling_is_kept_with_the_mission_and_a_new_session_does_not_reset_it() {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    // A first session sends its sign-up text and the store has it afterwards.
+    assert_eq!(sign_up_card(&w, &Kit::new()).await, None);
+    let after_first = w.store.sent_chars(&w.mission).unwrap();
+    assert!(
+        after_first >= BIO.chars().count() as u64,
+        "the mission counts what the session sent: {after_first}"
+    );
+    // A second session adds to the same total instead of starting at zero.
+    assert_eq!(sign_up_card(&w, &Kit::new()).await, None);
+    assert!(w.store.sent_chars(&w.mission).unwrap() >= 2 * after_first - 20);
+}
+
+#[tokio::test]
+async fn a_mission_that_used_up_its_send_ceiling_asks_even_in_a_fresh_session() {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    // Earlier sessions used all but a few characters; this session's own run budget is untouched.
+    spend_mission(&w, crate::full_autonomy::MISSION_SEND_BUDGET - 10);
+    let kit = Kit::new();
+    // The first address (the session starts untrusted, so even the first page read counts) goes
+    // over the ceiling: it asks, and nothing is typed.
+    let card = sign_up_card(&w, &kit).await;
+    assert!(
+        matches!(card.as_deref(), Some("web_extract" | "browser_open")),
+        "{card:?}"
+    );
+    assert_eq!(kit.count("browser_fill"), 0);
+    // Nothing of the refused call was counted.
+    assert_eq!(
+        w.store.sent_chars(&w.mission).unwrap(),
+        (crate::full_autonomy::MISSION_SEND_BUDGET - 10) as u64
+    );
+}
+
+#[tokio::test]
+async fn a_mission_whose_send_total_cannot_be_kept_asks() {
+    // The mission is not in the store the loop was given: nothing can be counted, so it asks.
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let other = Arc::new(missions::MissionStore::open_in_memory().unwrap());
+    let script = vec![
+        calls(&[("r", "fs_read", json!({"path": "customers.csv"}))]),
+        calls(&[("x", "web_extract", json!({"url": "https://dir-0.example/"}))]),
+        calls(&[(
+            "o",
+            "browser_open",
+            json!({"url": "https://dir-0.example/signup?plan=free"}),
+        )]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, own_inbox);
+    lp.set_mission_store(other);
+    let card = run_to_card(&lp, &w, "brief").await;
+    assert!(
+        matches!(
+            card.as_ref().map(|c| c.0.as_str()),
+            Some("web_extract" | "browser_open")
+        ),
+        "{card:?}"
+    );
+    assert_eq!(kit.count("browser_open"), 0);
+}
+
+/// A chat message an earlier session left behind, with the provenance it was stored with.
+fn earlier_message(w: &World, private: bool, sources: &[&str]) {
+    w.env
+        .storage
+        .insert_message(&storage::Message {
+            id: uuid::Uuid::now_v7(),
+            user_id: w.env.user,
+            chat_id: w.env.chat,
+            run_id: None,
+            role: "assistant".into(),
+            content: "Read the inbox.".into(),
+            created_at_ms: storage::now_ms(),
+            exposure_untrusted: true,
+            exposure_private: private,
+            exposure_sources: sources.iter().map(|s| (*s).to_owned()).collect(),
+        })
+        .unwrap();
+}
+
+/// (private, unhashed) of the next session after such a message.
+async fn taint_after_earlier_message(private: bool, label: &str) -> (bool, bool) {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    earlier_message(&w, private, &[label]);
+    let kit = Kit::new();
+    let (lp, _fake) = session_loop(&w, &kit, vec![text("done")], own_inbox);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let record = w.env.storage.get_run(run).unwrap().unwrap();
+    let ctx = lp.sh.ctx(&record).unwrap();
+    let taint = ctx.taint.lock();
+    (taint.private_source, taint.seen.unhashed)
+}
+
+#[tokio::test]
+async fn a_stored_own_inbox_label_is_a_name_and_the_message_bit_decides() {
+    // Stored from a read the daemon cleared (identity and kind): not private, as before.
+    assert_eq!(
+        taint_after_earlier_message(false, "own inbox INBOX").await,
+        (false, false)
+    );
+    // The same words on a message that DID hold private data are not a declassification.
+    let (private, unhashed) = taint_after_earlier_message(true, "own inbox INBOX").await;
+    assert!(private || unhashed, "read as the owner's mailbox");
+    // Free text after the prefix never declassifies, whatever the message bit says.
+    let (private, unhashed) =
+        taint_after_earlier_message(false, "own inbox INBOX and other words").await;
+    assert!(private && unhashed);
 }

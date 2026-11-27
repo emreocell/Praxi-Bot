@@ -1942,7 +1942,10 @@ impl TurnExecutor {
                     ingests_untrusted: spec.content.ingests_untrusted && !status_call,
                     // Opening a file, localhost or LAN address in the owner's browser reads
                     // private machine data, whatever the page then returns.
-                    reads_private: (spec.content.reads_private && !status_call && !own_inbox)
+                    reads_private: ((spec.content.reads_private
+                        || resolved.name == builtin_tools::mail_wait::EMAIL_WAIT_FOR)
+                        && !status_call
+                        && !own_inbox)
                         || (spec.content.in_owner_browser
                             && crate::browser_url::opens_non_public(
                                 &resolved.name,

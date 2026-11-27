@@ -683,6 +683,52 @@ async fn the_budget_is_counted_per_site_so_many_sites_each_get_their_own() {
 }
 
 #[tokio::test]
+async fn subdomains_of_one_site_share_one_budget_so_a_spray_of_them_asks() {
+    // The same sixty-odd characters of address per call, but each call to a new sub-domain of
+    // ONE registrable domain: they are one site, and its budget runs out.
+    let later: Vec<(&str, Value)> = (0..40)
+        .map(|i| {
+            (
+                "browser_open",
+                json!({"url": format!("https://s{i}.evil.example/catalog/item{i}?color=red&size=large&sort=price{i}&page={i}")}),
+            )
+        })
+        .collect();
+    let (ran, card) = run(private(), &[], &later).await;
+    assert_eq!(card.as_deref(), Some("browser_open"));
+    assert!(
+        (2..40).contains(&ran),
+        "the one budget stopped it after {ran}"
+    );
+    // Different registrable domains do not share it (the test above) and a clean run never asks.
+    assert_eq!(card_for_clean(&later).await, None);
+}
+
+#[test]
+fn a_site_is_its_registrable_domain() {
+    let site = crate::approval::budget_site;
+    // One bucket for the bare name, `www.`, any sub-domain, any case and a trailing dot.
+    for host in [
+        "evil.example",
+        "www.evil.example",
+        "a.evil.example",
+        "a.b.evil.example",
+        "EVIL.Example.",
+    ] {
+        assert_eq!(site(host), "evil.example", "{host}");
+    }
+    // Multi-label public suffixes and platforms that give every customer a sub-domain.
+    assert_eq!(site("shop.example.co.uk"), "example.co.uk");
+    assert_eq!(site("a.example.com.tr"), "example.com.tr");
+    assert_eq!(site("alice.github.io"), "alice.github.io");
+    assert_ne!(site("alice.github.io"), site("bob.github.io"));
+    // No registrable domain: the host itself.
+    assert_eq!(site("localhost"), "localhost");
+    assert_eq!(site("203.0.113.7"), "203.0.113.7");
+    assert_eq!(site("github.io"), "github.io");
+}
+
+#[tokio::test]
 async fn a_profile_description_fits_a_private_run_but_a_paragraph_does_not() {
     let stranger = || {
         let mut c = private();
