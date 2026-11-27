@@ -6,11 +6,11 @@ A **scheduled job** lets a bot do something by itself at the times you choose. F
 
 1. Click **Scheduled tasks** in the left rail.
 2. Press **New schedule**. The window **New scheduled task** opens.
-3. Under **Start from an example**, click one example. It fills in the form. You can change everything afterwards.
-4. Under **How often?** choose **Once**, **Every day**, **Weekdays**, **Every week**, **Every month** or **Other**.
-5. Under **At what time?** pick the time. Praxi shows the time zone it uses. It also shows **Next 5 runs**. Check that this is what you meant.
-6. Check the **Prompt**. This is what the bot is asked to do each time. Write it in your own words.
-7. Under **Tell me when it ran**, choose **Every time**, **Only if something goes wrong** or **Never**.
+3. In **In your own words**, write the job in one sentence and press **Fill in**. Or click one of the small **Examples** chips. It fills in the form. You can change everything afterwards.
+4. Under **When** choose **Once**, **Every day**, **Weekdays**, **Every week**, **Every month** or **Other**, then pick the time. One line sums it up, for example "Every weekday at 09:00, Istanbul". **Next 5 runs** unfolds the next times. Check that this is what you meant.
+5. Pick the **Bot** and check the **Name**.
+6. Check **What should the bot do?** This is what the bot is asked to do each time. Write it in your own words.
+7. **More options** holds **Tell me when it ran** (**Every time**, **Only if something goes wrong** or **Never**), the time zone and the rarer settings. It is folded; its title shows what is chosen.
 8. Press **Create**.
 
 ![The New scheduled task window, with When, At what time? and Next 5 runs](images/en/new-schedule.webp)
