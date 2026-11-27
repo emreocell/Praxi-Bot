@@ -232,6 +232,65 @@ impl Environment for System {
     }
 }
 
+/// Libraries Chrome for Testing links against on Debian and Ubuntu (a test keeps this equal to
+/// `install_cft` in `scripts/install-linux.sh`, which installs them with root).
+const CHROME_LIBRARIES: [&str; 13] = [
+    "libnss3",
+    "libatk1.0-0",
+    "libatk-bridge2.0-0",
+    "libcups2",
+    "libdrm2",
+    "libxkbcommon0",
+    "libxcomposite1",
+    "libxdamage1",
+    "libxfixes3",
+    "libxrandr2",
+    "libgbm1",
+    "libpango-1.0-0",
+    "libcairo2",
+];
+
+/// Libraries that got a `t64` suffix on Ubuntu 24.04 and Debian 13. There the old name is only a
+/// virtual package, and `apt-get install libasound2` refuses it.
+const CHROME_LIBRARIES_T64: [&str; 2] = ["libasound2", "libatspi2.0-0"];
+
+/// The `apt-get install` command for the libraries Chrome links against on Debian and Ubuntu.
+#[must_use]
+pub fn apt_install_command() -> String {
+    let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    apt_install_command_for(&os_release)
+}
+
+fn apt_install_command_for(os_release: &str) -> String {
+    let suffix = if has_t64_libraries(os_release) {
+        "t64"
+    } else {
+        ""
+    };
+    let packages = CHROME_LIBRARIES
+        .iter()
+        .map(|p| (*p).to_owned())
+        .chain(CHROME_LIBRARIES_T64.iter().map(|p| format!("{p}{suffix}")))
+        .collect::<Vec<_>>();
+    format!("sudo apt-get install -y {}", packages.join(" "))
+}
+
+/// Ubuntu 24.04 and Debian 13 and later carry the `t64` names (the installer script picks them the
+/// same way). Unknown systems keep the old names.
+fn has_t64_libraries(os_release: &str) -> bool {
+    let field = |key: &str| {
+        os_release
+            .lines()
+            .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+            .map(|v| v.trim().trim_matches('"'))
+    };
+    let major = field("VERSION_ID").and_then(|v| v.split('.').next()?.parse::<u32>().ok());
+    matches!(
+        (field("ID"), major),
+        (Some("ubuntu"), Some(24..)) | (Some("debian"), Some(13..) | None)
+    )
+}
+
 /// A browser that cannot load a shared library is the commonest failure on a bare server image:
 /// say which package family to install (the installer script does this with root).
 fn with_missing_library_note(message: &str) -> String {
@@ -239,7 +298,8 @@ fn with_missing_library_note(message: &str) -> String {
         || message.to_ascii_lowercase().contains("shared libraries")
     {
         format!(
-            "{message}. Install the libraries Chrome needs (on Ubuntu or Debian: sudo apt-get install -y libnss3 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon0 libasound2 libxdamage1 libxfixes3 libxrandr2 libpango-1.0-0 libcairo2), or run `sudo ./install-linux.sh --update --with-desktop`"
+            "{message}. Install the libraries Chrome needs (on Ubuntu or Debian: {}), or run `sudo ./install-linux.sh --update --with-desktop`",
+            apt_install_command()
         )
     } else {
         message.to_owned()
@@ -1242,5 +1302,55 @@ mod tests {
         );
         assert!(libs.contains("libnss3"), "{libs}");
         assert_eq!(with_missing_library_note("other"), "other");
+    }
+
+    #[test]
+    fn the_apt_hint_uses_the_package_names_this_system_has() {
+        let release =
+            |id: &str, version: &str| format!("NAME=x\nID={id}\nVERSION_ID=\"{version}\"\n");
+        for (id, version, suffix) in [
+            ("ubuntu", "22.04", ""),
+            ("ubuntu", "24.04", "t64"),
+            ("ubuntu", "26.04", "t64"),
+            ("debian", "12", ""),
+            ("debian", "13", "t64"),
+        ] {
+            let cmd = apt_install_command_for(&release(id, version));
+            assert!(
+                cmd.starts_with("sudo apt-get install -y libnss3")
+                    && cmd.contains(&format!(" libasound2{suffix} "))
+                    && cmd.ends_with(&format!(" libatspi2.0-0{suffix}")),
+                "{id} {version}: {cmd}"
+            );
+        }
+        // Debian testing and unstable have no VERSION_ID and already use the new names.
+        assert!(has_t64_libraries("ID=debian\n"));
+        assert!(!has_t64_libraries(""));
+    }
+
+    #[test]
+    fn the_apt_hint_lists_the_libraries_the_installer_script_installs() {
+        let script = include_str!("../../../scripts/install-linux.sh");
+        let after = script
+            .split("local libs=(")
+            .nth(1)
+            .expect("install_cft has a libs list");
+        let (list, rest) = after.split_once(")\n").expect("the libs list ends");
+        let from_script: Vec<&str> = list.split_whitespace().collect();
+        assert_eq!(from_script, CHROME_LIBRARIES, "hint and installer differ");
+        let loop_line = rest
+            .lines()
+            .find(|l| l.contains("for pkg in libasound2"))
+            .expect("the t64 loop");
+        let t64: Vec<&str> = loop_line
+            .trim()
+            .trim_start_matches("for pkg in ")
+            .trim_end_matches("; do")
+            .split_whitespace()
+            .collect();
+        assert_eq!(
+            t64, CHROME_LIBRARIES_T64,
+            "t64 names differ from the installer"
+        );
     }
 }
