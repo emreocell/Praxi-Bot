@@ -1,6 +1,7 @@
 use super::*;
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // One row per engine, one test.
 async fn registry_is_authenticated_and_preserves_confinement() {
     let t = setup();
     let no_auth = send(&t.app, Method::GET, "/v1/providers/cli", None, &[]).await;
@@ -80,7 +81,10 @@ async fn registry_is_authenticated_and_preserves_confinement() {
         "--auto-approve true"
     );
     assert_eq!(cline["auth_args"], json!([]));
-    assert_eq!(cline["install"]["command"], "npm install -g cline");
+    // A data-driven engine's install is pinned, shown as unverified and never one-click.
+    assert_eq!(cline["install"]["command"], "npm install -g cline@3.0.76");
+    assert_eq!(cline["install"]["verified"], false);
+    assert_eq!(cline["install"]["executable"], false);
     assert_eq!(cline["limitation"], "native_only");
     let auggie = rows
         .iter()
@@ -90,6 +94,11 @@ async fn registry_is_authenticated_and_preserves_confinement() {
         assert_eq!(auggie["native"]["levels"][level]["offered"], false);
     }
     assert_eq!(auggie["native"]["levels"][3]["offered"], true);
+    // No native Windows installer is listed for Auggie (the row has none there).
+    if !auggie["install"].is_null() {
+        assert_eq!(auggie["install"]["verified"], false);
+        assert_eq!(auggie["install"]["executable"], false);
+    }
     let claude = rows
         .iter()
         .find(|r| r["detected"]["id"] == "claude")
@@ -145,6 +154,10 @@ async fn install_requires_single_use_approval_and_audits_before_execution() {
         json!({"id":"claude;whoami"}),
         json!({"id":"claude", "argv":["evil"]}),
         json!({"id":"gemini"}),
+        // Data-driven engines (`providers/cli/`): unverified, so copy and run yourself, the
+        // same as an experimental built-in.
+        json!({"id":"cline"}),
+        json!({"id":"auggie"}),
     ] {
         assert_eq!(
             call(&t, Method::POST, "/v1/providers/cli/install", Some(body))
