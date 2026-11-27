@@ -1434,7 +1434,14 @@ fi
 run_timed bash "${SB_INSTALL}" --update --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
   --skip-packages --no-start > "${TMP_ROOT}/update.log" 2>&1
 assert_file_contains "${TMP_ROOT}/update.log" "updating in place"
+: > "${SANDBOX_STATE}/systemctl.log"
 run_timed bash "${SB_INSTALL}" --uninstall > "${TMP_ROOT}/uninstall.log" 2>&1
+# praxi-xvfb.service has Upholds=praxi.service: the display must be stopped before the daemon, or the
+# daemon is started again and keeps running with its unit file deleted (found by the e2e install test).
+xvfb_stop_line="$(grep -n '^disable --now praxi-xvfb.service' "${SANDBOX_STATE}/systemctl.log" | head -n1 | cut -d: -f1)"
+praxi_stop_line="$(grep -n '^disable --now praxi.service' "${SANDBOX_STATE}/systemctl.log" | head -n1 | cut -d: -f1)"
+[[ -n "${xvfb_stop_line}" && -n "${praxi_stop_line}" && "${xvfb_stop_line}" -lt "${praxi_stop_line}" ]] \
+  || fail "--uninstall must stop praxi-xvfb.service before praxi.service (xvfb ${xvfb_stop_line:-never}, praxi ${praxi_stop_line:-never})"
 [[ -f "${JOURNALD_FILE}" ]] || fail "--uninstall removed a journald drop-in it did not write"
 assert_file_contains "${JOURNALD_FILE}" "SystemMaxUse=2G"
 assert_file_not_contains "${SANDBOX_STATE}/systemctl.log" "journald"

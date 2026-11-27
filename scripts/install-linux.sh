@@ -416,7 +416,9 @@ if [[ "${UNINSTALL}" -eq 1 ]]; then
   log "stopping and removing services"
   systemctl disable --now praxi-update.socket praxi-update-check.timer >/dev/null 2>&1 || true
   for u in "${UPDATE_UNITS[@]}"; do rm -f "${UNIT_DIR:?}/${u:?}"; done
-  for u in praxi.service praxi-node.service praxi-desktop.service praxi-xvfb.service "${SLICE_NAME}"; do
+  # The display goes before the daemon: praxi-xvfb.service has Upholds=praxi.service, so a daemon
+  # stopped first is started again at once and then runs on with its unit file deleted.
+  for u in praxi-node.service praxi-desktop.service praxi-xvfb.service praxi.service "${SLICE_NAME}"; do
     systemctl disable --now "${u}" >/dev/null 2>&1 || true
     rm -f "${UNIT_DIR:?}/${u:?}"
   done
