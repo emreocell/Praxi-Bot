@@ -46,13 +46,17 @@ fn store(data_dir: &Path, settings: &BotCursorSettings) -> std::io::Result<()> {
     std::fs::rename(&tmp, path(data_dir))
 }
 
-/// Whether the bot's own pointer is drawn.
+/// Whether the bot's own pointer is drawn (owner only, like the switch itself).
 #[utoipa::path(get, path = "/v1/bot-cursor", tag = "computer", security(("bearer" = [])),
-    responses((status = 200, body = BotCursorSettings)))]
-pub(crate) async fn get_bot_cursor() -> Json<BotCursorSettings> {
-    Json(BotCursorSettings {
+    responses((status = 200, body = BotCursorSettings), (status = 403, body = ErrorBody)))]
+pub(crate) async fn get_bot_cursor(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<BotCursorSettings>, ApiError> {
+    s.require_owner(&headers)?;
+    Ok(Json(BotCursorSettings {
         enabled: live_view::bot_cursor::enabled(),
-    })
+    }))
 }
 
 /// Turn the bot's own pointer on or off (owner only). Off removes it everywhere at once.

@@ -462,7 +462,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Whether the bot's own pointer is drawn. */
+        /** Whether the bot's own pointer is drawn (owner only, like the switch itself). */
         get: operations["get_bot_cursor"];
         /** Turn the bot's own pointer on or off (owner only). Off removes it everywhere at once. */
         put: operations["put_bot_cursor"];
@@ -14383,6 +14383,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BotCursorSettings"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

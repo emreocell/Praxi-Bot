@@ -1700,7 +1700,7 @@
         "tags": [
           "computer"
         ],
-        "summary": "Whether the bot's own pointer is drawn.",
+        "summary": "Whether the bot's own pointer is drawn (owner only, like the switch itself).",
         "operationId": "get_bot_cursor",
         "responses": {
           "200": {
@@ -1709,6 +1709,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BotCursorSettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
