@@ -290,7 +290,7 @@ pub(crate) fn skill_index_with_assignments(storage: &Arc<Storage>, data_dir: &Pa
     load_skills(data_dir).with_assignments(assignments as Arc<dyn skills::AssignmentSource>)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // agent assembly in one ordered place
 fn build_agent_with_skills(
     storage: &Arc<Storage>,
     providers: Providers,
