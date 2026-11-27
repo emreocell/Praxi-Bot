@@ -7865,6 +7865,10 @@
     "ended": "The shell ended.",
     "failed": "The terminal could not be opened.",
     "note": "This is a shell on the server, through the connection your app already has. It runs as the server's service user and can read the server's keys. It ends when you close this panel.",
+    "rootHint": {
+      "dismiss": "Dismiss",
+      "text": "This command needs root, and this terminal runs without it. Ask the server admin, or run `sudo praxi ...` over SSH."
+    },
     "runForMe": "Run it for me",
     "runForMeHint": "Opens the terminal and types the command; you press Enter.",
     "state": {

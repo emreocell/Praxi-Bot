@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError, type ApiClient } from "../api/client";
 import { humanError } from "../lib/humanError";
+import { RootHintDetector } from "../lib/terminalRootHint";
 import { TerminalLink, type TerminalApiLike } from "../lib/terminalSession";
 import styles from "./ServerTerminal.module.css";
 import { UpdateServerModal } from "./UpdateServerModal";
@@ -56,6 +57,8 @@ export function ServerTerminal({
   // The server runs an older version with no terminal: offer the update right here.
   const [outdated, setOutdated] = useState(false);
   const [updating, setUpdating] = useState(false);
+  // A command printed that it needs root (apt, a system-wide npm install...): say what to do instead.
+  const [rootHint, setRootHint] = useState(false);
 
   useEffect(() => {
     const node = holder.current;
@@ -70,6 +73,8 @@ export function ServerTerminal({
     setProblem(null);
     setDetail("");
     setOutdated(false);
+    setRootHint(false);
+    const rootHints = new RootHintDetector();
     void (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
       if (stopped) {
@@ -93,7 +98,12 @@ export function ServerTerminal({
       node.style.setProperty("--term-background", background);
       fit.fit();
       const live = new TerminalLink(terminalApi(api, hostId), {
-        write: (bytes) => term?.write(bytes),
+        write: (bytes) => {
+          term?.write(bytes);
+          if (rootHints.feed(bytes)) {
+            setRootHint(true);
+          }
+        },
         ended: () => setPhase("ended"),
         failed: (e) => {
           const h = humanError(e);
@@ -172,6 +182,14 @@ export function ServerTerminal({
       ) : (
         <p className={styles.note}>{t("terminal.note")}</p>
       )}
+      {rootHint && phase === "live" ? (
+        <p className={styles.note} role="status" data-testid="terminal-root-hint">
+          {t("terminal.rootHint.text")}
+          <button type="button" className={styles.again} onClick={() => setRootHint(false)}>
+            {t("terminal.rootHint.dismiss")}
+          </button>
+        </p>
+      ) : null}
       <UpdateServerModal
         open={updating}
         hostId={hostId}

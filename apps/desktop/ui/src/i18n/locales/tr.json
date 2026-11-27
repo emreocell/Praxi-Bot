@@ -7865,6 +7865,10 @@
     "ended": "Kabuk sona erdi.",
     "failed": "Terminal açılamadı.",
     "note": "Bu, uygulamanın zaten kurduğu bağlantı üzerinden sunucudaki bir kabuktur. Sunucunun hizmet kullanıcısı olarak çalışır ve sunucunun anahtarlarını okuyabilir. Bu paneli kapatınca biter.",
+    "rootHint": {
+      "dismiss": "Kapat",
+      "text": "Bu komut root yetkisi gerektiriyor, bu terminal ise root olmadan çalışıyor. Sunucu yöneticisinden isteyin ya da SSH üzerinden `sudo praxi ...` çalıştırın."
+    },
     "runForMe": "Benim için çalıştır",
     "runForMeHint": "Terminali açar ve komutu yazar; Enter'a sen basarsın.",
     "state": {
