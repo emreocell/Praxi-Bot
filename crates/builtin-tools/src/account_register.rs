@@ -20,8 +20,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use connector_email::MailHandle;
 use secret_store::{
-    FillError, FillSecrets, NewAccount, PASSWORD_MAX_LEN, PASSWORD_MIN_LEN, canonical_origin,
-    sanitize_label,
+    AccountInfo, FillError, FillSecrets, NewAccount, PASSWORD_MAX_LEN, PASSWORD_MIN_LEN, TotpSpec,
+    canonical_origin, sanitize_label,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -39,6 +39,8 @@ pub const ACCOUNT_REGISTER: &str = "account_register";
 pub const ACCOUNT_LIST: &str = "account_list";
 /// Name of the tool that drops a bot-made account.
 pub const ACCOUNT_DISCARD: &str = "account_discard";
+/// Name of the tool that keeps a bot-made account's two-factor key.
+pub const ACCOUNT_TOTP_SAVE: &str = "account_totp_save";
 
 const SHOWN_CAP: usize = 80;
 /// Accounts `account_list` shows by default.
@@ -322,7 +324,7 @@ impl Tool for AccountRegister {
             }
         };
         Ok(ToolOutput::text(format!(
-            "Account entry created. Secret name: {name}\nSite: {site}\nLogin: {}\nThe password is stored by Praxi and is not shown to you.\nNext: open the sign-up page on {site}, type the login with browser_fill `text`, and the password with browser_fill `secret` = \"{name}\" (the owner approves each typing).\n{mail_hint}\nCAPTCHA, phone number or two-factor code: stop and ask the owner to take over; do not try to solve them.",
+            "Account entry created. Secret name: {name}\nSite: {site}\nLogin: {}\nThe password is stored by Praxi and is not shown to you.\nNext: open the sign-up page on {site}, type the login with browser_fill `text`, and the password with browser_fill `secret` = \"{name}\" (the owner approves each typing).\n{mail_hint}\nCAPTCHA, phone number, or a code sent by SMS or e-mail you cannot read: stop and ask the owner to take over; do not try to solve them. If the site makes you set up an authenticator app and shows a key (or an otpauth address), keep it with account_totp_save, then type each code with browser_fill `secret` = \"totp:{name}\".",
             plain(&info.login_id, SHOWN_CAP)
         )))
     }
@@ -461,6 +463,13 @@ impl Tool for AccountList {
                     ""
                 },
             );
+            if a.has_totp && a.created_by == "bot" {
+                let _ = writeln!(
+                    out,
+                    "  two-factor key stored: type the code with browser_fill `secret` = \"totp:{}\"",
+                    plain(&a.name, SHOWN_CAP)
+                );
+            }
         }
         if end < total {
             let _ = writeln!(out, "... {} more; next offset: {end}", total - end);
@@ -553,6 +562,113 @@ impl Tool for AccountDiscard {
         Ok(ToolOutput::text(format!(
             "Account entry {} removed. account_register can create a new one.",
             plain(&i.name, SHOWN_CAP)
+        )))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TotpSaveIn {
+    name: String,
+    setup: String,
+}
+
+struct AccountTotpSave {
+    spec: ToolSpec,
+    secrets: Arc<FillSecrets>,
+}
+
+/// The `account_totp_save` tool: keep the two-factor setup secret a site showed
+/// for an account THIS bot registered, so the bot can later type the current
+/// code with `browser_fill {secret: "totp:<name>"}`. Asks the owner every time.
+/// The key is never shown again, on a card or in any result.
+#[must_use]
+pub fn account_totp_save_tool(secrets: Arc<FillSecrets>) -> Arc<dyn Tool> {
+    Arc::new(AccountTotpSave {
+        spec: spec(
+            ACCOUNT_TOTP_SAVE,
+            "Keep the two-factor (authenticator app) setup secret that a site showed you for an account YOU made with account_register. `setup` is the `otpauth://totp/...` address or the base32 key the site prints next to its QR code. The daemon stores it in the owner's vault with that account, limited to that site and to you, and it is never shown to you again. From then on, type the current 6-digit code into the code field with browser_fill `secret` set to \"totp:<name>\" (you never see the code). The owner is asked first. Only for your own accounts, never the owner's; for a code sent by SMS or e-mail, a phone number or a CAPTCHA, stop and hand over to the owner instead. Example: {\"name\":\"login/example.com-1a2b3c4d\",\"setup\":\"JBSWY3DPEHPK3PXP\"}",
+            json!({"type":"object","properties":{
+                "name":{"type":"string","description":"Secret name of the account, from account_list."},
+                "setup":{"type":"string","description":"The otpauth://totp/ address or base32 key the site showed."}
+            },"required":["name","setup"]}),
+            Effect::Write,
+            PermissionCategory::Meta,
+        ),
+        secrets,
+    })
+}
+
+impl AccountTotpSave {
+    /// The bot-made account `name`, refused before any card for another bot's
+    /// or an owner-made secret, and for a setup text that cannot make codes.
+    fn checked(
+        &self,
+        ctx: &ToolContext,
+        i: &TotpSaveIn,
+    ) -> Result<(AccountInfo, TotpSpec), ToolError> {
+        let bot = ctx.bot_id.as_deref();
+        self.secrets
+            .check_bot(&i.name, bot)
+            .map_err(|e| refused(&e))?;
+        let info = self
+            .secrets
+            .accounts(bot)
+            .map_err(|e| ToolError::Execution(e.to_string()))?
+            .into_iter()
+            .find(|a| a.name == i.name && a.created_by == "bot")
+            .ok_or_else(|| {
+                ToolError::InvalidInput("there is no account of yours with that name".into())
+            })?;
+        let spec = TotpSpec::parse(&i.setup).map_err(|e| refused(&e))?;
+        Ok((info, spec))
+    }
+}
+
+#[async_trait]
+impl Tool for AccountTotpSave {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+
+    fn always_ask(&self) -> bool {
+        true
+    }
+
+    async fn approval_details(
+        &self,
+        ctx: &ToolContext,
+        input: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        let i: TotpSaveIn = parse(input.clone())?;
+        let (info, spec) = self.checked(ctx, &i)?;
+        // Names the account and the code shape only, never the key.
+        Ok(Some(json!({
+            "kind": "account_totp_save",
+            "tool": ACCOUNT_TOTP_SAVE,
+            "secret": plain(&info.name, SHOWN_CAP),
+            "site": plain(&info.site, SHOWN_CAP),
+            "login_id": plain(&info.login_id, SHOWN_CAP),
+            "digits": spec.digits(),
+            "period_seconds": spec.period(),
+            "replaces_existing": info.has_totp,
+            "note": format!("A two-factor key for {} (login {}) will be stored in the vault, limited to that site and this bot. The bot can then type the {}-digit code there; it never sees the key again or any code.", plain(&info.site, SHOWN_CAP), plain(&info.login_id, SHOWN_CAP), spec.digits()),
+        })))
+    }
+
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        let i: TotpSaveIn = parse(input)?;
+        let (info, spec) = self.checked(ctx, &i)?;
+        self.secrets
+            .set_totp(&i.name, ctx.bot_id.as_deref(), &i.setup)
+            .map_err(|e| refused(&e))?;
+        Ok(ToolOutput::text(format!(
+            "Two-factor key saved for {} ({} digits, every {} s). It is stored by Praxi and is not shown again. To sign in: type the password with browser_fill `secret` = \"{}\", then when the site asks for the code, browser_fill the code field with `secret` = \"totp:{}\" (the owner approves each typing; you never see the code). Do not type the key anywhere.",
+            plain(&info.name, SHOWN_CAP),
+            spec.digits(),
+            spec.period(),
+            plain(&info.name, SHOWN_CAP),
+            plain(&info.name, SHOWN_CAP),
         )))
     }
 }
@@ -829,5 +945,91 @@ mod tests {
         let plain = secret_store::generate_password(5, false).unwrap();
         assert_eq!(plain.expose().len(), PASSWORD_MIN_LEN);
         assert!(plain.expose().chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    const KEY_B32: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+    async fn registered(secrets: &Arc<FillSecrets>) -> (ToolContext, String) {
+        let tool = account_register_tool(Arc::clone(secrets), AccountRegisterConfig::default());
+        let c = ctx(Some("bot-aaaa-1111"));
+        let input: Value = serde_json::from_str(IN).unwrap();
+        tool.call(&c, input).await.unwrap();
+        (c, "login/example.com-botaaaa1".to_owned())
+    }
+
+    #[tokio::test]
+    async fn totp_save_keeps_the_key_without_showing_it_anywhere() {
+        let (secrets, red) = rig();
+        let (c, name) = registered(&secrets).await;
+        let tool = account_totp_save_tool(Arc::clone(&secrets));
+        assert!(tool.always_ask(), "every key is confirmed by the owner");
+        let input = json!({"name": name, "setup": format!("otpauth://totp/Example:me?secret={KEY_B32}&issuer=Example")});
+        let card = tool.approval_details(&c, &input).await.unwrap().unwrap();
+        assert_eq!(card["digits"], 6);
+        assert_eq!(card["period_seconds"], 30);
+        assert_eq!(card["replaces_existing"], false);
+        assert!(!card.to_string().contains(KEY_B32), "{card}");
+        let out = tool.call(&c, input).await.unwrap();
+        let shown = format!("{out:?}");
+        assert!(
+            !shown.contains(KEY_B32) && !shown.contains("otpauth"),
+            "{shown}"
+        );
+        assert!(shown.contains(&format!("totp:{name}")), "{shown}");
+        // From now on the key is masked in any output, and the account lists it.
+        assert!(
+            !red.lock()
+                .redact(&format!("key {KEY_B32}"))
+                .contains(KEY_B32)
+        );
+        let listed = account_list_tool(Arc::clone(&secrets))
+            .call(&c, json!({}))
+            .await
+            .unwrap();
+        let listed = format!("{listed:?}");
+        assert!(listed.contains(&format!("totp:{name}")), "{listed}");
+        assert!(!listed.contains(KEY_B32), "{listed}");
+        // The code reads back as a 6-digit number and is not the password.
+        let code = secrets
+            .resolve_value_for(&format!("totp:{name}"), Some("bot-aaaa-1111"))
+            .unwrap();
+        assert_eq!(code.expose().len(), 6);
+        // A second save is shown as a replacement.
+        let again = json!({"name": name, "setup": KEY_B32});
+        let card = tool.approval_details(&c, &again).await.unwrap().unwrap();
+        assert_eq!(card["replaces_existing"], true);
+    }
+
+    #[tokio::test]
+    async fn totp_save_refuses_owner_secrets_other_bots_and_junk() {
+        let (secrets, _) = rig();
+        let (c, name) = registered(&secrets).await;
+        secrets
+            .upsert("login/owner-made", Some("x"), None, None)
+            .unwrap();
+        let tool = account_totp_save_tool(Arc::clone(&secrets));
+        // The owner's own secret is never given a code, whoever asks.
+        let owner = json!({"name": "login/owner-made", "setup": KEY_B32});
+        assert!(tool.approval_details(&c, &owner).await.is_err());
+        assert!(tool.call(&c, owner).await.is_err());
+        // Another bot cannot attach a key to this bot's account, and no bot to none.
+        let mine = json!({"name": name, "setup": KEY_B32});
+        for who in [Some("bot-bbbb-2222"), None] {
+            assert!(tool.approval_details(&ctx(who), &mine).await.is_err());
+            assert!(tool.call(&ctx(who), mine.clone()).await.is_err());
+        }
+        // Text that is not a usable key: refused before any card, never echoed.
+        let junk = json!({"name": name, "setup": "hello world 0189"});
+        let e = tool
+            .approval_details(&c, &junk)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(!e.contains("hello world"), "{e}");
+        assert!(tool.call(&c, junk).await.is_err());
+        assert!(!secrets.accounts(None).unwrap()[0].has_totp);
+        // Unknown fields are refused.
+        let extra = json!({"name": name, "setup": KEY_B32, "digits": 8});
+        assert!(tool.call(&c, extra).await.is_err());
     }
 }

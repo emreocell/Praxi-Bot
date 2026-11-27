@@ -26,6 +26,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::secret::{FILL_PREFIX, SecretStore, SecretValue};
+use crate::totp::TotpSpec;
 
 /// Largest accepted value.
 pub const MAX_FILL_VALUE_BYTES: usize = 64 * 1024;
@@ -226,6 +227,10 @@ struct Entry {
     ask_before_use: bool,
     #[serde(default)]
     updated_at_ms: u64,
+    /// A two-factor key is stored for this (bot-made) account, under
+    /// [`totp_key`]. The key itself never leaves the store.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    totp: bool,
 }
 
 impl Default for Entry {
@@ -241,6 +246,7 @@ impl Default for Entry {
             note: None,
             ask_before_use: true,
             updated_at_ms: 0,
+            totp: false,
         }
     }
 }
@@ -276,6 +282,8 @@ pub struct AccountInfo {
     pub note: Option<String>,
     /// Whether the store holds the password.
     pub has_value: bool,
+    /// Whether a two-factor key is stored too (`totp:<name>` types its code).
+    pub has_totp: bool,
     /// Creation time, ms since the epoch.
     pub created_at_ms: u64,
     /// The password was never typed anywhere (a failed or abandoned sign-up).
@@ -620,6 +628,32 @@ enum WriteScope<'a> {
 
 fn store_key(name: &str) -> String {
     format!("{FILL_PREFIX}{name}")
+}
+
+/// Where the two-factor key of account `name` is kept. The first segment starts
+/// with `__`, which [`validate_fill_name`] refuses, so no name a model or the
+/// owner can pick ever maps onto it.
+fn totp_key(name: &str) -> String {
+    format!("{FILL_PREFIX}__totp/{name}")
+}
+
+/// What a `secret` reference starts with to ask for the current two-factor
+/// code of an account instead of its password: `totp:<name>`. A `:` is not
+/// allowed in a fill name, so the form can never be a stored secret's name.
+pub const TOTP_REF_PREFIX: &str = "totp:";
+
+/// The account name inside a `totp:<name>` reference, or `None` for an
+/// ordinary secret name.
+#[must_use]
+pub fn totp_reference(secret: &str) -> Option<&str> {
+    secret
+        .get(..TOTP_REF_PREFIX.len())
+        .filter(|p| p.eq_ignore_ascii_case(TOTP_REF_PREFIX))
+        .map(|_| &secret[TOTP_REF_PREFIX.len()..])
+}
+
+fn unix_secs() -> u64 {
+    now_ms() / 1000
 }
 
 impl FillSecrets {
@@ -1160,6 +1194,7 @@ impl FillSecrets {
             bot_ids: a.bot_ids.clone(),
             note: a.note.clone(),
             has_value: present.contains(&store_key(name)),
+            has_totp: e.totp && present.contains(&totp_key(name)),
             created_at_ms: a.created_at_ms,
             unused: a.first_used_at_ms.is_none(),
         })
@@ -1187,6 +1222,115 @@ impl FillSecrets {
             return Err(e);
         }
         Ok(())
+    }
+
+    /// Store the two-factor setup secret (an `otpauth://totp/` address or a
+    /// base32 key) of an account `bot` registered itself, next to its password.
+    /// The key is bound to that account's bot and origin: it is typed only
+    /// through `totp:<name>` fills, into a field on the account's site. It is
+    /// never returned, listed or revealed. Saving again replaces the key.
+    ///
+    /// The owner's own secrets are refused: their two-factor codes stay theirs.
+    ///
+    /// # Errors
+    /// Unknown name, not this bot's bot-made account, a setup text that is not a
+    /// usable TOTP secret ([`FillError::Invalid`], never echoing it), or a
+    /// backend failure. Nothing is changed on failure.
+    pub fn set_totp(&self, name: &str, bot: Option<&str>, setup: &str) -> Result<(), FillError> {
+        validate_fill_name(name)?;
+        let spec = TotpSpec::parse(setup)?;
+        let mut meta = self.meta.lock();
+        let entry = meta
+            .secrets
+            .get(name)
+            .ok_or_else(|| FillError::Unknown(name.to_owned()))?;
+        Self::scope_check(name, entry, bot)?;
+        Self::require_bot_made(name, entry)?;
+        let key = totp_key(name);
+        let previous = self
+            .store
+            .get(&key)
+            .map_err(|_| unavailable("the secret store cannot be read"))?;
+        let canonical = spec.canonical();
+        // The key goes to the redactor before it is stored: from here on no
+        // output of any tool can carry it (nor its base32 form).
+        self.registered(&canonical);
+        self.registered(&spec.key_base32());
+        self.store
+            .set(&key, &canonical)
+            .map_err(|_| unavailable("the secret store rejected the write"))?;
+        let before = meta.clone();
+        if let Some(e) = meta.secrets.get_mut(name) {
+            e.totp = true;
+            e.updated_at_ms = now_ms();
+        }
+        if let Err(e) = self.persist(&meta) {
+            *meta = before;
+            match previous {
+                Some(old) => {
+                    let _ = self.store.set(&key, old.expose());
+                }
+                None => {
+                    let _ = self.store.delete(&key);
+                }
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Only an account a bot made itself may carry a two-factor key.
+    fn require_bot_made(name: &str, e: &Entry) -> Result<(), FillError> {
+        if e.account.as_ref().is_some_and(|a| a.created_by == "bot") {
+            Ok(())
+        } else {
+            Err(FillError::NotAllowed(format!(
+                "the secret `{}` is not an account this bot registered; two-factor codes are only kept for those",
+                sanitize_label(name, 80)
+            )))
+        }
+    }
+
+    /// The checks every use of `totp:<name>` passes, on top of the bot scope.
+    fn totp_ready(name: &str, e: &Entry) -> Result<(), FillError> {
+        Self::require_bot_made(name, e)?;
+        if e.totp {
+            Ok(())
+        } else {
+            Err(FillError::NotAllowed(format!(
+                "no two-factor key is stored for `{}`; save the setup secret with account_totp_save first",
+                sanitize_label(name, 80)
+            )))
+        }
+    }
+
+    /// The current two-factor code of account `name` at `now` (seconds since
+    /// the epoch). The only read path to the key; the key never leaves here.
+    fn resolve_totp(
+        &self,
+        name: &str,
+        bot: Option<&str>,
+        now: u64,
+    ) -> Result<SecretValue, FillError> {
+        validate_fill_name(name)?;
+        match self.meta.lock().secrets.get(name) {
+            None => return Err(FillError::Unknown(name.to_owned())),
+            Some(e) => {
+                Self::scope_check(name, e, bot)?;
+                Self::totp_ready(name, e)?;
+            }
+        }
+        let stored = self
+            .store
+            .get(&totp_key(name))
+            .map_err(|_| unavailable("the secret store cannot be read"))?
+            .ok_or_else(|| FillError::MissingValue(format!("totp:{name}")))?;
+        let spec = TotpSpec::parse(stored.expose())?;
+        let code = spec.code_at(now);
+        // The code is short-lived but a later page read could echo it back from
+        // the field; mask it like any other typed secret.
+        self.registered(&code);
+        Ok(SecretValue::new(code))
     }
 
     /// Delete an account its own bot made, with its password and grants (a
@@ -1249,6 +1393,15 @@ impl FillSecrets {
     /// [`FillError::NotAllowed`] (names the secret, nothing else).
     pub fn check_bot(&self, name: &str, bot: Option<&str>) -> Result<(), FillError> {
         let meta = self.meta.lock();
+        if let Some(base) = totp_reference(name) {
+            // A code is only ever made for an existing account, never "free".
+            let e = meta
+                .secrets
+                .get(base)
+                .ok_or_else(|| FillError::Unknown(base.to_owned()))?;
+            Self::scope_check(base, e, bot)?;
+            return Self::totp_ready(base, e);
+        }
         match meta.secrets.get(name) {
             Some(e) => Self::scope_check(name, e, bot),
             None => Ok(()),
@@ -1360,6 +1513,9 @@ impl FillSecrets {
         }
         self.store
             .delete(&store_key(name))
+            .map_err(|_| unavailable("the secret store rejected the delete"))?;
+        self.store
+            .delete(&totp_key(name))
             .map_err(|_| unavailable("the secret store rejected the delete"))?;
         Ok(existed)
     }
@@ -1484,13 +1640,20 @@ impl FillSecrets {
         live_origin: Option<&str>,
         bot: Option<&str>,
     ) -> Result<Option<String>, FillError> {
-        validate_fill_name(name)?;
+        // `totp:<name>` is checked against the account's own origin list, bot
+        // scope and bot-made flag; it never has a standing grant (every code is
+        // confirmed, like every password fill).
+        let (base, is_totp) = totp_reference(name).map_or((name, false), |b| (b, true));
+        validate_fill_name(base)?;
         let meta = self.meta.lock();
         let entry = meta
             .secrets
-            .get(name)
-            .ok_or_else(|| FillError::Unknown(name.to_owned()))?;
-        Self::scope_check(name, entry, bot)?;
+            .get(base)
+            .ok_or_else(|| FillError::Unknown(base.to_owned()))?;
+        Self::scope_check(base, entry, bot)?;
+        if is_totp {
+            Self::totp_ready(base, entry)?;
+        }
         let origin = live_origin
             .and_then(|o| canonical_origin(o).ok())
             .ok_or_else(|| {
@@ -1503,7 +1666,7 @@ impl FillSecrets {
                 "refused: `{name}` is not allowed on {origin}; only the owner can add an origin to it"
             )));
         }
-        if entry.ask_before_use {
+        if is_totp || entry.ask_before_use {
             return Ok(None);
         }
         Ok(meta
@@ -1559,6 +1722,9 @@ impl FillSecrets {
         name: &str,
         bot: Option<&str>,
     ) -> Result<SecretValue, FillError> {
+        if let Some(base) = totp_reference(name) {
+            return self.resolve_totp(base, bot, unix_secs());
+        }
         validate_fill_name(name)?;
         match self.meta.lock().secrets.get(name) {
             None => return Err(FillError::Unknown(name.to_owned())),
@@ -1613,6 +1779,15 @@ impl FillSecrets {
                 .map_err(|_| unavailable("the secret store cannot be read"))?
             {
                 out.push(v.expose().to_owned());
+            }
+            if let Some(v) = self
+                .store
+                .get(&totp_key(&n))
+                .map_err(|_| unavailable("the secret store cannot be read"))?
+                && let Ok(spec) = TotpSpec::parse(v.expose())
+            {
+                out.push(v.expose().to_owned());
+                out.push(spec.key_base32());
             }
         }
         Ok(out)
@@ -2513,3 +2688,6 @@ mod tests {
         assert_eq!(s.accounts(None).unwrap(), Vec::new());
     }
 }
+
+#[cfg(test)]
+mod totp_tests;

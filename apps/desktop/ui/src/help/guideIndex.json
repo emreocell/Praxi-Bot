@@ -20,6 +20,7 @@
     "title": "Notes",
     "headings": [
       "Interactive terminal sessions",
+      "Scripts (script_run)",
       "Memory tools",
       "Clock and calculator",
       "Documents and code repositories"
@@ -316,6 +317,7 @@
       "Check that the bot's tools work",
       "Several mail identities",
       "Sign-ups: a bot with its own address",
+      "Two-factor codes for the bot's own accounts",
       "Approvals and security",
       "Safe sending (send log, opt-out list, limits)",
       "Give a bot its own address (AgentMail)"

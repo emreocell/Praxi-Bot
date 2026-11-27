@@ -222,7 +222,23 @@ For "sign up to these sites" the bot uses:
 1. `account_register`: the app makes the password (the bot never sees it), keeps it in the vault for that site and that bot, signs up with the bot's address (the login is the address unless the site wants a user name) and records **which mail identity** the account was registered with.
 2. `email_wait_for`: after the form is submitted the bot waits (up to 10 minutes; Stop cancels at once) for the verification mail. The filters the bot passes (sender domain, subject, keyword) are applied inside the app to what the inbox returns: nothing the bot wrote is sent to the mail server. The answer is short and labelled untrusted: sender, subject, time, one-time codes, and links. The wait is tied to the page the browser was on when it **started**, so the bot can go on to the next site while it waits; it is kept when the run ends (a long job is cut into sessions) and the bot's next session picks it up again. Only mail from shortly before the wait started counts, and a mail already handed to one site's wait is not handed to another's, so many sign-ups with one inbox do not mix up their mails.
 3. A link is returned as **followable** only when it is `https`, has no user name or IP address in it, and is on the same registrable domain as the page the browser was really on when the wait started (asked from the browser, not from the page or the model) or on a domain you listed in Settings > Mail > Safe sending ("Extra sites a verification e-mail may link to"). Every other link is listed by host only as "external link, not followed"; plain `http` is refused. A link the bot was given in an earlier session (kept for a day) is remembered together with that site: the next session opens it without asking only while the browser is on the same site and the link still passes this check; on any other page it asks.
-4. The bot opens a followable link with `browser_open`, confirms it is signed in, and reports. CAPTCHA, phone or two-factor steps go to you through **Take control**. The playbook is the bundled skill `signup-to-site`.
+4. The bot opens a followable link with `browser_open`, confirms it is signed in, and reports. CAPTCHA, a phone number, or a code sent by SMS or e-mail that the bot cannot read go to you through **Take control**. An authenticator-app code the bot can handle itself (see below). The playbook is the bundled skill `signup-to-site`.
+
+### Two-factor codes for the bot's own accounts
+
+When a site makes a bot-made account set up an authenticator app, it shows a setup key: an `otpauth://` address (the text behind the QR code) or a base32 key. The bot can keep that key with the account and type the current 6-digit code itself:
+
+1. `account_totp_save` with the account's secret name (from `account_list`) and the key. **You approve every save.** The card names the account, the site and the code shape, never the key.
+2. When the site asks for a code, `browser_fill` with `secret` set to `totp:<account name>`. The app works out the current code (RFC 6238; SHA-1, SHA-256 and SHA-512, 6 to 8 digits) and types it into the field. **Every typing asks you**, like a password fill, and a standing "always allow" for the password does not cover the code.
+
+What is guaranteed in code, not left to the bot:
+
+- **The key and the codes never reach the model.** The key is kept in the vault, apart from the password, and is never listed, revealed or returned. The code goes straight from the app into the page field. Both are masked in every result, log and page text.
+- **Bound to that bot and that site.** Only the bot that registered the account can save or use its key, and a code is typed only into a field on the account's own site (the live frame is checked, as for passwords). A desktop program never receives a code.
+- **Only for the bot's own accounts.** Your own secrets and logins never get a code here. Asking for one is refused.
+- Saving again replaces the key. Discarding or deleting the account deletes its key too.
+
+A `hotp` (counter based) address is refused. If the site only offers SMS, e-mail or a security key, the bot stops and asks you.
 
 Permissions: reading the bot's **own** inbox (`email_search`, `email_read`, `email_list_folders`, `email_wait_for`) and opening a link `email_wait_for` returned as followable run **without a card** only for a run **you started** by hand, on a bot at the **Full** level. A run started by mail, a webhook, a schedule, a channel or an imported chat keeps asking, as before. An inbox every bot may use (an unbound account) and your personal mailbox are never "the bot's own". Sending is unchanged: `email_send` always asks, and a draft-only address only saves drafts.
 

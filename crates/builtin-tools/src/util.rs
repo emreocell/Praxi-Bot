@@ -30,7 +30,7 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
         | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list"
         | "secrets_list" | "secret_request" | "bot_delete" | "account_list" | "account_discard"
-        | "browser_handover" => ContentClass::none(),
+        | "account_totp_save" | "browser_handover" => ContentClass::none(),
         // Pure helpers: only the clock and the model's own short text go in.
         // Writing or deleting a note only changes the bot's own notes file on this machine:
         // not egress. What a tainted run stores is marked and read back fenced (see `notes`),

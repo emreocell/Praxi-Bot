@@ -19,6 +19,7 @@
     "doc": "tr/agent-tools.md",
     "title": "Notlar",
     "headings": [
+      "Betikler (script_run)",
       "Hafıza araçları",
       "Saat ve hesap makinesi",
       "Belgeler ve kod depoları"
@@ -311,6 +312,7 @@
       "Botun araçlarının çalıştığını denetle",
       "Birden fazla posta kimliği",
       "Kayıtlar: kendi adresi olan bir bot",
+      "Botun kendi hesapları için iki adımlı doğrulama kodları",
       "Onaylar ve güvenlik",
       "Güvenli gönderim (gönderim günlüğü, çıkış listesi, sınırlar)",
       "Bota kendi adresini ver (AgentMail)"

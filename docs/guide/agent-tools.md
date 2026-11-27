@@ -22,6 +22,17 @@ Notes are different from memory: memory holds facts you told the bot; notes are 
 * **Bounded.** At most 4 sessions per bot (16 on the computer), 8 KiB of text per read, 4 KiB per write, 10 minutes without a call, 1 hour in all. The limits hold in the background too, and everything a session started ends with it, also when the program ends on its own and when the app shuts down. A bot sees only its own sessions.
 * **Secrets.** Output is masked with the app's secret detector, including the values of your stored secrets and also when a key is broken across lines, before the bot sees it, and neither the typed text nor the output is ever logged. A password or a code you type for the bot is still shown on its approval card: give secrets through the secret request, not in chat.
 
+## Scripts (`script_run`)
+
+`script_run` lets a bot run a short JavaScript program that calls several tools and returns one compact result. The program has no files, network or timers of its own; every tool it calls goes through the same permission check as a direct call.
+
+Two clocks limit a run, so a script that waits is not punished for waiting:
+
+* **Compute budget: 10 seconds.** Only the script's own work counts (loops, parsing, filtering). The clock stops while the script waits for a tool call, such as a page load, a download or an approval, and a busy loop is still stopped at 10 seconds. The bot can ask for a lower budget with `timeout`, never a higher one.
+* **Total cap: 10 minutes**, waiting included. It is always bounded, and no setting can raise it above 30 minutes, so a tool that never answers cannot hold a run for ever.
+
+The error says which limit was hit. Other limits are unchanged: 50 tool calls, 32 MB of memory, 64 KB of result and log.
+
 ## Memory tools
 
 A bot with memory switched on has four tools: `memory_search` (look up what it remembers), `session_search` (find something said in an earlier chat), `memory_save` and `memory_forget`. A bot whose memory is **Off** does not get them. See [Memory](memory.md).

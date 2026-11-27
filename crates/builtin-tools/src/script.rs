@@ -406,7 +406,7 @@ pub fn tool_with_control(
             "Run a short JavaScript program that calls several tools and returns one compact result. Use await tools.call(name, input) and return a value. Example: {\"code\":\"const r = await tools.call('fs_list',{path:'.'}); return r;\"}",
             json!({"type":"object","properties":{
                 "code":{"type":"string","description":"Body of an async function; must return a JSON value."},
-                "timeout":{"type":"integer","minimum":1,"description":"Seconds before the script is stopped."}
+                "timeout":{"type":"integer","minimum":1,"description":"Seconds of the script's own computing before it stops (max 10; waiting for tools does not count)."}
             },"required":["code"]}),
             Effect::Write,
             PermissionCategory::Script,
@@ -428,7 +428,7 @@ impl Tool for ScriptTool {
         let i: Input = parse(input)?;
         let mut limits = self.limits.clone();
         if let Some(t) = i.timeout {
-            limits.timeout = Duration::from_secs(t).min(limits.timeout);
+            limits.cpu_timeout = Duration::from_secs(t).min(limits.cpu_timeout);
         }
         let mut host = GateHost::new(
             self.registry.clone(),
@@ -657,6 +657,71 @@ mod tests {
             "runtime was starved: {} ticks",
             ticks.load(std::sync::atomic::Ordering::SeqCst)
         );
+    }
+
+    struct SlowTool {
+        spec: ToolSpec,
+    }
+
+    #[async_trait]
+    impl Tool for SlowTool {
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
+        }
+        async fn call(&self, _c: &ToolContext, _input: Value) -> Result<ToolOutput, ToolError> {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            Ok(ToolOutput::text("slow done"))
+        }
+    }
+
+    /// The `timeout` the model passes is a compute budget: a script that spends
+    /// longer than that waiting on a tool (a page load, a download) still
+    /// finishes, as long as its own work is short.
+    #[tokio::test]
+    async fn waiting_on_a_slow_tool_does_not_use_up_the_script_timeout() {
+        let (reg, _gate, _calls) = setup(vec![]);
+        let mut slow = spec(
+            "slow",
+            "d",
+            json!({"type":"object"}),
+            Effect::Read,
+            PermissionCategory::Fs,
+        );
+        slow.content = tool_registry::ContentClass::none();
+        reg.register(Arc::new(SlowTool { spec: slow }));
+        let started = std::time::Instant::now();
+        let out = reg
+            .get(SCRIPT_TOOL_NAME)
+            .unwrap()
+            .call(
+                &ToolContext::default(),
+                json!({"code": "return await tools.call('slow', {});", "timeout": 1}),
+            )
+            .await
+            .unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(1500));
+        let ContentPart::Text { text } = &out.content[0] else {
+            panic!()
+        };
+        assert!(text.contains("slow done"), "{text}");
+    }
+
+    /// A model cannot ask for more than the configured compute budget.
+    #[tokio::test]
+    async fn the_script_timeout_argument_can_only_lower_the_compute_budget() {
+        let (reg, _gate, _calls) = setup(vec![]);
+        let started = std::time::Instant::now();
+        let err = reg
+            .get(SCRIPT_TOOL_NAME)
+            .unwrap()
+            .call(
+                &ToolContext::default(),
+                json!({"code": "while (true) {}", "timeout": 1}),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("compute budget"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(8));
     }
 
     #[tokio::test]

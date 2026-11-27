@@ -2471,7 +2471,7 @@ fn tools_with_pool(
             Op::Fill,
             spec(
                 "browser_fill",
-                "Replace the text of an input. Give exactly one of `text` (what you type) or `secret` (the name of a secret the owner stored, from secrets_list: it is typed for you and you never see the value). Example: {\"ref\":\"e5\",\"text\":\"hello\"} or {\"ref\":\"e5\",\"secret\":\"login/github\"}",
+                "Replace the text of an input. Give exactly one of `text` (what you type) or `secret` (the name of a secret the owner stored, from secrets_list: it is typed for you and you never see the value). 2FA code of an account you made: `secret` = `totp:<name>`. Example: {\"ref\":\"e5\",\"text\":\"hello\"} or {\"ref\":\"e5\",\"secret\":\"login/github\"}",
                 json!({"type":"object","properties":{
                     "ref":ref_prop,
                     "text":{"type":"string","description":"New text. Not with `secret`."},

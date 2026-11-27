@@ -47,6 +47,8 @@ pub fn mark_private(data_dir: &Path, bot: &str) -> std::io::Result<()> {
 /// bot registered for itself with `account_register`. An unknown name counts as the owner's.
 #[must_use]
 pub(crate) fn is_owner_secret(secrets: &FillSecrets, bot: &str, name: &str) -> bool {
+    // `totp:<account>` types the two-factor code of a bot-made account.
+    let name = secret_store::totp_reference(name).unwrap_or(name);
     !secrets
         .accounts(Some(bot))
         .unwrap_or_default()
@@ -93,5 +95,12 @@ mod tests {
             .unwrap();
         assert!(is_owner_secret(&secrets, "bot-1", "login/owner-made"));
         assert!(is_owner_secret(&secrets, "bot-1", "login/unknown"));
+        // A two-factor code is judged by the account it belongs to.
+        assert!(!is_owner_secret(
+            &secrets,
+            "bot-1",
+            "totp:login/example.com-1"
+        ));
+        assert!(is_owner_secret(&secrets, "bot-1", "totp:login/owner-made"));
     }
 }

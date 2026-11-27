@@ -834,3 +834,135 @@ async fn another_bots_account_is_not_typed() {
     fill.call(&owner, input).await.unwrap();
     assert_eq!(r.fake.typed_secrets.lock().len(), 1);
 }
+
+// ---- two-factor codes of bot-made accounts (`totp:<name>`) ----
+
+const TOTP_ACCOUNT: &str = "login/acct-totp";
+/// RFC 6238 appendix B SHA-1 key, base32.
+const TOTP_KEY_B32: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+fn rig_with_totp_account() -> Rig {
+    let r = rig();
+    r.secrets
+        .register_account(&secret_store::NewAccount {
+            name: TOTP_ACCOUNT,
+            site: GITHUB,
+            login_id: "a@example.org",
+            email_account: None,
+            bot_id: BOT_A,
+            note: None,
+            password_len: 20,
+            symbols: true,
+        })
+        .unwrap();
+    r.secrets
+        .set_totp(TOTP_ACCOUNT, Some(BOT_A), TOTP_KEY_B32)
+        .unwrap();
+    r
+}
+
+fn totp_input() -> Value {
+    json!({"ref": "e5", "secret": format!("totp:{TOTP_ACCOUNT}")})
+}
+
+/// Guard: a `totp:` fill types the current 6-digit code into the field and
+/// neither the result nor the card carries the code or the key. Fails if the
+/// `totp:` resolution or the `scrub` of the typed value is removed.
+#[tokio::test]
+async fn a_totp_fill_types_the_current_code_and_never_returns_it() {
+    let r = rig_with_totp_account();
+    let fill = tool(&r.tools, "browser_fill");
+    let card = fill
+        .approval_details(&bot_ctx(BOT_A), &totp_input())
+        .await
+        .unwrap()
+        .expect("a code fill has a card");
+    assert_eq!(card["secret"], format!("totp:{TOTP_ACCOUNT}"));
+    assert_eq!(card["has_standing_grant"], false);
+    let out = fill.call(&bot_ctx(BOT_A), totp_input()).await.unwrap();
+    let typed = r.fake.typed_secrets.lock().clone();
+    assert_eq!(typed.len(), 1);
+    let code = &typed[0];
+    assert_eq!(code.len(), 6, "{code}");
+    assert!(code.bytes().all(|b| b.is_ascii_digit()));
+    let shown = format!("{card}{}", text(&out));
+    assert!(
+        !shown.contains(code),
+        "the code reached the output: {shown}"
+    );
+    assert!(!shown.contains(TOTP_KEY_B32), "{shown}");
+    // The key was read for the code; the password was not typed.
+    assert!(
+        !typed.iter().any(|t| t.len() == 20),
+        "the password must not be typed by a totp fill"
+    );
+}
+
+/// Guard: the code is only typed on the account's own origin, and a standing
+/// grant for the password never covers it.
+#[tokio::test]
+async fn a_totp_fill_is_refused_on_another_origin_and_ignores_password_grants() {
+    let r = rig_with_totp_account();
+    r.secrets
+        .upsert_with(
+            TOTP_ACCOUNT,
+            secret_store::FillSecretUpdate {
+                ask_before_use: Some(false),
+                ..secret_store::FillSecretUpdate::default()
+            },
+        )
+        .unwrap();
+    r.secrets.grant_create(TOTP_ACCOUNT, GITHUB).unwrap();
+    let fill = tool(&r.tools, "browser_fill");
+    assert!(
+        fill.standing_grant(&bot_ctx(BOT_A), &totp_input())
+            .await
+            .is_none(),
+        "a password grant must not cover the code"
+    );
+    r.fake.targets.lock().insert(
+        "e5".into(),
+        field(Some("https://evil.test"), Some("https://evil.test")),
+    );
+    assert!(fill.call(&bot_ctx(BOT_A), totp_input()).await.is_err());
+    assert!(
+        fill.approval_details(&bot_ctx(BOT_A), &totp_input())
+            .await
+            .is_err()
+    );
+    assert!(r.fake.typed_secrets.lock().is_empty());
+}
+
+/// Guard: another bot, an owner-made secret and an account without a stored key
+/// never produce a code.
+#[tokio::test]
+async fn a_totp_fill_is_refused_for_other_bots_owner_secrets_and_missing_keys() {
+    let r = rig_with_totp_account();
+    let fill = tool(&r.tools, "browser_fill");
+    assert!(fill.call(&bot_ctx(BOT_B), totp_input()).await.is_err());
+    // The owner's own secret (`login/github`, allowed for bot-a): no code, even for bot-a.
+    let owner = json!({"ref": "e5", "secret": "totp:login/github"});
+    assert!(fill.call(&bot_ctx(BOT_A), owner.clone()).await.is_err());
+    assert!(
+        fill.approval_details(&bot_ctx(BOT_A), &owner)
+            .await
+            .is_err()
+    );
+    // A bot-made account without a key.
+    r.secrets
+        .register_account(&secret_store::NewAccount {
+            name: "login/acct-nokey",
+            site: GITHUB,
+            login_id: "b@example.org",
+            email_account: None,
+            bot_id: BOT_A,
+            note: None,
+            password_len: 20,
+            symbols: true,
+        })
+        .unwrap();
+    let nokey = json!({"ref": "e5", "secret": "totp:login/acct-nokey"});
+    let err = fill.call(&bot_ctx(BOT_A), nokey).await.unwrap_err();
+    assert!(err.to_string().contains("account_totp_save"), "{err}");
+    assert!(r.fake.typed_secrets.lock().is_empty());
+}

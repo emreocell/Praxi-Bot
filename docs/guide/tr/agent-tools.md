@@ -10,6 +10,17 @@ Her botun, çalışmalar arasında kullandığı küçük bir yerleşik not deft
 
 Notlar hafızadan farklıdır: hafıza, botun sana ait olduğunu söylediğin bilgileri tutar. Notlar ise botun kendi çalışma alanıdır.
 
+## Betikler (`script_run`)
+
+`script_run`, botun birkaç aracı çağıran ve tek bir derli toplu sonuç döndüren kısa bir JavaScript programı çalıştırmasını sağlar. Programın kendine ait dosyası, ağı ya da zamanlayıcısı yoktur; çağırdığı her araç, doğrudan çağrıyla aynı izin denetiminden geçer.
+
+Bir çalışmayı iki saat sınırlar; böylece bekleyen bir betik beklediği için cezalandırılmaz:
+
+* **Hesaplama bütçesi: 10 saniye.** Yalnızca betiğin kendi işi sayılır (döngüler, ayrıştırma, süzme). Betik bir araç çağrısını (sayfa yükleme, indirme ya da onay gibi) beklerken saat durur; boşa dönen bir döngü yine 10 saniyede durdurulur. Bot `timeout` ile daha düşük bir bütçe isteyebilir, daha yükseğini isteyemez.
+* **Toplam üst sınır: 10 dakika**, bekleme dahil. Her zaman sınırlıdır ve hiçbir ayar onu 30 dakikanın üstüne çıkaramaz; yani hiç yanıt vermeyen bir araç bir çalışmayı sonsuza kadar tutamaz.
+
+Hata, hangi sınıra takıldığını söyler. Diğer sınırlar aynıdır: 50 araç çağrısı, 32 MB bellek, 64 KB sonuç ve günlük.
+
 ## Hafıza araçları
 
 Hafızası açık olan bir botun dört aracı vardır: `memory_search` (hatırladıklarına bakar), `session_search` (daha önceki bir sohbette söyleneni bulur), `memory_save` ve `memory_forget`. Hafızası **Kapalı** olan bota bu araçlar verilmez. Bkz. [Hafıza](memory.md).

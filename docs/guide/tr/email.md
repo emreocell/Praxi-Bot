@@ -250,8 +250,25 @@ bot böyle bir blok almaz ve başka bir botun adresini asla görmez.
    hatırlanır: sonraki oturum onu yalnızca tarayıcı aynı sitedeyken ve bağlantı bu denetimden hâlâ
    geçiyorsa sormadan açar; başka bir sayfadayken sorar.
 4. Bot izlenebilir bir bağlantıyı `browser_open` ile açar, oturumun açıldığını doğrular ve bildirir.
-   CAPTCHA, telefon ya da iki adımlı doğrulama adımları sana **Kontrolü devral** ile gelir. İzlenen tarif
-   yerleşik `signup-to-site` becerisidir.
+   CAPTCHA, telefon numarası ya da botun okuyamadığı SMS veya e-posta kodları sana **Kontrolü devral**
+   ile gelir. Doğrulayıcı uygulama kodunu bot kendisi yazabilir (aşağıya bak). İzlenen tarif yerleşik
+   `signup-to-site` becerisidir.
+
+### Botun kendi hesapları için iki adımlı doğrulama kodları
+
+Bir site, botun açtığı hesaba doğrulayıcı uygulama kurdurduğunda bir kurulum anahtarı gösterir: `otpauth://` adresi (QR kodunun arkasındaki metin) ya da base32 anahtar. Bot bu anahtarı hesabıyla birlikte saklayabilir ve güncel 6 haneli kodu kendisi yazabilir:
+
+1. `account_totp_save`: hesabın gizli adı (`account_list`'ten) ve anahtarla çağrılır. **Her kaydı sen onaylarsın.** Kart hesabı, siteyi ve kodun biçimini söyler, anahtarı asla göstermez.
+2. Site kod istediğinde `browser_fill` çağrılır; `secret` değeri `totp:<hesap adı>` olur. Uygulama güncel kodu hesaplar (RFC 6238; SHA-1, SHA-256 ve SHA-512, 6 ila 8 hane) ve alana yazar. **Her yazış sana sorulur**, parola yazmak gibi; parola için verdiğin kalıcı “her zaman izin ver” kodu kapsamaz.
+
+Botun insafına bırakılmayan, kodda sağlanan güvenceler:
+
+- **Anahtar ve kodlar modele hiç ulaşmaz.** Anahtar kasada, paroladan ayrı tutulur; hiçbir yerde listelenmez, gösterilmez ya da geri verilmez. Kod uygulamadan doğrudan sayfadaki alana gider. İkisi de her sonuçta, günlükte ve sayfa metninde maskelenir.
+- **O bota ve o siteye bağlı.** Anahtarı yalnızca hesabı açan bot kaydedebilir ya da kullanabilir; kod yalnızca hesabın kendi sitesindeki bir alana yazılır (parolalarda olduğu gibi canlı çerçeve denetlenir). Masaüstü bir programa kod verilmez.
+- **Yalnızca botun kendi hesapları için.** Senin kendi gizli bilgilerin ve girişlerin için burada kod üretilmez; istenirse reddedilir.
+- Yeniden kaydetmek anahtarı değiştirir. Hesabı silmek ya da vazgeçmek anahtarını da siler.
+
+`hotp` (sayaç tabanlı) adresi reddedilir. Site yalnızca SMS, e-posta ya da güvenlik anahtarı sunuyorsa bot durur ve sana sorar.
 
 İzinler: botun **kendi** gelen kutusunu okumak (`email_search`, `email_read`, `email_list_folders`,
 `email_wait_for`) ve `email_wait_for`'un izlenebilir diye döndürdüğü bir bağlantıyı açmak, **kartsız**

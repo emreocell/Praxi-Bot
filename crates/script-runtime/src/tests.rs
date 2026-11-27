@@ -27,7 +27,7 @@ impl ScriptHost for FakeHost {
 
 fn limits() -> Limits {
     Limits {
-        timeout: Duration::from_secs(5),
+        cpu_timeout: Duration::from_secs(5),
         ..Limits::default()
     }
 }
@@ -95,16 +95,16 @@ async fn tool_error_is_catchable_and_recorded() {
 }
 
 #[tokio::test]
-async fn infinite_loop_is_killed_by_timeout() {
+async fn infinite_loop_is_killed_by_the_compute_budget() {
     let limits = Limits {
-        timeout: Duration::from_millis(300),
+        cpu_timeout: Duration::from_millis(300),
         ..Limits::default()
     };
     let started = Instant::now();
     let err = ScriptRuntime::run("while (true) {}", Arc::new(FakeHost), limits)
         .await
         .unwrap_err();
-    assert!(matches!(err, ScriptError::Timeout(_)), "{err:?}");
+    assert!(matches!(err, ScriptError::CpuTimeout(_)), "{err:?}");
     assert!(started.elapsed() < Duration::from_secs(4));
 }
 
@@ -335,24 +335,168 @@ async fn large_logs_are_truncated_with_marker() {
     assert!(out.logs.len() < 100);
 }
 
-#[tokio::test(start_paused = true)]
-async fn timeout_applies_while_awaiting_a_slow_tool() {
-    struct Slow;
-    #[async_trait]
-    impl ScriptHost for Slow {
-        async fn call_tool(&self, _: &str, _: Value) -> Result<Value, String> {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            Ok(Value::Null)
-        }
+/// A host whose every call takes `delay` of real time.
+struct SlowHost {
+    delay: Duration,
+}
+
+#[async_trait]
+impl ScriptHost for SlowHost {
+    async fn call_tool(&self, _: &str, input: Value) -> Result<Value, String> {
+        tokio::time::sleep(self.delay).await;
+        Ok(input)
     }
+}
+
+/// A script's own work for about `ms` milliseconds.
+fn busy(ms: u32) -> String {
+    format!("{{ const t = Date.now(); while (Date.now() - t < {ms}) {{}} }}")
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_total_cap_applies_while_awaiting_a_slow_tool() {
     let limits = Limits {
-        timeout: Duration::from_millis(200),
+        total_timeout: Duration::from_millis(200),
         ..Limits::default()
     };
-    let err = ScriptRuntime::run("return await tools.call('x', {});", Arc::new(Slow), limits)
+    let host = SlowHost {
+        delay: Duration::from_secs(30),
+    };
+    let err = ScriptRuntime::run("return await tools.call('x', {});", Arc::new(host), limits)
         .await
         .unwrap_err();
     assert!(matches!(err, ScriptError::Timeout(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn waiting_for_tools_does_not_spend_the_compute_budget() {
+    // Three sequential calls of 400 ms each: 1.2 s of waiting against a
+    // compute budget of 300 ms. The old single wall timer would have fired.
+    let limits = Limits {
+        cpu_timeout: Duration::from_millis(300),
+        total_timeout: Duration::from_secs(30),
+        ..Limits::default()
+    };
+    let host = SlowHost {
+        delay: Duration::from_millis(400),
+    };
+    let code = "const a = await tools.call('x', 1); const b = await tools.call('x', 2); \
+                const c = await tools.call('x', 3); return a + b + c;";
+    let out = ScriptRuntime::run(code, Arc::new(host), limits)
+        .await
+        .unwrap();
+    assert_eq!(out.result, json!(6));
+    assert_eq!(out.tool_calls.len(), 3);
+    assert!(
+        out.duration >= Duration::from_millis(1200),
+        "{:?}",
+        out.duration
+    );
+}
+
+#[tokio::test]
+async fn overlapping_tool_calls_keep_the_compute_clock_stopped() {
+    let limits = Limits {
+        cpu_timeout: Duration::from_millis(300),
+        total_timeout: Duration::from_secs(30),
+        ..Limits::default()
+    };
+    let host = SlowHost {
+        delay: Duration::from_millis(500),
+    };
+    let code = "const r = await Promise.all([1, 2, 3].map(n => tools.call('x', n))); \
+                return r.reduce((a, b) => a + b, 0);";
+    let started = Instant::now();
+    let out = ScriptRuntime::run(code, Arc::new(host), limits)
+        .await
+        .unwrap();
+    assert_eq!(out.result, json!(6));
+    // They really ran at the same time, and the clock came back afterwards.
+    assert!(started.elapsed() < Duration::from_millis(1400));
+}
+
+#[tokio::test]
+async fn the_compute_budget_adds_up_across_the_pieces_between_tool_calls() {
+    // 2 x ~200 ms of the script's own work around a call, budget 300 ms: the
+    // sum is over budget although no single piece is.
+    let limits = Limits {
+        cpu_timeout: Duration::from_millis(300),
+        total_timeout: Duration::from_secs(30),
+        ..Limits::default()
+    };
+    let host = SlowHost {
+        delay: Duration::from_millis(50),
+    };
+    let code = format!(
+        "{} await tools.call('x', 1); {} return 1;",
+        busy(200),
+        busy(200)
+    );
+    let err = ScriptRuntime::run(&code, Arc::new(host), limits)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ScriptError::CpuTimeout(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn a_busy_loop_after_a_long_wait_is_still_stopped_by_the_compute_budget() {
+    let limits = Limits {
+        cpu_timeout: Duration::from_millis(300),
+        total_timeout: Duration::from_secs(30),
+        ..Limits::default()
+    };
+    let host = SlowHost {
+        delay: Duration::from_millis(400),
+    };
+    let started = Instant::now();
+    let err = ScriptRuntime::run(
+        "await tools.call('x', 1); while (true) {}",
+        Arc::new(host),
+        limits,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ScriptError::CpuTimeout(_)), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(4));
+}
+
+#[tokio::test]
+async fn the_total_cap_stops_a_busy_loop_that_the_compute_budget_would_allow() {
+    let limits = Limits {
+        cpu_timeout: Duration::from_secs(60),
+        total_timeout: Duration::from_millis(300),
+        ..Limits::default()
+    };
+    let started = Instant::now();
+    let err = ScriptRuntime::run("while (true) {}", Arc::new(FakeHost), limits)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ScriptError::Timeout(_)), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(4));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_total_is_bounded_whatever_the_limits_say() {
+    // A caller asking for a day gets the hard maximum, not a day.
+    let limits = Limits {
+        total_timeout: Duration::from_secs(24 * 3600),
+        ..Limits::default()
+    };
+    let host = SlowHost {
+        delay: Duration::from_secs(24 * 3600),
+    };
+    let err = ScriptRuntime::run("return await tools.call('x', {});", Arc::new(host), limits)
+        .await
+        .unwrap_err();
+    assert_eq!(err, ScriptError::Timeout(MAX_TOTAL_TIMEOUT));
+}
+
+#[test]
+fn the_default_limits_keep_the_compute_budget_at_ten_seconds_with_a_bounded_total() {
+    let d = Limits::default();
+    assert_eq!(d.cpu_timeout, Duration::from_secs(10));
+    assert!(d.total_timeout > d.cpu_timeout);
+    assert!(d.total_timeout <= MAX_TOTAL_TIMEOUT);
 }
 
 #[tokio::test]

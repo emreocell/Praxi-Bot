@@ -28,6 +28,7 @@ mod redact;
 mod rules;
 mod scan;
 mod secret;
+mod totp;
 mod transaction;
 mod wipe;
 
@@ -37,8 +38,8 @@ pub use file::{EncryptedFileStore, KdfParams};
 pub use fill::{
     AccountInfo, FillError, FillGrant, FillSecretInfo, FillSecretUpdate, FillSecrets,
     GRANT_KIND_BROWSER_FILL, MAX_FILL_VALUE_BYTES, NewAccount, PASSWORD_MAX_LEN, PASSWORD_MIN_LEN,
-    ValueHook, VaultKind, canonical_origin, generate_password, metadata_path, sanitize_label,
-    validate_fill_name,
+    TOTP_REF_PREFIX, ValueHook, VaultKind, canonical_origin, generate_password, metadata_path,
+    sanitize_label, totp_reference, validate_fill_name,
 };
 pub use keyring_store::KeyringStore;
 pub use memory::MemoryStore;
@@ -53,3 +54,4 @@ pub use secret::{
     is_fill_name, is_host_credential, is_managed_oauth_name, is_reserved_name,
     refuse_fill_namespace, resolve, validate_name,
 };
+pub use totp::{TotpAlgorithm, TotpSpec};

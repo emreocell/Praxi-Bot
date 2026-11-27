@@ -58,6 +58,9 @@ fn account_register_is_classified_as_egress_and_never_executes() {
     // Discarding an account is a local delete that always asks on its own.
     let discard = builtin_tools::classify("account_discard").unwrap();
     assert!(!discard.egress && !discard.ingests_untrusted && !discard.reads_private);
+    // Keeping a two-factor key is a local write too: nothing leaves the machine.
+    let totp = builtin_tools::classify("account_totp_save").unwrap();
+    assert!(!totp.egress && !totp.ingests_untrusted && !totp.reads_private);
 }
 
 /// After an untrusted read, even with the egress waiver on and the Full preset,
@@ -81,6 +84,9 @@ async fn account_register_asks_after_untrusted_reads_and_in_webhook_runs() {
     lp.sh
         .tools
         .register(builtin_tools::account_discard_tool(secrets()));
+    lp.sh
+        .tools
+        .register(builtin_tools::account_totp_save_tool(secrets()));
     let ctx_for = |kind: String, untrusted: bool| {
         let run = lp
             .rt
@@ -115,6 +121,14 @@ async fn account_register_asks_after_untrusted_reads_and_in_webhook_runs() {
             &json!({"name": "login/x"}),
         );
         assert!(d.is_ask(), "discard, {label}: {d:?}");
+        let d = lp.sh.decide(
+            &ctx,
+            "account_totp_save",
+            Effect::Write,
+            PermissionCategory::Meta,
+            &json!({"name": "login/x", "setup": "JBSWY3DPEHPK3PXP"}),
+        );
+        assert!(d.is_ask(), "totp save, {label}: {d:?}");
     }
 }
 

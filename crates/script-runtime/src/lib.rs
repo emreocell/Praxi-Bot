@@ -17,13 +17,24 @@
 //! return a.filter(x => x.score > 0.5).map(x => x.id);
 //! ```
 //!
-//! Hard limits ([`Limits`]): wall-clock timeout, memory, tool-call count and
-//! output size. Errors ([`ScriptError`]) carry the JS message, stack and line
-//! number so the model can fix its script.
+//! Hard limits ([`Limits`]): two clocks, memory, tool-call count and output
+//! size.
+//!
+//! * The **compute budget** ([`Limits::cpu_timeout`]) counts only the time the
+//!   interpreter is running the script's own code. It is paused while the script
+//!   awaits a tool call, so a script that waits on a slow browser page or web
+//!   request is not killed for it, while a busy loop still is.
+//! * The **total cap** ([`Limits::total_timeout`]) is the wall clock of the whole
+//!   run, tool waits included. It is always bounded (never above
+//!   [`MAX_TOTAL_TIMEOUT`]), so a tool that never answers cannot hold a run for
+//!   ever.
+//!
+//! Errors ([`ScriptError`]) carry the JS message, stack and line number so the
+//! model can fix its script.
 //!
 //! Note: `QuickJS` is single threaded and a busy loop occupies the polling
-//! thread until the interrupt handler fires (at most `timeout`). Callers that
-//! cannot afford this on an async worker should run the future with
+//! thread until the interrupt handler fires (at most `cpu_timeout`). Callers
+//! that cannot afford this on an async worker should run the future with
 //! `spawn_blocking` or on a dedicated runtime.
 
 use std::fmt;
@@ -59,11 +70,19 @@ pub trait ScriptHost: Send + Sync {
     async fn call_tool(&self, name: &str, input: Json) -> Result<Json, String>;
 }
 
+/// Largest total (wall-clock) duration a run may be given, whatever
+/// [`Limits::total_timeout`] says.
+pub const MAX_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 /// Hard resource limits for a single script run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
-    /// Wall-clock budget for the whole run (including awaited tool calls).
-    pub timeout: Duration,
+    /// Compute budget: how long the script's own code may run, summed over the
+    /// whole run. The clock stops while any `tools.call` is awaited.
+    pub cpu_timeout: Duration,
+    /// Wall-clock cap for the whole run, awaited tool calls included. Clamped to
+    /// [`MAX_TOTAL_TIMEOUT`].
+    pub total_timeout: Duration,
     /// Maximum JS heap size in bytes.
     pub memory_bytes: usize,
     /// Maximum JS native stack size in bytes (guards against deep recursion).
@@ -78,7 +97,8 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            timeout: Duration::from_secs(10),
+            cpu_timeout: Duration::from_secs(10),
+            total_timeout: Duration::from_secs(10 * 60),
             memory_bytes: 32 * 1024 * 1024,
             max_stack_bytes: 512 * 1024,
             max_tool_calls: 50,
@@ -154,9 +174,15 @@ pub enum ScriptError {
     /// The script threw (including syntax errors).
     #[error("script error: {0}")]
     Js(JsError),
-    /// The wall-clock timeout elapsed.
-    #[error("script timed out after {0:?}")]
+    /// The whole run (tool waits included) took longer than the total cap.
+    #[error("script timed out after {0:?} in total (waiting for tools counts here)")]
     Timeout(Duration),
+    /// The script's own code used up its compute budget. Time spent waiting for
+    /// tool calls does not count towards it.
+    #[error(
+        "script timed out: its own work used up the compute budget of {0:?} (waiting for tool calls does not count)"
+    )]
+    CpuTimeout(Duration),
     /// The caller cancelled the run.
     #[error("script was cancelled")]
     Cancelled,
@@ -181,9 +207,94 @@ pub enum ScriptError {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScriptRuntime;
 
+/// The compute clock: runs while the interpreter executes script code, stops
+/// while at least one tool call is awaited.
+struct CpuClock {
+    state: Mutex<ClockState>,
+}
+
+struct ClockState {
+    used: Duration,
+    running_since: Option<Instant>,
+    waiting: usize,
+}
+
+impl CpuClock {
+    fn started() -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(ClockState {
+                used: Duration::ZERO,
+                running_since: Some(Instant::now()),
+                waiting: 0,
+            }),
+        })
+    }
+
+    /// Compute time used so far.
+    fn used(&self) -> Duration {
+        let st = self.state.lock();
+        st.used + st.running_since.map_or(Duration::ZERO, |t| t.elapsed())
+    }
+
+    /// Stop the clock until the returned guard is dropped. Overlapping waits
+    /// (a `Promise.all` of calls) keep it stopped until the last one ends.
+    fn wait(self: &Arc<Self>) -> WaitGuard {
+        let mut st = self.state.lock();
+        st.waiting += 1;
+        if let Some(since) = st.running_since.take() {
+            st.used += since.elapsed();
+        }
+        drop(st);
+        WaitGuard(Arc::clone(self))
+    }
+}
+
+struct WaitGuard(Arc<CpuClock>);
+
+impl Drop for WaitGuard {
+    fn drop(&mut self) {
+        let mut st = self.0.state.lock();
+        st.waiting = st.waiting.saturating_sub(1);
+        if st.waiting == 0 && st.running_since.is_none() {
+            st.running_since = Some(Instant::now());
+        }
+    }
+}
+
+/// What the engine's interrupt handler consults while script code runs.
+struct Watchdog {
+    cancel: CancellationToken,
+    deadline: Instant,
+    clock: Arc<CpuClock>,
+    cpu_budget: Duration,
+    total_hit: Arc<AtomicBool>,
+    cpu_hit: Arc<AtomicBool>,
+}
+
+impl Watchdog {
+    /// True when the script must be stopped now; records which limit it was.
+    fn should_stop(&self) -> bool {
+        if self.cancel.is_cancelled() {
+            return true;
+        }
+        // A busy loop never yields to the async timer, so the total cap is
+        // enforced here as well.
+        if Instant::now() >= self.deadline {
+            self.total_hit.store(true, Ordering::SeqCst);
+            return true;
+        }
+        if self.clock.used() >= self.cpu_budget {
+            self.cpu_hit.store(true, Ordering::SeqCst);
+            return true;
+        }
+        false
+    }
+}
+
 /// Shared mutable state between the JS closures and the runner.
 struct RunState {
     limits: Limits,
+    clock: Arc<CpuClock>,
     host: Arc<dyn ScriptHost>,
     calls_started: AtomicUsize,
     call_limit_hit: AtomicBool,
@@ -232,7 +343,12 @@ impl RunState {
             Err(e) => return json!({"err": format!("invalid tool input: {e}")}).to_string(),
         };
         let started = Instant::now();
-        let outcome = self.host.call_tool(&name, input.clone()).await;
+        // The compute clock stands still while the host works (a page load, a
+        // download, a person approving the call).
+        let outcome = {
+            let _waiting = self.clock.wait();
+            self.host.call_tool(&name, input.clone()).await
+        };
         let duration = started.elapsed();
         let (reply, output, error) = match outcome {
             Ok(v) => (json!({"ok": v}), Some(v), None),
@@ -314,28 +430,25 @@ impl ScriptRuntime {
             return Err(ScriptError::Cancelled);
         }
         let started = Instant::now();
-        let deadline = started + limits.timeout;
-        let timed_out = Arc::new(AtomicBool::new(false));
+        let total = limits.total_timeout.min(MAX_TOTAL_TIMEOUT);
+        let deadline = started + total;
+        let clock = CpuClock::started();
+        let total_hit = Arc::new(AtomicBool::new(false));
+        let cpu_hit = Arc::new(AtomicBool::new(false));
 
         let rt = AsyncRuntime::new().map_err(|e| internal(&e))?;
         rt.set_memory_limit(limits.memory_bytes).await;
         rt.set_max_stack_size(limits.max_stack_bytes).await;
-        {
-            let flag = Arc::clone(&timed_out);
-            let interrupt_cancel = cancel.clone();
-            rt.set_interrupt_handler(Some(Box::new(move || {
-                if interrupt_cancel.is_cancelled() {
-                    return true;
-                }
-                if Instant::now() >= deadline {
-                    flag.store(true, Ordering::SeqCst);
-                    true
-                } else {
-                    false
-                }
-            })))
+        let watch = Watchdog {
+            cancel: cancel.clone(),
+            deadline,
+            clock: Arc::clone(&clock),
+            cpu_budget: limits.cpu_timeout,
+            total_hit: Arc::clone(&total_hit),
+            cpu_hit: Arc::clone(&cpu_hit),
+        };
+        rt.set_interrupt_handler(Some(Box::new(move || watch.should_stop())))
             .await;
-        }
         let ctx = AsyncContext::custom::<(
             intrinsic::Eval,
             intrinsic::Json,
@@ -352,6 +465,7 @@ impl ScriptRuntime {
 
         let state = Arc::new(RunState {
             limits: limits.clone(),
+            clock,
             host,
             calls_started: AtomicUsize::new(0),
             call_limit_hit: AtomicBool::new(false),
@@ -370,10 +484,10 @@ impl ScriptRuntime {
         let outcome = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(ScriptError::Cancelled),
-            result = tokio::time::timeout(limits.timeout, work) => result,
+            result = tokio::time::timeout(total, work) => result,
         };
         let Ok(outcome) = outcome else {
-            return Err(ScriptError::Timeout(limits.timeout));
+            return Err(ScriptError::Timeout(total));
         };
 
         if cancel.is_cancelled() {
@@ -384,8 +498,11 @@ impl ScriptRuntime {
                 max: limits.max_tool_calls,
             });
         }
-        if timed_out.load(Ordering::SeqCst) {
-            return Err(ScriptError::Timeout(limits.timeout));
+        if total_hit.load(Ordering::SeqCst) {
+            return Err(ScriptError::Timeout(total));
+        }
+        if cpu_hit.load(Ordering::SeqCst) {
+            return Err(ScriptError::CpuTimeout(limits.cpu_timeout));
         }
         let oom = || ScriptError::MemoryLimitExceeded {
             limit_bytes: limits.memory_bytes,
