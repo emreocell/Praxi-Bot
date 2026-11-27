@@ -42,8 +42,8 @@ pub mod snapshot;
 pub mod web_url;
 
 pub use actions::{
-    ActionResult, FieldTarget, FrameIdentity, KeySpec, ScreenshotOptions, ScreenshotTarget,
-    StepGuard, WaitCondition, parse_key,
+    ActionResult, FieldTarget, FrameIdentity, KeySpec, ReadTarget, ReadValue, ScreenshotOptions,
+    ScreenshotTarget, StepGuard, WaitCondition, parse_key,
 };
 pub use actions::{ConsentChoice, ConsentOutcome};
 pub use actions::{

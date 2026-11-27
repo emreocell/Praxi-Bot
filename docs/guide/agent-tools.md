@@ -28,7 +28,7 @@ Notes are different from memory: memory holds facts you told the bot; notes are 
 
 Two clocks limit a run, so a script that waits is not punished for waiting:
 
-* **Compute budget: 10 seconds.** Only the script's own work counts (loops, parsing, filtering). The clock stops while the script waits for a tool call, such as a page load, a download or an approval, and a busy loop is still stopped at 10 seconds. The bot can ask for a lower budget with `timeout`, never a higher one.
+* **Compute budget: 10 seconds.** Only the script's own work counts (loops, parsing, filtering). The clock stops only while the script itself is waiting (a page load, a download or an approval it awaits), and a busy loop is still stopped at 10 seconds, also one that starts tool calls without waiting for them. The bot can ask for a lower budget with `timeout`, never a higher one.
 * **Total cap: 10 minutes**, waiting included. It is always bounded, and no setting can raise it above 30 minutes, so a tool that never answers cannot hold a run for ever.
 
 The error says which limit was hit. Other limits are unchanged: 50 tool calls, 32 MB of memory, 64 KB of result and log.

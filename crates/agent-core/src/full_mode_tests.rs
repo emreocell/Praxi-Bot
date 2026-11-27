@@ -1517,3 +1517,82 @@ fn full_policy_has_a_money_floor_for_each_initiator() {
         }
     }
 }
+
+/// The owner's rule for Full: nothing asks except money. The two-factor key and codes of the
+/// bot's OWN accounts (`account_totp_save`, `browser_fill` with a `totp:` secret) therefore
+/// run without a card on an owner-run Full bot, also after the run read a page. The same calls
+/// keep their card on every other level and in every run that is not the owner's, and the
+/// owner's stored secrets (a plain `secret`) keep asking on Full.
+#[tokio::test]
+async fn a_full_bot_keeps_and_types_its_own_totp_codes_without_a_card() {
+    // Fresh tools per run: a card asserts that the tool never ran.
+    let pair = || {
+        [
+            AlwaysAsks::new("account_totp_save", PermissionCategory::Meta),
+            AlwaysAsks::new("browser_fill", PermissionCategory::Browser),
+        ]
+    };
+    let both = [
+        ("account_totp_save", json!({"name": "login/x", "ref": "e9"})),
+        (
+            "browser_fill",
+            json!({"ref": "e5", "secret": "totp:login/x"}),
+        ),
+    ];
+    // Full, owner's run, after a page was read (`run` opens and reads the owner's site first).
+    let extra = pair();
+    assert_eq!(run(Case::full(), &extra, &both).await.1, None);
+    assert_eq!(extra[0].count.load(Ordering::SeqCst), 1);
+    assert_eq!(extra[1].count.load(Ordering::SeqCst), 1);
+    // Upper-case spelling of the reference is the same reference.
+    let upper = [(
+        "browser_fill",
+        json!({"ref": "e5", "secret": "TOTP:login/x"}),
+    )];
+    let extra = pair();
+    assert_eq!(run(Case::full(), &extra, &upper).await.1, None);
+    assert_eq!(extra[1].count.load(Ordering::SeqCst), 1);
+    // The owner's own secret is still never typed silently, on Full too.
+    let owner = [("browser_fill", json!({"ref": "e5", "secret": "login/shop"}))];
+    assert_eq!(
+        run(Case::full(), &pair(), &owner).await.1.as_deref(),
+        Some("browser_fill")
+    );
+    // Other levels keep today's card, for each of the two calls.
+    for (name, input) in &both {
+        let mut balanced = Case::full();
+        balanced.preset = BALANCED;
+        balanced.policy = Policy::approve_destructive();
+        assert_eq!(
+            run(balanced, &pair(), &[(name, input.clone())])
+                .await
+                .1
+                .as_deref(),
+            Some(*name),
+            "balanced: {name}"
+        );
+        let mut custom = Case::full();
+        custom.preset = "";
+        assert_eq!(
+            run(custom, &pair(), &[(name, input.clone())])
+                .await
+                .1
+                .as_deref(),
+            Some(*name),
+            "custom level: {name}"
+        );
+        // Not the owner's run: a message from another channel, another initiator.
+        for source in ["telegram", "api", "webhook"] {
+            let mut other = Case::full();
+            other.source = source;
+            assert_eq!(
+                run(other, &pair(), &[(name, input.clone())])
+                    .await
+                    .1
+                    .as_deref(),
+                Some(*name),
+                "{source}: {name}"
+            );
+        }
+    }
+}

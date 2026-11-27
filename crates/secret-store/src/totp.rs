@@ -249,6 +249,143 @@ impl TotpSpec {
     }
 }
 
+/// What replaces a setup key or `otpauth://` address in masked page text.
+pub const SEED_MASK: &str = "[REDACTED 2FA setup key]";
+
+/// Group sizes sites print a key in (`JBSW Y3DP`, `JBSWY-3DPEH`, ...).
+const GROUP_SIZES: [usize; 6] = [3, 4, 5, 6, 7, 8];
+
+impl TotpSpec {
+    /// Find a usable setup in text a page showed: an `otpauth://totp/` address
+    /// anywhere in it, else the whole text (optionally after a `Label:`) read
+    /// as a base32 key. For the host-side read of a setup field: the text never
+    /// reaches the model.
+    ///
+    /// # Errors
+    /// [`FillError::Invalid`] with a fixed message; the text is never echoed.
+    pub fn find_in_text(text: &str) -> Result<Self, FillError> {
+        let lower = text.to_ascii_lowercase();
+        if let Some(at) = lower.find("otpauth://") {
+            let uri: String = text[at..]
+                .chars()
+                .take_while(|c| !c.is_whitespace() && !matches!(c, '"' | '\'' | '<' | '>'))
+                .collect();
+            return Self::parse(&uri);
+        }
+        // Plain text parses as base32 too ("Enter the 6-digit code" is valid base32
+        // letters), so the element must read as a key: one run, or equal groups.
+        let is_key = |t: &str| mask_setup_secrets(t.trim()) == SEED_MASK;
+        if is_key(text)
+            && let Ok(spec) = Self::parse(text)
+        {
+            return Ok(spec);
+        }
+        // "Setup key: ABCD EFGH ..." / "Key - ABCD ...": try what follows a label.
+        for sep in [':', '\n'] {
+            if let Some((head, tail)) = text.split_once(sep)
+                && head.len() <= 48
+                && is_key(tail)
+                && let Ok(spec) = Self::parse(tail)
+            {
+                return Ok(spec);
+            }
+        }
+        Err(bad(
+            "the element does not hold a setup key or an otpauth address",
+        ))
+    }
+
+    /// Every spelling of this key a page or a person can show or type: base32
+    /// upper and lower case, with and without `=` padding, in groups of 3 to 8
+    /// characters split by a space or a dash, and the stored `otpauth://` form.
+    /// For the redactor, so no later echo of the key survives in any layout.
+    #[must_use]
+    pub fn seed_spellings(&self) -> Vec<String> {
+        let plain = self.key_base32();
+        let mut out = vec![self.canonical(), plain.clone()];
+        let padded = |s: &str| format!("{s}{}", "=".repeat((8 - s.len() % 8) % 8));
+        let cased = |s: String, out: &mut Vec<String>| {
+            out.push(s.clone());
+            out.push(s.to_ascii_lowercase());
+        };
+        cased(padded(&plain), &mut out);
+        out.push(plain.to_ascii_lowercase());
+        for size in GROUP_SIZES {
+            let groups: Vec<&str> = plain
+                .as_bytes()
+                .chunks(size)
+                .filter_map(|c| std::str::from_utf8(c).ok())
+                .collect();
+            for sep in [" ", "-"] {
+                let joined = groups.join(sep);
+                cased(joined.clone(), &mut out);
+                cased(
+                    format!("{joined}{}", "=".repeat((8 - plain.len() % 8) % 8)),
+                    &mut out,
+                );
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+/// Mask what looks like a two-factor setup in `text` (page text a model could
+/// read): every `otpauth://` address, and a base32 key written as one run of
+/// 16 or more characters or as 4 or more space or dash separated groups. A run
+/// must have a digit 2 to 7 or be all upper case, so ordinary long words stay.
+/// Shape-based and independent of what is stored: a key is hidden from the very
+/// first read of the page, before anything is saved.
+#[must_use]
+pub fn mask_setup_secrets(text: &str) -> String {
+    use std::sync::LazyLock;
+    static URI: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)otpauth://[^\s"'<>]+"#).unwrap_or_else(|_| unreachable!())
+    });
+    static RUN: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)\b(?:[a-z2-7]{4,8}(?:[ \-][a-z2-7]{1,8}){3,}|[a-z2-7]{16,})=*(?:[^a-z0-9]|$)",
+        )
+        .unwrap_or_else(|_| unreachable!())
+    });
+    let step = URI.replace_all(text, SEED_MASK);
+    RUN.replace_all(&step, |caps: &regex::Captures<'_>| {
+        let whole = &caps[0];
+        // The class above also swallowed one trailing non-word character: keep it.
+        let (core, tail) = match whole.char_indices().last() {
+            Some((i, c)) if !c.is_ascii_alphanumeric() && c != '=' => (&whole[..i], &whole[i..]),
+            _ => (whole, ""),
+        };
+        let letters: Vec<char> = core.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        let has_digit = letters.iter().any(char::is_ascii_digit);
+        let all_upper = letters.iter().all(|c| !c.is_ascii_lowercase());
+        let sizes: Vec<usize> = core
+            .split([' ', '-'])
+            .map(|g| g.trim_end_matches('=').len())
+            .collect();
+        let grouped = sizes.len() > 1;
+        // Sites print equal groups (the last may be short): `JBSW Y3DP EHPK 3PXP`.
+        let even = sizes.split_last().is_some_and(|(last, rest)| {
+            rest.first()
+                .is_some_and(|f| rest.iter().all(|n| n == f) && last <= f)
+        });
+        let long_enough = letters.len() >= 16;
+        let seedlike = long_enough
+            && if grouped {
+                even && has_digit
+            } else {
+                has_digit || all_upper
+            };
+        if seedlike {
+            format!("{SEED_MASK}{tail}")
+        } else {
+            whole.to_owned()
+        }
+    })
+    .into_owned()
+}
+
 fn mac<M: Mac + hmac::digest::KeyInit>(key: &[u8], msg: &[u8]) -> Vec<u8> {
     // HMAC accepts a key of any length, so `new_from_slice` cannot fail.
     let mut m = <M as Mac>::new_from_slice(key).unwrap_or_else(|_| unreachable!());

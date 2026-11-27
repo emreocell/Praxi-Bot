@@ -63,19 +63,25 @@ fn the_reference_form_never_collides_with_a_stored_name() {
 fn the_code_for_a_saved_key_matches_the_rfc_vector() {
     let (_, s) = with_account();
     s.set_totp(NAME, Some(BOT), &rfc_uri_8_digits()).unwrap();
-    let code = s.resolve_totp(NAME, Some(BOT), 59).unwrap();
+    let code = s
+        .resolve_totp(NAME, Some(BOT), 59, Some(SITE), Some(SITE))
+        .unwrap();
     assert_eq!(code.expose(), "94287082");
-    let code = s.resolve_totp(NAME, Some(BOT), 1_111_111_109).unwrap();
+    let code = s
+        .resolve_totp(NAME, Some(BOT), 1_111_111_109, Some(SITE), Some(SITE))
+        .unwrap();
     assert_eq!(code.expose(), "07081804");
 }
 
 #[test]
-fn resolve_value_for_a_totp_reference_gives_the_current_code_not_the_password() {
+fn resolving_a_totp_reference_for_a_page_gives_the_current_code_not_the_password() {
     let (_, s) = with_account();
     s.set_totp(NAME, Some(BOT), &rfc_b32()).unwrap();
     let spec = TotpSpec::parse(&rfc_b32()).unwrap();
     let before = unix_secs();
-    let got = s.resolve_value_for(&totp_ref(), Some(BOT)).unwrap();
+    let got = s
+        .resolve_totp_for_page(&totp_ref(), Some(BOT), Some(SITE), Some(SITE))
+        .unwrap();
     let after = unix_secs();
     assert!(
         (before..=after).any(|t| spec.code_at(t) == got.expose()),
@@ -125,7 +131,9 @@ fn the_redactor_hook_sees_the_key_and_every_code() {
     }));
     s.register_account(&account(NAME)).unwrap();
     s.set_totp(NAME, Some(BOT), &rfc_b32()).unwrap();
-    let code = s.resolve_value_for(&totp_ref(), Some(BOT)).unwrap();
+    let code = s
+        .resolve_totp_for_page(&totp_ref(), Some(BOT), Some(SITE), Some(SITE))
+        .unwrap();
     let seen = seen.lock();
     assert!(
         seen.contains(&rfc_b32()),
@@ -155,6 +163,11 @@ fn only_the_bot_that_owns_the_account_may_save_or_use_a_key() {
         assert!(s.check_bot(&totp_ref(), who).is_err());
         assert!(s.resolve_value_for(&totp_ref(), who).is_err());
         assert!(
+            s.resolve_totp_for_page(&totp_ref(), who, Some(SITE), Some(SITE))
+                .is_err(),
+            "{who:?}"
+        );
+        assert!(
             s.check_browser(&totp_ref(), Some(SITE), who).is_err(),
             "{who:?}"
         );
@@ -183,6 +196,10 @@ fn the_owners_own_secrets_have_no_two_factor_codes_here() {
     let reference = format!("{TOTP_REF_PREFIX}{owner}");
     assert!(s.check_bot(&reference, Some(BOT)).is_err());
     assert!(s.resolve_value_for(&reference, Some(BOT)).is_err());
+    assert!(
+        s.resolve_totp_for_page(&reference, Some(BOT), Some(SITE), Some(SITE))
+            .is_err()
+    );
     assert!(s.check_browser(&reference, Some(SITE), Some(BOT)).is_err());
     // An unknown name is refused too, never "free".
     assert!(matches!(
@@ -196,7 +213,10 @@ fn a_code_needs_a_saved_key() {
     let (_, s) = with_account();
     let e = s.check_bot(&totp_ref(), Some(BOT)).unwrap_err().to_string();
     assert!(e.contains("account_totp_save"), "{e}");
-    assert!(s.resolve_value_for(&totp_ref(), Some(BOT)).is_err());
+    assert!(
+        s.resolve_totp_for_page(&totp_ref(), Some(BOT), Some(SITE), Some(SITE))
+            .is_err()
+    );
     assert!(!s.accounts(None).unwrap()[0].has_totp);
 }
 
@@ -287,7 +307,9 @@ fn saving_again_replaces_the_key() {
     )
     .unwrap();
     let new = TotpSpec::parse(&other).unwrap();
-    let got = s.resolve_totp(NAME, Some(BOT), 59).unwrap();
+    let got = s
+        .resolve_totp(NAME, Some(BOT), 59, Some(SITE), Some(SITE))
+        .unwrap();
     assert_ne!(got.expose(), "94287082");
     assert_eq!(got.expose().len(), 8);
     // The 6-digit code is the last six digits of the 8-digit one (same HOTP).
@@ -341,4 +363,224 @@ fn the_flag_survives_a_restart() {
         !raw.contains(&rfc_b32()) && !raw.contains("otpauth"),
         "{raw}"
     );
+}
+
+/// Finding 3: the origin binding lives in the read itself. A caller that skipped
+/// (or got wrong) the `check_*` pre-check still gets no code for another page.
+#[test]
+fn the_resolve_path_itself_refuses_a_page_that_is_not_the_accounts_own() {
+    let (_, s) = with_account();
+    s.set_totp(NAME, Some(BOT), &rfc_b32()).unwrap();
+    let ok = |frame: Option<&str>, top: Option<&str>| {
+        s.resolve_totp_for_page(&totp_ref(), Some(BOT), frame, top)
+    };
+    for (frame, top) in [
+        (Some("https://evil.example"), Some("https://evil.example")),
+        (Some("http://example.com"), Some("http://example.com")),
+        (Some("https://example.com:8443"), Some(SITE)),
+        // The right frame inside a page of another site, and the reverse.
+        (Some(SITE), Some("https://evil.example")),
+        (Some("https://evil.example"), Some(SITE)),
+        // No verifiable origin for either side.
+        (None, Some(SITE)),
+        (Some(SITE), None),
+        (Some("about:blank"), Some(SITE)),
+    ] {
+        assert!(
+            matches!(ok(frame, top), Err(FillError::NotAllowed(_))),
+            "{frame:?} in {top:?}"
+        );
+    }
+    // The refusal never carries a code or the key.
+    let e = ok(Some("https://evil.example"), Some("https://evil.example"))
+        .unwrap_err()
+        .to_string();
+    assert!(!e.contains(&rfc_b32()) && !e.contains("otpauth"), "{e}");
+    assert!(ok(Some(SITE), Some(SITE)).is_ok());
+    // The time-pinned read enforces it as well (it is the same function).
+    assert!(
+        s.resolve_totp(
+            NAME,
+            Some(BOT),
+            59,
+            Some("https://evil.example"),
+            Some(SITE)
+        )
+        .is_err()
+    );
+}
+
+/// Finding 4: every path without a web page refuses the reference by name.
+#[test]
+fn desktop_owner_grant_and_plain_read_paths_refuse_a_totp_reference_explicitly() {
+    let (_, s) = with_account();
+    s.set_totp(NAME, Some(BOT), &rfc_b32()).unwrap();
+    let reference = totp_ref();
+    let refused = |r: Result<(), FillError>, what: &str| match r {
+        Err(FillError::NotAllowed(m)) => {
+            assert!(m.contains("two-factor code"), "{what}: {m}");
+        }
+        other => panic!("{what}: expected an explicit NotAllowed, got {other:?}"),
+    };
+    // A program that IS on the account's program list still gets nothing.
+    s.upsert_with(
+        NAME,
+        FillSecretUpdate {
+            programs: Some(&["win:sha256:abc".to_owned()]),
+            ..FillSecretUpdate::default()
+        },
+    )
+    .unwrap();
+    refused(
+        s.check_desktop(&reference, Some("win:sha256:abc"), Some(BOT)),
+        "desktop",
+    );
+    refused(
+        s.resolve_value_for_owner(&reference).map(|_| ()),
+        "owner reveal",
+    );
+    refused(
+        s.resolve_value_for(&reference, Some(BOT)).map(|_| ()),
+        "plain read",
+    );
+    refused(
+        s.grant_create(&reference, SITE).map(|_| ()),
+        "standing grant",
+    );
+    // The password of the same account is untouched by all of this.
+    assert!(s.resolve_value_for(NAME, Some(BOT)).is_ok());
+    assert!(
+        s.check_desktop(NAME, Some("win:sha256:abc"), Some(BOT))
+            .is_ok()
+    );
+}
+
+fn seen_by_hook(setup: impl Fn(&FillSecrets)) -> Vec<String> {
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = Arc::clone(&seen);
+    let s = FillSecrets::in_memory(Arc::new(MemoryStore::new()))
+        .with_value_hook(Arc::new(move |v| sink.lock().push(v.to_owned())));
+    s.register_account(&account(NAME)).unwrap();
+    setup(&s);
+    let out = seen.lock().clone();
+    out
+}
+
+fn grouped(text: &str, size: usize, sep: &str) -> String {
+    text.as_bytes()
+        .chunks(size)
+        .map(|c| std::str::from_utf8(c).unwrap())
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
+/// Finding 2: the redactor learns the key in every layout a page or a person gives it.
+#[test]
+fn the_redactor_learns_every_spelling_of_the_key() {
+    let b32 = rfc_b32();
+    let uri = format!("otpauth://totp/Example:bot?secret={b32}&issuer=Example");
+    let seen = seen_by_hook(|s| s.set_totp(NAME, Some(BOT), &uri).unwrap());
+    let mut red = crate::Redactor::new();
+    for v in &seen {
+        red.add_secret(v);
+    }
+    let spaced4 = grouped(&b32, 4, " ");
+    let dashed4 = grouped(&b32, 4, "-");
+    let padded = format!("{b32}{}", "=".repeat((8 - b32.len() % 8) % 8));
+    let spellings = [
+        b32.clone(),
+        b32.to_ascii_lowercase(),
+        padded.clone(),
+        padded.to_ascii_lowercase(),
+        spaced4.clone(),
+        spaced4.to_ascii_lowercase(),
+        dashed4.clone(),
+        dashed4.to_ascii_lowercase(),
+        grouped(&b32, 5, " "),
+        grouped(&b32, 8, "-"),
+        uri.clone(),
+    ];
+    for spelling in &spellings {
+        let page = format!("Scan or type: {spelling} then press Next");
+        let out = red.redact(&page);
+        assert!(
+            !out.to_ascii_lowercase()
+                .contains(&b32[..8].to_ascii_lowercase()),
+            "not masked: {spelling} -> {out}"
+        );
+    }
+    // A plain base32 setup text is registered raw too (with its own spacing).
+    let raw = "gezd gnbv gy3t qojq gezd gnbv gy3t qojq";
+    let seen = seen_by_hook(|s| s.set_totp(NAME, Some(BOT), raw).unwrap());
+    assert!(seen.iter().any(|v| v == raw), "{seen:?}");
+    // And the store-wide list the production redactor is built from carries them too.
+    let (_, s) = with_account();
+    s.set_totp(NAME, Some(BOT), &uri).unwrap();
+    let all = s.values_for_redaction().unwrap();
+    assert!(all.contains(&spaced4) && all.contains(&dashed4.to_ascii_lowercase()));
+}
+
+#[test]
+fn a_setup_is_found_in_the_text_of_a_page_element() {
+    let b32 = rfc_b32();
+    let want = TotpSpec::parse(&b32).unwrap().canonical();
+    for text in [
+        b32.clone(),
+        format!("  {b32}\n"),
+        format!("Setup key: {}", b32.to_ascii_lowercase()),
+        format!("otpauth://totp/x?secret={b32}"),
+        format!("Cannot scan? Use <otpauth://totp/x?secret={b32}> instead"),
+    ] {
+        assert_eq!(
+            TotpSpec::find_in_text(&text).unwrap().canonical(),
+            want,
+            "{text}"
+        );
+    }
+    for junk in [
+        "",
+        "Enter the 6-digit code",
+        "otpauth://hotp/x?secret=ABC",
+        "!!!",
+    ] {
+        let e = TotpSpec::find_in_text(junk).unwrap_err().to_string();
+        assert!(junk.is_empty() || !e.contains(junk), "{e}");
+    }
+}
+
+/// Finding 1, the page side: a key on the page is masked in what the model reads.
+#[test]
+fn page_text_hides_a_setup_key_before_anything_is_saved() {
+    use crate::{SEED_MASK, mask_setup_secrets};
+    let b32 = rfc_b32();
+    let uri = format!("otpauth://totp/Example:bot?secret={b32}&issuer=Example");
+    for shown in [
+        uri.clone(),
+        b32.clone(),
+        b32.to_ascii_lowercase(),
+        grouped(&b32, 4, " "),
+        grouped(&b32, 4, "-"),
+        format!("{b32}======"),
+    ] {
+        let page = format!("textbox \"Setup key\": \"{shown}\" link \"Continue\"");
+        let out = mask_setup_secrets(&page);
+        assert!(out.contains(SEED_MASK), "{shown} -> {out}");
+        assert!(
+            !out.to_ascii_lowercase()
+                .contains(&b32[..12].to_ascii_lowercase()),
+            "{shown} -> {out}"
+        );
+        assert!(out.contains("link \"Continue\""), "{out}");
+    }
+    // Ordinary page text stays readable.
+    for text in [
+        "Create your account in under 3 minutes and then confirm your e-mail address",
+        "ver 234 for all the new items in the list",
+        "heading \"Two-factor authentication\" button \"Enable 2FA\"",
+        "a very long identifier: internationalization-and-localization",
+        "Use the 6-digit code from your app, e.g. 123456",
+        "e1 2 3 4 5 6 7 8 9",
+    ] {
+        assert_eq!(mask_setup_secrets(text), text);
+    }
 }

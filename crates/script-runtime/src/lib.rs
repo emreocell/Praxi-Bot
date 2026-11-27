@@ -21,9 +21,11 @@
 //! size.
 //!
 //! * The **compute budget** ([`Limits::cpu_timeout`]) counts only the time the
-//!   interpreter is running the script's own code. It is paused while the script
-//!   awaits a tool call, so a script that waits on a slow browser page or web
-//!   request is not killed for it, while a busy loop still is.
+//!   interpreter is running the script's own code. It is paused only while the
+//!   script is itself awaiting (no JavaScript is runnable and the host is
+//!   working), so a script that waits on a slow browser page or web request is
+//!   not killed for it, while a busy loop still is: also one that starts tool
+//!   calls without awaiting them, which keeps computing while they are pending.
 //! * The **total cap** ([`Limits::total_timeout`]) is the wall clock of the whole
 //!   run, tool waits included. It is always bounded (never above
 //!   [`MAX_TOTAL_TIMEOUT`]), so a tool that never answers cannot hold a run for
@@ -207,8 +209,16 @@ pub enum ScriptError {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ScriptRuntime;
 
-/// The compute clock: runs while the interpreter executes script code, stops
-/// while at least one tool call is awaited.
+/// The compute clock. It runs exactly while the script's own code can execute:
+/// during a poll of the script's future (the interpreter runs JavaScript and the
+/// promise jobs inside such a poll), except while the host is working inside a
+/// tool call's own poll. It is stopped while the script is awaiting, that is,
+/// between polls, when no JavaScript is runnable and the host (a page load, a
+/// download, a person approving a call) is the one working.
+///
+/// The clock does NOT look at how many tool calls are pending: a script that
+/// starts a call and goes on (`while (true) { tools.call(...) }`, never
+/// awaited) keeps computing, and that time counts.
 struct CpuClock {
     state: Mutex<ClockState>,
 }
@@ -216,16 +226,35 @@ struct CpuClock {
 struct ClockState {
     used: Duration,
     running_since: Option<Instant>,
-    waiting: usize,
+    /// Inside a poll of the script's future.
+    script_polling: bool,
+    /// Inside a poll of a host tool call's future (nested in a script poll).
+    host_polling: usize,
+}
+
+impl ClockState {
+    /// Start or stop the running interval to match the flags.
+    fn sync(&mut self) {
+        let run = self.script_polling && self.host_polling == 0;
+        match (run, self.running_since) {
+            (true, None) => self.running_since = Some(Instant::now()),
+            (false, Some(since)) => {
+                self.used += since.elapsed();
+                self.running_since = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl CpuClock {
-    fn started() -> Arc<Self> {
+    fn new() -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(ClockState {
                 used: Duration::ZERO,
-                running_since: Some(Instant::now()),
-                waiting: 0,
+                running_since: None,
+                script_polling: false,
+                host_polling: 0,
             }),
         })
     }
@@ -236,28 +265,47 @@ impl CpuClock {
         st.used + st.running_since.map_or(Duration::ZERO, |t| t.elapsed())
     }
 
-    /// Stop the clock until the returned guard is dropped. Overlapping waits
-    /// (a `Promise.all` of calls) keep it stopped until the last one ends.
-    fn wait(self: &Arc<Self>) -> WaitGuard {
+    /// The clock runs until the returned guard is dropped: the script's future
+    /// is being polled.
+    fn script_poll(&self) -> ClockGuard<'_> {
         let mut st = self.state.lock();
-        st.waiting += 1;
-        if let Some(since) = st.running_since.take() {
-            st.used += since.elapsed();
-        }
+        st.script_polling = true;
+        st.sync();
         drop(st);
-        WaitGuard(Arc::clone(self))
+        ClockGuard {
+            clock: self,
+            host: false,
+        }
+    }
+
+    /// The clock stands still until the returned guard is dropped: a host tool
+    /// call's future is being polled.
+    fn host_poll(&self) -> ClockGuard<'_> {
+        let mut st = self.state.lock();
+        st.host_polling += 1;
+        st.sync();
+        drop(st);
+        ClockGuard {
+            clock: self,
+            host: true,
+        }
     }
 }
 
-struct WaitGuard(Arc<CpuClock>);
+struct ClockGuard<'a> {
+    clock: &'a CpuClock,
+    host: bool,
+}
 
-impl Drop for WaitGuard {
+impl Drop for ClockGuard<'_> {
     fn drop(&mut self) {
-        let mut st = self.0.state.lock();
-        st.waiting = st.waiting.saturating_sub(1);
-        if st.waiting == 0 && st.running_since.is_none() {
-            st.running_since = Some(Instant::now());
+        let mut st = self.clock.state.lock();
+        if self.host {
+            st.host_polling = st.host_polling.saturating_sub(1);
+        } else {
+            st.script_polling = false;
         }
+        st.sync();
     }
 }
 
@@ -343,11 +391,17 @@ impl RunState {
             Err(e) => return json!({"err": format!("invalid tool input: {e}")}).to_string(),
         };
         let started = Instant::now();
-        // The compute clock stands still while the host works (a page load, a
-        // download, a person approving the call).
+        // The compute clock stands still only while the host itself is working
+        // on the call (its polls): a page load, a download, a person approving
+        // it. It does not stand still because a call is pending: the script may
+        // be computing meanwhile, and that counts.
         let outcome = {
-            let _waiting = self.clock.wait();
-            self.host.call_tool(&name, input.clone()).await
+            let mut call = Box::pin(self.host.call_tool(&name, input.clone()));
+            std::future::poll_fn(|cx| {
+                let _host = self.clock.host_poll();
+                call.as_mut().poll(cx)
+            })
+            .await
         };
         let duration = started.elapsed();
         let (reply, output, error) = match outcome {
@@ -389,11 +443,22 @@ const SHIM: &str = r"(function (nativeCall, nativeLog) {
   });
   Object.defineProperty(globalThis, 'tools', {
     value: Object.freeze({
-      call: async (name, input) => {
-        const raw = await nativeCall(String(name), JSON.stringify(input === undefined ? null : input));
-        const reply = JSON.parse(raw);
-        if (reply.err !== undefined) throw new Error(reply.err);
-        return reply.ok;
+      // Not an `async` function on purpose: the engine's interrupt (the compute and
+      // total limits) raised inside an async function is turned into a rejected
+      // promise, which a loop of un-awaited calls would never look at. Raised in this
+      // plain function it unwinds the caller, which is what stops the loop.
+      call: (name, input) => {
+        let pending;
+        try {
+          pending = nativeCall(String(name), JSON.stringify(input === undefined ? null : input));
+        } catch (e) {
+          return Promise.reject(e);
+        }
+        return Promise.resolve(pending).then((raw) => {
+          const reply = JSON.parse(raw);
+          if (reply.err !== undefined) throw new Error(reply.err);
+          return reply.ok;
+        });
       },
     }),
     configurable: true, writable: true,
@@ -432,7 +497,7 @@ impl ScriptRuntime {
         let started = Instant::now();
         let total = limits.total_timeout.min(MAX_TOTAL_TIMEOUT);
         let deadline = started + total;
-        let clock = CpuClock::started();
+        let clock = CpuClock::new();
         let total_hit = Arc::new(AtomicBool::new(false));
         let cpu_hit = Arc::new(AtomicBool::new(false));
 
@@ -480,6 +545,16 @@ impl ScriptRuntime {
             let state = Arc::clone(&state);
             ctx.async_with(async move |ctx| execute(&ctx, &source, &state).await)
         };
+        // The compute clock runs while this future is polled (JavaScript runs
+        // inside the poll) and stops between polls (the script is awaiting).
+        let mut work = Box::pin(work);
+        let work = std::future::poll_fn({
+            let clock = Arc::clone(&state.clock);
+            move |cx| {
+                let _running = clock.script_poll();
+                work.as_mut().poll(cx)
+            }
+        });
 
         let outcome = tokio::select! {
             biased;

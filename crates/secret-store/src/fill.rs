@@ -652,6 +652,20 @@ pub fn totp_reference(secret: &str) -> Option<&str> {
         .map(|_| &secret[TOTP_REF_PREFIX.len()..])
 }
 
+/// Refuse a `totp:<name>` reference where no web page is involved (a desktop
+/// program, the owner's reveal, a standing grant, the plain read path): a code
+/// is made only by [`FillSecrets::resolve_totp_for_page`], for a field of the
+/// account's own site. Explicit, so none of these paths relies on the `:` in
+/// the reference failing name validation.
+fn refuse_totp_reference(name: &str) -> Result<(), FillError> {
+    if totp_reference(name).is_some() {
+        return Err(FillError::NotAllowed(
+            "a two-factor code is typed only into a field of the account's own web page; it is never given to a desktop program, shown, granted for good or read here".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn unix_secs() -> u64 {
     now_ms() / 1000
 }
@@ -1238,7 +1252,9 @@ impl FillSecrets {
     /// backend failure. Nothing is changed on failure.
     pub fn set_totp(&self, name: &str, bot: Option<&str>, setup: &str) -> Result<(), FillError> {
         validate_fill_name(name)?;
-        let spec = TotpSpec::parse(setup)?;
+        // Strict first (a bare key or an address), then the text of a page element
+        // (a labelled key): the caller read it host-side, it never came from the model.
+        let spec = TotpSpec::parse(setup).or_else(|_| TotpSpec::find_in_text(setup))?;
         let mut meta = self.meta.lock();
         let entry = meta
             .secrets
@@ -1253,9 +1269,10 @@ impl FillSecrets {
             .map_err(|_| unavailable("the secret store cannot be read"))?;
         let canonical = spec.canonical();
         // The key goes to the redactor before it is stored: from here on no
-        // output of any tool can carry it (nor its base32 form).
-        self.registered(&canonical);
-        self.registered(&spec.key_base32());
+        // output of any tool can carry it, in any spelling a page or a person
+        // can give it (spaced, dashed, either case, padded or not, the address
+        // as it was read).
+        self.register_seed(setup, &spec);
         self.store
             .set(&key, &canonical)
             .map_err(|_| unavailable("the secret store rejected the write"))?;
@@ -1276,6 +1293,43 @@ impl FillSecrets {
             }
             return Err(e);
         }
+        Ok(())
+    }
+
+    /// Teach the redactor every spelling of a setup key, and the text it was read from.
+    fn register_seed(&self, raw: &str, spec: &TotpSpec) {
+        self.registered(raw);
+        self.registered(raw.trim());
+        for spelling in spec.seed_spellings() {
+            self.registered(&spelling);
+        }
+    }
+
+    /// Whether the setup key of account `name` may be read off the page whose frame
+    /// and top origin are given (as the browser reports them): the account is this
+    /// bot's own, bot-made, and BOTH origins are the account's own site. Checked
+    /// before the element is read and again at the read.
+    ///
+    /// # Errors
+    /// Unknown name, another bot's or an owner's secret, or an origin that is not
+    /// the account's own.
+    pub fn check_totp_save_page(
+        &self,
+        name: &str,
+        bot: Option<&str>,
+        frame_origin: Option<&str>,
+        top_origin: Option<&str>,
+    ) -> Result<(), FillError> {
+        validate_fill_name(name)?;
+        let meta = self.meta.lock();
+        let e = meta
+            .secrets
+            .get(name)
+            .ok_or_else(|| FillError::Unknown(name.to_owned()))?;
+        Self::scope_check(name, e, bot)?;
+        Self::require_bot_made(name, e)?;
+        Self::check_origin(name, e, frame_origin)?;
+        Self::check_origin(name, e, top_origin)?;
         Ok(())
     }
 
@@ -1304,13 +1358,63 @@ impl FillSecrets {
         }
     }
 
+    /// Whether `origin` (as the browser reported it) is on the entry's allow-list.
+    ///
+    /// # Errors
+    /// [`FillError::NotAllowed`] for no verifiable origin or one that is not listed.
+    fn check_origin(shown: &str, e: &Entry, origin: Option<&str>) -> Result<String, FillError> {
+        let origin = origin
+            .and_then(|o| canonical_origin(o).ok())
+            .ok_or_else(|| {
+                FillError::NotAllowed(format!(
+                    "refused: the page frame that holds this field has no verifiable web origin, so `{shown}` is not typed there"
+                ))
+            })?;
+        if e.origins.contains(&origin) {
+            Ok(origin)
+        } else {
+            Err(FillError::NotAllowed(format!(
+                "refused: `{shown}` is not allowed on {origin}; only the owner can add an origin to it"
+            )))
+        }
+    }
+
+    /// The current two-factor code of account `name` for a field of a web page:
+    /// `frame_origin` is the origin of the frame that holds the field and
+    /// `top_origin` that of the page, as the browser reports them. The origin
+    /// binding is enforced HERE, in the read itself, together with the bot
+    /// scope and the bot-made flag; [`Self::check_browser_in`] stays as the
+    /// pre-check that refuses before a card is shown.
+    ///
+    /// # Errors
+    /// Unknown name, another bot's or an owner's secret, no key saved, an origin
+    /// that is not the account's own (either of the two), or a backend failure.
+    pub fn resolve_totp_for_page(
+        &self,
+        name: &str,
+        bot: Option<&str>,
+        frame_origin: Option<&str>,
+        top_origin: Option<&str>,
+    ) -> Result<SecretValue, FillError> {
+        let base = totp_reference(name).unwrap_or(name);
+        self.resolve_totp(base, bot, unix_secs(), frame_origin, top_origin)
+    }
+
     /// The current two-factor code of account `name` at `now` (seconds since
     /// the epoch). The only read path to the key; the key never leaves here.
+    ///
+    /// The page the code is for is part of the call: `frame` is the origin of
+    /// the frame that holds the field, `top` the origin of its page, both as
+    /// the browser reports them. Both must be the account's own origin (see
+    /// [`Self::check_origin`]); no caller can get a code for a page this does
+    /// not accept, whatever it checked before.
     fn resolve_totp(
         &self,
         name: &str,
         bot: Option<&str>,
         now: u64,
+        frame: Option<&str>,
+        top: Option<&str>,
     ) -> Result<SecretValue, FillError> {
         validate_fill_name(name)?;
         match self.meta.lock().secrets.get(name) {
@@ -1318,6 +1422,8 @@ impl FillSecrets {
             Some(e) => {
                 Self::scope_check(name, e, bot)?;
                 Self::totp_ready(name, e)?;
+                Self::check_origin(&format!("{TOTP_REF_PREFIX}{name}"), e, frame)?;
+                Self::check_origin(&format!("{TOTP_REF_PREFIX}{name}"), e, top)?;
             }
         }
         let stored = self
@@ -1526,6 +1632,7 @@ impl FillSecrets {
     /// # Errors
     /// Unknown secret, origin not on its allow-list, a limit, or a write failure.
     pub fn grant_create(&self, secret: &str, origin: &str) -> Result<FillGrant, FillError> {
+        refuse_totp_reference(secret)?;
         validate_fill_name(secret)?;
         let origin = canonical_origin(origin)?;
         let mut meta = self.meta.lock();
@@ -1654,18 +1761,7 @@ impl FillSecrets {
         if is_totp {
             Self::totp_ready(base, entry)?;
         }
-        let origin = live_origin
-            .and_then(|o| canonical_origin(o).ok())
-            .ok_or_else(|| {
-                FillError::NotAllowed(format!(
-                    "refused: the page frame that holds this field has no verifiable web origin, so `{name}` is not typed there"
-                ))
-            })?;
-        if !entry.origins.contains(&origin) {
-            return Err(FillError::NotAllowed(format!(
-                "refused: `{name}` is not allowed on {origin}; only the owner can add an origin to it"
-            )));
-        }
+        let origin = Self::check_origin(name, entry, live_origin)?;
         if is_totp || entry.ask_before_use {
             return Ok(None);
         }
@@ -1689,6 +1785,7 @@ impl FillSecrets {
         program: Option<&str>,
         bot: Option<&str>,
     ) -> Result<(), FillError> {
+        refuse_totp_reference(name)?;
         validate_fill_name(name)?;
         let meta = self.meta.lock();
         let entry = meta
@@ -1722,9 +1819,9 @@ impl FillSecrets {
         name: &str,
         bot: Option<&str>,
     ) -> Result<SecretValue, FillError> {
-        if let Some(base) = totp_reference(name) {
-            return self.resolve_totp(base, bot, unix_secs());
-        }
+        // A code is made only for a field of a web page, with the page's origins
+        // in the call: [`Self::resolve_totp_for_page`]. This path has none.
+        refuse_totp_reference(name)?;
         validate_fill_name(name)?;
         match self.meta.lock().secrets.get(name) {
             None => return Err(FillError::Unknown(name.to_owned())),
@@ -1745,6 +1842,7 @@ impl FillSecrets {
     /// # Errors
     /// Unknown name, no stored value, or a backend failure.
     pub fn resolve_value_for_owner(&self, name: &str) -> Result<SecretValue, FillError> {
+        refuse_totp_reference(name)?;
         validate_fill_name(name)?;
         if !self.meta.lock().secrets.contains_key(name) {
             return Err(FillError::Unknown(name.to_owned()));
@@ -1787,7 +1885,7 @@ impl FillSecrets {
                 && let Ok(spec) = TotpSpec::parse(v.expose())
             {
                 out.push(v.expose().to_owned());
-                out.push(spec.key_base32());
+                out.extend(spec.seed_spellings());
             }
         }
         Ok(out)

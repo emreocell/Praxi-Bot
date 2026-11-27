@@ -9,7 +9,7 @@ mod c812;
 mod c821;
 mod composio_approvals;
 mod external_agent;
-mod fill_secret;
+pub(crate) mod fill_secret;
 mod grounding;
 mod loop_cycles;
 mod offline;

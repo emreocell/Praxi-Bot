@@ -42,6 +42,8 @@ pub mod script;
 pub mod secret_request;
 pub mod selfcheck;
 pub mod shell;
+#[cfg(test)]
+mod totp_save_tests;
 mod util;
 pub mod wait;
 pub mod workspace;
@@ -66,14 +68,16 @@ use desktop_api::DesktopBackend;
 use tool_registry::{Tool, ToolRegistry};
 
 pub use account_register::{
-    ACCOUNT_DISCARD, ACCOUNT_LIST, ACCOUNT_REGISTER, ACCOUNT_TOTP_SAVE, AccountRegisterConfig,
-    account_discard_tool, account_list_tool, account_register_tool, account_totp_save_tool,
+    ACCOUNT_DISCARD, ACCOUNT_LIST, ACCOUNT_REGISTER, AccountRegisterConfig, account_discard_tool,
+    account_list_tool, account_register_tool,
 };
 pub use bots::{
     BOT_PRESETS, BOT_TOOL_NAMES, BotCaller, BotChange, BotHost, BotPreview, BotRequest, BotView,
     FieldChange,
 };
-pub use browser::{BrowserDriver, BrowserSettings, CdpDriver, Wait, act_can_egress, act_summary};
+pub use browser::{
+    ACCOUNT_TOTP_SAVE, BrowserDriver, BrowserSettings, CdpDriver, Wait, act_can_egress, act_summary,
+};
 pub use checkpoint::{
     ChangeKind, Checkpoint, CheckpointEntry, CheckpointStore, DiffOmittedReason, FileChange,
     MAX_DIFF_FILE_BYTES, MAX_DIFF_RUN_BYTES, RestoreAction, RestorePreviewEntry, RestoreReport,
@@ -354,9 +358,6 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         ));
         all.push(account_register::account_list_tool(Arc::clone(secrets)));
         all.push(account_register::account_discard_tool(Arc::clone(secrets)));
-        all.push(account_register::account_totp_save_tool(Arc::clone(
-            secrets,
-        )));
         if cfg.secret_requests {
             all.push(secret_request::secret_request_tool(Arc::clone(secrets)));
         }

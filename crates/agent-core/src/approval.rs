@@ -530,6 +530,38 @@ impl Shared {
                 || ctx.initiator == InitiatorKind::ExternalSchedule))
     }
 
+    /// A call that keeps or types the two-factor key of the bot's own account (`account_totp_save`,
+    /// or `browser_fill` with a `totp:<name>` secret) on a bot at the Full level, in a run the
+    /// owner's Full level serves (their own, a schedule of theirs, an unattended session of their
+    /// mission), never a helper bot's. A pure function of daemon facts (the bot's level, the run's
+    /// recorded initiator, the call's own name and arguments).
+    ///
+    /// It waives only the always-ask test. A deny, the money floor, the owner's own site / app
+    /// rules and an explicit `Ask` the owner wrote for the category on this bot all still decide,
+    /// and the tools themselves refuse an account that is not this bot's own.
+    fn full_totp_waives(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        input: &Value,
+        req: &ActionRequest,
+    ) -> bool {
+        let totp_call = name == builtin_tools::ACCOUNT_TOTP_SAVE
+            || (name == "browser_fill"
+                && input
+                    .get("secret")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| secret_store::totp_reference(s).is_some()));
+        totp_call
+            && ctx.profile.permissions.mode() == AutonomyMode::Full
+            && ctx.delegation().is_none()
+            && !crate::shared::is_external_initiator(ctx.initiator)
+            && (self.full_lane_run(ctx)
+                || self.full_owner_started(ctx)
+                || self.mission_full_started(ctx))
+            && !Self::bot_asks_explicitly(ctx, req)
+    }
+
     /// The bot's own policy resolves this call, or this run's initiator, to something other
     /// than a plain allow: an `Ask` the owner set for the category on a bot at the Full preset.
     /// Only a category the bot's policy names counts; a bot with no policy of its own inherits
@@ -761,13 +793,19 @@ impl Shared {
         // decided below before it is looked at.
         let run_tool_covered = self.run_tool_covers(ctx, name, input);
         let must_ask = must_ask && !control_covered && !remembered && !run_tool_covered;
+        // The two-factor key and codes of the bot's OWN accounts: on the owner's Full level
+        // nothing asks except money, so the always-ask test below is skipped for exactly these
+        // two calls (the tools still refuse every account that is not this bot's own, and the
+        // browser re-checks the account's site at the read). Every other level keeps the card.
+        let own_totp_on_full =
+            category != PermissionCategory::Money && self.full_totp_waives(ctx, name, input, &req);
         // A tool that delegates future authority is confirmed every time:
         // an allow becomes a plain ask, and no grant waives it (a deny stays).
         // The same holds for a call that types an owner-stored secret
         // ([`Tool::always_ask_for`]): the policy level, the Full preset, read
         // shortcuts, "this chat" / "always" grants and any run-scoped control
         // grant sit BELOW this early return, so none of them can waive it.
-        if self.must_ask(name, input)
+        if (self.must_ask(name, input) && !own_totp_on_full)
             || matches!(
                 ctx.initiator,
                 InitiatorKind::ExternalAgent | InitiatorKind::ExternalSchedule

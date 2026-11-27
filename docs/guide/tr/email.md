@@ -258,13 +258,13 @@ bot böyle bir blok almaz ve başka bir botun adresini asla görmez.
 
 Bir site, botun açtığı hesaba doğrulayıcı uygulama kurdurduğunda bir kurulum anahtarı gösterir: `otpauth://` adresi (QR kodunun arkasındaki metin) ya da base32 anahtar. Bot bu anahtarı hesabıyla birlikte saklayabilir ve güncel 6 haneli kodu kendisi yazabilir:
 
-1. `account_totp_save`: hesabın gizli adı (`account_list`'ten) ve anahtarla çağrılır. **Her kaydı sen onaylarsın.** Kart hesabı, siteyi ve kodun biçimini söyler, anahtarı asla göstermez.
-2. Site kod istediğinde `browser_fill` çağrılır; `secret` değeri `totp:<hesap adı>` olur. Uygulama güncel kodu hesaplar (RFC 6238; SHA-1, SHA-256 ve SHA-512, 6 ila 8 hane) ve alana yazar. **Her yazış sana sorulur**, parola yazmak gibi; parola için verdiğin kalıcı “her zaman izin ver” kodu kapsamaz.
+1. `account_totp_save`: hesabın gizli adı (`account_list`'ten) ve anahtarı gösteren sayfa öğesiyle (anlık görüntüden bir `ref` ya da bir CSS seçici) çağrılır. **Anahtarı uygulama sayfadan kendisi okur**: bot anahtarı ne yazar ne de kopyalar; sayfada görünen bir anahtar botun okuduğu metinde maskelenir. Kart hesabı, siteyi ve öğeyi söyler, anahtarı asla göstermez. **Tam** düzeyde, senin başlattığın bir çalışmada botun kendi hesapları için hiçbir şey sormaz (aşağıya bak); diğer düzeylerde her kaydı sen onaylarsın.
+2. Site kod istediğinde `browser_fill` çağrılır; `secret` değeri `totp:<hesap adı>` olur. Uygulama güncel kodu hesaplar (RFC 6238; SHA-1, SHA-256 ve SHA-512, 6 ila 8 hane) ve alana yazar. **Tam** düzeyde, senin başlattığın bir çalışmada kartsız yazılır; para harcamak dışında Tam'daki her şey gibi. Diğer düzeylerde **her yazış sana sorulur**, parola yazmak gibi; parola için verdiğin kalıcı “her zaman izin ver” kodu kapsamaz.
 
 Botun insafına bırakılmayan, kodda sağlanan güvenceler:
 
-- **Anahtar ve kodlar modele hiç ulaşmaz.** Anahtar kasada, paroladan ayrı tutulur; hiçbir yerde listelenmez, gösterilmez ya da geri verilmez. Kod uygulamadan doğrudan sayfadaki alana gider. İkisi de her sonuçta, günlükte ve sayfa metninde maskelenir.
-- **O bota ve o siteye bağlı.** Anahtarı yalnızca hesabı açan bot kaydedebilir ya da kullanabilir; kod yalnızca hesabın kendi sitesindeki bir alana yazılır (parolalarda olduğu gibi canlı çerçeve denetlenir). Masaüstü bir programa kod verilmez.
+- **Anahtar ve kodlar modele hiç ulaşmaz.** Anahtar kasada, paroladan ayrı tutulur; hiçbir yerde listelenmez, gösterilmez ya da geri verilmez. Kod uygulamadan doğrudan sayfadaki alana gider. İkisi de her sonuçta, günlükte ve sayfa metninde maskelenir; sitenin anahtarı hangi biçimde yazdığı fark etmez (boşluklu ya da tireli, büyük ya da küçük harf, `=` dolgulu ya da dolgusuz, ya da tüm `otpauth://` adresi).
+- **O bota ve o siteye bağlı.** Anahtarı yalnızca hesabı açan bot kaydedebilir ya da kullanabilir; kod yalnızca hesabın kendi sitesindeki bir alana yazılır: canlı çerçeve ve sayfa, kart gösterilmeden önce ve kodu üreten adımın içinde bir kez daha denetlenir; kodu başka hiçbir yoldan almak mümkün değildir. Masaüstü bir programa kod verilmez; kod hiçbir zaman gösterilmez ve kalıcı bir izinle kapsanmaz.
 - **Yalnızca botun kendi hesapları için.** Senin kendi gizli bilgilerin ve girişlerin için burada kod üretilmez; istenirse reddedilir.
 - Yeniden kaydetmek anahtarı değiştirir. Hesabı silmek ya da vazgeçmek anahtarını da siler.
 

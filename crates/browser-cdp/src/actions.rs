@@ -288,6 +288,36 @@ pub struct FieldTarget {
     pub sensitive: bool,
 }
 
+/// What `Page::read_value` reads: an element of the latest snapshot, or one found by a CSS
+/// selector in the top document.
+#[derive(Debug, Clone, Copy)]
+pub enum ReadTarget<'a> {
+    /// A ref (`e12`) issued by the latest snapshot; the element may sit in an embedded frame.
+    Ref(&'a str),
+    /// A CSS selector, resolved in the top document only (no frames, no shadow roots).
+    Selector(&'a str),
+}
+
+/// A value read from a page element, with where it came from. Holds a secret: never printed.
+pub struct ReadValue {
+    /// The element's value (an input) or its visible text.
+    pub value: String,
+    /// The element's accessible name (page-supplied text).
+    pub name: String,
+    /// The element's role.
+    pub role: String,
+    /// Origin of the frame that holds the element, as the browser reports it.
+    pub frame_origin: Option<String>,
+    /// Origin of the top-level document.
+    pub top_origin: Option<String>,
+}
+
+impl std::fmt::Debug for ReadValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ReadValue(<redacted>)")
+    }
+}
+
 /// An `http(s)` origin as Chrome reports it, or `None` for `null`, `://`,
 /// empty or any other scheme (an opaque origin matches nothing).
 fn web_origin(raw: Option<&str>) -> Option<String> {
@@ -711,6 +741,126 @@ impl Page {
             top_origin: self.top_origin().await,
             // Live check (as `focused_target`): the snapshot flag can be stale, and fails closed on error.
             sensitive: self.entry_is_sensitive(&e).await.unwrap_or(true),
+        })
+    }
+
+    /// Resolve a CSS selector in the top document to an element entry. The query runs in an
+    /// isolated world, so page scripts cannot patch `querySelector` to point elsewhere.
+    async fn locate_selector(&self, selector: &str) -> Result<RefEntry> {
+        if selector.trim().is_empty()
+            || selector.len() > 200
+            || selector.chars().any(char::is_control)
+        {
+            return Err(Error::Element(
+                "the selector is 1 to 200 printable characters".into(),
+            ));
+        }
+        let tree = self.cmd("Page.getFrameTree", json!({})).await?;
+        let frame_id = tree["frameTree"]["frame"]["id"]
+            .as_str()
+            .ok_or_else(|| Error::Element("the page has no top frame".into()))?
+            .to_owned();
+        let world = self
+            .cmd(
+                "Page.createIsolatedWorld",
+                json!({"frameId": frame_id, "worldName": "praxi-capture"}),
+            )
+            .await?;
+        let context_id = world["executionContextId"]
+            .as_i64()
+            .ok_or_else(|| Error::Element("could not look at the page".into()))?;
+        let found = self
+            .cmd(
+                "Runtime.evaluate",
+                json!({"expression": format!("document.querySelector({})", json!(selector)),
+                       "returnByValue": false, "contextId": context_id}),
+            )
+            .await?;
+        if found.get("exceptionDetails").is_some() {
+            return Err(Error::Element("the selector is not valid CSS".into()));
+        }
+        let object_id = found["result"]["objectId"]
+            .as_str()
+            .ok_or_else(|| Error::Element("no element on the page matches that selector".into()))?;
+        let node = self
+            .cmd("DOM.describeNode", json!({"objectId": object_id}))
+            .await?;
+        let backend_id = node["node"]["backendNodeId"]
+            .as_i64()
+            .ok_or_else(|| Error::Element("could not resolve the element".into()))?;
+        Ok(RefEntry {
+            session_id: None,
+            backend_id,
+            frame_id,
+            role: String::new(),
+            name: String::new(),
+            sensitive: false,
+        })
+    }
+
+    /// Read the value (an input's value, otherwise the visible text) of an element, for a
+    /// value the page shows that the model must not see (an API key after a sign-up). The
+    /// frame origin and the top-level origin are read from the browser and passed to `accept`
+    /// before the element is touched; a different document in between, or a navigation,
+    /// reads nothing. The element stays masked in later snapshots (and screenshots are
+    /// withheld) until the page navigates, like a typed secret. The value is never put into
+    /// an error.
+    ///
+    /// # Errors
+    /// An unknown ref, a selector that matches nothing, an origin `accept` refuses, a frame
+    /// that changed, or an element with no value.
+    pub async fn read_value<F>(&self, target: ReadTarget<'_>, accept: F) -> Result<ReadValue>
+    where
+        F: Fn(Option<String>, Option<String>) -> bool + Send + Sync,
+    {
+        let e = match target {
+            ReadTarget::Ref(r) => self.locate(r).await?,
+            ReadTarget::Selector(sel) => self.locate_selector(sel).await?,
+        };
+        let nav = self.shared.nav_gen.load(Ordering::SeqCst);
+        let first = self.frame_identity(&e).await?;
+        let top = self.top_origin().await;
+        if !accept(first.origin.clone(), top.clone()) {
+            return Err(Error::Element(
+                "refused: the page frame that holds this element is not a verifiable site that may keep the value; nothing was read"
+                    .into(),
+            ));
+        }
+        // Latched BEFORE the element is read: from here on no snapshot shows the value and
+        // no picture is taken until the page navigates, even when the read below fails or
+        // a snapshot runs at the same moment. Masked by backend id (a selector hit has no session).
+        self.shared
+            .latch_secret(nav, (e.session_id.clone(), e.backend_id));
+        let read = self
+            .call_on(
+                &e,
+                "function(){ if (!this.isConnected) return null; const t = this.tagName;                   if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return this.value;                   if (t === 'A' && /^otpauth:/i.test(this.href || '')) return this.href;                   return this.innerText || this.textContent || ''; }",
+                &[],
+            )
+            .await?;
+        let second = self.frame_identity(&e).await?;
+        // The top page is read again too: the value stays bound to the origin it was read on.
+        let top_after = self.top_origin().await;
+        if second != first
+            || top_after != top
+            || self.shared.nav_gen.load(Ordering::SeqCst) != nav
+            || !accept(second.origin.clone(), top_after)
+        {
+            return Err(Error::Element(
+                "the page changed while the value was read; nothing was kept".into(),
+            ));
+        }
+        let Some(value) = read.as_str().map(|v| v.trim().to_owned()) else {
+            return Err(Error::Element(
+                "the element is no longer on the page; nothing was read".into(),
+            ));
+        };
+        Ok(ReadValue {
+            value,
+            name: e.name.clone(),
+            role: e.role.clone(),
+            frame_origin: first.origin,
+            top_origin: top,
         })
     }
 

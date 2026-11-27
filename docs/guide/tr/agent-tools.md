@@ -16,7 +16,7 @@ Notlar hafızadan farklıdır: hafıza, botun sana ait olduğunu söylediğin bi
 
 Bir çalışmayı iki saat sınırlar; böylece bekleyen bir betik beklediği için cezalandırılmaz:
 
-* **Hesaplama bütçesi: 10 saniye.** Yalnızca betiğin kendi işi sayılır (döngüler, ayrıştırma, süzme). Betik bir araç çağrısını (sayfa yükleme, indirme ya da onay gibi) beklerken saat durur; boşa dönen bir döngü yine 10 saniyede durdurulur. Bot `timeout` ile daha düşük bir bütçe isteyebilir, daha yükseğini isteyemez.
+* **Hesaplama bütçesi: 10 saniye.** Yalnızca betiğin kendi işi sayılır (döngüler, ayrıştırma, süzme). Saat yalnızca betiğin kendisi beklerken durur (beklediği bir sayfa yükleme, indirme ya da onay); boşa dönen bir döngü, araç çağrılarını beklemeden başlatan bir döngü dahil, yine 10 saniyede durdurulur. Bot `timeout` ile daha düşük bir bütçe isteyebilir, daha yükseğini isteyemez.
 * **Toplam üst sınır: 10 dakika**, bekleme dahil. Her zaman sınırlıdır ve hiçbir ayar onu 30 dakikanın üstüne çıkaramaz; yani hiç yanıt vermeyen bir araç bir çalışmayı sonsuza kadar tutamaz.
 
 Hata, hangi sınıra takıldığını söyler. Diğer sınırlar aynıdır: 50 araç çağrısı, 32 MB bellek, 64 KB sonuç ve günlük.

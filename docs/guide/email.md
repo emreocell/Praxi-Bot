@@ -228,13 +228,13 @@ For "sign up to these sites" the bot uses:
 
 When a site makes a bot-made account set up an authenticator app, it shows a setup key: an `otpauth://` address (the text behind the QR code) or a base32 key. The bot can keep that key with the account and type the current 6-digit code itself:
 
-1. `account_totp_save` with the account's secret name (from `account_list`) and the key. **You approve every save.** The card names the account, the site and the code shape, never the key.
-2. When the site asks for a code, `browser_fill` with `secret` set to `totp:<account name>`. The app works out the current code (RFC 6238; SHA-1, SHA-256 and SHA-512, 6 to 8 digits) and types it into the field. **Every typing asks you**, like a password fill, and a standing "always allow" for the password does not cover the code.
+1. `account_totp_save` with the account's secret name (from `account_list`) and the element of the page that shows the key (a `ref` from the snapshot, or a CSS selector). **The app reads the key off the page itself**: the bot never types or copies it, and a key shown on a page is masked in what the bot reads. The card names the account, the site and the element, never the key. On the **Full** level, in a run you started, nothing asks for the bot's own accounts (below); on every other level you approve each save.
+2. When the site asks for a code, `browser_fill` with `secret` set to `totp:<account name>`. The app works out the current code (RFC 6238; SHA-1, SHA-256 and SHA-512, 6 to 8 digits) and types it into the field. On the **Full** level, in a run you started, it types without a card, like everything else on Full except spending money. On every other level **every typing asks you**, like a password fill, and a standing "always allow" for the password does not cover the code.
 
 What is guaranteed in code, not left to the bot:
 
-- **The key and the codes never reach the model.** The key is kept in the vault, apart from the password, and is never listed, revealed or returned. The code goes straight from the app into the page field. Both are masked in every result, log and page text.
-- **Bound to that bot and that site.** Only the bot that registered the account can save or use its key, and a code is typed only into a field on the account's own site (the live frame is checked, as for passwords). A desktop program never receives a code.
+- **The key and the codes never reach the model.** The key is kept in the vault, apart from the password, and is never listed, revealed or returned. The code goes straight from the app into the page field. Both are masked in every result, log and page text, in every way a site writes the key (with spaces or dashes, in either case, with or without `=` padding, or as the whole `otpauth://` address).
+- **Bound to that bot and that site.** Only the bot that registered the account can save or use its key, and a code is typed only into a field on the account's own site: the live frame and the page are checked before the card and again inside the step that makes the code, so no other way of asking gets one. A desktop program never receives a code, and a code is never revealed or covered by a standing grant.
 - **Only for the bot's own accounts.** Your own secrets and logins never get a code here. Asking for one is refused.
 - Saving again replaces the key. Discarding or deleting the account deletes its key too.
 

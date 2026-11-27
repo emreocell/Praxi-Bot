@@ -19,7 +19,7 @@ const GITHUB: &str = "https://github.com";
 
 /// A scripted browser: knows where each ref lives, remembers what reached the page.
 #[derive(Default)]
-struct Page {
+pub(crate) struct Page {
     targets: Mutex<HashMap<String, FieldTarget>>,
     typed_secrets: Mutex<Vec<String>>,
     typed_text: Mutex<Vec<String>>,

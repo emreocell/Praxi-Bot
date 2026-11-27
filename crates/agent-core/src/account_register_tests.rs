@@ -84,9 +84,18 @@ async fn account_register_asks_after_untrusted_reads_and_in_webhook_runs() {
     lp.sh
         .tools
         .register(builtin_tools::account_discard_tool(secrets()));
-    lp.sh
-        .tools
-        .register(builtin_tools::account_totp_save_tool(secrets()));
+    // `account_totp_save` is a browser tool now (the host reads the key off the page).
+    let dir = tempfile::tempdir().unwrap();
+    for t in builtin_tools::browser::tools_with_secrets(
+        Arc::new(crate::tests::fill_secret::Page::default()),
+        dir.path(),
+        None,
+        Some(secrets()),
+    ) {
+        if t.spec().name == builtin_tools::ACCOUNT_TOTP_SAVE {
+            lp.sh.tools.register(t);
+        }
+    }
     let ctx_for = |kind: String, untrusted: bool| {
         let run = lp
             .rt
@@ -126,7 +135,7 @@ async fn account_register_asks_after_untrusted_reads_and_in_webhook_runs() {
             "account_totp_save",
             Effect::Write,
             PermissionCategory::Meta,
-            &json!({"name": "login/x", "setup": "JBSWY3DPEHPK3PXP"}),
+            &json!({"name": "login/x", "ref": "e9"}),
         );
         assert!(d.is_ask(), "totp save, {label}: {d:?}");
     }
@@ -216,4 +225,74 @@ async fn the_generated_password_appears_in_no_result_event_row_or_log() {
     );
     assert!(!haystack.contains(&pw), "the password leaked");
     assert!(haystack.contains("example.com"), "the scan saw the run");
+}
+
+/// On the Full level the bot's own two-factor save and code fill need no card, but only in the
+/// owner's own runs: a webhook run, a run with no owner message and a helper bot's run keep it
+/// (and so does a Full-level bot whose calls are not about a `totp:` code).
+#[tokio::test]
+async fn the_full_level_waives_the_totp_card_for_the_owners_runs_only() {
+    let env = setup();
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &Fake::new(vec![]),
+        &[],
+        profile(
+            "[permissions]
+preset = \"full\"
+",
+        ),
+        cfg(Policy::full()),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    for t in builtin_tools::browser::tools_with_secrets(
+        Arc::new(crate::tests::fill_secret::Page::default()),
+        dir.path(),
+        None,
+        Some(secrets()),
+    ) {
+        if matches!(
+            t.spec().name.as_str(),
+            builtin_tools::ACCOUNT_TOTP_SAVE | "browser_fill"
+        ) {
+            lp.sh.tools.register(t);
+        }
+    }
+    let ctx_for = |kind: String| {
+        let run = lp
+            .rt
+            .create_run(env.user, env.bot, Some(env.chat), &kind)
+            .unwrap();
+        let row = env.storage.get_run(run).unwrap().unwrap();
+        lp.sh.ctx(&row).unwrap()
+    };
+    let save = json!({"name": "login/x", "ref": "e9"});
+    let code = json!({"ref": "e5", "secret": "totp:login/x"});
+    let stored = json!({"ref": "e5", "secret": "login/x"});
+    let decide = |ctx: &crate::shared::RunCtx, name: &str, input: &Value| {
+        let (effect, category) = if name == "browser_fill" {
+            (Effect::Write, PermissionCategory::Browser)
+        } else {
+            (Effect::Write, PermissionCategory::Meta)
+        };
+        lp.sh.decide(ctx, name, effect, category, input)
+    };
+    let hook = ctx_for(format!("turn:external_schedule:{}", TaskId::new()));
+    // A run without any owner message is not the owner's run.
+    let bare = ctx_for("turn".into());
+    for (label, ctx) in [
+        ("webhook run", &hook),
+        ("run without an owner message", &bare),
+    ] {
+        assert!(
+            decide(ctx, "account_totp_save", &save).is_ask(),
+            "{label}: save"
+        );
+        assert!(decide(ctx, "browser_fill", &code).is_ask(), "{label}: code");
+        assert!(
+            decide(ctx, "browser_fill", &stored).is_ask(),
+            "{label}: stored secret"
+        );
+    }
 }

@@ -46,10 +46,12 @@ mod recover;
 mod reopen_tests;
 mod sideband;
 mod tabs;
+mod totp;
 pub use act::{can_egress as act_can_egress, summary as act_summary};
 pub use profiles::{BrowserProfiles, ProfileStatus};
 pub use recover::{RECOVERY_CLOSE, RECOVERY_OPEN, split_recovery};
 pub use sideband::{Sideband, UploadRecord, UploadedFile, note_screenshot, take as take_sideband};
+pub use totp::ACCOUNT_TOTP_SAVE;
 
 pub use browser_cdp::FieldTarget;
 
@@ -247,6 +249,18 @@ pub trait BrowserDriver: Send + Sync {
         accept: &(dyn Fn(Option<String>) -> bool + Send + Sync),
     ) -> Result<String, String> {
         let _ = (r, text, accept);
+        Err(NO_SECRET_FILL.into())
+    }
+    /// Read the value of an element for a host-side capture (a two-factor setup key), but only
+    /// while the origins of the frame that holds it and of the top-level page (read from the
+    /// browser, twice) satisfy `accept`. The element stays masked in later snapshots. Backends
+    /// that cannot do this refuse, so no value is ever read through them.
+    async fn read_value(
+        &self,
+        target: browser_cdp::ReadTarget<'_>,
+        accept: &(dyn Fn(Option<String>, Option<String>) -> bool + Send + Sync),
+    ) -> Result<browser_cdp::ReadValue, String> {
+        let _ = (target, accept);
         Err(NO_SECRET_FILL.into())
     }
     /// Choose option `value` in select `r`.
@@ -1534,6 +1548,16 @@ impl BrowserDriver for CdpDriver {
         render_action(&acted)
     }
 
+    async fn read_value(
+        &self,
+        target: browser_cdp::ReadTarget<'_>,
+        accept: &(dyn Fn(Option<String>, Option<String>) -> bool + Send + Sync),
+    ) -> Result<browser_cdp::ReadValue, String> {
+        with_session!(self, None, false, |sess| {
+            sess.page.read_value(target, accept).await
+        })
+    }
+
     async fn select(&self, r: &str, value: &str) -> Result<String, String> {
         let acted = with_session!(self, None, |sess| {
             sess.page
@@ -2079,6 +2103,8 @@ enum Op {
     Downloads,
     Reload,
     Forward,
+    /// `account_totp_save`: the host reads a two-factor setup key off the page.
+    TotpSave,
 }
 
 struct Shared {
@@ -2424,7 +2450,7 @@ fn tools_with_pool(
     let b = PermissionCategory::Browser;
     let ref_prop =
         json!({"type":"string","description":"Element ref from browser_snapshot, like e12."});
-    let defs: Vec<(Op, ToolSpec)> = vec![
+    let mut defs: Vec<(Op, ToolSpec)> = vec![
         (
             Op::Open,
             spec(
@@ -2655,6 +2681,10 @@ fn tools_with_pool(
         (Op::Pointer, pointer::tool_spec(b)),
         (Op::Attach, attach::tool_spec(b)),
     ];
+    // Keeping a two-factor key needs the vault: without secrets there is no such tool.
+    if shared.fill_secrets.is_some() {
+        defs.push((Op::TotpSave, totp::tool_spec()));
+    }
     if let (Some(slot), Some((_, snapshot_spec))) =
         (page_origin, defs.iter().find(|(op, _)| *op == Op::Snapshot))
     {
@@ -2918,9 +2948,19 @@ pub async fn fill_with_secret(
             bot,
         )
         .map_err(|e| e.to_string())?;
-    let value = secrets
-        .resolve_value_for(name, bot)
-        .map_err(|e| e.to_string())?;
+    // A two-factor code is made for exactly this field's frame and page: the origin
+    // binding runs inside the read itself, not only in the pre-check above.
+    let value = if secret_store::totp_reference(name).is_some() {
+        secrets.resolve_totp_for_page(
+            name,
+            bot,
+            target.frame_origin.as_deref(),
+            target.top_origin.as_deref(),
+        )
+    } else {
+        secrets.resolve_value_for(name, bot)
+    }
+    .map_err(|e| e.to_string())?;
     let top = target.top_origin.clone();
     let accept = |origin: Option<String>| {
         secrets
@@ -3758,6 +3798,9 @@ impl BrowserTool {
             Op::Pointer => return self.run_pointer(run_id, input).await,
             Op::Attach => return self.run_attach(run_id, input).await,
             Op::Act => return self.run_act(run_id, input, bot).await,
+            Op::TotpSave => {
+                return Err(exec_err("account_totp_save runs through its own path"));
+            }
             Op::Handover => {
                 return Err(exec_err("browser_handover runs through the handover path"));
             }
@@ -4113,6 +4156,9 @@ impl BrowserTool {
         if self.op == Op::Act {
             return self.act_details(ctx, input).await.map(Some);
         }
+        if self.op == Op::TotpSave {
+            return self.totp_save_details(ctx, input).await.map(Some);
+        }
         let Some((name, target, grant)) = self.secret_fill_facts(ctx, input).await? else {
             return Ok(None);
         };
@@ -4147,6 +4193,10 @@ impl BrowserTool {
             return Err(exec_err(
                 "browser is unavailable for this run's computer target",
             ));
+        }
+        // A host-side read of the setup key: no page action, nothing for the model to see.
+        if self.op == Op::TotpSave {
+            return self.totp_save(ctx, &input).await;
         }
         // A bot-owned account is typed only by that bot, also with a standing grant.
         if self.op == Op::Fill
@@ -4238,6 +4288,9 @@ impl BrowserTool {
         }
         let view = selected.shared.driver.live_view_attached();
         let owner_browser = selected.shared.driver.attached();
+        // A page can show a two-factor setup key or an otpauth address: it is masked in
+        // what the model reads, before anything was saved.
+        let text = secret_store::mask_setup_secrets(&text);
         let mut out = finish_text(ctx, &self.shared.data_dir.join("spill"), text);
         // Which browser this came from, so the run timeline shows it. Only said when it is the
         // owner's own (after a `browser_attach`): then what the result shows is the owner's
@@ -4292,6 +4345,8 @@ impl Tool for BrowserTool {
     /// permissive the policy, preset, grants or read shortcuts are.
     fn always_ask_for(&self, input: &Value) -> bool {
         (self.op == Op::Fill && names_a_secret(input))
+            // Keeping a two-factor key is confirmed too, except where the Full level waives it.
+            || self.op == Op::TotpSave
             // The owner's own browser holds their signed-in sessions: every attach is confirmed.
             || (self.op == Op::Attach && attach::attaches(input))
     }
@@ -4412,6 +4467,10 @@ pub(crate) mod fake {
         pub report: PMutex<Option<browser_cdp::DownloadReport>>,
         /// Why `set_payment_block(true)` fails, when a test wants it to.
         pub block_error: PMutex<Option<String>>,
+        /// What `read_value` finds: `ref:<ref>` or `sel:<css>` to (value, frame origin, top origin).
+        #[allow(clippy::type_complexity)]
+        pub reads:
+            PMutex<std::collections::HashMap<String, (String, Option<String>, Option<String>)>>,
     }
 
     impl FakeBrowser {
@@ -4522,6 +4581,34 @@ pub(crate) mod fake {
                 .get(r)
                 .cloned()
                 .ok_or_else(|| format!("unknown ref {r}"))
+        }
+        async fn read_value(
+            &self,
+            target: browser_cdp::ReadTarget<'_>,
+            accept: &(dyn Fn(Option<String>, Option<String>) -> bool + Send + Sync),
+        ) -> Result<browser_cdp::ReadValue, String> {
+            let key = match target {
+                browser_cdp::ReadTarget::Ref(r) => format!("ref:{r}"),
+                browser_cdp::ReadTarget::Selector(s) => format!("sel:{s}"),
+            };
+            // The call log never carries the value.
+            self.rec(&format!("read_value:{key}"))?;
+            let (value, frame, top) = self
+                .reads
+                .lock()
+                .get(&key)
+                .cloned()
+                .ok_or_else(|| format!("no element for {key}"))?;
+            if !accept(frame.clone(), top.clone()) {
+                return Err("refused: the page frame that holds this element is not a verifiable site that may keep the value; nothing was read".into());
+            }
+            Ok(browser_cdp::ReadValue {
+                value,
+                name: String::new(),
+                role: String::new(),
+                frame_origin: frame,
+                top_origin: top,
+            })
         }
         async fn fill_secret(
             &self,

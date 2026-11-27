@@ -506,3 +506,82 @@ async fn deep_recursion_is_a_js_error_not_a_crash() {
         .unwrap_err();
     assert!(matches!(err, ScriptError::Js(_)), "{err:?}");
 }
+
+/// A host where the tool named `slow` takes 60 s and everything else 20 ms.
+struct SlowAndFastHost;
+
+#[async_trait]
+impl ScriptHost for SlowAndFastHost {
+    async fn call_tool(&self, name: &str, input: Value) -> Result<Value, String> {
+        let delay = if name == "slow" {
+            Duration::from_secs(60)
+        } else {
+            Duration::from_millis(20)
+        };
+        tokio::time::sleep(delay).await;
+        Ok(input)
+    }
+}
+
+/// A call that is started and never awaited stays pending for the rest of the run.
+/// It must not stop the compute clock while the script computes in the meantime.
+#[tokio::test]
+async fn a_pending_fire_and_forget_call_does_not_hide_a_busy_loop() {
+    let limits = Limits {
+        cpu_timeout: Duration::from_millis(300),
+        total_timeout: Duration::from_secs(30),
+        ..Limits::default()
+    };
+    for code in [
+        // The slow call is polled once the script yields at the awaited fast one.
+        "tools.call('slow', 1); await tools.call('fast', 2); while (true) {}",
+        // Several in flight, then the loop.
+        "tools.call('slow', 1); tools.call('slow', 2); await tools.call('fast', 3); \
+         await tools.call('fast', 4); while (true) { tools.call('fast', 5).catch(() => {}); }",
+    ] {
+        let started = Instant::now();
+        let err = ScriptRuntime::run(
+            code,
+            Arc::new(SlowAndFastHost),
+            Limits {
+                max_tool_calls: 10_000_000,
+                ..limits.clone()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ScriptError::CpuTimeout(_)), "{code}: {err:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{code}: ran {:?}",
+            started.elapsed()
+        );
+    }
+}
+
+/// The pause is by awaiting, not by a count of pending calls: waiting on a slow
+/// call still costs nothing, even next to other calls that already finished.
+#[tokio::test]
+async fn awaiting_the_slow_call_while_others_finish_still_spends_no_budget() {
+    let limits = Limits {
+        cpu_timeout: Duration::from_millis(300),
+        total_timeout: Duration::from_secs(30),
+        ..Limits::default()
+    };
+    let code = "const slow = tools.call('wait', 1); \
+                for (let i = 0; i < 5; i++) { await tools.call('fast', i); } \
+                return await slow;";
+    struct Host;
+    #[async_trait]
+    impl ScriptHost for Host {
+        async fn call_tool(&self, name: &str, input: Value) -> Result<Value, String> {
+            let delay = if name == "wait" { 600 } else { 20 };
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            Ok(input)
+        }
+    }
+    let out = ScriptRuntime::run(code, Arc::new(Host), limits)
+        .await
+        .unwrap();
+    assert_eq!(out.result, json!(1));
+}

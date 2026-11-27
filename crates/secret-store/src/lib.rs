@@ -54,4 +54,4 @@ pub use secret::{
     is_fill_name, is_host_credential, is_managed_oauth_name, is_reserved_name,
     refuse_fill_namespace, resolve, validate_name,
 };
-pub use totp::{TotpAlgorithm, TotpSpec};
+pub use totp::{SEED_MASK, TotpAlgorithm, TotpSpec, mask_setup_secrets};
