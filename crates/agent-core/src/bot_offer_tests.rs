@@ -138,6 +138,12 @@ struct Rig {
 }
 
 fn rig(preset: &str, script: Vec<crate::tests::Reply>, legacy: bool) -> Rig {
+    rig_on(preset, script, legacy, false)
+}
+
+/// [`rig`] with the daemon's Full lane switched `on` or off (the lane serves the owner's own
+/// chat and an owner-written schedule; the daemon turns it on).
+fn rig_on(preset: &str, script: Vec<crate::tests::Reply>, legacy: bool, lane: bool) -> Rig {
     let env = setup();
     let fake = Fake::new(script);
     let page = page();
@@ -148,7 +154,11 @@ fn rig(preset: &str, script: Vec<crate::tests::Reply>, legacy: bool) -> Rig {
         ContentClass::none(),
         "paid",
     ));
-    let mut config = cfg(Policy::full());
+    let mut config = if lane {
+        crate::tests::lane_cfg(Policy::full())
+    } else {
+        cfg(Policy::full())
+    };
     config.legacy_tool_surface = legacy;
     let lp = make_loop(
         &env.storage,
@@ -446,6 +456,46 @@ async fn the_preview_waiver_belongs_to_the_owners_own_chat_alone() {
     assert!(r.lp.sh.bot_preview_waived(&ctx, "bot_update"));
     assert!(!r.lp.sh.bot_preview_waived(&ctx, "pay"));
     r.lp.cancel(run).unwrap();
+}
+
+/// With the daemon's Full lane on (as it is in production) the owner's own chat works the same:
+/// no card, the preview frozen first. An owner-written schedule on a Full bot with the switch is
+/// served by the same lane, but it is not the owner's chat: the tool is told nothing about a
+/// waiver and freezes no preview, so the host (which refuses a change nothing froze) refuses it.
+#[tokio::test]
+async fn the_lane_does_not_turn_a_schedule_into_the_owners_chat() {
+    let r = rig_on(FULL, vec![create_call("c1"), text("done")], true, true);
+    let run = r.turn("owner");
+    assert_eq!(r.card(run).await, None);
+    assert_eq!(
+        r.calls(),
+        ["preview create", "create Kralinho #7c3aed star"]
+    );
+
+    let r = rig_on(
+        FULL_SWITCH,
+        vec![create_call("c1"), text("done")],
+        true,
+        true,
+    );
+    r.lp.set_schedule_owner_check(Arc::new(|_| true));
+    let run =
+        r.lp.run_scheduled(
+            r.env.chat,
+            protocol::TaskId::new(),
+            crate::ScheduleWork::Prompt(SAYS.into()),
+        )
+        .unwrap();
+    assert_eq!(
+        r.card(run).await,
+        None,
+        "the lane let it through without a card"
+    );
+    assert_eq!(
+        r.calls(),
+        ["create Kralinho #7c3aed star"],
+        "no preview was frozen for a run that is not the owner's chat"
+    );
 }
 
 #[tokio::test]

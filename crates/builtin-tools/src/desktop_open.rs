@@ -409,6 +409,17 @@ mod tests {
                 assert!(candidates("windows", bad, with).is_err(), "windows {bad:?}");
             }
         }
+        // an option or a share is refused for that very reason, not only as "not a drive path"
+        for bad in [
+            "/e,C:\\Windows",
+            "/select,C:\\a.exe",
+            "\\\\evil\\share\\a.html",
+        ] {
+            let e = candidates("windows", bad, With::Default)
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("option or a network path"), "{bad}: {e}");
+        }
         // an absolute path is fine on the other systems, an address on all
         assert!(candidates("linux", "/home/a/x.html", With::Default).is_ok());
         assert!(candidates("macos", "/Users/a/x.html", With::Default).is_ok());
