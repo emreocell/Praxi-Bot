@@ -566,11 +566,12 @@ async fn the_hub_searches_later_native_pages_without_exposing_control_toolkits()
     );
     assert_eq!(next.items[0].0.slug, "helpmate");
     assert!(next.next_cursor.is_none());
-    assert!(
+    assert_eq!(
         h.svc
             .catalog_view(Some("vendor_mcp"), None, None, 10)
             .items
-            .is_empty()
+            .len(),
+        0
     );
     let all = h.svc.catalog_view(None, None, None, 100);
     assert_eq!(all.items[0].0.slug, "gmail");
@@ -632,7 +633,7 @@ async fn a_disabled_app_checks_authorization_without_executing_its_probe() {
     h.svc.set_enabled("github", false).await.unwrap();
     let result = h.svc.test_app("github").await.unwrap();
     assert!(result.authorization_only);
-    assert!(result.items.is_empty());
+    assert_eq!(result.items.len(), 0);
     assert!(
         !h.server
             .received_requests()
@@ -687,7 +688,7 @@ async fn reconnect_replaces_only_the_bound_inactive_account() {
         Some("ca_replacement")
     );
     assert_eq!(h.svc.apps()[0].state, ConnState::Pending);
-    assert!(h.svc.registered_tools("github").is_empty());
+    assert_eq!(h.svc.registered_tools("github"), Vec::<String>::new());
 }
 
 #[tokio::test]
