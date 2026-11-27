@@ -118,6 +118,13 @@ export async function flows(ctx) {
   const T = { timeout: 30000 };
   // A run that executes a shell command can take 25 s on a loaded machine.
   const SLOW = { timeout: 90000 };
+  // A shell_run on the GitHub windows-latest runner spends 25-37 s just starting powershell.exe when the
+  // runner is loaded (main run 46010420448; 0.3 s locally). The tool's own default kills it at 60 s and the
+  // wait above gives up at 90 s, which failed the run. The tool is told to wait 180 s and the page 240 s;
+  // a command that really hangs still fails, only later.
+  const SHELL_TIMEOUT_SECS = 180;
+  const SHELL_SLOW = { timeout: 240000 };
+  const shellCall = (command) => `call:shell_run ${JSON.stringify({ command, timeout: SHELL_TIMEOUT_SECS })}`;
 
   const runWorkspace = async () => {
     const workspaceSession = await newSession(ctx, { onboarded: true });
@@ -508,9 +515,9 @@ export async function flows(ctx) {
     // Always switch: the previous flows left another bot's chat open.
     await page.locator('[class*="railItem"]', { hasText: 'Fulla' }).first().click();
     await openFirstChat(page);
-    await sendLines(page, ['call:schedule_list {}', `call:shell_run ${JSON.stringify({ command: 'echo smoke-one' })}`]);
+    await sendLines(page, ['call:schedule_list {}', shellCall('echo smoke-one')]);
     // A card would hold the run: the reply of the last step only arrives when nothing asked.
-    await page.getByText(/tool said: .*smoke-one/).first().waitFor(SLOW);
+    await page.getByText(/tool said: .*smoke-one/).first().waitFor(SHELL_SLOW);
     if ((await cards(page).count()) > 0) throw new Error('an approval card appeared although nothing untrusted was read');
   });
   await run(s, 'Full level: after a web read, shell_run still asks nothing (only money asks)', async (page) => {
@@ -529,12 +536,12 @@ export async function flows(ctx) {
       await page.getByText(/tool said: .*smoke-one/).first().waitFor({ state: 'hidden', timeout: 15000 });
     }
     await composer(page).waitFor(T);
-    await sendLines(page, ['call:web_search {"query":"smoke untrusted"}', `call:shell_run ${JSON.stringify({ command: 'echo smoke-two' })}`]);
+    await sendLines(page, ['call:web_search {"query":"smoke untrusted"}', shellCall('echo smoke-two')]);
     // Full access asks only before spending money: the search result is untrusted, yet nothing is asked.
-    await page.getByText(/tool said: .*smoke-two/).first().waitFor(SLOW);
+    await page.getByText(/tool said: .*smoke-two/).first().waitFor(SHELL_SLOW);
     if ((await cards(page).count()) > 0) throw new Error('an approval card appeared after an untrusted read although nothing spends money');
-    await sendLines(page, [`call:shell_run ${JSON.stringify({ command: 'echo smoke-three' })}`]);
-    await page.getByText(/tool said: .*smoke-three/).first().waitFor(SLOW);
+    await sendLines(page, [shellCall('echo smoke-three')]);
+    await page.getByText(/tool said: .*smoke-three/).first().waitFor(SHELL_SLOW);
     if ((await cards(page).count()) > 0) throw new Error('the next shell call asked');
   });
   await run(s, 'human-driving latch: banner, "Give control back", then an observation tool works', async (page) => {

@@ -521,9 +521,28 @@ jobs:
           XDG_SESSION_TYPE: x11
         run: xvfb-run -a -s "-screen 0 1280x800x24 -nolisten tcp" dbus-run-session -- pnpm --dir apps/desktop/ui smoke --no-build
 
+      # Evidence for the timing budgets of the powershell-based tests (pty-session, the smoke shell
+      # step): how long a start of powershell.exe takes on this runner right now. Cold = first start,
+      # warm = the following ones. Never fails the job; the numbers go to the log and the summary.
+      - name: Measure powershell start time (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $rows = foreach ($i in 1..4) {
+            $t = Measure-Command { & powershell.exe -NoLogo -NoProfile -NonInteractive -Command 'exit 0' }
+            [pscustomobject]@{ start = $i; seconds = [math]::Round($t.TotalSeconds, 2) }
+          }
+          $rows | Format-Table | Out-String | Write-Host
+          $defender = try { (Get-MpComputerStatus).RealTimeProtectionEnabled } catch { 'unknown' }
+          "Defender real-time protection: $defender" | Write-Host
+          "### powershell.exe start time on $env:RUNNER_NAME`n" >> $env:GITHUB_STEP_SUMMARY
+          ($rows | ForEach-Object { "- start $($_.start): $($_.seconds) s" }) >> $env:GITHUB_STEP_SUMMARY
+
       - name: Run real-app smoke (Windows)
         if: runner.os == 'Windows'
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: pnpm --dir apps/desktop/ui smoke --no-build
 
       - name: Upload trigger registry screenshots

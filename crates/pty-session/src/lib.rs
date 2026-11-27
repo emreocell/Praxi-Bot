@@ -646,9 +646,15 @@ mod tests {
         }
     }
 
+    /// How many one-second reads `read_until` may spend. Starting `powershell.exe` took 25-37 s on
+    /// the GitHub `windows-latest` runner when it was loaded (main run 46010420448; 0.3 s on a
+    /// developer PC), so 40 reads were not enough there. 180 keeps a margin of about 5x over the
+    /// worst measured start. A program that never prints still fails, only later.
+    const READ_BUDGET: usize = if cfg!(windows) { 180 } else { 40 };
+
     async fn read_until(session: &PtySession, needle: &str) -> String {
         let mut seen = String::new();
-        for _ in 0..40 {
+        for _ in 0..READ_BUDGET {
             let snap = session
                 .read(
                     Duration::from_secs(1),
