@@ -623,6 +623,7 @@ impl VoiceHost {
     }
 
     #[cfg(not(feature = "local-voice"))]
+    #[allow(clippy::unused_self)] // same signature as the local-voice build
     fn synthesize_local(
         &self,
         mut input: SynthesizeInput,

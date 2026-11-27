@@ -2071,6 +2071,7 @@ mod acl_tests {
             csp,
             "default-src 'self'; script-src 'self'; style-src 'self'; \
              style-src-attr 'unsafe-inline'; img-src 'self' blob: data:; \
+             media-src 'self' blob:; \
              font-src 'self' data:; \
              connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; \
              object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
