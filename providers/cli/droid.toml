@@ -1,0 +1,40 @@
+# Factory Droid (`droid`). Runs with its own tools through `droid exec --output-format acp`.
+id = "droid"
+display_name = "Factory Droid"
+command = "droid"
+docs_url = "https://docs.factory.com/ide-integrations.md"
+login = "droid"
+support = "experimental"
+models = ["default"]
+# `~/.factory` holds `settings.json` (autonomy level, custom models and their keys) and the specs.
+protected_dirs = [".factory"]
+evidence = "Read on 2026-11-27 from docs.factory.com (ide-integrations, droid-exec/overview, droid-cli/cli-reference, droid-cli/settings, autonomy-and-safety/auto-run) and npm metadata for droid. Not read from an install or a signed-in run."
+unverified = [
+  "whether ACP sessions forward permission requests or run read-only like droid exec",
+  "the acp-daemon output format the ACP registry lists (the docs only name acp)",
+  "session mode ids and choosing a model over ACP",
+  "where sign-in credentials are stored (sign-in is /login in the CLI)",
+  "version output format",
+  "native Windows support for ACP mode",
+]
+
+[install]
+npm = "droid"
+# Exact release (npm dist-tag latest on 2026-11-27). Never a range or a tag.
+version = "1.21.1"
+
+[acp]
+args = ["exec", "--output-format", "acp"]
+model = "none"
+
+# The docs give `--auto low|medium|high` for `droid exec` and say nothing about ACP permissions.
+# Praxi cannot make Droid ask, so nothing below Full is offered or started.
+[levels.ask]
+applied = "ask"
+native = "not enforceable: Droid's permission handling over ACP is not documented"
+enforced = false
+
+[levels.full]
+applied = "full"
+native = "permission requests approved automatically"
+allow_all = true

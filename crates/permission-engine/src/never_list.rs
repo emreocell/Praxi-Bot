@@ -745,6 +745,10 @@ const HOME_STORES: &[&str] = &[
     ".kimi-code",
     ".cline",
     ".augment",
+    ".factory",
+    ".grok",
+    ".junie",
+    ".openhands",
     ".config/opencode",
     ".config/claude",
     ".config/cursor",
@@ -835,6 +839,8 @@ impl CliStores {
             "GOOSE_PATH_ROOT",
             "CLINE_DIR",
             "CLINE_DATA_DIR",
+            "GROK_HOME",
+            "JUNIE_HOME",
         ] {
             roots.extend(env_dir(key));
         }

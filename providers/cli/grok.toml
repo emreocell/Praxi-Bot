@@ -1,0 +1,41 @@
+# Grok Build CLI (`grok`, x.ai/cli). Runs with its own tools through `grok agent stdio`.
+id = "grok"
+display_name = "Grok Build"
+command = "grok"
+docs_url = "https://docs.x.ai/build/cli/headless-scripting"
+login = "grok login"
+support = "experimental"
+models = ["default"]
+# `~/.grok` holds `auth.json` (session tokens), `mcp_credentials.json` and `config.toml`.
+protected_dirs = [".grok"]
+evidence = "Read on 2026-11-27 from docs.x.ai (build/cli/headless-scripting, build/cli/reference, build/features/permissions, build/settings/reference), the xai-org/grok-build user guide and npm metadata for @xai-official/grok. Not read from an install or a signed-in run."
+unverified = [
+  "that nothing below Full can be enforced (the docs name a permission mode flag that has to sit before the stdio argument)",
+  "session mode ids",
+  "choosing a model over ACP (the docs name a launch flag and a config option)",
+  "native Windows support for the npm package",
+  "version output format",
+]
+
+[install]
+npm = "@xai-official/grok"
+# Exact release (npm dist-tag latest on 2026-11-27); the alpha tag is newer. Never a range or a tag.
+version = "1.0.92"
+
+[acp]
+args = ["agent", "stdio"]
+model = "none"
+
+# The docs: the default mode asks and permission requests are forwarded, but a user setting
+# (`[ui] permission_mode` in `~/.grok/config.toml`) can switch the CLI to always-approve, and
+# the flag that pins a mode must come before `stdio`, which the data schema cannot express.
+# Praxi cannot make Grok Build ask, so nothing below Full is offered or started.
+[levels.ask]
+applied = "ask"
+native = "not enforceable: a user setting can turn permission prompts off"
+enforced = false
+
+[levels.full]
+applied = "full"
+native = "permission requests approved automatically"
+allow_all = true

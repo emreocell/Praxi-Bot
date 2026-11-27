@@ -1,0 +1,37 @@
+# Junie CLI by JetBrains (`junie`). Runs with its own tools through `junie --acp true`.
+id = "junie"
+display_name = "Junie"
+command = "junie"
+docs_url = "https://junie.jetbrains.com/docs/junie-cli-acp.html"
+login = "junie"
+support = "experimental"
+models = ["default"]
+# `~/.junie` holds `allowlist.json` (actions that run without asking), `sandbox.json` and `config.json` (hooks).
+protected_dirs = [".junie"]
+evidence = "Read on 2026-11-27 from junie.jetbrains.com (docs/junie-cli-acp, docs/junie-cli, docs/parameters, docs/environment-variables) and the ACP registry entry. Not read from an install or a signed-in run."
+unverified = [
+  "whether ACP mode forwards permission requests or runs actions without asking",
+  "an install command: the npm package lags the ACP registry's release, so none is pinned",
+  "where sign-in credentials are stored (sign-in is the JetBrains account in the CLI, or JUNIE_API_KEY)",
+  "session mode ids and choosing a model over ACP",
+  "version output format",
+]
+
+# No `[install]`: the docs give an install script, which Praxi never runs. The owner installs it.
+
+[acp]
+# The docs show the space form; the ACP registry uses `--acp=true`, which is not a fixed argument.
+args = ["--acp", "true"]
+model = "none"
+
+# `--brave` is documented for interactive mode only, and the ACP page says nothing about
+# approvals. Praxi cannot make Junie ask, so nothing below Full is offered or started.
+[levels.ask]
+applied = "ask"
+native = "not enforceable: Junie's permission handling over ACP is not documented"
+enforced = false
+
+[levels.full]
+applied = "full"
+native = "permission requests approved automatically"
+allow_all = true

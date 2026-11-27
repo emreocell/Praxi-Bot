@@ -1487,9 +1487,14 @@ const CREDENTIAL_NAMES: &[&str] = &[
     ".qoder",
     ".vibe",
     ".kimi-code",
-    // Data-driven ACP engines (`providers/cli/`): Cline and Augment Code.
+    // Data-driven ACP engines (`providers/cli/`): Cline, Augment Code, Droid, Grok Build, Junie
+    // and OpenHands.
     ".cline",
     ".augment",
+    ".factory",
+    ".grok",
+    ".junie",
+    ".openhands",
     // Project-level OpenCode config can declare plugins, commands and MCP
     // servers that run code, so it is protected in every workspace on purpose.
     // Likewise `.claude/` (hooks, commands) and `.cursor/` (rules, MCP).
@@ -1636,6 +1641,8 @@ fn cli_home_override(path: &[String]) -> bool {
         "GOOSE_PATH_ROOT",
         "CLINE_DIR",
         "CLINE_DATA_DIR",
+        "GROK_HOME",
+        "JUNIE_HOME",
     ]
     .iter()
     .any(|key| {
@@ -1672,7 +1679,7 @@ pub fn service_home() -> Option<PathBuf> {
 
 /// Credential and tool-configuration folders (SSH, cloud, GPG, container, CLI settings).
 /// A workspace may not be one, sit inside one, or contain one under the home folder.
-const CREDENTIAL_DIRS: [&str; 20] = [
+const CREDENTIAL_DIRS: [&str; 24] = [
     ".claude",
     ".codex",
     ".gemini",
@@ -1684,6 +1691,10 @@ const CREDENTIAL_DIRS: [&str; 20] = [
     ".vibe",
     ".cline",
     ".augment",
+    ".factory",
+    ".grok",
+    ".junie",
+    ".openhands",
     ".cursor",
     ".config",
     ".local",
@@ -1788,6 +1799,10 @@ fn native_cli_authority_roots() -> Vec<PathBuf> {
             // tool permissions and hooks, and the session token).
             home.join(".cline"),
             home.join(".augment"),
+            home.join(".factory"),
+            home.join(".grok"),
+            home.join(".junie"),
+            home.join(".openhands"),
             // Goose loads `.goosehints`, `AGENTS.md`, skills and saved tool permissions
             // from its config folder (XDG on Linux and macOS, roaming AppData on Windows).
             home.join(".config").join("goose"),
@@ -1810,6 +1825,8 @@ fn native_cli_authority_roots() -> Vec<PathBuf> {
         "GOOSE_PATH_ROOT",
         "CLINE_DIR",
         "CLINE_DATA_DIR",
+        "GROK_HOME",
+        "JUNIE_HOME",
     ] {
         if let Some(root) = std::env::var_os(variable).filter(|root| !root.is_empty()) {
             roots.push(PathBuf::from(root));
@@ -2200,6 +2217,10 @@ const SENSITIVE_SEQUENCES: &[&[&str]] = &[
     &[".kimi-code"],
     &[".cline"],
     &[".augment"],
+    &[".factory"],
+    &[".grok"],
+    &[".junie"],
+    &[".openhands"],
     &[".opencode"],
     &[".config", "goose"],
     &["appdata", "roaming", "block", "goose"],
@@ -5006,6 +5027,8 @@ mod tests {
             "GOOSE_PATH_ROOT",
             "CLINE_DIR",
             "CLINE_DATA_DIR",
+            "GROK_HOME",
+            "JUNIE_HOME",
         ];
         if let Some(root) = std::env::var_os(FIXTURE) {
             let root = PathBuf::from(root);
@@ -6692,6 +6715,10 @@ mod tests {
             ".kimi-code",
             ".cline",
             ".augment",
+            ".factory",
+            ".grok",
+            ".junie",
+            ".openhands",
             ".claude.json.backup",
             "opencode.json",
             "opencode.jsonc",

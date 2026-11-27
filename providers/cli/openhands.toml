@@ -1,0 +1,41 @@
+# OpenHands CLI (`openhands`). Runs with its own tools through `openhands acp`.
+# The project's README says the CLI is no longer actively maintained.
+id = "openhands"
+display_name = "OpenHands"
+command = "openhands"
+docs_url = "https://docs.openhands.dev/openhands/usage/cli/ide/overview"
+login = "openhands login"
+support = "experimental"
+models = ["default"]
+# `~/.openhands` holds `agent_settings.json` (the LLM and its API key), `cli_config.json` and `mcp.json`.
+protected_dirs = [".openhands"]
+evidence = "Read on 2026-11-27 from docs.openhands.dev (cli/ide/overview, cli/command-reference, run-openhands/acp), the OpenHands-CLI README and its acp_impl source (session mode ids). Not read from an install or a signed-in run."
+unverified = [
+  "session mode ids (they come from the source, the docs name none)",
+  "an install command: it is installed with uv or a script, and the npm openhands package is a placeholder",
+  "whether settings saved by the user change the starting confirmation mode",
+  "sign-in status and the model list (settings are in the CLI)",
+  "native Windows support (the docs say Linux, macOS or WSL)",
+  "version output format",
+]
+
+# No `[install]`: `uv tool install openhands` is not an npm install, so the owner installs it.
+
+[acp]
+args = ["acp"]
+model = "none"
+
+# Docs: confirmation defaults to "Always Ask". The source of the ACP server names the session
+# modes `always-ask`, `llm-approve` and `always-approve`; Praxi selects `always-ask` itself
+# instead of trusting the default. `llm-approve` lets the model's own risk guess skip approval,
+# so Accept edits and Auto run as Ask.
+[levels.ask]
+applied = "ask"
+native = "ACP session mode always-ask"
+mode = "always-ask"
+
+[levels.full]
+applied = "full"
+native = "--always-approve"
+flags = ["--always-approve"]
+allow_all = true
