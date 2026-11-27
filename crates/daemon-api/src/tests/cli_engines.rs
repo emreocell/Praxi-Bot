@@ -9,7 +9,7 @@ async fn registry_is_authenticated_and_preserves_confinement() {
     assert_eq!(response.status, StatusCode::OK);
     let body = response.json();
     let rows = body.as_array().unwrap();
-    assert_eq!(rows.len(), 12);
+    assert_eq!(rows.len(), 14);
     let qwen = rows.iter().find(|r| r["detected"]["id"] == "qwen").unwrap();
     assert_eq!(qwen["native"]["support"], "experimental");
     assert_eq!(
@@ -67,6 +67,29 @@ async fn registry_is_authenticated_and_preserves_confinement() {
     assert_eq!(goose["native"]["levels"][1]["applied"], "ask");
     assert_eq!(goose["native"]["levels"][3]["native_setting"], "mode auto");
     assert_eq!(goose["auth_args"], json!([]));
+    // Data-driven engines (`providers/cli/`) look like any other row.
+    let cline = rows
+        .iter()
+        .find(|r| r["detected"]["id"] == "cline")
+        .unwrap();
+    assert_eq!(cline["native"]["support"], "experimental");
+    assert_eq!(cline["native"]["levels"][0]["offered"], true);
+    assert_eq!(cline["native"]["levels"][1]["offered"], false);
+    assert_eq!(
+        cline["native"]["levels"][3]["native_setting"],
+        "--auto-approve true"
+    );
+    assert_eq!(cline["auth_args"], json!([]));
+    assert_eq!(cline["install"]["command"], "npm install -g cline");
+    assert_eq!(cline["limitation"], "native_only");
+    let auggie = rows
+        .iter()
+        .find(|r| r["detected"]["id"] == "auggie")
+        .unwrap();
+    for level in 0..3 {
+        assert_eq!(auggie["native"]["levels"][level]["offered"], false);
+    }
+    assert_eq!(auggie["native"]["levels"][3]["offered"], true);
     let claude = rows
         .iter()
         .find(|r| r["detected"]["id"] == "claude")

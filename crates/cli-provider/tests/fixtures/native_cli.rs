@@ -165,6 +165,22 @@ fn acp(args: &[String]) {
         prompt = read(&mut stdin);
     }
     log("prompt", &prompt["params"]["prompt"][0]["text"].to_string());
+    // What the agent offers with a permission request: by default one allow and one reject.
+    let options = match std::env::var("FAKE_MODE").unwrap_or_default().as_str() {
+        // Every kind ACP defines, the "always" ones first: only the exact "once" may be picked.
+        "acp-permission-options" => json!([
+            {"optionId":"always","name":"Always allow","kind":"allow_always"},
+            {"optionId":"yes","name":"Allow","kind":"allow_once"},
+            {"optionId":"no","name":"Reject","kind":"reject_once"},
+            {"optionId":"never","name":"Always reject","kind":"reject_always"}]),
+        // No "once" option at all: a remembered grant must never be chosen below Full.
+        "acp-only-always" => json!([
+            {"optionId":"always","name":"Always allow","kind":"allow_always"},
+            {"optionId":"never","name":"Always reject","kind":"reject_always"}]),
+        _ => json!([
+            {"optionId":"yes","name":"Allow","kind":"allow_once"},
+            {"optionId":"no","name":"Reject","kind":"reject_once"}]),
+    };
     emit(
         &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{
         "sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"PRIVATE_THINKING"}}}}),
@@ -176,7 +192,7 @@ fn acp(args: &[String]) {
     emit(
         &json!({"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{
         "sessionId":"s1","toolCall":{"toolCallId":"t","title":"touch note.txt","kind":"execute","rawInput":{"command":"touch note.txt"}},
-        "options":[{"optionId":"yes","name":"Allow","kind":"allow_once"},{"optionId":"no","name":"Reject","kind":"reject_once"}]}}),
+        "options":options}}),
     );
     log("permission_answer", &read(&mut stdin).to_string());
     // fs was not offered: the client must refuse and keep the session alive.

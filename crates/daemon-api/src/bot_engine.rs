@@ -367,7 +367,7 @@ mod tests {
         let work = tmp.path().join("work");
         std::fs::create_dir_all(&data).unwrap();
         std::fs::create_dir_all(&work).unwrap();
-        for driver in Driver::ALL {
+        for driver in Driver::all() {
             let level = dialog_default(driver);
             let executor = format!("cli:{}/default", driver.id());
             let chosen = next_settings(

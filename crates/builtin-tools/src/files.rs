@@ -1487,6 +1487,9 @@ const CREDENTIAL_NAMES: &[&str] = &[
     ".qoder",
     ".vibe",
     ".kimi-code",
+    // Data-driven ACP engines (`providers/cli/`): Cline and Augment Code.
+    ".cline",
+    ".augment",
     // Project-level OpenCode config can declare plugins, commands and MCP
     // servers that run code, so it is protected in every workspace on purpose.
     // Likewise `.claude/` (hooks, commands) and `.cursor/` (rules, MCP).
@@ -1631,6 +1634,8 @@ fn cli_home_override(path: &[String]) -> bool {
         "OPENCODE_CONFIG",
         "VIBE_HOME",
         "GOOSE_PATH_ROOT",
+        "CLINE_DIR",
+        "CLINE_DATA_DIR",
     ]
     .iter()
     .any(|key| {
@@ -1667,7 +1672,7 @@ pub fn service_home() -> Option<PathBuf> {
 
 /// Credential and tool-configuration folders (SSH, cloud, GPG, container, CLI settings).
 /// A workspace may not be one, sit inside one, or contain one under the home folder.
-const CREDENTIAL_DIRS: [&str; 18] = [
+const CREDENTIAL_DIRS: [&str; 20] = [
     ".claude",
     ".codex",
     ".gemini",
@@ -1677,6 +1682,8 @@ const CREDENTIAL_DIRS: [&str; 18] = [
     ".kimi-code",
     ".qoder",
     ".vibe",
+    ".cline",
+    ".augment",
     ".cursor",
     ".config",
     ".local",
@@ -1777,6 +1784,10 @@ fn native_cli_authority_roots() -> Vec<PathBuf> {
             home.join(".claude.json"),
             // Mistral Vibe loads its config, agents, prompts and hooks from here.
             home.join(".vibe"),
+            // Cline (`providers.json` with API keys) and Augment Code (`settings.json` with
+            // tool permissions and hooks, and the session token).
+            home.join(".cline"),
+            home.join(".augment"),
             // Goose loads `.goosehints`, `AGENTS.md`, skills and saved tool permissions
             // from its config folder (XDG on Linux and macOS, roaming AppData on Windows).
             home.join(".config").join("goose"),
@@ -1797,6 +1808,8 @@ fn native_cli_authority_roots() -> Vec<PathBuf> {
         "CLAUDE_CONFIG_DIR",
         "VIBE_HOME",
         "GOOSE_PATH_ROOT",
+        "CLINE_DIR",
+        "CLINE_DATA_DIR",
     ] {
         if let Some(root) = std::env::var_os(variable).filter(|root| !root.is_empty()) {
             roots.push(PathBuf::from(root));
@@ -2185,6 +2198,8 @@ const SENSITIVE_SEQUENCES: &[&[&str]] = &[
     &[".qoder"],
     &[".vibe"],
     &[".kimi-code"],
+    &[".cline"],
+    &[".augment"],
     &[".opencode"],
     &[".config", "goose"],
     &["appdata", "roaming", "block", "goose"],
@@ -4796,6 +4811,9 @@ mod tests {
             ".qoder/.auth/machine_id",
             ".vibe/.env",
             ".vibe/config.toml",
+            ".cline/data/settings/providers.json",
+            ".cline/data/settings/global-settings.json",
+            ".augment/settings.json",
             ".config/goose/config.yaml",
             ".config/goose/permission.yaml",
             "AppData/Roaming/Block/goose/config/secrets.yaml",
@@ -4986,6 +5004,8 @@ mod tests {
             "OPENCODE_CONFIG",
             "VIBE_HOME",
             "GOOSE_PATH_ROOT",
+            "CLINE_DIR",
+            "CLINE_DATA_DIR",
         ];
         if let Some(root) = std::env::var_os(FIXTURE) {
             let root = PathBuf::from(root);
@@ -6615,6 +6635,35 @@ mod tests {
         }
     }
 
+    /// Every `protected_dirs` of a data-driven engine (`providers/cli/*.toml`, kept on one line).
+    fn data_engine_dirs() -> Vec<String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../providers/cli");
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            for line in text
+                .lines()
+                .filter(|l| l.trim_start().starts_with("protected_dirs"))
+            {
+                out.extend(line.split('"').skip(1).step_by(2).map(str::to_owned));
+            }
+        }
+        assert_ne!(out.len(), 0);
+        out
+    }
+
+    #[test]
+    fn the_credential_folder_of_every_data_driven_engine_is_protected() {
+        let (home, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        for folder in data_engine_dirs() {
+            for file in ["settings.json", "data/settings/providers.json"] {
+                let path = home.path().join(&folder).join(file);
+                assert!(is_protected(&path, outside.path()), "{folder}/{file}");
+            }
+            assert!(CREDENTIAL_DIRS.contains(&folder.as_str()), "{folder}");
+        }
+    }
+
     #[tokio::test]
     async fn credential_paths_require_an_explicit_grant() {
         let (d, w, t) = setup();
@@ -6641,6 +6690,8 @@ mod tests {
             ".qoder",
             ".vibe",
             ".kimi-code",
+            ".cline",
+            ".augment",
             ".claude.json.backup",
             "opencode.json",
             "opencode.jsonc",

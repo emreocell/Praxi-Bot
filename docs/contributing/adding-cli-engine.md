@@ -4,6 +4,35 @@ Read the [engine security and support guide](../guide/cli-engines.md) first.
 Do not enable an engine until its approval mode can be enforced. Unknown
 version floors and authentication evidence must stay unknown.
 
+## The data path (a plain ACP agent)
+
+A coding CLI that speaks the Agent Client Protocol over stdio and needs no special handling
+is **a data file, not Rust**: add `providers/cli/<id>.toml` and list it in `EMBEDDED` in
+`crates/cli-provider/src/acp_data.rs`. Start from `cline.toml` (a level the CLI can hold)
+or `auggie.toml` (a CLI whose permission behaviour is unknown, so only Full access is
+offered). The schema is strict, and `cargo test -p cli-provider` rejects a file that:
+
+- has an unknown key, a command that is not a bare executable name, or an argument that is
+  not fixed text (no `{prompt}`, no `$VAR`, no spaces, no shell characters);
+- installs anything but `npm install -g <package>`;
+- maps a level to a wider one, or marks Full as not enforceable;
+- uses a permissive flag (`--yolo`, `--auto-approve`, `--force`, ...) below Full (a flag may
+  pin the safe value: `--auto-approve false`);
+- claims anything but `support = "experimental"`, or states no `unverified` facts;
+- reuses an id, command or alias of another engine.
+
+A new file needs: the official docs it was read from (`evidence`), the facts it does not
+claim (`unverified`), the credential folders (`protected_dirs`, on one line), and the same
+folders added to the file tools' and never-list protections (a test in `builtin-tools` and
+`permission-engine` fails otherwise). Add the id to the engine lists of the UI
+(`modelBrand.ts`) and the guide (`docs/guide/cli-engines.md` and its Turkish page). The
+files `tests/acp_data_engines.rs` runs every entry against the fake ACP agent (argv, level
+mapping, refused levels and models, exact permission options), and `adapter_conformance`
+runs the same stream, cancellation and confinement checks as for every driver.
+
+Use the Rust path below when the CLI needs engine-specific behaviour (its own sign-in
+probe or error mapping, a model list command, a launch flag before the subcommand).
+
 `cli_provider::adapter::EngineAdapter` is the native session contract.
 `Driver` implements it for Claude, Codex, Cursor, OpenCode, Gemini and
 Antigravity. `run_native_turn` dispatches through that contract; the shared

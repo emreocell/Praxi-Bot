@@ -77,14 +77,14 @@ pub enum CliSettings {
 }
 
 /// Engines supported by the fixture-locked session runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+///
+/// Serialized as the plain engine id (`"claude"`, `"opencode"`, ...).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CliEngine {
     Claude,
     Codex,
     /// Native-tools engines (no confined mode): Cursor, `OpenCode`, Gemini CLI.
     Cursor,
-    #[serde(rename = "opencode")]
     OpenCode,
     Gemini,
     /// Antigravity CLI (`agy acp`).
@@ -103,13 +103,94 @@ pub enum CliEngine {
     Vibe,
     /// Goose (`goose acp`).
     Goose,
+    /// An ACP engine defined by a data file (`providers/cli/<id>.toml`), named by its id.
+    /// Only the shape of the id is checked here; the engine registry decides whether the
+    /// engine exists, so a config naming an engine this build lacks still loads.
+    Data(DataEngineId),
+}
+
+/// The id of a data-driven CLI engine: a short lower-case slug, interned for the life of
+/// the process (at most [`DataEngineId::MAX_DISTINCT`] distinct ids, so a hostile config
+/// cannot grow memory).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DataEngineId(&'static str);
+
+impl DataEngineId {
+    pub const MAX_DISTINCT: usize = 64;
+
+    /// `None` unless `id` is a slug (`a-z`, digits, `-`; 2 to 24 characters; starts with a letter).
+    #[must_use]
+    pub fn intern(id: &str) -> Option<Self> {
+        static SEEN: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+        let slug = (2..=24).contains(&id.len())
+            && id.starts_with(|c: char| c.is_ascii_lowercase())
+            && id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if !slug {
+            return None;
+        }
+        let mut seen = SEEN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(known) = seen.iter().find(|known| **known == id) {
+            return Some(Self(known));
+        }
+        if seen.len() >= Self::MAX_DISTINCT {
+            return None;
+        }
+        let leaked: &'static str = Box::leak(id.to_owned().into_boxed_str());
+        seen.push(leaked);
+        Some(Self(leaked))
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl Serialize for CliEngine {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CliEngine {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let id = String::deserialize(deserializer)?;
+        Self::from_id(&id)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown CLI engine {id:?}")))
+    }
 }
 
 impl CliEngine {
+    /// The engine with this wire id: a built-in one, else a well-formed data-driven id.
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "claude" => Self::Claude,
+            "codex" => Self::Codex,
+            "cursor" => Self::Cursor,
+            "opencode" => Self::OpenCode,
+            "gemini" => Self::Gemini,
+            "agy" => Self::Agy,
+            "qwen" => Self::Qwen,
+            "kiro" => Self::Kiro,
+            "qoder" => Self::Qoder,
+            "copilot" => Self::Copilot,
+            "kimi" => Self::Kimi,
+            "vibe" => Self::Vibe,
+            "goose" => Self::Goose,
+            other => Self::Data(DataEngineId::intern(other)?),
+        })
+    }
+
     /// Wire identifier of this CLI engine (`"claude"`, `"codex"`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Data(id) => id.as_str(),
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Cursor => "cursor",
@@ -465,22 +546,7 @@ impl ProviderConfig {
         for p in &self.providers {
             if let Some(cli) = &p.cli {
                 let (engine, command) = cli.parts();
-                let id = match engine {
-                    CliEngine::Claude => "cli:claude",
-                    CliEngine::Codex => "cli:codex",
-                    CliEngine::Cursor => "cli:cursor",
-                    CliEngine::OpenCode => "cli:opencode",
-                    CliEngine::Gemini => "cli:gemini",
-                    CliEngine::Agy => "cli:agy",
-                    CliEngine::Qwen => "cli:qwen",
-                    CliEngine::Kiro => "cli:kiro",
-                    CliEngine::Qoder => "cli:qoder",
-                    CliEngine::Copilot => "cli:copilot",
-                    CliEngine::Kimi => "cli:kimi",
-                    CliEngine::Vibe => "cli:vibe",
-                    CliEngine::Goose => "cli:goose",
-                };
-                if p.id != id
+                if p.id != format!("cli:{}", engine.as_str())
                     || p.key.is_some()
                     || p.custom.is_some()
                     || command.is_empty()
@@ -1090,6 +1156,85 @@ mod cli_tests {
         let text = std::fs::read_to_string(path).unwrap();
         assert!(!text.contains("base_url"));
         assert!(!text.contains("key"));
+    }
+    #[test]
+    fn engine_wire_ids_round_trip_and_data_driven_ids_are_well_formed_slugs() {
+        // Built in and data-driven (`providers/cli/`) engines are the same plain string.
+        for id in ["claude", "opencode", "goose", "cline", "auggie"] {
+            let engine: CliEngine = serde_json::from_value(serde_json::json!(id)).unwrap();
+            assert_eq!(engine.as_str(), id);
+            assert_eq!(serde_json::to_value(engine).unwrap(), serde_json::json!(id));
+        }
+        assert_eq!(CliEngine::from_id("cline"), CliEngine::from_id("cline"));
+        assert_eq!(CliEngine::from_id("goose"), Some(CliEngine::Goose));
+        let too_long = "a".repeat(25);
+        for bad in [
+            "",
+            "A",
+            "x",
+            "../claude",
+            "cline engine",
+            "1abc",
+            "a_b",
+            "cli:cline",
+            &too_long,
+        ] {
+            assert!(
+                serde_json::from_value::<CliEngine>(serde_json::json!(bad)).is_err(),
+                "{bad:?}"
+            );
+        }
+        // The number of distinct unknown ids is bounded, so a hostile file cannot grow memory.
+        let accepted = (0..DataEngineId::MAX_DISTINCT * 2)
+            .filter(|i| DataEngineId::intern(&format!("fuzz-{i}")).is_some())
+            .count();
+        assert!(accepted <= DataEngineId::MAX_DISTINCT);
+    }
+    #[test]
+    fn a_data_driven_engine_is_a_provider_entry_like_any_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            "[[provider]]
+id='cli:cline'
+added_at_ms=0
+kind='cli'
+engine='cline'
+command='cline'
+",
+        )
+        .unwrap();
+        let cfg = ProviderConfig::load(&path).unwrap();
+        let (engine, command) = cfg.get("cli:cline").unwrap().cli.as_ref().unwrap().parts();
+        assert_eq!((engine.as_str(), command), ("cline", "cline"));
+        cfg.save(&path).unwrap();
+        assert_eq!(ProviderConfig::load(&path).unwrap(), cfg);
+        // The entry id must name the same engine, and the command stays a bare name.
+        for fields in [
+            "id='cli:claude'
+engine='cline'
+command='cline'",
+            "id='cli:cline'
+engine='cline'
+command='/opt/cline'",
+            "id='cli:cline'
+engine='cline'
+command='--yolo'",
+        ] {
+            std::fs::write(
+                &path,
+                format!(
+                    "[[provider]]
+added_at_ms=0
+kind='cli'
+{fields}
+"
+                ),
+            )
+            .unwrap();
+            assert!(ProviderConfig::load(&path).is_err(), "{fields}");
+        }
     }
     #[test]
     fn cli_configuration_rejects_paths_unsupported_engines_and_keys() {

@@ -31,8 +31,9 @@ async fn test_all_missing() {
     let detector = Detector::with_env(env);
 
     let detected = detector.detect(false).await;
-    // Gemini CLI is retired: never listed unless it is already installed.
-    assert_eq!(detected.len(), 12);
+    // Gemini CLI is retired: never listed unless it is already installed. 12 built-in rows
+    // plus the two data-driven engines of `providers/cli/`.
+    assert_eq!(detected.len(), 14);
     assert!(detected.iter().all(|cli| cli.id != "gemini"));
 
     for cli in &detected {
@@ -850,7 +851,8 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
 
     for id in [
         "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro", "kimi", "qoder",
-        "vibe", "goose",
+        "vibe", "goose", // The data-driven ACP engines of `providers/cli/`.
+        "auggie", "cline",
     ] {
         let spec = cli_provider::engine_spec(id).expect("spec exists");
         assert!(!spec.runnable, "{id} must not be runnable");

@@ -1,0 +1,41 @@
+# Cline CLI (cline.bot/cli). Runs with its own tools through `cline --acp`.
+id = "cline"
+display_name = "Cline"
+command = "cline"
+docs_url = "https://docs.cline.bot/usage/acp"
+login = "cline auth"
+support = "experimental"
+models = ["default"]
+# `~/.cline` holds `data/settings/providers.json` (API keys) and `global-settings.json`.
+protected_dirs = [".cline"]
+evidence = "Read on 2026-11-27 from docs.cline.bot (usage/acp, cli/cli-reference, cline-cli/installation, getting-started/config) and the ACP registry entry (npx cline --acp). Not read from an install or a signed-in run."
+unverified = [
+  "minimum version with --acp",
+  "sign-in status (no status command is documented)",
+  "session mode ids",
+  "choosing a model over ACP",
+  "version output format",
+]
+
+[install]
+npm = "cline"
+
+[acp]
+args = ["--acp"]
+# The docs name CLINE_MODEL and the client's model picker, not a stable ACP method: no model is sent.
+model = "none"
+
+# Docs: "Nothing is auto-approved by default" in ACP, and `--auto-approve` is a boolean
+# flag. The flag is always passed so a user setting cannot make a lower level approve.
+[levels.ask]
+applied = "ask"
+native = "--auto-approve false"
+flags = ["--auto-approve", "false"]
+
+# No edits-only or reviewer mode is documented: Accept edits and Auto run as Ask.
+
+[levels.full]
+applied = "full"
+native = "--auto-approve true"
+flags = ["--auto-approve", "true"]
+allow_all = true

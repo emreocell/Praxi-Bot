@@ -376,7 +376,10 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
 
 #[must_use]
 pub fn engine_spec(id: &str) -> Option<&'static CliEngineSpec> {
-    CLI_ENGINES.iter().find(|spec| spec.id == id)
+    CLI_ENGINES
+        .iter()
+        .find(|spec| spec.id == id)
+        .or_else(|| crate::acp_data::specs().find(|spec| spec.id == id))
 }
 
 #[cfg(test)]

@@ -177,7 +177,8 @@
       "Install and sign in on a server",
       "Security boundary",
       "Local evidence and attribution",
-      "Running a CLI with its own tools (engine mode)"
+      "Running a CLI with its own tools (engine mode)",
+      "Engines defined by a data file"
     ],
     "summary": "Settings → Providers lists CLI engines on the daemon's computer. Refresh"
   },

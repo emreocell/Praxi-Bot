@@ -2094,23 +2094,9 @@ pub(crate) async fn detect_providers(
 
 /// Registry id to the provider-catalog engine kind (`None`: never a provider).
 pub(crate) fn cli_engine_kind(id: &str) -> Option<provider_catalog::config::CliEngine> {
-    use provider_catalog::config::CliEngine;
-    Some(match id {
-        "claude" => CliEngine::Claude,
-        "codex" => CliEngine::Codex,
-        "cursor" => CliEngine::Cursor,
-        "opencode" => CliEngine::OpenCode,
-        "gemini" => CliEngine::Gemini,
-        "agy" => CliEngine::Agy,
-        "qwen" => CliEngine::Qwen,
-        "kiro" => CliEngine::Kiro,
-        "qoder" => CliEngine::Qoder,
-        "copilot" => CliEngine::Copilot,
-        "kimi" => CliEngine::Kimi,
-        "vibe" => CliEngine::Vibe,
-        "goose" => CliEngine::Goose,
-        _ => return None,
-    })
+    // Only an engine of this build's registry (built in or data-driven) is ever a provider.
+    cli_provider::engine_spec(id)?;
+    provider_catalog::config::CliEngine::from_id(id)
 }
 
 /// Write the `cli:<id>` entry of `providers.toml`. The entry is also the memory of the

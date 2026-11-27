@@ -237,7 +237,10 @@ async fn session(
         Transport::Acp => {
             // Vibe saves a model chosen over ACP as the user's default model, so Praxi never
             // sends one; a model other than the CLI's own is refused, never silently swapped.
-            if driver == Driver::Vibe && nt.turn.model.as_deref().is_some_and(|m| m != "default") {
+            let own_model_only = driver == Driver::Vibe
+                || matches!(driver, Driver::Data(data)
+                    if data.engine().model == crate::acp_data::ModelSelection::None);
+            if own_model_only && nt.turn.model.as_deref().is_some_and(|m| m != "default") {
                 return Err(CliError::Protocol);
             }
             acp_args(driver, &plan, nt.turn.model.as_deref()).ok_or(CliError::NativeToolsOpen)?
@@ -746,6 +749,20 @@ impl Run<'_> {
                         // Only the mode: a Vibe model other than `default` is refused at launch.
                         Driver::Vibe => agy_setup(id, self.plan.acp_mode, None),
                         Driver::Kiro => kiro_setup(id, model),
+                        // A data-driven engine: the mode, then the model the way its entry says.
+                        Driver::Data(data) => match data.engine().model {
+                            crate::acp_data::ModelSelection::None => {
+                                agy_setup(id, self.plan.acp_mode, None)
+                            }
+                            crate::acp_data::ModelSelection::SetModel => {
+                                agy_setup(id, self.plan.acp_mode, model)
+                            }
+                            crate::acp_data::ModelSelection::ConfigOption => {
+                                let mut requests = agy_setup(id, self.plan.acp_mode, None);
+                                requests.extend(kiro_setup(id, model));
+                                requests
+                            }
+                        },
                         Driver::Goose => {
                             let mut requests = agy_setup(id, self.plan.acp_mode, None);
                             requests.extend(kiro_setup(id, model));

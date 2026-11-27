@@ -743,6 +743,8 @@ const HOME_STORES: &[&str] = &[
     ".qoder",
     ".vibe",
     ".kimi-code",
+    ".cline",
+    ".augment",
     ".config/opencode",
     ".config/claude",
     ".config/cursor",
@@ -831,6 +833,8 @@ impl CliStores {
             "CLAUDE_CONFIG_DIR",
             "VIBE_HOME",
             "GOOSE_PATH_ROOT",
+            "CLINE_DIR",
+            "CLINE_DATA_DIR",
         ] {
             roots.extend(env_dir(key));
         }
@@ -1114,6 +1118,10 @@ mod tests {
             ("cat ~/.vibe/.env", None),
             ("cat ${HOME}/.vibe/config.toml", None),
             ("cat .vibe/.env", Some("/home/praxi")),
+            // Cline: API keys in providers.json; Augment Code: tool permissions, hooks and token
+            ("cat ~/.cline/data/settings/providers.json", None),
+            ("cat ${HOME}/.augment/settings.json", None),
+            ("cat .augment/settings.json", Some("/home/praxi")),
             // Goose: provider settings, keys without a keyring and saved tool permissions
             ("cat ~/.config/goose/secrets.yaml", None),
             ("rm ${HOME}/.config/goose/permission.yaml", None),
@@ -1143,6 +1151,28 @@ mod tests {
             ("cat .codex/auth.json", Some("/home/praxi")),
         ] {
             assert!(stores.names_store(command, cwd), "{command} in {cwd:?}");
+        }
+    }
+
+    #[test]
+    fn the_credential_folder_of_every_data_driven_engine_is_a_store() {
+        // `providers/cli/*.toml` name the folders (`protected_dirs`, on one line each).
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../providers/cli");
+        let mut folders = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            for line in text
+                .lines()
+                .filter(|l| l.trim_start().starts_with("protected_dirs"))
+            {
+                folders.extend(line.split('"').skip(1).step_by(2).map(str::to_owned));
+            }
+        }
+        assert_ne!(folders.len(), 0);
+        let stores = CliStores::for_homes(&["/home/praxi"], Some("/var/lib/praxi"));
+        for folder in folders {
+            let command = format!("cat ~/{folder}/settings.json");
+            assert!(stores.names_store(&command, None), "{command}");
         }
     }
 

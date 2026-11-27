@@ -21,6 +21,8 @@ An unrelated `agent` on PATH cannot hide Cursor's vendor-directory alias.
 | Kimi Code CLI | `kimi` | Credential-file metadata only (`~/.kimi-code/credentials/kimi-code.json`); contents never opened | `npm install -g @moonshot-ai/kimi-code` (verified against the vendor source 2026-11-26; the Install button runs it after your approval) | Runs with its own tools (`kimi acp`, experimental); minimum unverified. The Python `kimi-cli` 1.x is its retired predecessor |
 | Mistral Vibe | `vibe-acp` | None: no status command; the API key can be in the environment, `~/.vibe/.env`, the OS keyring or a browser sign-in, and none of them is evidence | `uv tool install mistral-vibe` (**unverified**, copy only) | Runs with its own tools (`vibe-acp`, experimental); minimum unverified. Runs the CLI's own model: Vibe saves a model chosen over ACP as the user's default, so another model is refused |
 | Goose | `goose` (the database migration tool of the same name, which prints `goose version: ...`, is reported as another program) | None: no status command; keys are in the OS keyring or `secrets.yaml` (set up with `goose configure`), and none of them is evidence | Unix: `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| CONFIGURE=false bash` (**unverified**, copy only) | Runs with its own tools (`goose acp`, experimental); minimum unverified. Without a configured provider the run ends as signed out |
+| Cline | `cline` | None: no status command is documented (sign-in is `cline auth`; keys are in `~/.cline`, which Praxi's file tools never open) | `npm install -g cline` (**unverified**, copy only) | Runs with its own tools (`cline --acp`, experimental, data entry `providers/cli/cline.toml`); minimum unverified. Runs the CLI's own model |
+| Augment Code | `auggie` | None: `auggie auth status` has no documented output, so sign-in is never claimed (sign-in is `auggie auth login`) | Unix: `npm install -g @augmentcode/auggie` (**unverified**, copy only). The install page lists macOS, Linux and WSL, not native Windows | Runs with its own tools (`auggie --acp`, experimental, data entry `providers/cli/auggie.toml`); only at Full access, see below. Runs the CLI's own model |
 | OpenCode | `opencode` | Credential-file metadata only; contents never opened | `npm install -g opencode-ai` (verified local reference) | Detect/install only: inspected CLI has no switch to disable native tools |
 | Cursor | `cursor-agent`; `agent` only inside a `cursor-agent` directory | `status --format json`, then `status` | Windows: `irm 'https://cursor.com/install?win32=true' \| iex`; Unix: `curl https://cursor.com/install -fsS \| bash` (verified local reference) | Detection only; minimum unverified |
 | ChatGPT plan | Same Codex executable | Unknown; no Praxi PKCE flow | Use the Codex row | Detection only |
@@ -189,6 +191,8 @@ or another model, and nothing is switched on for an engine that cannot start.
 | Kimi Code CLI (`kimi acp`, experimental) | Windows: mode `default` (Always Ask). Linux and macOS: not offered, because that mode approves edits inside a git repository | runs as Ask | mode `yolo` (Ask When Needed) | mode `auto` (Never Ask) |
 | Mistral Vibe (`vibe-acp`, experimental) | mode `ask` | mode `accept-edits` | mode `smart-approve`; refused when the session does not offer it (it is behind a rollout gate) | mode `auto-approve`; refused when the session does not offer it (`enable_auto_approve = false`) |
 | Goose (`goose acp`, experimental) | mode `approve` | runs as Ask | mode `smart_approve` | mode `auto` |
+| Cline (`--acp`, experimental) | `--auto-approve false` | runs as Ask | runs as Ask | `--auto-approve true` |
+| Augment Code (`--acp`, experimental) | not offered | not offered | not offered | requests approved automatically |
 
 A level a CLI has no mode for runs as Ask, never as something wider. When an ACP CLI
 lists its modes in `session/new` and the level's mode is not among them, the turn is
@@ -214,3 +218,42 @@ session only. Three things to know about Goose:
 
 A model chosen in Praxi is sent as the session's `model` config option, which Goose keeps
 on that session and does not save as the user's default.
+
+### Engines defined by a data file
+
+Cline and Augment Code are not Rust code: each is one file in `providers/cli/` (`cline.toml`,
+`auggie.toml`), read and validated by `cli_provider::acp_data` and run by the same launcher,
+approval cards, consent steps and checks as the built-in engines. A file states the command,
+the fixed ACP arguments, the install package, the sign-in text to copy, which approval level
+maps to which flag or mode, how a model is chosen, the folders that hold the CLI's
+credentials, what was read and where, and a list of facts it does **not** claim (`unverified`).
+
+What a file can never do: hold a command line (only a bare executable name and fixed
+arguments, with no placeholder for a prompt, a model or any user text), install anything but
+`npm install -g <package>`, widen a level (a level maps to the same or a narrower one, and
+one the CLI cannot be made to keep is refused before anything starts), put a permissive flag
+(`--yolo`, `--auto-approve`, `--force`, ...) below Full access (a flag may only pin the safe
+value, as in `--auto-approve false`), be anything but experimental, or reuse the id or the
+command of another engine. A file that breaks a rule is dropped, and the build's tests fail.
+The engine folder rule, the consent steps for native tools and Full access, and the money gate
+apply exactly as for the built-in engines, because they belong to the engine mode, not to one
+engine.
+
+- **Cline** (`cline --acp`): the docs say nothing is auto-approved in ACP mode and give a
+  boolean `--auto-approve`, which Praxi always passes (`false` below Full access, `true` at
+  Full access) so a setting of the user cannot make a lower level approve. No edits-only or
+  reviewer mode is documented: Accept edits and Auto run as Ask.
+- **Augment Code** (`auggie --acp`): the ACP pages do not say whether permission requests
+  are forwarded or tools run without asking, and the permissions page only says the CLI
+  follows its implicit runtime behavior when no rule matches. Praxi cannot make it ask, so
+  only Full access is offered (the rule OpenCode follows).
+- Neither engine is sent a model: the docs name no stable ACP way to choose one, so a model
+  other than `default` is refused.
+
+Looked at and **not added**: Factory Droid (the docs give `droid exec --output-format acp`,
+the ACP registry `acp-daemon`, and nothing explains the difference), Junie (the public docs
+index was empty; the launch flag exists only in a staging registry file), Amp (no official
+ACP mode; the registry lists a third-party wrapper, `amp-acp`, and Amp's own headless mode
+speaks a different protocol), Grok Build (no reachable official docs) and Crush (no confirmed
+ACP mode). Each can become a data file once its launch command and permission behaviour are
+verified against the vendor's docs or a real install.

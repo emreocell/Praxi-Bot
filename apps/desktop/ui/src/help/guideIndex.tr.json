@@ -173,7 +173,8 @@
     "headings": [
       "Güvenlik sınırı",
       "Yerel kanıtlar ve kaynak belirtme",
-      "Bir CLI'yı kendi araçlarıyla çalıştırma (motor kipi)"
+      "Bir CLI'yı kendi araçlarıyla çalıştırma (motor kipi)",
+      "Veri dosyasıyla tanımlanan motorlar"
     ],
     "summary": "Ayarlar bölümündeki sağlayıcılar sayfası, daemon'ın çalıştığı bilgisayardaki CLI motorlarını listeler. Yeniden tara düğmesi, sınırlı sürüm ve kimlik doğrulama yoklamalarını yeniden çalıştırır. Algıla…"
   },

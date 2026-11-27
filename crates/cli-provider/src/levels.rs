@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::acp_data::{self, DataId};
+
 /// Who runs the bot's file and shell actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,6 +116,8 @@ pub enum Driver {
     Vibe,
     /// Goose (`goose acp`).
     Goose,
+    /// An ACP engine defined by a `providers/cli/<id>.toml` file instead of Rust code.
+    Data(DataId),
 }
 
 /// How far a driver's interface was checked.
@@ -138,6 +142,7 @@ pub enum Transport {
 }
 
 impl Driver {
+    /// The drivers written in Rust. Data-driven engines are in [`Driver::all`].
     pub const ALL: [Self; 13] = [
         Self::Claude,
         Self::Codex,
@@ -154,10 +159,20 @@ impl Driver {
         Self::Goose,
     ];
 
-    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`, `goose`).
+    /// Every driver: the Rust ones, then the data-driven ACP engines.
     #[must_use]
-    pub const fn id(self) -> &'static str {
+    pub fn all() -> Vec<Self> {
+        Self::ALL
+            .into_iter()
+            .chain(acp_data::ids().map(Self::Data))
+            .collect()
+    }
+
+    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`, `goose`, or a data-driven id).
+    #[must_use]
+    pub fn id(self) -> &'static str {
         match self {
+            Self::Data(data) => data.engine().spec.id,
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Cursor => "cursor",
@@ -176,12 +191,16 @@ impl Driver {
 
     #[must_use]
     pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|d| d.id() == id)
+        Self::ALL
+            .into_iter()
+            .find(|d| d.id() == id)
+            .or_else(|| acp_data::data_id(id).map(Self::Data))
     }
 
     #[must_use]
-    pub const fn display_name(self) -> &'static str {
+    pub fn display_name(self) -> &'static str {
         match self {
+            Self::Data(data) => data.engine().spec.display_name,
             Self::Claude => "Claude Code",
             Self::Codex => "Codex",
             Self::Cursor => "Cursor",
@@ -199,7 +218,7 @@ impl Driver {
     }
 
     #[must_use]
-    pub const fn transport(self) -> Transport {
+    pub fn transport(self) -> Transport {
         match self {
             Self::Claude => Transport::StreamJson,
             Self::Codex => Transport::CodexAppServer,
@@ -213,14 +232,15 @@ impl Driver {
             | Self::Kimi
             | Self::Qoder
             | Self::Vibe
-            | Self::Goose => Transport::Acp,
+            | Self::Goose
+            | Self::Data(_) => Transport::Acp,
         }
     }
 
     /// Gemini CLI is not installed on the machine this was written on and its
     /// install command is unverified, so its driver ships as experimental.
     #[must_use]
-    pub const fn support(self) -> Support {
+    pub fn support(self) -> Support {
         match self {
             Self::Gemini
             | Self::OpenCode
@@ -231,7 +251,8 @@ impl Driver {
             | Self::Kimi
             | Self::Qoder
             | Self::Vibe
-            | Self::Goose => Support::Experimental,
+            | Self::Goose
+            | Self::Data(_) => Support::Experimental,
             _ => Support::Verified,
         }
     }
@@ -293,6 +314,7 @@ const fn plan(requested: ApprovalLevel, applied: ApprovalLevel, native: &'static
 pub fn level_plan(driver: Driver, level: ApprovalLevel) -> LevelPlan {
     use ApprovalLevel::{AcceptEdits, Ask, Auto, Full};
     match driver {
+        Driver::Data(data) => data.engine().level_plan(level),
         Driver::Claude => {
             let (mode, native) = match level {
                 Ask => ("default", "--permission-mode default"),
@@ -611,6 +633,7 @@ pub fn acp_args(driver: Driver, plan: &LevelPlan, model: Option<&str>) -> Option
                 args.extend(["--model".into(), m.to_owned()]);
             }
         }
+        Driver::Data(data) => return Some(data.engine().argv(plan)),
         Driver::Claude | Driver::Codex => return None,
     }
     Some(args)
@@ -841,14 +864,14 @@ mod tests {
             }
         }
         // Nothing widens: an applied level is never wider than the requested one.
-        for driver in Driver::ALL {
+        for driver in Driver::all() {
             for level in ApprovalLevel::ALL {
                 assert!(level_plan(driver, level).applied.rank() <= level.rank());
             }
         }
         // Full access is never the default and only Full auto-allows ACP requests.
         assert_eq!(ApprovalLevel::default(), Ask);
-        for driver in Driver::ALL {
+        for driver in Driver::all() {
             for level in [Ask, AcceptEdits, Auto] {
                 assert!(!level_plan(driver, level).acp_allow_all);
             }

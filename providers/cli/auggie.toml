@@ -1,0 +1,41 @@
+# Augment Code CLI (`auggie`). Runs with its own tools through `auggie --acp`.
+id = "auggie"
+display_name = "Augment Code"
+command = "auggie"
+docs_url = "https://docs.augmentcode.com/cli/acp/agent"
+login = "auggie auth login"
+support = "experimental"
+models = ["default"]
+# `~/.augment` holds `settings.json` (tool permissions, hooks) and the session token.
+protected_dirs = [".augment"]
+evidence = "Read on 2026-11-27 from docs.augmentcode.com (cli/acp/agent, cli/acp/clients, cli/reference, cli/permissions, cli/setup-auggie) and the ACP registry entry (npx @augmentcode/auggie --acp). Not read from an install or a signed-in run."
+unverified = [
+  "whether ACP mode forwards permission requests or runs tools without asking",
+  "session mode ids",
+  "sign-in status (`auggie auth status` output is not documented)",
+  "native Windows support (docs list macOS, Linux and WSL)",
+  "choosing a model over ACP",
+  "version output format",
+]
+
+[install]
+npm = "@augmentcode/auggie"
+# The install page lists macOS, Linux and Windows WSL, not native Windows.
+windows = false
+
+[acp]
+args = ["--acp"]
+model = "none"
+
+# The ACP pages say nothing about permissions, and the permissions page only says the CLI
+# "follows its implicit runtime behavior" when no rule matches. Praxi cannot make Auggie ask,
+# so nothing below Full is offered or started (the same rule as OpenCode).
+[levels.ask]
+applied = "ask"
+native = "not enforceable: Augment's permission handling over ACP is not documented"
+enforced = false
+
+[levels.full]
+applied = "full"
+native = "permission requests approved automatically"
+allow_all = true

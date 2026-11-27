@@ -67,6 +67,9 @@ fn durable_audit_precedes_real_spawn_and_completion_refreshes_cached_detection()
         "kimi",
         "vibe-acp",
         "goose",
+        // Data-driven ACP engines (`providers/cli/`).
+        "auggie",
+        "cline",
     ] {
         common::install_binary(
             binary,

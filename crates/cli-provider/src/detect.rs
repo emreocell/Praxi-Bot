@@ -1327,6 +1327,16 @@ impl Detector {
             claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, kimi, qoder, vibe,
             goose,
         ];
+        // Data-driven ACP engines (`providers/cli/`): version probe only, sign-in is never
+        // claimed because their entries state no verified status command.
+        rows.extend(
+            futures::future::join_all(
+                crate::acp_data::engines()
+                    .iter()
+                    .map(|engine| self.probe_unverified_auth(engine.spec.id)),
+            )
+            .await,
+        );
         // Gemini CLI is retired (Antigravity replaces it): never offered for install,
         // listed only where it is already installed so that setup keeps working.
         rows.retain(|r| r.id != "gemini" || r.installed);

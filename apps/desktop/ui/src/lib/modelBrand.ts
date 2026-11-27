@@ -36,7 +36,9 @@ const CLI_LABELS: Record<string, string> = {
   kimi: "Kimi Code",
   qoder: "Qoder",
   vibe: "Mistral Vibe",
-  goose: "Goose"
+  goose: "Goose",
+  cline: "Cline",
+  auggie: "Augment Code"
 };
 
 function pretty(id: string): string {

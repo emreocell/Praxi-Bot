@@ -2640,7 +2640,7 @@ async fn providers_detected_reports_five_rows_without_the_retired_gemini_cli() {
     assert_eq!(r.status, StatusCode::OK);
     let list = r.json();
     let items = list.as_array().unwrap();
-    assert_eq!(items.len(), 12);
+    assert_eq!(items.len(), 14);
     let ids: Vec<&str> = items
         .iter()
         .map(|item| item["id"].as_str().unwrap())
@@ -2649,7 +2649,7 @@ async fn providers_detected_reports_five_rows_without_the_retired_gemini_cli() {
         ids,
         vec![
             "claude", "codex", "cursor", "opencode", "agy", "qwen", "copilot", "kiro", "kimi",
-            "qoder", "vibe", "goose"
+            "qoder", "vibe", "goose", "auggie", "cline"
         ]
     );
     for row in items {

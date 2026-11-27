@@ -66,7 +66,7 @@ async fn opt_in_read_only_installed_adapter_detection() {
         return;
     }
     let detector = cli_provider::Detector::new();
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         if let Some(detected) = driver.detect(&detector).await {
             approval_contract(&driver).unwrap();
             detection_contract(driver, &detected);
@@ -79,7 +79,7 @@ async fn every_adapter_detects_only_hermetic_binaries() {
     let binary = Path::new(env!("CARGO_BIN_EXE_fake-cli"));
     let bin = common::fixture_dir(binary);
     let missing = cli_provider::Detector::with_env(PathEnv::for_test(bin.path().into()));
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         // Retired engines may be omitted entirely when not installed.
         assert!(driver.detect(&missing).await.is_none_or(|d| !d.installed));
         common::install_binary(
@@ -92,7 +92,7 @@ async fn every_adapter_detects_only_hermetic_binaries() {
         );
     }
     let detector = cli_provider::Detector::with_env(PathEnv::for_test(bin.path().into()));
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         let detected = driver
             .detect(&detector)
             .await
@@ -354,7 +354,7 @@ async fn exited(bin: &tempfile::TempDir) {
 
 #[tokio::test]
 async fn every_adapter_spawns_streams_and_confines_launch_data() {
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         let adapter: &dyn EngineAdapter = &driver;
         assert_eq!(adapter.spec().id, driver.id());
         approval_contract(adapter).unwrap();
@@ -399,7 +399,7 @@ async fn every_adapter_spawns_streams_and_confines_launch_data() {
 
 #[tokio::test]
 async fn every_adapter_cancels_and_cleans_up_after_a_caller_timeout() {
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         for timeout in [false, true] {
             let (bin, workspace, env) = setup(driver, "hang");
             let cancel = CancellationToken::new();
@@ -440,7 +440,7 @@ async fn every_adapter_cancels_and_cleans_up_after_a_caller_timeout() {
 
 #[tokio::test]
 async fn every_adapter_rejects_bad_output_and_workspace_executables() {
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         for mode in ["exit", "flood"] {
             let (_bin, workspace, env) = setup(driver, mode);
             let host = Arc::new(Host::default());

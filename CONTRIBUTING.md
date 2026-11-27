@@ -55,7 +55,7 @@ size are welcome: fixes, improvements and new features, from first-timers and re
 | `desktop-api`, `desktop-windows`, `desktop-linux`, `desktop-macos` | OS-agnostic desktop trait and the per-OS backends (macOS is a stub today) |
 | `vision` | OCR and visual grounding helpers |
 | `provider-catalog` | LLM provider adapters and the provider catalog |
-| `cli-provider` | Detects and runs locally installed coding CLIs (Claude Code, Codex, Cursor, OpenCode, Antigravity, Qwen Code, GitHub Copilot CLI, Kiro CLI, Kimi Code CLI, Qoder CLI, Mistral Vibe, Goose), installs them and signs them in on a host |
+| `cli-provider` | Detects and runs locally installed coding CLIs (Claude Code, Codex, Cursor, OpenCode, Antigravity, Qwen Code, GitHub Copilot CLI, Kiro CLI, Kimi Code CLI, Qoder CLI, Mistral Vibe, Goose, and any ACP agent defined by a data file in `providers/cli/`: Cline, Augment Code), installs them and signs them in on a host |
 | `pty-session` | A program on a pseudo-terminal (ConPTY / `openpty`): input, bounded text output, screen, resize, kill. Behind the `shell_interactive` tool and the CLI sign-in flows |
 | `mcp-bridge` | MCP client and server bridge, OAuth for remote MCP servers |
 | `composio` | Composio app connections (REST client, curated catalog, logos) |

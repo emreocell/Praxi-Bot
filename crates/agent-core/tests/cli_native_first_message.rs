@@ -54,7 +54,7 @@ fn every_engine_runs_the_first_message_once_the_owner_agreed_in_the_picker() {
         tokio::runtime::Runtime::new().unwrap().block_on(child(&id));
         return;
     }
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir(&bin).unwrap();

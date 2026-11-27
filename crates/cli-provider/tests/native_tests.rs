@@ -168,7 +168,7 @@ fn level_picker_starts_on(driver: Driver) -> ApprovalLevel {
 
 #[tokio::test]
 async fn every_engine_runs_its_first_message_with_the_settings_the_picker_gives_it() {
-    for driver in Driver::ALL {
+    for driver in Driver::all() {
         let level = level_picker_starts_on(driver);
         let (dir, workspace, env) = setup();
         let env = match driver {

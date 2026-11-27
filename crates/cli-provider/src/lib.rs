@@ -1,8 +1,10 @@
 //! CLI provider detection and execution.
 //!
 //! Reports installed, signed-in coding CLIs (`claude`, `codex`, `cursor`, `opencode`,
-//! `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`, `goose`).
+//! `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`, `goose`, and the data-driven ACP engines of
+//! `providers/cli/`, see [`acp_data`]).
 
+pub mod acp_data;
 pub mod adapter;
 pub mod detect;
 pub mod foreground;
