@@ -334,6 +334,7 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
 /// The workspaces root must be a plain directory owned by this process's account and closed to
 /// every other account (`0700`), or the other accounts could list every bot's folder. A root that
 /// is not ours is refused; one that is ours but open is closed. No-op outside Unix.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))] // nothing to check outside Unix
 fn secure_workspaces_root(root: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
