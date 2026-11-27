@@ -138,7 +138,12 @@ mod tests {
             (12, 19),
         )
         .unwrap();
-        assert_eq!(citation.path, "/home/ada/Documents/taxes/2024 return.pdf");
+        // Built the way the citation builds it, so the separators are the platform's own.
+        let expected = Path::new("/home/ada/Documents")
+            .join("taxes/2024 return.pdf")
+            .display()
+            .to_string();
+        assert_eq!(citation.path, expected);
         assert_eq!(citation.page, Some(3));
         assert_eq!(
             citation.markdown,

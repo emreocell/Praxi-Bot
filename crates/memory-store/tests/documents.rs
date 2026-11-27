@@ -187,7 +187,7 @@ fn fuller_matches_rank_above_repeated_partial_matches() {
             h.path
                 .as_deref()
                 .unwrap()
-                .rsplit('/')
+                .rsplit(['/', '\\'])
                 .next()
                 .unwrap()
                 .to_owned()

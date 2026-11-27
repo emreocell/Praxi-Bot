@@ -88,11 +88,23 @@ fn normal_local_prefix(path: &Path) -> Result<PathBuf> {
     Ok(path.to_owned())
 }
 
+/// The daemon's data directory in the same canonical form as a checked path, so an 8.3 alias or a
+/// link in front of it cannot hide an overlap. Falls back to the plain form when it cannot be resolved.
+fn state_prefix(data_dir: &Path) -> Result<PathBuf> {
+    let resolved = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_owned());
+    normal_local_prefix(&resolved)
+}
+
 fn canonical_source_path(path: &Path) -> Result<PathBuf> {
     if !path.is_absolute()
         || path.to_string_lossy().chars().any(char::is_control)
         || path.components().any(|part| match part {
-            Component::Prefix(prefix) => !matches!(prefix.kind(), std::path::Prefix::Disk(_)),
+            // A `\\?\C:` path is what `canonicalize` returns on Windows: still a local disk,
+            // and normalized below.
+            Component::Prefix(prefix) => !matches!(
+                prefix.kind(),
+                std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)
+            ),
             Component::CurDir | Component::ParentDir => true,
             _ => false,
         })
@@ -488,7 +500,7 @@ impl SelectedSource {
             path.to_owned()
         };
         let canonical = canonical_source_path(&selected)?;
-        let state = normal_local_prefix(data_dir)?;
+        let state = state_prefix(data_dir)?;
         let brain = state.join("brain");
         let exact_brain =
             folder && path_within(&canonical, &brain) && path_within(&brain, &canonical);
@@ -514,7 +526,7 @@ impl SelectedSource {
         let Ok(canonical) = canonical_source_path(path) else {
             return false;
         };
-        let Ok(state) = normal_local_prefix(data_dir) else {
+        let Ok(state) = state_prefix(data_dir) else {
             return false;
         };
         !protected_path(&canonical)
@@ -533,7 +545,7 @@ impl SelectedSource {
         let Ok(canonical) = canonical_source_path(path) else {
             return false;
         };
-        let Ok(state) = normal_local_prefix(data_dir) else {
+        let Ok(state) = state_prefix(data_dir) else {
             return false;
         };
         !protected_path(&canonical) && !path_within(&canonical, &state)
@@ -1440,7 +1452,7 @@ mod tests {
     #[test]
     fn canonical_check_rejects_a_path_that_resolves_elsewhere() {
         let dir = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let root = normal_local_prefix(&std::fs::canonicalize(dir.path()).unwrap()).unwrap();
         std::fs::write(root.join("a.txt"), "a").unwrap();
         assert!(ensure_canonical_within(&root, Path::new("a.txt")).is_ok());
         assert!(ensure_canonical_within(&root, Path::new("missing.txt")).is_err());
