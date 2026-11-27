@@ -618,12 +618,11 @@ impl VoiceHost {
     }
 
     #[cfg(not(feature = "local-voice"))]
-    #[allow(clippy::unused_async)]
-    async fn synthesize_local(
+    fn synthesize_local(
         &self,
         _input: SynthesizeInput,
-    ) -> Result<Vec<u8>, VoiceControlError> {
-        Err(VoiceControlError::NotConfigured)
+    ) -> std::future::Ready<Result<Vec<u8>, VoiceControlError>> {
+        std::future::ready(Err(VoiceControlError::NotConfigured))
     }
 }
 
