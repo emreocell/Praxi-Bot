@@ -575,6 +575,39 @@ async fn owner_messages_reach_the_daemon_and_replies_are_safe() {
 }
 
 #[tokio::test]
+async fn a_pasted_secret_is_cut_out_before_the_daemon_and_the_owner_is_told() {
+    let h = harness(FakeDaemon::new(vec![vec![finished()]], false)).await;
+    pair_owner(&h).await;
+    // Assembled at run time so no secret-shaped literal sits in the source.
+    let key = format!("{}{}", "sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+    let dm = (None, "777");
+
+    h.gw.message("2", OWNER, dm, &format!("deploy with {key} please"));
+    let s = wait_sent(&h.rest, 3).await;
+    assert_eq!(
+        h.daemon.sent.lock().as_slice(),
+        ["deploy with [REDACTED] please"]
+    );
+    let said: Vec<&str> = s.iter().filter_map(|m| m["content"].as_str()).collect();
+    let notice = said.iter().find(|t| t.starts_with("🔒")).expect("a notice");
+    assert!(notice.contains("cut that part out"), "{notice}");
+    assert!(said.iter().all(|t| !t.contains("Ab12Cd34")), "{said:?}");
+
+    // Nothing but a key: nothing reaches the daemon, the owner still hears why.
+    h.gw.message("3", OWNER, dm, &format!("  {key}\n"));
+    settle().await;
+    assert_eq!(h.daemon.sent.lock().len(), 1);
+    let s = sent(&h.rest).await;
+    let last = s.last().unwrap()["content"].as_str().unwrap().to_owned();
+    assert!(
+        last.starts_with("🔒") && last.contains("did not pass it on"),
+        "{last}"
+    );
+    assert!(!last.contains("Ab12Cd34"));
+    h.channel.shutdown().await;
+}
+
+#[tokio::test]
 async fn approval_buttons_are_owner_only_low_risk_once_or_deny() {
     let call = ToolCallId::new();
     let high = ToolCallId::new();

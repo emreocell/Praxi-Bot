@@ -34,7 +34,7 @@ use channel_telegram::{
 use futures_util::StreamExt;
 use parking_lot::Mutex;
 use protocol::{Event, RunId, ToolCallId};
-use secret_store::{Redactor, SecretStore, SecretValue};
+use secret_store::{Redactor, SecretStore, SecretValue, screen_inbound};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -780,6 +780,27 @@ impl Inner {
             self.say(chat, &Msg::TooLong.render(lang)).await;
             return;
         }
+        // The owner cannot be offered the "keep it out of the chat" card here, so a pasted
+        // secret is cut out before it reaches the model, the history or the logs, and the
+        // owner is told.
+        let screened = screen_inbound(text);
+        let text = match &screened {
+            Some(s) => {
+                self.say(
+                    chat,
+                    &Msg::SecretRemoved {
+                        whole: s.only_secrets,
+                    }
+                    .render(lang),
+                )
+                .await;
+                if s.only_secrets {
+                    return;
+                }
+                s.text.as_str()
+            }
+            None => text,
+        };
         if let Err(e) = self.forward(chat, parts.channel_id, text, event_id).await {
             self.fail(chat, &e).await;
         }

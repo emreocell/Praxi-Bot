@@ -1922,6 +1922,74 @@ async fn oversized_incoming_text_is_not_forwarded() {
     assert!(daemon.sent_messages.lock().is_empty());
 }
 
+#[tokio::test]
+async fn a_pasted_secret_is_cut_out_before_the_daemon_and_the_owner_is_told() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    // Assembled at run time so no secret-shaped literal sits in the source.
+    let key = format!("{}{}", "sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+    let say = |id: i64, text: String| {
+        let channel = &channel;
+        async move {
+            channel
+                .handle_update(update(text_update(id, PAIRED_USER_ID, TEST_CHAT_ID, &text)))
+                .await
+                .unwrap();
+        }
+    };
+
+    // A message with a key and other words: the rest goes on, the key never does.
+    say(1, format!("deploy with {key} please")).await;
+    let sent = daemon.sent_messages.lock().clone();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].1, "deploy with [REDACTED] please");
+
+    // Nothing but a key: nothing reaches the daemon.
+    say(2, format!("  {key}\n")).await;
+    assert_eq!(daemon.sent_messages.lock().len(), 1);
+
+    // A card number is caught too; ordinary text and hashes are not touched.
+    say(3, "card 4111 1111 1111 1111 exp 12/29".into()).await;
+    say(
+        4,
+        "commit 3f786850e387550fdab836ed7e6dc881de23001b ahahahah".into(),
+    )
+    .await;
+    let sent = daemon.sent_messages.lock().clone();
+    assert_eq!(sent.len(), 3, "{sent:?}");
+    assert_eq!(sent[1].1, "card [REDACTED] exp 12/29");
+    assert_eq!(
+        sent[2].1,
+        "commit 3f786850e387550fdab836ed7e6dc881de23001b ahahahah"
+    );
+    for (_, text) in &sent {
+        assert!(
+            !text.contains("Ab12Cd34") && !text.contains("4111"),
+            "{text}"
+        );
+    }
+
+    // The owner heard about the three cuts, without the value, in a message of its own.
+    let reqs = server.received_requests().await.unwrap();
+    let said = sent_texts(&reqs);
+    let notices: Vec<&String> = said.iter().filter(|t| t.starts_with("🔒")).collect();
+    assert_eq!(notices.len(), 3, "{said:?}");
+    assert!(notices[0].contains("cut that part out"));
+    assert!(notices[1].contains("did not pass it on"));
+    assert!(
+        said.iter()
+            .all(|t| !t.contains("Ab12Cd34") && !t.contains("4111"))
+    );
+}
+
 // ---------------------------------------------------------------------------
 // F04 fix wave
 // ---------------------------------------------------------------------------

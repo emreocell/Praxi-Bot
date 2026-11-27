@@ -52,6 +52,10 @@ pub(crate) enum Message<'a> {
         query: &'a str,
     },
     InputTooLong,
+    /// A secret was cut out of the owner's message (`whole`: nothing was left to pass on).
+    SecretRemoved {
+        whole: bool,
+    },
     NoActiveRun,
     RunStopped,
     UnknownOrExpiredRequest,
@@ -171,6 +175,28 @@ impl<'a> Message<'a> {
             .into(),
             (Self::InputTooLong, false) => "Message too long; please shorten it.".into(),
             (Self::InputTooLong, true) => "Mesaj çok uzun. Lütfen kısalt.".into(),
+            (Self::SecretRemoved { whole }, false) => format!(
+                "🔒 That message looks like a secret (a key, token, password or card number), so I {}. \
+                 Telegram keeps the original in this chat: please delete it. To give me a secret \
+                 safely, store it in the vault in the desktop app.",
+                if whole {
+                    "did not pass it on"
+                } else {
+                    "cut that part out and passed on the rest"
+                }
+            )
+            .into(),
+            (Self::SecretRemoved { whole }, true) => format!(
+                "🔒 Bu mesaj gizli bilgiye benziyor (anahtar, jeton, parola ya da kart numarası), \
+                 o yüzden {}. Telegram asıl mesajı bu sohbette tutuyor: lütfen sil. Gizli bir \
+                 bilgiyi bana güvenle vermek için masaüstü uygulamasındaki kasaya kaydet.",
+                if whole {
+                    "iletmedim"
+                } else {
+                    "o kısmı çıkarıp mesajın geri kalanını ilettim"
+                }
+            )
+            .into(),
             (Self::NoActiveRun, false) => "No active run to stop.".into(),
             (Self::NoActiveRun, true) => "Durdurulacak etkin çalışma yok.".into(),
             (Self::RunStopped, false) => "🛑 Run stopped.".into(),
@@ -377,6 +403,7 @@ mod tests {
             Message::NoBots
             | Message::AvailableBots
             | Message::InputTooLong
+            | Message::SecretRemoved { .. }
             | Message::NoActiveRun
             | Message::RunStopped
             | Message::UnknownOrExpiredRequest
@@ -425,6 +452,8 @@ mod tests {
             Message::AvailableBots,
             Message::BotNotFound { query: "QUERY_x7" },
             Message::InputTooLong,
+            Message::SecretRemoved { whole: false },
+            Message::SecretRemoved { whole: true },
             Message::NoActiveRun,
             Message::RunStopped,
             Message::UnknownOrExpiredRequest,

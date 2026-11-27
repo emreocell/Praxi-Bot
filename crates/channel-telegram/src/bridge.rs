@@ -15,7 +15,7 @@ use futures::FutureExt;
 use futures::stream::{self, BoxStream, StreamExt};
 use parking_lot::Mutex;
 use protocol::{BotId, ChatId, Envelope, Event, RunId, ToolCallId};
-use secret_store::{MemoryStore, Redactor, SecretRef, SecretStore};
+use secret_store::{MemoryStore, Redactor, SecretRef, SecretStore, screen_inbound};
 use serde_json::Value;
 use tokio::sync::{Mutex as AsyncMutex, Notify, watch};
 use tokio::task::JoinHandle;
@@ -1626,6 +1626,30 @@ impl TelegramChannel {
         {
             return self.forward_user_message(chat_id, trimmed, update_id).await;
         }
+
+        // The owner cannot be offered the "keep it out of the chat" card here, so a pasted
+        // secret is cut out before it reaches the model, the history or the logs, and the
+        // owner is told. Voice transcripts arrive through this function too.
+        let screened = screen_inbound(trimmed);
+        let trimmed = match &screened {
+            Some(s) => {
+                self.send_redacted(
+                    chat_id,
+                    &Message::SecretRemoved {
+                        whole: s.only_secrets,
+                    }
+                    .render(self.language(chat_id)),
+                    None,
+                )
+                .await?;
+                if s.only_secrets {
+                    self.inner.inbox.delivered(update_id, None)?;
+                    return Ok(());
+                }
+                s.text.as_str()
+            }
+            None => trimmed,
+        };
 
         // If the chat has a pending `ask_user` question, free text answers it.
         let pending_q = self
