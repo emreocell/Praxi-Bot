@@ -2335,6 +2335,12 @@ impl Shared {
     }
 
     pub(crate) fn set_state(&self, run_id: RunId, to: RunState) {
+        // The runtime orders this write against the drive loop's own, so a run
+        // that Stop or the loop already ended is not moved back to `Running`.
+        if let Some(rt) = self.rt.get().and_then(Weak::upgrade) {
+            rt.follow_state(run_id, to);
+            return;
+        }
         if let Ok(Some(run)) = self.storage.get_run(run_id)
             && let Some(from) = RunState::parse(&run.state)
             && can_transition(from, to)

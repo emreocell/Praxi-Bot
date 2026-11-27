@@ -400,3 +400,44 @@ async fn stop_ends_a_blocking_tool_that_never_polls_cancel() {
         started_at.elapsed()
     );
 }
+
+/// Stop releases what the run is waiting on (a `wait` in flight, a handover, the run's
+/// computer). That release ends the step on another thread, so the stop signal has to
+/// be out before it: otherwise the drive loop books the released step as finished,
+/// plans the next model call, and the run ends `Succeeded` or `Failed` instead of
+/// `Cancelled`. The hook holds the stopping thread right after the release until the
+/// run has moved on, which is the worst order a loaded machine can produce.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_signals_the_run_before_it_releases_a_wait_in_flight() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        crate::tests::calls(&[("c1", "wait", json!({"seconds": 300}))]),
+        text("must not be asked for"),
+    ]);
+    let wait = builtin_tools::wait::tools().remove(0);
+    let lp = loop_with(&env, wait, Arc::clone(&fake));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ToolCallRequested(_))).await;
+    let probe = Arc::clone(&fake);
+    let storage = Arc::clone(&env.storage);
+    *lp.sh.stop_released_hook.lock() = Some(Arc::new(move || {
+        // Controlled ordering, no sleeps: wait for the effect of the release,
+        // either a second model call or a finished run, then let Stop go on.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            let finished = storage
+                .get_run(run)
+                .unwrap()
+                .and_then(|r| RunState::parse(&r.state))
+                .is_some_and(RunState::is_terminal);
+            if finished || probe.n_requests() >= 2 {
+                return;
+            }
+            std::thread::yield_now();
+        }
+    }));
+    let _ = lp.cancel(run);
+    cancelled_within(&lp, run).await;
+    assert_eq!(fake.n_requests(), 1, "no model call after Stop");
+}

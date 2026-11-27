@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, ReentrantMutex};
 use protocol::{BotId, ChatId, RunId, UserId};
 use serde_json::json;
 use storage::{Run, RunStep, Storage, StorageError, now_ms};
@@ -75,6 +75,18 @@ pub struct Runtime {
     /// Live runs that must stop as `Paused` (not `Cancelled`), see
     /// [`Runtime::request_pause`].
     pausing: Mutex<HashSet<RunId>>,
+    /// Orders every state write of a run against the Stop signal. The read of
+    /// the stored state, the legality check and the write of a transition all
+    /// happen under it, and so do the cancel token's `cancel()` and the drive
+    /// loop's last look at that token before it writes `Succeeded`/`Failed`.
+    /// Without it a Stop that lands between the look and the write is
+    /// overwritten by the outcome the loop had already decided on. Reentrant
+    /// because the finishing helpers call `transition`.
+    write: ReentrantMutex<()>,
+    /// Test-only: runs right before the drive loop commits `Succeeded` or
+    /// `Failed`, after it decided on that outcome.
+    #[cfg(test)]
+    before_final_write: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Runtime {
@@ -86,6 +98,9 @@ impl Runtime {
             executor,
             tokens: Mutex::new(HashMap::new()),
             pausing: Mutex::new(HashSet::new()),
+            write: ReentrantMutex::new(()),
+            #[cfg(test)]
+            before_final_write: Mutex::new(None),
         }
     }
 
@@ -259,7 +274,15 @@ impl Runtime {
     /// # Errors
     /// Fails if the run is already terminal or on storage errors.
     pub fn cancel(&self, run_id: RunId) -> Result<()> {
-        if let Some(token) = self.tokens.lock().get(&run_id) {
+        // Under the write lock the drive loop either already committed its
+        // outcome (then this is a stop of a finished run: an error) or has
+        // not, and then it sees the signal before it commits.
+        let _write = self.write.lock();
+        if let Some(token) = self.tokens.lock().get(&run_id)
+            && !self
+                .stored_state(run_id)?
+                .is_some_and(RunState::is_terminal)
+        {
             // An explicit cancel beats a pending pause request.
             self.pausing.lock().remove(&run_id);
             token.cancel();
@@ -275,10 +298,19 @@ impl Runtime {
     /// calls this first, so the woken step can never be taken for a finished
     /// one and followed by another model call.
     pub fn signal_cancel(&self, run_id: RunId) -> bool {
+        let _write = self.write.lock();
         let tokens = self.tokens.lock();
         let Some(token) = tokens.get(&run_id) else {
             return false;
         };
+        if self
+            .stored_state(run_id)
+            .ok()
+            .flatten()
+            .is_some_and(RunState::is_terminal)
+        {
+            return false;
+        }
         self.pausing.lock().remove(&run_id);
         token.cancel();
         true
@@ -292,6 +324,7 @@ impl Runtime {
     /// # Errors
     /// Fails if the run is missing or storage fails.
     pub fn finish_aborted(&self, run_id: RunId) -> Result<bool> {
+        let _write = self.write.lock();
         self.tokens.lock().remove(&run_id);
         self.pausing.lock().remove(&run_id);
         let run = self.require_run(run_id)?;
@@ -410,6 +443,61 @@ impl Runtime {
 
     // ---- internals ----
 
+    /// The stored state of a run, `None` when the run does not exist.
+    fn stored_state(&self, run_id: RunId) -> Result<Option<RunState>> {
+        let Some(run) = self.storage.get_run(run_id)? else {
+            return Ok(None);
+        };
+        RunState::parse(&run.state)
+            .map(Some)
+            .ok_or(RuntimeError::UnknownState(run.state))
+    }
+
+    /// Move a live run along a legal edge of the state machine, or leave it be.
+    /// For writers outside the drive loop that only mean to follow the run (the
+    /// approval wait entering and leaving `WaitingApproval`): read, check and
+    /// write are one step, so a terminal state the loop wrote in between is
+    /// never overwritten. Returns whether the state changed.
+    pub fn follow_state(&self, run_id: RunId, to: RunState) -> bool {
+        let _write = self.write.lock();
+        match self.stored_state(run_id) {
+            Ok(Some(from)) if can_transition(from, to) => self
+                .storage
+                .update_run_state(run_id, to.as_str(), None)
+                .is_ok(),
+            _ => false,
+        }
+    }
+
+    /// The drive loop's way to end a run as `Succeeded` or `Failed`. The
+    /// owner's Stop wins: if the token was cancelled before this write the run
+    /// ends as the stop (`Cancelled`, or `Paused` for a pause request) instead.
+    /// The check and the write sit under the same lock as [`Runtime::cancel`],
+    /// so a Stop is either seen here or reported as a stop of a finished run.
+    fn finish_run(
+        &self,
+        run_id: RunId,
+        token: &CancellationToken,
+        to: RunState,
+        error: Option<&str>,
+    ) -> Result<RunState> {
+        #[cfg(test)]
+        self.run_before_final_write();
+        let _write = self.write.lock();
+        if token.is_cancelled() {
+            return self.finish_stopped(run_id);
+        }
+        self.transition(run_id, to, error)
+    }
+
+    #[cfg(test)]
+    fn run_before_final_write(&self) {
+        let hook = self.before_final_write.lock().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
     fn require_run(&self, run_id: RunId) -> Result<Run> {
         self.storage
             .get_run(run_id)?
@@ -417,6 +505,7 @@ impl Runtime {
     }
 
     fn transition(&self, run_id: RunId, to: RunState, error: Option<&str>) -> Result<RunState> {
+        let _write = self.write.lock();
         let run = self.require_run(run_id)?;
         let from = RunState::parse(&run.state).ok_or(RuntimeError::UnknownState(run.state))?;
         if !can_transition(from, to) {
@@ -483,8 +572,12 @@ impl Runtime {
                     return self.transition(run_id, self.stop_state(run_id), None);
                 }
                 match next {
-                    Ok(None) => return self.transition(run_id, RunState::Succeeded, None),
-                    Err(e) => return self.transition(run_id, RunState::Failed, Some(&e.0)),
+                    Ok(None) => {
+                        return self.finish_run(run_id, token, RunState::Succeeded, None);
+                    }
+                    Err(e) => {
+                        return self.finish_run(run_id, token, RunState::Failed, Some(&e.0));
+                    }
                     Ok(Some(spec)) => {
                         let row = RunStep {
                             id: Uuid::now_v7(),
@@ -582,7 +675,7 @@ impl Runtime {
                             .filter(|p| spec.idempotent && attempt < p.max_attempts);
                         let Some(policy) = policy else {
                             let msg = format!("step '{}' failed: {}", spec.name, e.0);
-                            return self.transition(run_id, RunState::Failed, Some(&msg));
+                            return self.finish_run(run_id, token, RunState::Failed, Some(&msg));
                         };
                         tokio::select! {
                             biased;
@@ -962,6 +1055,56 @@ mod tests {
             vec![("a".into(), "interrupted".into(), 1)]
         );
         assert_eq!(ex.executed.lock().len(), 1, "no retry after Stop");
+    }
+
+    /// Stop lands after a step failed for real and the loop decided to end the run
+    /// `Failed`, but before that is written. The owner's Stop wins.
+    #[tokio::test]
+    async fn a_stop_that_lands_just_before_the_failed_write_still_cancels() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(Fake::new(vec![spec("a", false)]).failing("a", 1));
+        let rt = Arc::new(Runtime::new(st.clone(), ex));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        let stopper = Arc::downgrade(&rt);
+        *rt.before_final_write.lock() = Some(Arc::new(move || {
+            // Controlled ordering: the Stop is delivered exactly here, from the
+            // thread that is about to write the outcome.
+            stopper.upgrade().unwrap().cancel(run).unwrap();
+        }));
+        assert_eq!(rt.start(run).await.unwrap(), RunState::Cancelled);
+        assert_eq!(rt.state(run).unwrap(), RunState::Cancelled);
+        assert_eq!(st.get_run(run).unwrap().unwrap().error, None);
+    }
+
+    /// The same for a run that is about to be written `Succeeded`: a Stop the owner
+    /// pressed before that write is the outcome, not a late success.
+    #[tokio::test]
+    async fn a_stop_that_lands_just_before_the_succeeded_write_still_cancels() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(Fake::new(vec![spec("a", false)]));
+        let rt = Arc::new(Runtime::new(st.clone(), ex));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        let stopper = Arc::downgrade(&rt);
+        *rt.before_final_write.lock() = Some(Arc::new(move || {
+            stopper.upgrade().unwrap().cancel(run).unwrap();
+        }));
+        assert_eq!(rt.start(run).await.unwrap(), RunState::Cancelled);
+        assert_eq!(rt.state(run).unwrap(), RunState::Cancelled);
+    }
+
+    /// `follow_state` never overwrites a state the loop already ended in.
+    #[tokio::test]
+    async fn follow_state_does_not_resurrect_a_finished_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(Fake::new(vec![spec("a", false)]));
+        let rt = Arc::new(Runtime::new(st.clone(), ex));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        assert_eq!(rt.start(run).await.unwrap(), RunState::Succeeded);
+        assert!(!rt.follow_state(run, RunState::Running));
+        assert_eq!(rt.state(run).unwrap(), RunState::Succeeded);
     }
 
     struct Planning {

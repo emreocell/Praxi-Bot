@@ -1249,6 +1249,10 @@ pub(crate) struct Shared {
     /// were released.
     #[cfg(test)]
     pub stop_split_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Test-only: invoked by Stop after it released the run's handover, waits and
+    /// computer, before it cancels the run through the runtime.
+    #[cfg(test)]
+    pub stop_released_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Hosts the owner approved a navigation to (any scope), newest last, bounded. A favicon may
     /// be fetched for these and for hosts with a standing / chat grant, never for anything else.
     pub approved_hosts: Mutex<VecDeque<String>>,
@@ -1517,6 +1521,14 @@ pub fn initiator_of(kind: &str) -> InitiatorKind {
 }
 
 impl Shared {
+    #[cfg(test)]
+    pub(crate) fn run_stop_released_hook(&self) {
+        let hook = self.stop_released_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
     /// USD price of `model` (full `provider/model` reference): the loop
     /// config's override, else the providers' catalog price.
     pub fn price_for(&self, model: &str) -> Option<ModelPrice> {
