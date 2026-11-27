@@ -856,8 +856,15 @@ impl TurnExecutor {
             )
         } else {
             let mut specs = self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools);
-            // The mission tools belong to mission sessions only.
-            specs.retain(|s| ctx.mission.is_some() || !missions::tools::is_mission_tool(&s.name));
+            // The mission tools belong to mission sessions only, and `mission_create` to the
+            // owner's own Full-level chat.
+            let offer_create = self.sh.mission_create_offered(&ctx);
+            specs.retain(|s| {
+                if s.name == crate::mission_start::MISSION_CREATE {
+                    return offer_create;
+                }
+                ctx.mission.is_some() || !missions::tools::is_mission_tool(&s.name)
+            });
             if !self.sh.cfg.legacy_tool_surface {
                 crate::discovery::bound_legacy(&mut specs);
             }

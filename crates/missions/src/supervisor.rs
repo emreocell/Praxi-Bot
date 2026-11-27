@@ -24,7 +24,7 @@ use crate::digest;
 use crate::error::{MissionError, Result};
 pub use crate::model::MAX_ITEM_ATTEMPTS;
 use crate::model::{ItemStatus, Mission, MissionState};
-use crate::store::{MissionStore, SESSION_LEASE_PREFIX, SessionEndRecord};
+use crate::store::{Leftover, MissionStore, SESSION_LEASE_PREFIX, SessionEndRecord};
 
 /// How long the loop waits for the drivers of running sessions after `shutdown` before it
 /// aborts them (their runs are cancelled the moment `shutdown` fires, so this is a backstop).
@@ -512,7 +512,19 @@ impl Supervisor {
             .then(|| self.get(id).ok().and_then(|m| m.lease_run_id))
             .flatten()
             .filter(|r| !r.starts_with(SESSION_LEASE_PREFIX));
-        self.store.requeue_stale_doing(id, MAX_ITEM_ATTEMPTS, now)?;
+        // What an item left `doing` costs depends on how the session ended: only a session the
+        // model closed itself with the item unfinished burns the attempt. The step guard
+        // cutting a session is the normal way a long item spans sessions.
+        let left = match &result.end {
+            _ if interrupted => Leftover::Interrupted,
+            SessionEnd::Finished => Leftover::Abandoned,
+            SessionEnd::GuardStop => Leftover::Cut,
+            SessionEnd::Failed(_) | SessionEnd::Cancelled | SessionEnd::Paused => {
+                Leftover::Interrupted
+            }
+        };
+        self.store
+            .requeue_stale_doing(id, MAX_ITEM_ATTEMPTS, left, now)?;
         self.store.end_session(
             id,
             session,

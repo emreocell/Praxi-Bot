@@ -28,7 +28,7 @@ pub use model::{
     can_transition,
 };
 pub use store::{
-    Event, ItemUpdate, MissionStore, NewItem, NewMission, SessionEndRecord, UpsertReport,
+    Event, ItemUpdate, Leftover, MissionStore, NewItem, NewMission, SessionEndRecord, UpsertReport,
 };
 
 /// File name of the mission database inside the data directory.

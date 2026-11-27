@@ -46,23 +46,49 @@ works without asking, so that is the level where it can).
 The bot may ask its questions once, in one message, at the start. After that it
 decides for itself and writes the decisions down; you read them in the report.
 
+### Or just ask in the chat
+
+On a bot at the **Full** level you can also write the job in your own chat (typed
+in the app or sent from your paired Telegram chat), for example *"Sign up on
+backlink sites with your own e-mail address."* When the job is a long batch that
+cannot fit one chat turn, the bot starts a mission by itself with its
+`mission_create` tool and tells you what it started. You are not asked again:
+asking at the Full level is the go-ahead. The mission gets its own chat
+("Mission: ..."), where the report is posted.
+
+What the bot cannot change: the goal is **your own message**, copied by the daemon
+(the bot cannot rewrite it), the budgets are the defaults, and a chat in which the
+bot has already read a web page or a mail cannot start a mission any more (a page
+could plant the request). A bot has at most three open missions, and the same
+request never starts a second one. Below the Full level the tool does not exist:
+use **Start a mission** in the Activity panel.
+
 ## What you see
 
 The Activity tab shows each running mission with a progress bar: **done**,
 **blocked** and **left**. You can pause, resume or stop it there.
 
-An item that needs you (a CAPTCHA, a 2FA code, a question only you can
-answer, a payment) is **parked**: it is marked blocked with the reason and the bot
-carries on with the rest. All blocked items appear in **one list**; type an
+An item that needs you (a 2FA code, a question only you can answer, a payment, an
+approval nobody gave) is **parked**: it is marked blocked with the reason and the
+bot carries on with the rest. All blocked items appear in **one list**; type an
 answer for each (or skip it) and send them all with one button. When nothing
 else is left to do, the mission waits for you and the report lists what is
 blocked.
 
-**A code is never an answer.** A 2FA or verification code is single-use, so it
-is never stored in the list and never shown to the bot. An item that waits for a
-code only offers "Skip this one": enter the code on the site yourself, then skip
-the item. The same holds for passwords: add a credential in the app, never write
-it in an answer.
+A **CAPTCHA** is not parked: nobody can solve it from that list and a mission has
+no live hand-over, so the item is **given up** with the reason ("a CAPTCHA on
+site X") and the bot goes on to the next site. The report lists the given-up
+sites, so you know where to try by hand.
+
+An **approval card** nobody answers (for example for money) stays open for five
+minutes. After that only the item it belongs to is parked ("needs your approval")
+and the session carries on; the mission is not paused. Allow the action in the
+bot's permissions, then answer the item to retry it, or skip it.
+
+A long item may take more than one session: when the step limit cuts a session
+while an item is half done, that does not count as a failed attempt. An item is
+given up, with the reason, only when the bot ends three sessions itself with it
+still unfinished, or when it eats four whole sessions without being settled.
 
 ## When a mission stops
 
@@ -74,6 +100,8 @@ it in an answer.
   numbers. The bot cannot raise a budget.
 * **No progress:** four sessions in a row changed nothing, or three in a row
   failed (a provider outage, for example).
+* **A question:** the bot's one batch of questions at the start is the only thing
+  that still pauses the whole mission when you do not answer in time.
 * **Paused / stopped:** you did it. Stopping ends the run in flight.
 
 At the end (and whenever it blocks) the mission posts a short report in its own
@@ -83,8 +111,9 @@ decisions the bot made.
 ## Limits of this first version
 
 Missions are delivered in waves (see the [design](../design/missions-adr.md)).
-What works today: the item list, session chaining, budgets, parking of CAPTCHA
-and 2FA items, the report, pause/resume/stop, restart recovery and the Activity
+What works today: the item list, session chaining, budgets, parking of 2FA and
+approval items, giving up CAPTCHA items, starting a mission from a Full-level chat,
+the report, pause/resume/stop, restart recovery and the Activity
 panel. What does **not** exist yet: waking a mission by a timer, an incoming
 mail or a webhook (the bot cannot "check the verification mail in 10 minutes"
 without holding a run), a separate permission scope per mission, mail pacing and
@@ -97,8 +126,7 @@ computer (`pc_*` tools) or other bots, and it gets the Full level's web,
 own-inbox and shell waivers with nothing of yours but the goal: only the goal
 you wrote when you started the mission is your text. It still asks for what the Full
 level asks for (money, secrets, messages to other people): an approval nobody
-answers pauses the session, and the mission then waits for you with a note
-instead of running past the card. Everything about a mission (the goal, the
+answers parks that one item with a note instead of running past the card. Everything about a mission (the goal, the
 list, your answers, its chat and its sessions) can be read or changed only with
 the owner key: the app, or the administrator desktop of a host. A paired phone, a
 script holding the API token or another desktop gets a refusal.

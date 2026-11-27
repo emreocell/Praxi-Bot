@@ -25,6 +25,10 @@ pub const MAX_NOTE_CHARS: usize = 400;
 pub const MAX_NOTES: usize = 60;
 /// Attempts an item gets (sessions that left it `doing`) before it is given up.
 pub const MAX_ITEM_ATTEMPTS: u32 = 3;
+/// Sessions the step guard may cut while one item is being worked on before the item is given
+/// up. A cut does not burn an attempt (an item may need more than one session), but an item
+/// that eats this many whole sessions without being settled is stuck.
+pub const MAX_ITEM_CUTS: u32 = 4;
 
 /// Where a mission is in its life.
 ///
@@ -439,6 +443,17 @@ pub fn mentions_code(reason: &str) -> bool {
     ]
     .iter()
     .any(|w| r.contains(w))
+}
+
+/// The text of a blocked reason is about a CAPTCHA. Nobody can pass one by typing an answer into
+/// the ledger, and a mission has no live hand-over, so such an item is given up with the reason
+/// rather than parked for the owner.
+#[must_use]
+pub fn mentions_captcha(reason: &str) -> bool {
+    let r = reason.to_lowercase();
+    ["captcha", "turnstile", "i am not a robot"]
+        .iter()
+        .any(|w| r.contains(w))
 }
 
 /// The text is (or is mostly) a one-time code: a short answer that holds a run of 4 to 10

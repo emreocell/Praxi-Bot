@@ -15,20 +15,26 @@ use serde_json::{Value, json};
 
 use crate::error::{MissionError, Result};
 use crate::model::{
-    Budgets, Digest, Item, ItemStatus, MAX_ITEM_ATTEMPTS, MAX_ITEMS, MAX_ITEMS_PER_CALL,
-    MAX_KEY_CHARS, MAX_NOTE_CHARS, MAX_NOTES, MAX_PAYLOAD_BYTES, MAX_TEXT_CHARS, MAX_TITLE_CHARS,
-    Mission, MissionState, Note, Progress, can_transition, clip, looks_like_one_time_code,
-    mentions_code,
+    Budgets, Digest, Item, ItemStatus, MAX_ITEM_ATTEMPTS, MAX_ITEM_CUTS, MAX_ITEMS,
+    MAX_ITEMS_PER_CALL, MAX_KEY_CHARS, MAX_NOTE_CHARS, MAX_NOTES, MAX_PAYLOAD_BYTES,
+    MAX_TEXT_CHARS, MAX_TITLE_CHARS, Mission, MissionState, Note, Progress, can_transition, clip,
+    looks_like_one_time_code, mentions_code,
 };
 
 /// Prefix of the lease a session holds from [`MissionStore::begin_session`] until its run
 /// exists (the run id replaces it): the mission is taken while the session waits for the chat.
 pub const SESSION_LEASE_PREFIX: &str = "session:";
 
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_missions",
-    include_str!("../migrations/0001_missions.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_missions",
+        include_str!("../migrations/0001_missions.sql"),
+    ),
+    (
+        "0002_item_cuts",
+        include_str!("../migrations/0002_item_cuts.sql"),
+    ),
+];
 
 /// A mission to create.
 #[derive(Debug, Clone)]
@@ -683,7 +689,7 @@ impl MissionStore {
         let mut released = 0;
         for (key, answer) in checked {
             let n = tx.execute(
-                "UPDATE mission_items SET status = 'todo', owner_answer = ?3, live_only = 0, attempts = 0, updated_at_ms = ?4 \
+                "UPDATE mission_items SET status = 'todo', owner_answer = ?3, live_only = 0, attempts = 0, cuts = 0, updated_at_ms = ?4 \
                  WHERE mission_id = ?1 AND key = ?2 AND status = 'blocked'",
                 params![id, key, answer, now],
             )?;
@@ -754,18 +760,57 @@ impl MissionStore {
         Ok(Some(item.key.clone()))
     }
 
-    /// End-of-session housekeeping: an item still `doing` goes back to `todo`
-    /// (its attempt was already counted), or to `failed` after `max_attempts`.
+    /// End-of-session housekeeping: an item still `doing` goes back to `todo`. What it costs
+    /// depends on how the session ended (see [`Leftover`]): a session the model ended itself
+    /// with the item unfinished keeps the attempt it counted (and gives the item up after
+    /// `max_attempts`); a session the step guard cut, or an interruption, refunds it.
     /// Returns `(requeued, gave_up)`.
     ///
     /// # Errors
     /// SQLite failure.
-    pub fn requeue_stale_doing(&self, id: &str, max_attempts: u32, now: i64) -> Result<(u32, u32)> {
+    pub fn requeue_stale_doing(
+        &self,
+        id: &str,
+        max_attempts: u32,
+        left: Leftover,
+        now: i64,
+    ) -> Result<(u32, u32)> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let counts = requeue_in(&tx, id, max_attempts, now)?;
+        let counts = requeue_in(&tx, id, max_attempts, left, now)?;
         tx.commit()?;
         Ok(counts)
+    }
+
+    /// A CAPTCHA stopped the work on the site the bot is on and nobody can solve it (a mission
+    /// has no live hand-over, and a typed answer does not pass a CAPTCHA): give the item being
+    /// worked on up with the reason, instead of parking it for an owner who could only skip it.
+    /// Returns its key; `None` when no single item is `doing`.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn give_up_sole_doing_item(
+        &self,
+        id: &str,
+        error: &str,
+        now: i64,
+    ) -> Result<Option<String>> {
+        let doing = self.items(id, Some(ItemStatus::Doing))?;
+        let [item] = doing.as_slice() else {
+            return Ok(None);
+        };
+        self.update_item(
+            id,
+            &item.key,
+            &ItemUpdate {
+                status: Some(ItemStatus::Failed),
+                error: Some(error.to_owned()),
+                ..ItemUpdate::default()
+            },
+            false,
+            now,
+        )?;
+        Ok(Some(item.key.clone()))
     }
 
     // ---- notes ----
@@ -971,7 +1016,7 @@ impl MissionStore {
             }
         }
         for mission in missions {
-            requeue_in(&tx, mission, MAX_ITEM_ATTEMPTS, now)?;
+            requeue_in(&tx, mission, MAX_ITEM_ATTEMPTS, Leftover::Interrupted, now)?;
         }
         tx.commit()?;
         Ok(open.into_iter().filter_map(|(_, _, run)| run).collect())
@@ -1070,34 +1115,62 @@ impl MissionStore {
     }
 }
 
+/// How a session ended while an item was still `doing`: what the leftover costs the item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leftover {
+    /// The model ended the session itself and left the item unfinished: the attempt counts.
+    Abandoned,
+    /// The step guard cut the session. That is how a mission gets past the 40-call wall of one
+    /// run, so the attempt is refunded. A separate cap ([`MAX_ITEM_CUTS`]) still gives up an
+    /// item that eats whole sessions without being settled.
+    Cut,
+    /// The session was cancelled, paused, crashed or cut off by a restart or a provider
+    /// error: not the item's fault, the attempt is refunded.
+    Interrupted,
+}
+
 /// [`MissionStore::requeue_stale_doing`] inside a transaction. Giving an item up settles it,
 /// so it counts as progress.
-fn requeue_in(tx: &Transaction<'_>, id: &str, max_attempts: u32, now: i64) -> Result<(u32, u32)> {
-    let stale: Vec<(String, u32)> = {
+fn requeue_in(
+    tx: &Transaction<'_>,
+    id: &str,
+    max_attempts: u32,
+    left: Leftover,
+    now: i64,
+) -> Result<(u32, u32)> {
+    let stale: Vec<(String, u32, u32)> = {
         let mut stmt = tx.prepare(
-            "SELECT key, attempts FROM mission_items WHERE mission_id = ?1 AND status = 'doing'",
+            "SELECT key, attempts, cuts FROM mission_items WHERE mission_id = ?1 AND status = 'doing'",
         )?;
-        stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?
     };
     let (mut requeued, mut gave_up) = (0, 0);
-    for (key, attempts) in stale {
-        let (to, err) = if attempts >= max_attempts {
-            gave_up += 1;
-            (
-                "failed",
-                Some(format!(
-                    "gave up after {attempts} attempts without a result"
-                )),
-            )
-        } else {
-            requeued += 1;
-            ("todo", None)
+    for (key, attempts, cuts) in stale {
+        let (attempts, cuts) = match left {
+            Leftover::Abandoned => (attempts, cuts),
+            Leftover::Cut => (attempts.saturating_sub(1), cuts + 1),
+            Leftover::Interrupted => (attempts.saturating_sub(1), cuts),
         };
+        let abandoned = left == Leftover::Abandoned;
+        let (to, err) =
+            if (abandoned && attempts >= max_attempts) || (!abandoned && cuts >= MAX_ITEM_CUTS) {
+                gave_up += 1;
+                let why = if abandoned {
+                    format!("gave up after {attempts} attempts without a result")
+                } else {
+                    format!("gave up: {cuts} whole sessions were not enough to finish it")
+                };
+                ("failed", Some(why))
+            } else {
+                requeued += 1;
+                ("todo", None)
+            };
         tx.execute(
-            "UPDATE mission_items SET status = ?3, last_error = COALESCE(?4, last_error), updated_at_ms = ?5 \
+            "UPDATE mission_items SET status = ?3, attempts = ?4, cuts = ?5, \
+             last_error = COALESCE(?6, last_error), updated_at_ms = ?7 \
              WHERE mission_id = ?1 AND key = ?2",
-            params![id, key, to, err, now],
+            params![id, key, to, attempts, cuts, err, now],
         )?;
         event(
             tx,
@@ -1553,12 +1626,88 @@ mod tests {
             ..ItemUpdate::default()
         };
         s.update_item(&m.id, "a.com", &doing, false, 2).unwrap();
-        assert_eq!(s.requeue_stale_doing(&m.id, 2, 3).unwrap(), (1, 0));
+        let abandoned = Leftover::Abandoned;
+        assert_eq!(
+            s.requeue_stale_doing(&m.id, 2, abandoned, 3).unwrap(),
+            (1, 0)
+        );
         s.update_item(&m.id, "a.com", &doing, false, 4).unwrap();
-        assert_eq!(s.requeue_stale_doing(&m.id, 2, 5).unwrap(), (0, 1));
+        assert_eq!(
+            s.requeue_stale_doing(&m.id, 2, abandoned, 5).unwrap(),
+            (0, 1)
+        );
         let it = &s.items(&m.id, None).unwrap()[0];
         assert_eq!(it.status, ItemStatus::Failed);
         assert_eq!(it.attempts, 2);
+    }
+
+    #[test]
+    fn a_cut_or_interrupted_session_refunds_the_attempt() {
+        let s = store();
+        let m = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        let doing = ItemUpdate {
+            status: Some(ItemStatus::Doing),
+            ..ItemUpdate::default()
+        };
+        // Cut: no attempt is burnt, however often, until the separate cut cap.
+        for cut in 1..MAX_ITEM_CUTS {
+            s.update_item(&m.id, "a.com", &doing, false, 2).unwrap();
+            assert_eq!(
+                s.requeue_stale_doing(&m.id, 1, Leftover::Cut, 3).unwrap(),
+                (1, 0),
+                "cut {cut}"
+            );
+            let it = &s.items(&m.id, None).unwrap()[0];
+            assert_eq!((it.status, it.attempts), (ItemStatus::Todo, 0));
+        }
+        // An interruption refunds too and does not count as a cut.
+        s.update_item(&m.id, "a.com", &doing, false, 4).unwrap();
+        assert_eq!(
+            s.requeue_stale_doing(&m.id, 1, Leftover::Interrupted, 5)
+                .unwrap(),
+            (1, 0)
+        );
+        // The cap on whole sessions an item may eat gives it up.
+        s.update_item(&m.id, "a.com", &doing, false, 6).unwrap();
+        assert_eq!(
+            s.requeue_stale_doing(&m.id, 1, Leftover::Cut, 7).unwrap(),
+            (0, 1)
+        );
+        let it = &s.items(&m.id, None).unwrap()[0];
+        assert_eq!(it.status, ItemStatus::Failed);
+        assert!(it.last_error.as_deref().unwrap().contains("whole sessions"));
+    }
+
+    #[test]
+    fn the_owners_answer_gives_an_item_fresh_attempts_and_cuts() {
+        let s = store();
+        let m = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        let doing = ItemUpdate {
+            status: Some(ItemStatus::Doing),
+            ..ItemUpdate::default()
+        };
+        s.update_item(&m.id, "a.com", &doing, false, 2).unwrap();
+        s.requeue_stale_doing(&m.id, 3, Leftover::Cut, 3).unwrap();
+        s.update_item(&m.id, "a.com", &doing, false, 4).unwrap();
+        s.update_item(
+            &m.id,
+            "a.com",
+            &ItemUpdate {
+                status: Some(ItemStatus::Blocked),
+                blocked_reason: Some("which address?".into()),
+                ..ItemUpdate::default()
+            },
+            false,
+            5,
+        )
+        .unwrap();
+        s.answer_blocked(&m.id, &[("a.com".into(), "use b@x.org".into())], 6)
+            .unwrap();
+        let cuts: u32 = s
+            .conn()
+            .query_row("SELECT cuts FROM mission_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cuts, 0);
     }
 
     fn status(
@@ -1715,7 +1864,9 @@ mod tests {
         s.begin_session(&m.id, 2).unwrap();
         s.recover_interrupted(3).unwrap();
         let items = s.items(&m.id, None).unwrap();
-        assert_eq!(items[0].status, ItemStatus::Failed, "attempts used up");
+        // A crash is not the item's fault: the attempt is refunded.
+        assert_eq!(items[0].status, ItemStatus::Todo, "attempt refunded");
+        assert_eq!(items[0].attempts, MAX_ITEM_ATTEMPTS - 1);
         assert_eq!(items[1].status, ItemStatus::Todo, "worked again");
         // A mission without an open session is left alone.
         status(&s, &m.id, "b.com", ItemStatus::Doing, false).unwrap();
