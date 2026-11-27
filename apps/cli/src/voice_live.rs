@@ -1104,10 +1104,15 @@ mod tests {
     fn kept_audio_names_are_random_and_never_overwrite() {
         let dir = tempfile::tempdir().unwrap();
         let (a, b) = (Keeper::new(dir.path()), Keeper::new(dir.path()));
-        assert_ne!(a.name, b.name, "two conversations in one millisecond");
         let (stamp, random) = a.name.split_once('-').unwrap();
+        let (_, other) = b.name.split_once('-').unwrap();
+        assert_ne!(
+            random, other,
+            "the suffix, not just the clock, tells them apart"
+        );
         assert!(stamp.chars().all(|c| c.is_ascii_digit()), "{}", a.name);
         assert_eq!(random.len(), 16, "{}", a.name);
+        assert!(random.chars().all(|c| c.is_ascii_hexdigit()), "{}", a.name);
         let path = dir.path().join("x.wav");
         Wav::create(&path, INPUT_RATE).unwrap();
         assert!(
