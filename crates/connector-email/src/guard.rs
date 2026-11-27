@@ -788,6 +788,28 @@ impl MailGuard {
     /// Evaluate the soft guards for `facts`. Never refuses.
     #[must_use]
     pub fn check(&self, facts: &MailFacts<'_>) -> GuardReport {
+        self.evaluate(facts, false)
+    }
+
+    /// The guards that apply to a calendar invitation, an update of one or a
+    /// cancellation, sent to `recipients` from `account`: the opt-out list and the daily
+    /// limit. Not the repeat-recipient rule (an update and a cancellation follow the
+    /// invitation by design) and not the opt-out line (an invitation carries none).
+    #[must_use]
+    pub fn check_invite(&self, account: &str, recipients: &[String]) -> GuardReport {
+        self.evaluate(
+            &MailFacts {
+                bot: None,
+                account,
+                from: "",
+                recipients,
+                opt_out_line: true,
+            },
+            true,
+        )
+    }
+
+    fn evaluate(&self, facts: &MailFacts<'_>, invite: bool) -> GuardReport {
         let st = lock(&self.state);
         let now = now_secs();
         let mut warnings = Vec::new();
@@ -843,7 +865,11 @@ impl MailGuard {
             });
         }
 
-        let days = st.settings.same_recipient_days;
+        let days = if invite {
+            0
+        } else {
+            st.settings.same_recipient_days
+        };
         if days > 0 {
             let since = now.saturating_sub(u64::from(days) * 86_400);
             let seen: HashSet<String> = st
@@ -871,7 +897,7 @@ impl MailGuard {
             }
         }
 
-        if !facts.opt_out_line {
+        if !facts.opt_out_line && !invite {
             legal = true;
             warnings.push(Warning {
                 code: "no_opt_out_line".into(),
@@ -885,9 +911,7 @@ impl MailGuard {
         GuardReport {
             warnings,
             legal_notice: legal.then(|| LEGAL_NOTICE.to_owned()),
-            footer: facts
-                .opt_out_line
-                .then(|| st.settings.footer_for(facts.from)),
+            footer: (facts.opt_out_line && !invite).then(|| st.settings.footer_for(facts.from)),
         }
     }
 
@@ -950,14 +974,39 @@ impl MailGuard {
         subject: &str,
         message_id: &str,
     ) {
+        self.record_program_mail(
+            None,
+            run,
+            account,
+            from,
+            &[to.to_owned()],
+            subject,
+            message_id,
+        );
+    }
+
+    /// Log a mail a connector sent for a bot (a calendar invitation, or one the calendar
+    /// server delivered itself): like [`Self::record_system_mail`] but with the bot that
+    /// acted and one entry for all `to`, so the send log and the daily limit show it.
+    #[allow(clippy::too_many_arguments)] // the fields of one log line
+    pub fn record_program_mail(
+        &self,
+        bot: Option<&str>,
+        run: &str,
+        account: &str,
+        from: &str,
+        to: &[String],
+        subject: &str,
+        message_id: &str,
+    ) {
         self.record(SendLogEntry {
             at: now_secs(),
             at_utc: String::new(),
-            bot: None,
+            bot: bot.map(str::to_owned),
             run: run.to_owned(),
             account: account.to_owned(),
             from: from.to_owned(),
-            recipients: vec![key_of(to).full],
+            recipients: to.iter().map(|r| key_of(r).full).collect(),
             subject: subject.to_owned(),
             message_id: message_id.to_owned(),
             opt_out_line: false,
@@ -1248,6 +1297,93 @@ mod tests {
                 .log(100)
                 .len(),
             3
+        );
+    }
+
+    #[test]
+    fn an_invitation_is_held_to_the_opt_outs_and_the_daily_limit_only() {
+        let g = MailGuard::in_memory();
+        g.add_opt_out("ann@example.com", "").unwrap();
+        let one = |a: &str| vec![a.to_owned()];
+        // An address that asked not to be written to is refused ...
+        let rep = g.check_invite("work", &one("ann@example.com"));
+        assert_eq!(rep.codes(), vec!["opt_out_listed"]);
+        assert!(rep.legal_notice.is_some());
+        // ... and any other address is fine: an invitation carries no opt-out line, so that
+        // is not a warning for it (and asks for no footer) ...
+        let ok = g.check_invite("work", &one("bob@example.com"));
+        assert!(ok.warnings.is_empty());
+        assert!(ok.footer.is_none() && ok.legal_notice.is_none());
+        // ... while an ordinary mail without the line still warns, as it always did.
+        assert_eq!(
+            g.check(&facts(&one("bob@example.com"), false)).codes(),
+            vec!["no_opt_out_line"]
+        );
+        // The daily limit counts the account's mail, invitations included.
+        g.set_settings(GuardSettings {
+            daily_limit: 2,
+            ..GuardSettings::default()
+        })
+        .unwrap();
+        g.record(entry(&["a@x.io", "b@x.io"], now_secs()));
+        assert_eq!(
+            g.check_invite("work", &one("c@x.io")).codes(),
+            vec!["daily_limit"]
+        );
+        // Another account's count is its own.
+        assert!(
+            g.check_invite("calendar", &one("c@x.io"))
+                .warnings
+                .is_empty()
+        );
+        // An update or a cancellation goes to people who were just invited: that is not a
+        // repeat to hold back, while the plain check still flags it.
+        assert!(g.check_invite("work", &one("a@x.io")).codes() == vec!["daily_limit"]);
+        g.set_settings(GuardSettings::default()).unwrap();
+        assert!(g.check_invite("work", &one("a@x.io")).warnings.is_empty());
+        assert_eq!(
+            g.check(&facts(&one("a@x.io"), true)).codes(),
+            vec!["same_recipient"]
+        );
+    }
+
+    #[test]
+    fn a_mail_a_program_sent_is_logged_with_the_bot_and_every_recipient() {
+        let g = MailGuard::in_memory();
+        let to = vec!["a@x.io".to_owned(), "B@x.io".to_owned()];
+        g.record_program_mail(
+            Some("bot-7"),
+            "calendar-server-invite",
+            "work",
+            "me@example.org",
+            &to,
+            "Invitation: Sync",
+            "m9",
+        );
+        let log = g.log(10);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].bot.as_deref(), Some("bot-7"));
+        assert_eq!(log[0].run, "calendar-server-invite");
+        assert_eq!(log[0].recipients, ["a@x.io", "b@x.io"]);
+        assert_eq!(log[0].account, "work");
+        // It counts against the daily limit like any other send.
+        g.set_settings(GuardSettings {
+            daily_limit: 3,
+            ..GuardSettings::default()
+        })
+        .unwrap();
+        assert_eq!(
+            g.check(&facts(&["c@x.io".to_owned(), "d@x.io".to_owned()], true))
+                .codes(),
+            vec!["daily_limit"]
+        );
+        // The older single-recipient helper is the same entry with no bot.
+        g.record_system_mail("r", "work", "me@example.org", "e@x.io", "s", "m10");
+        let log = g.log(10);
+        assert_eq!(log.len(), 2);
+        assert!(
+            log.iter()
+                .any(|e| e.bot.is_none() && e.recipients == ["e@x.io"])
         );
     }
 }
