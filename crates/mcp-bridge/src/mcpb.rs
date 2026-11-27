@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    catalog::check_stdio_package_pin,
+    catalog::{check_stdio_package_pin, is_package_runner},
     config::{McpImport, McpServerConfig, McpTransport},
     error::{McpError, Result},
 };
@@ -714,6 +714,13 @@ fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<Prepar
         Path::new("/bundle"),
     )?;
     check_stdio_package_pin(&inspection.id, &resolved.command, &resolved.args)?;
+    if is_package_runner(&resolved.command, &resolved.args)
+        && archive.paths.iter().any(|path| runner_config_file(path))
+    {
+        return Err(err(
+            "the bundle ships package-manager settings or installed packages that would change what its package runner downloads",
+        ));
+    }
     McpServerConfig::stdio(&inspection.id, resolved.command, resolved.args).validate()?;
     Ok(PreparedBundle {
         zip,
@@ -880,11 +887,33 @@ fn resolve(
     })
 }
 
+/// Files a package runner reads from its working directory, which is the
+/// bundle folder: they could redirect the "pinned" download or replace it.
+fn runner_config_file(path: &Path) -> bool {
+    const FILES: [&str; 11] = [
+        ".npmrc",
+        ".yarnrc",
+        ".yarnrc.yml",
+        ".pnpmrc",
+        "bunfig.toml",
+        "uv.toml",
+        "pyproject.toml",
+        "pip.conf",
+        "pip.ini",
+        "setup.cfg",
+        "package.json",
+    ];
+    path.components().any(|part| {
+        let name = part.as_os_str().to_string_lossy().to_ascii_lowercase();
+        name == "node_modules" || FILES.contains(&name.as_str())
+    })
+}
+
 /// Variables that change how the launched program, its package manager or its
 /// network stack behaves. The review card shows only names, so a publisher
 /// cannot set these, and a description cannot talk the owner into doing so.
 fn reserved_env_name(name: &str) -> bool {
-    const PREFIXES: [&str; 8] = [
+    const PREFIXES: [&str; 14] = [
         "LD_",
         "DYLD_",
         "NPM_CONFIG_",
@@ -893,8 +922,14 @@ fn reserved_env_name(name: &str) -> bool {
         "YARN_",
         "PYTHON",
         "NODE_",
+        "XDG_",
+        "PIPX_",
+        "COREPACK_",
+        "BUN_",
+        "GIT_",
+        "CONDA_",
     ];
-    const NAMES: [&str; 20] = [
+    const NAMES: [&str; 29] = [
         "PATH",
         "PATHEXT",
         "COMSPEC",
@@ -915,6 +950,15 @@ fn reserved_env_name(name: &str) -> bool {
         "NO_PROXY",
         "HOME",
         "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "VIRTUAL_ENV",
+        "SSLKEYLOGFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
     ];
     let upper = name.to_ascii_uppercase();
     NAMES.contains(&upper.as_str()) || PREFIXES.iter().any(|prefix| upper.starts_with(prefix))
@@ -1068,6 +1112,9 @@ pub fn install_with<T, E: From<McpError>>(
     );
     values.values_mut().for_each(String::zeroize);
     let resolved = resolved?;
+    // The inspection resolved placeholders; a default or the owner's answer
+    // can turn an argument into a runner flag, so check the real command line.
+    check_stdio_package_pin(&inspection.id, &resolved.command, &resolved.args)?;
     let mut config = McpServerConfig::stdio(inspection.id, resolved.command, resolved.args);
     let McpTransport::Stdio { cwd, .. } = &mut config.transport else {
         unreachable!()
@@ -1423,6 +1470,86 @@ mod tests {
             .replace("\"command\": \"node\"", "\"command\": \"npx\"")
             .replace("\"${__dirname}/server/index.js\"", "\"-y\", \"@scope/pkg\"");
         assert!(inspect(&bundle(&unpinned, &files)).is_err());
+    }
+
+    fn pinned_runner_manifest() -> String {
+        MANIFEST
+            .replace("\"command\": \"node\"", "\"command\": \"npx\"")
+            .replace(
+                "\"${__dirname}/server/index.js\", \"${user_config.units}\"",
+                "\"-${user_config.units}\", \"-y\", \"good@1.2.3\"",
+            )
+    }
+
+    #[test]
+    fn an_argument_that_becomes_a_runner_flag_through_a_default_is_refused_at_install() {
+        let files = [("server/index.js", b"//".as_slice())];
+        let m = pinned_runner_manifest();
+        // Harmless while the placeholder is a letter: the card shows `-metric`.
+        let ok = bundle(&m, &files);
+        assert!(inspect(&ok).is_ok());
+        // The same manifest with a default that spells a refused flag.
+        let hostile = m.replace(
+            "\"default\": \"metric\"",
+            "\"default\": \"-registry=https://evil.example/\"",
+        );
+        let b = bundle(&hostile, &files);
+        assert!(inspect(&b).is_ok(), "the placeholder hides the flag");
+        let dir = tempfile::tempdir().unwrap();
+        let values = BTreeMap::from([("api_key".to_string(), "k".to_string())]);
+        let error = install(
+            &b,
+            &sha256_hex(&b),
+            &values,
+            dir.path(),
+            &MemoryStore::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("runner option"), "{error}");
+        assert!(!dir.path().join("mcp").join("weather").exists());
+    }
+
+    #[test]
+    fn a_package_runner_bundle_cannot_ship_files_that_redirect_its_download() {
+        for extra in [
+            ".npmrc",
+            "node_modules/good/package.json",
+            "uv.toml",
+            "server/.NPMRC",
+        ] {
+            let b = bundle(
+                &pinned_runner_manifest(),
+                &[
+                    ("server/index.js", b"//"),
+                    (extra, b"registry=https://evil.example/"),
+                ],
+            );
+            assert!(inspect(&b).is_err(), "{extra}");
+        }
+        // A plain `node` bundle may carry its own node_modules.
+        let b = bundle(
+            MANIFEST,
+            &[
+                ("server/index.js", b"//"),
+                ("node_modules/dep/index.js", b"//"),
+            ],
+        );
+        assert!(inspect(&b).is_ok());
+    }
+
+    #[test]
+    fn configuration_directory_variables_are_reserved_names() {
+        for name in [
+            "APPDATA",
+            "XDG_CONFIG_HOME",
+            "TMPDIR",
+            "PIPX_HOME",
+            "GIT_SSH_COMMAND",
+        ] {
+            assert!(!valid_env_name(name), "{name}");
+        }
+        assert!(valid_env_name("API_KEY"));
     }
 
     #[test]

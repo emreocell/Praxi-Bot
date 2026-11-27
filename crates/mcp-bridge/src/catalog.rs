@@ -312,30 +312,56 @@ fn is_exact_version(version: &str) -> bool {
         && pre.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
 }
 
-fn npm_pinned(spec: &str) -> bool {
-    let version = if let Some(rest) = spec.strip_prefix('@') {
-        let Some((_, version)) = rest.split_once('@') else {
-            return false;
-        };
-        version
-    } else {
-        let Some((_, version)) = spec.split_once('@') else {
-            return false;
-        };
-        version
+/// A plain registry package name: no URL, path, git or file spec can pass as a
+/// "pinned" package because of an `@1.2.3` hidden in its tail.
+fn plain_package_name(name: &str, scoped_ok: bool) -> bool {
+    let (scope, rest) = match name.strip_prefix('@') {
+        Some(tail) if scoped_ok => match tail.split_once('/') {
+            Some((scope, rest)) => (Some(scope), rest),
+            None => return false,
+        },
+        _ => (None, name),
     };
-    is_exact_version(version)
+    let part = |p: &str| {
+        !p.is_empty()
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~'))
+    };
+    scope.is_none_or(part) && part(rest)
+}
+
+fn npm_pinned(spec: &str) -> bool {
+    let (name, version) = if let Some(rest) = spec.strip_prefix('@') {
+        let Some((name, version)) = rest.split_once('@') else {
+            return false;
+        };
+        (&spec[..=name.len()], version)
+    } else {
+        let Some((name, version)) = spec.split_once('@') else {
+            return false;
+        };
+        (name, version)
+    };
+    plain_package_name(name, true) && is_exact_version(version)
 }
 
 fn python_pinned(spec: &str) -> bool {
-    let version = if let Some((_, version)) = spec.split_once("==") {
-        version.split('[').next().unwrap_or(version)
-    } else if let Some((_, version)) = spec.rsplit_once('@') {
-        version
+    let (name, version) = if let Some((name, version)) = spec.split_once("==") {
+        (name, version.split('[').next().unwrap_or(version))
+    } else if let Some((name, version)) = spec.split_once('@') {
+        (name, version)
     } else {
         return false;
     };
-    !spec.starts_with("==") && is_exact_version(version)
+    // Extras (`pkg[extra]`) are part of the name, not a location.
+    let name = name.split('[').next().unwrap_or(name);
+    plain_package_name(name, false) && is_exact_version(version)
+}
+
+/// Whether the command is a package runner (`npx`, `uvx`, `pipx run`, ...),
+/// which fetches and runs code from a package index.
+pub(crate) fn is_package_runner(command: &str, args: &[String]) -> bool {
+    !matches!(runner_of(&command_base(command), args), Ok(None))
 }
 
 /// How a package runner names what it installs.
@@ -756,6 +782,35 @@ mod tests {
 
     /// Review finding 7: every package-bearing runner option is held to the
     /// exact-version rule, and forms the rule cannot reason about are refused.
+    #[test]
+    fn a_location_cannot_pass_as_a_pinned_package() {
+        for ok in ["pkg@1.2.3", "@scope/pkg@1.2.3", "a.b-c_d@1.0.0-rc.1"] {
+            assert!(npm_pinned(ok), "{ok}");
+        }
+        for bad in [
+            "https://evil.example/x.tgz?@1.2.3",
+            "file:../x@1.2.3",
+            "git+https://evil/r@1.2.3",
+            "@scope@1.2.3",
+            "@/pkg@1.2.3",
+            "pkg@latest",
+        ] {
+            assert!(!npm_pinned(bad), "{bad}");
+        }
+        for ok in ["pkg==1.2.3", "pkg[extra]==1.2.3", "pkg@1.2.3"] {
+            assert!(python_pinned(ok), "{ok}");
+        }
+        for bad in [
+            "git+https://evil/r@1.2.3",
+            "https://evil/x.whl#==1.2.3",
+            "==1.2.3",
+            "pkg",
+            "../x==1.2.3",
+        ] {
+            assert!(!python_pinned(bad), "{bad}");
+        }
+    }
+
     #[test]
     fn every_package_bearing_runner_option_is_pinned() {
         let check = |cmd: &str, args: &[&str]| {
