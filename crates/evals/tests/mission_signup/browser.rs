@@ -3,6 +3,7 @@
 //! driver does and types secrets only where the caller's origin check allows it.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -66,7 +67,7 @@ fn re() -> &'static (Regex, Regex) {
     RE.get_or_init(|| {
         (
             Regex::new(
-                r#"(?s)<(h1|p|code|button|a)\b([^>]*)>(.*?)</(?:h1|p|code|button|a)>|<input\b([^>]*)>|<form\b([^>]*)>|(</form>)"#,
+                r"(?s)<(h1|p|code|button|a)\b([^>]*)>(.*?)</(?:h1|p|code|button|a)>|<input\b([^>]*)>|<form\b([^>]*)>|(</form>)",
             )
             .unwrap(),
             Regex::new(r#"([\w-]+)="([^"]*)""#).unwrap(),
@@ -253,8 +254,8 @@ fn render(p: &Page, typed: &HashMap<String, String>) -> String {
     };
     for (i, e) in p.els.iter().enumerate() {
         match e {
-            El::Heading(t) => out.push_str(&format!("heading \"{t}\"\n")),
-            El::Text(t) => out.push_str(&format!("text \"{t}\"\n")),
+            El::Heading(t) => writeln!(out, "heading \"{t}\"").unwrap(),
+            El::Text(t) => writeln!(out, "text \"{t}\"").unwrap(),
             El::Input {
                 kind, label, value, ..
             } if kind != "hidden" => {
@@ -270,13 +271,13 @@ fn render(p: &Page, typed: &HashMap<String, String>) -> String {
                     ("password", false) => " value=\"********\"".to_owned(),
                     (_, false) => format!(" value=\"{v}\""),
                 };
-                out.push_str(&format!("[{r}] {role} \"{label}\"{shown}\n"));
+                writeln!(out, "[{r}] {role} \"{label}\"{shown}").unwrap();
             }
             El::Button { label, .. } => {
-                out.push_str(&format!("[{}] button \"{label}\"\n", refs[&i]))
+                writeln!(out, "[{}] button \"{label}\"", refs[&i]).unwrap();
             }
-            El::Link { label, .. } => out.push_str(&format!("[{}] link \"{label}\"\n", refs[&i])),
-            El::Code(t) => out.push_str(&format!("[{}] code \"{t}\"\n", refs[&i])),
+            El::Link { label, .. } => writeln!(out, "[{}] link \"{label}\"", refs[&i]).unwrap(),
+            El::Code(t) => writeln!(out, "[{}] code \"{t}\"", refs[&i]).unwrap(),
             El::Input { .. } => {}
         }
     }

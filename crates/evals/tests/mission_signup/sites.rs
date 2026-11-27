@@ -176,7 +176,7 @@ async fn signup_submit(State(c): State<Arc<Ctx>>, body: String) -> Page {
             "<p>Email and a strong password are needed.</p>",
         );
     }
-    if c.kind == Kind::Captcha && f.get("captcha").is_none() {
+    if c.kind == Kind::Captcha && !f.contains_key("captcha") {
         c.book.lock().captcha_rejections += 1;
         return page(
             403,

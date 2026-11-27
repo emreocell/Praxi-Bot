@@ -152,6 +152,7 @@ impl SignupModel {
         self.calls.load(Ordering::SeqCst)
     }
 
+    #[allow(clippy::unused_self)] // the script is a function of the transcript alone
     fn decide(&self, req: &ChatRequest) -> Vec<ChatChunk> {
         // The closing call after a safety limit has no tools.
         if req.tools.is_empty() {
@@ -318,8 +319,10 @@ impl SignupModel {
                         r"https://[^\s\x22\\<>]+/confirm\?token=[\w-]+",
                         &since[1].result,
                     )
-                    .map(|c| c[0].to_owned())
-                    .unwrap_or_else(|| panic!("no followable link in: {}", since[1].result));
+                    .map_or_else(
+                        || panic!("no followable link in: {}", since[1].result),
+                        |c| c[0].to_owned(),
+                    );
                     call("browser_open", &json!({"url": link}))
                 }
                 _ => call(
@@ -342,9 +345,10 @@ impl SignupModel {
                 )
             }
             3 => {
-                let secret = find(r"login/[\w.-]+", &since[0].result)
-                    .map(|c| c[0].to_owned())
-                    .unwrap_or_else(|| panic!("no secret name in: {}", since[0].result));
+                let secret = find(r"login/[\w.-]+", &since[0].result).map_or_else(
+                    || panic!("no secret name in: {}", since[0].result),
+                    |c| c[0].to_owned(),
+                );
                 call(
                     "browser_fill",
                     &json!({"ref": ref_of(&since[1].result, "Password"), "secret": secret}),

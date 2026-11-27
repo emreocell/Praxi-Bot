@@ -1,5 +1,6 @@
 //! The daemon under test and its fake outside world.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -360,38 +361,44 @@ impl World {
             let ev = &e["event"];
             match ev["type"].as_str() {
                 Some("tool_call_requested") => {
-                    out += &format!(
-                        "  call {} {}\n",
+                    writeln!(
+                        out,
+                        "  call {} {}",
                         ev["tool_name"],
                         ev["input"]
                             .to_string()
                             .chars()
                             .take(160)
                             .collect::<String>()
-                    );
+                    )
+                    .unwrap();
                 }
                 Some("tool_call_completed") => {
-                    out += &format!(
-                        "    -> {}\n",
+                    writeln!(
+                        out,
+                        "    -> {}",
                         ev.to_string().chars().take(300).collect::<String>()
-                    );
+                    )
+                    .unwrap();
                 }
                 Some(
                     t @ ("approval_needed" | "question_asked" | "secret_requested"
                     | "handover_requested" | "error"),
                 ) => {
-                    out += &format!("  !! {t}: {ev}\n");
+                    writeln!(out, "  !! {t}: {ev}").unwrap();
                 }
                 _ => {}
             }
         }
         for a in self.storage.list_audit(self.user).unwrap_or_default() {
-            out += &format!(
-                "  audit {} {} {}\n",
+            writeln!(
+                out,
+                "  audit {} {} {}",
                 a.actor,
                 a.action,
                 a.detail.to_string().chars().take(200).collect::<String>()
-            );
+            )
+            .unwrap();
         }
         out
     }

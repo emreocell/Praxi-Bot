@@ -44,7 +44,13 @@ impl World {
                 .all(|a| a.created_by == "bot" && a.has_value && a.kind == "password"),
             "{accounts:#?}"
         );
-        eprintln!("PROBE ACCOUNTS {:?}", accounts.iter().map(|a| (a.site.clone(), a.unused, a.has_totp)).collect::<Vec<_>>());
+        eprintln!(
+            "PROBE ACCOUNTS {:?}",
+            accounts
+                .iter()
+                .map(|a| (a.site.clone(), a.unused, a.has_totp))
+                .collect::<Vec<_>>()
+        );
         let book = self.sites.book.lock();
         for host in [PLAIN, VERIFY, TWOFA] {
             let mine: Vec<_> = accounts.iter().filter(|a| a.site.contains(host)).collect();
@@ -316,7 +322,8 @@ impl World {
                 .unwrap()
                 .iter()
                 .map(|a| format!("{} {}", a.action, a.detail))
-                .collect(),
+                .collect::<Vec<_>>()
+                .join("\n"),
         ));
         let (_, detail) = self.api("GET", &format!("/v1/missions/{id}"), None).await;
         surfaces.push(("the mission".into(), detail.to_string()));
@@ -337,7 +344,7 @@ impl World {
         }
         let mut files = Vec::new();
         files_under(self.dir.path(), &mut files);
-        assert!(!files.is_empty());
+        assert!(!files.is_empty(), "the run left no files to scan");
         for f in files {
             surfaces.push((
                 format!("the file {}", f.display()),

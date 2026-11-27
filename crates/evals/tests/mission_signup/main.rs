@@ -85,40 +85,41 @@ async fn a_full_mission_registers_on_four_sites_with_its_own_mailbox_and_reports
     );
 
     // ---- what the sites saw ----
-    let book = w.sites.book.lock();
-    let signed = |host: &str| book.signups.iter().filter(|s| s.0 == host).count();
-    assert_eq!(signed(PLAIN), 1, "{:?}", book.hits);
-    assert_eq!(signed(VERIFY), 1);
-    assert_eq!(signed(TWOFA), 1);
-    assert_eq!(signed(CAPTCHA), 0, "the CAPTCHA form was never submitted");
-    assert_eq!(
-        book.captcha_rejections, 0,
-        "nobody tried to get past the check"
-    );
-    assert_eq!(
-        book.verified,
-        vec![w.mail.address().to_owned()],
-        "the mailed link confirmed site two, with the bot's own address"
-    );
-    assert_eq!(
-        book.tfa_enabled.len(),
-        1,
-        "site four got a correct TOTP code"
-    );
-    assert_eq!(book.tfa_wrong, 0);
-    // Every sign-up used the bot's own address and a vault password, different per site.
-    let mut passwords: Vec<String> = book.signups.iter().map(|s| s.2.clone()).collect();
-    assert!(book.signups.iter().all(|s| s.1 == w.mail.address()));
-    assert!(passwords.iter().all(|p| p.len() >= 16));
-    passwords.sort();
-    passwords.dedup();
-    assert_eq!(passwords.len(), 3, "one password per site");
-    // The captcha site was reached after the first two and before the last one (the mission
-    // went on past it), and the confirmation link was opened after the mail arrived.
-    let pos = |needle: &str| book.hits.iter().position(|h| h == needle).unwrap();
-    assert!(pos(&format!("{CAPTCHA} GET /signup")) < pos(&format!("{TWOFA} POST /signup")));
-    assert!(pos(&format!("{VERIFY} POST /signup")) < pos(&format!("{VERIFY} GET /confirm")));
-    drop(book);
+    {
+        let book = w.sites.book.lock();
+        let signed = |host: &str| book.signups.iter().filter(|s| s.0 == host).count();
+        assert_eq!(signed(PLAIN), 1, "{:?}", book.hits);
+        assert_eq!(signed(VERIFY), 1);
+        assert_eq!(signed(TWOFA), 1);
+        assert_eq!(signed(CAPTCHA), 0, "the CAPTCHA form was never submitted");
+        assert_eq!(
+            book.captcha_rejections, 0,
+            "nobody tried to get past the check"
+        );
+        assert_eq!(
+            book.verified,
+            vec![w.mail.address().to_owned()],
+            "the mailed link confirmed site two, with the bot's own address"
+        );
+        assert_eq!(
+            book.tfa_enabled.len(),
+            1,
+            "site four got a correct TOTP code"
+        );
+        assert_eq!(book.tfa_wrong, 0);
+        // Every sign-up used the bot's own address and a vault password, different per site.
+        let mut passwords: Vec<String> = book.signups.iter().map(|s| s.2.clone()).collect();
+        assert!(book.signups.iter().all(|s| s.1 == w.mail.address()));
+        assert!(passwords.iter().all(|p| p.len() >= 16));
+        passwords.sort();
+        passwords.dedup();
+        assert_eq!(passwords.len(), 3, "one password per site");
+        // The captcha site was reached after the first two and before the last one (the mission
+        // went on past it), and the confirmation link was opened after the mail arrived.
+        let pos = |needle: &str| book.hits.iter().position(|h| h == needle).unwrap();
+        assert!(pos(&format!("{CAPTCHA} GET /signup")) < pos(&format!("{TWOFA} POST /signup")));
+        assert!(pos(&format!("{VERIFY} POST /signup")) < pos(&format!("{VERIFY} GET /confirm")));
+    }
 
     // The bot never wandered off: no request to a host that is none of the four sites.
     assert!(
