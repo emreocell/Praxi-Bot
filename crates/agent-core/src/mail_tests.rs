@@ -772,3 +772,60 @@ async fn marking_a_mail_of_the_own_inbox_as_read_needs_no_card_for_an_owner_run_
     );
     assert!(mark_read_asks("owner", true, "").await, "below Full");
 }
+
+/// Run: read a page (so the run holds private data and untrusted content), then type the bot's
+/// address, which looks like a key to the data-shape check, into a form. Returns whether it asked.
+async fn typing_the_address_asks(own: bool) -> bool {
+    let env = setup();
+    let bot = env.bot.to_string();
+    let address = "praxi-8f3a9c1d2e4b@agentmail.to";
+    let conn = connector(vec![account(
+        "bot-mail",
+        own.then(|| bot.clone()),
+        address,
+        SendMode::Ask,
+    )]);
+    let page = page_tool();
+    let fill = Arc::new(with_class(
+        "browser_fill",
+        Effect::Write,
+        PermissionCategory::Browser,
+        builtin_tools::classify("browser_fill").expect("a built-in tool"),
+        "ok",
+    ));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_read", json!({"path": "page.html"}))]),
+        calls(&[("c2", "browser_fill", json!({"ref": "e1", "text": address}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&page), t(&fill)],
+        profile(FULL),
+        cfg(Policy::full()),
+    );
+    lp.mail_handle().set(conn);
+    let mut rx = lp.subscribe();
+    lp.send_user_message_from(env.chat, "sign up", crate::MessageMode::Steer, "owner")
+        .unwrap();
+    let ev = until(&mut rx, |e| {
+        matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+    })
+    .await;
+    match ev {
+        Event::ApprovalNeeded(a) => {
+            assert_eq!(a.tool_name, "browser_fill");
+            true
+        }
+        _ => false,
+    }
+}
+
+#[tokio::test]
+async fn the_bots_own_address_is_typed_into_a_stranger_form_without_a_card() {
+    assert!(!typing_the_address_asks(true).await);
+    // The same text is a key-shaped string when the inbox is not this bot's own.
+    assert!(typing_the_address_asks(false).await);
+}

@@ -108,7 +108,7 @@ const MAX_LABEL_CHARS: usize = 120;
 /// Label of the brief a mission session starts from (see `Shared::initial_taint`).
 pub(crate) const MISSION_LEDGER_LABEL: &str = "mission ledger";
 
-/// Prefix of the label a read of the bot's OWN AgentMail inbox carries (see
+/// Prefix of the label a read of the bot's OWN `AgentMail` inbox carries (see
 /// `Shared::own_inbox_call`): `own inbox INBOX`.
 pub(crate) const OWN_INBOX_LABEL_PREFIX: &str = "own inbox ";
 
@@ -120,7 +120,7 @@ pub(crate) const OWN_INBOX_LABEL_PREFIX: &str = "own inbox ";
 ///   (the run's exposure says so) and never the owner's words; what an earlier session really
 ///   read of the owner's private data reaches this one through the chat's message provenance,
 ///   not through this label;
-/// * the bot's own AgentMail inbox: an inbox made for the bot, whose mail comes from strangers.
+/// * the bot's own `AgentMail` inbox: an inbox made for the bot, whose mail comes from strangers.
 ///   The owner's personal mailboxes keep their `mailbox ...` label.
 ///
 /// Only the daemon writes these labels (they are built from fixed prefixes, never from a page,
@@ -574,7 +574,7 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
     }
 }
 
-/// The label of a read of the bot's own AgentMail inbox (see `Shared::own_inbox_call`): the
+/// The label of a read of the bot's own `AgentMail` inbox (see `Shared::own_inbox_call`): the
 /// same folder the `mailbox ...` label would name, under the prefix that does not mark the run
 /// as holding the owner's private data.
 pub(crate) fn own_inbox_label(input: &Value) -> String {

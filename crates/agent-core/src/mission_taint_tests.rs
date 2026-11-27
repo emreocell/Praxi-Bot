@@ -6,7 +6,7 @@
 //!
 //! * the ledger is the bot's own bookkeeping: untrusted (never the owner's words, never an
 //!   instruction) but not the owner's private data;
-//! * the bot's own AgentMail inbox holds mail from strangers: untrusted, not private; the
+//! * the bot's own `AgentMail` inbox holds mail from strangers: untrusted, not private; the
 //!   address is the bot's own, not foreign text; an IMAP mailbox bound to the bot (it can be the
 //!   owner's own) and every other mailbox stay private reads;
 //! * what a run may send to places the owner did not name is budgeted per site.
@@ -31,7 +31,7 @@ use crate::tests::{
 const FULL: &str = "[permissions]\npreset = \"full\"\n";
 /// The goal as the owner wrote it.
 const GOAL: &str = "Sitem webioo.com.tr icin backlink istiyorum. Backlink alabilecegim yerlere kendi mail adresinle kayit ol.";
-/// The bot's own AgentMail address: hex digits in it make it look like a key.
+/// The bot's own `AgentMail` address: hex digits in it make it look like a key.
 const OWN: &str = "praxi-8f3a9c1d2e4b@agentmail.to";
 /// What the owner keeps private: a customer list on the bot's disk.
 const CUSTOMERS: &str = "customers.csv: Hanne Lorentzen, account tail4242, Zurichstrasse 12; praxi-8f3a9c1d2e4b@agentmail.to";
@@ -106,7 +106,7 @@ impl Kit {
 }
 
 /// A mission session of a Full bot with the kit and `own` as its mail identity (when set, a
-/// bound AgentMail inbox at address `OWN`). The model's replies are `script`.
+/// bound `AgentMail` inbox at address `OWN`). The model's replies are `script`.
 fn session_loop(
     w: &World,
     kit: &Kit,

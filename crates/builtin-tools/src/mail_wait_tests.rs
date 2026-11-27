@@ -170,9 +170,11 @@ fn the_tool_is_a_read_of_the_messaging_family_and_asks_like_email_read() {
     let s = t.spec();
     assert_eq!(s.effect, Effect::Read);
     assert_eq!(s.category, PermissionCategory::Messaging);
-    // Same class as email_read: untrusted, private and it reaches a remote
-    // mailbox, so a mail- or webhook-started (tainted) run is still asked.
-    assert!(s.content.ingests_untrusted && s.content.reads_private && s.content.egress);
+    // Like email_read it is untrusted and reaches a remote mailbox, so a mail- or
+    // webhook-started (tainted) run is still asked. Unlike email_read it is not a private
+    // read: it refuses every mailbox but the bot's own identity and returns no mail body.
+    assert!(s.content.ingests_untrusted && s.content.egress);
+    assert!(!s.content.reads_private);
     assert!(!t.visible_to(Some("bot")), "no connector, no tool");
 }
 

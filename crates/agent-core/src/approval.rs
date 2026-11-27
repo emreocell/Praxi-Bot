@@ -1598,6 +1598,7 @@ impl Shared {
     /// typed text, hidden characters and anything the redactor would change. A run that is not
     /// owner-started (schedule, webhook, mail, channel, a peer, a subagent, an external agent)
     /// is unchanged, and so are the Normal, Ask and custom levels.
+    #[allow(clippy::too_many_lines)] // One rule read top to bottom; its checks share the call's state.
     fn full_mode_waives(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
         if name == "shell_run" {
             return self.full_shell_waives(ctx, input);
@@ -2159,9 +2160,9 @@ impl Shared {
         class
     }
 
-    /// A read of the bot's OWN AgentMail inbox: `email_search`, `email_read` or
+    /// A read of the bot's OWN `AgentMail` inbox: `email_search`, `email_read` or
     /// `email_list_folders` on an identity that is bound to this bot or shared with it and is an
-    /// AgentMail inbox (made through the API, for the bot). (`email_wait_for` needs no check: it
+    /// `AgentMail` inbox (made through the API, for the bot). (`email_wait_for` needs no check: it
     /// answers with no mail body and refuses every mailbox but the bot's own, so its class never
     /// says private.)
     ///
