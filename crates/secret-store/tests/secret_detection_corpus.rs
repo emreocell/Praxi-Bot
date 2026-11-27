@@ -14,89 +14,26 @@ fn join(prefix: &str, body: &str) -> String {
     format!("{prefix}{body}")
 }
 
-/// (kind, value) known provider shapes, high confidence.
-fn known_shapes() -> Vec<(SecretKind, String)> {
-    vec![
-        (
-            SecretKind::OpenAiStyleKey,
-            join("sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34"),
-        ),
-        (
-            SecretKind::OpenAiStyleKey,
-            join("sk-", "ant-api03-Zx98Yw76Vu54Ts32Rq10Po98"),
-        ),
-        (
-            SecretKind::OpenAiStyleKey,
-            join("sk-", "or-v1-0a1b2c3d4e5f60718293a4b5c6d7e8f9"),
-        ),
-        (
-            SecretKind::GoogleApiKey,
-            join("AI", "zaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q"),
-        ),
-        (
-            SecretKind::GithubToken,
-            join("gh", "p_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"),
-        ),
-        (
-            SecretKind::GithubToken,
-            join(
-                "github",
-                "_pat_11AAAAAAA0abcdefGHIJKL_mnopqrstuvwxyz0123456789",
-            ),
-        ),
-        (
-            SecretKind::SlackToken,
-            join("xo", "xb-123456789012-abcdefghijklmnop"),
-        ),
-        (
-            SecretKind::NvidiaKey,
-            join("nv", "api-A1b2C3d4E5f6G7h8I9j0K1l2"),
-        ),
-        (
-            SecretKind::Jwt,
-            join(
-                "ey",
-                "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop",
-            ),
-        ),
-        (SecretKind::AwsAccessKeyId, join("AK", "IAABCD1234EFGH5678")),
-        (
-            SecretKind::StripeKey,
-            join("sk_li", "ve_A1b2C3d4E5f6G7h8I9j0K1l2"),
-        ),
-        (
-            SecretKind::TelegramBotToken,
-            join("123456789:", "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw1"),
-        ),
-        (
-            SecretKind::NpmToken,
-            join("np", "m_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"),
-        ),
-        (
-            SecretKind::GitlabToken,
-            join("gl", "pat-A1b2C3d4E5f6G7h8I9j0"),
-        ),
-        (
-            SecretKind::HuggingFaceToken,
-            join("h", "f_abcdefghijklmnopqrstuvwxyzABCDEFGH"),
-        ),
-        (
-            SecretKind::GroqKey,
-            join("gs", "k_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0"),
-        ),
-        (
-            SecretKind::DigitalOceanToken,
-            join(
-                "dop",
-                "_v1_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            ),
-        ),
-    ]
+/// (kind, value) known provider shapes, high confidence. The rows are in the
+/// shared corpus (a prefix and a body, joined here), which the TypeScript port
+/// checks too.
+fn known_shapes() -> Vec<(String, String)> {
+    corpus()["shapes"]
+        .as_array()
+        .expect("shapes is an array")
+        .iter()
+        .map(|r| {
+            let f = |k: &str| r[k].as_str().expect("string").to_owned();
+            (f("kind"), join(&f("prefix"), &f("body")))
+        })
+        .collect()
 }
 
 #[test]
 fn every_known_shape_is_detected_with_exact_span() {
-    for (kind, value) in known_shapes() {
+    let shapes = known_shapes();
+    assert!(shapes.len() >= 17);
+    for (kind, value) in shapes {
         for template in [
             "{}",
             "here is my key: {} thanks",
@@ -108,7 +45,7 @@ fn every_known_shape_is_detected_with_exact_span() {
             let found = detect_secrets(&text);
             assert_eq!(found.len(), 1, "kind {kind} in {template:?}: {found:?}");
             let c = found[0];
-            assert_eq!(c.kind, kind, "template {template:?}");
+            assert_eq!(c.kind.as_str(), kind, "template {template:?}");
             assert_eq!(c.confidence, Confidence::High);
             assert_eq!(c.slice(&text), Some(value.as_str()), "span for {kind}");
         }
@@ -278,4 +215,65 @@ fn screen_inbound_cuts_values_and_says_when_nothing_else_is_left() {
     let labelled = screen_inbound("sifre: Tr0ub4dor&3").expect("a password");
     assert!(!labelled.only_secrets);
     assert_eq!(labelled.text, format!("sifre: {REDACTED}"));
+}
+
+/// Run `f` on a thread and fail, rather than hang the suite, if it is not done in `limit`.
+fn within<T: Send + 'static>(
+    limit: std::time::Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(limit)
+        .expect("the detector did not finish in time on a long input")
+}
+
+/// Pathological long inputs from the shared corpus (the TypeScript port runs
+/// the same rows): none may take more than seconds, and where the row says how
+/// many secrets are in it the count is exact.
+#[test]
+fn long_pathological_inputs_finish_fast_with_the_expected_result() {
+    let stress = corpus()["stress"].as_array().expect("stress rows").clone();
+    assert!(stress.len() >= 10);
+    for row in stress {
+        let name = row["name"].as_str().unwrap().to_owned();
+        let text = row["unit"]
+            .as_str()
+            .unwrap()
+            .repeat(usize::try_from(row["times"].as_u64().unwrap()).unwrap());
+        let expected = row["found"].as_u64();
+        assert!(text.len() > 100_000, "{name} is a long input");
+        let started = std::time::Instant::now();
+        let (found, screened) = within(std::time::Duration::from_secs(60), move || {
+            let found = detect_secrets(&text).len();
+            let screened = screen_inbound(&text).map(|s| s.text.len());
+            (found, screened)
+        });
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(20),
+            "{name} took {:?}",
+            started.elapsed()
+        );
+        if let Some(n) = expected {
+            assert_eq!(found as u64, n, "{name}");
+            assert_eq!(screened.is_some(), n > 0, "{name}");
+        }
+    }
+}
+
+/// A key at the very end of a text much longer than one scan window is still
+/// found, and one inside a long run of words is cut out whole.
+#[test]
+fn a_secret_deep_inside_a_long_text_is_cut_out() {
+    let key = join("sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+    let words = "alpha beta gamma ".repeat(30_000);
+    let text = format!("{words}{key} {words}");
+    let screened = within(std::time::Duration::from_secs(60), move || {
+        screen_inbound(&text)
+    })
+    .expect("a secret");
+    assert_eq!(screened.text.len(), words.len() * 2 + REDACTED.len() + 1);
+    assert!(!screened.text.contains("Ab12Cd34"));
 }

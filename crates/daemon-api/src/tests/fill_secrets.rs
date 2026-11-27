@@ -538,3 +538,124 @@ async fn vault_bot_scope_ask_toggle_and_confirmed_owner_reveal() {
         "{audit}"
     );
 }
+
+/// Review of #990, finding 4. The composer stores a pasted value with `POST /v1/fill-secrets` and
+/// sends only `{name, value}`. The write is owner-only on the server (a holder of only the API
+/// token is refused before anything is written or audited), and what it creates belongs to NO bot
+/// until the owner scopes it: not the bot of the chat the value was pasted in, not another bot.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn a_pasted_value_is_stored_by_the_owner_only_and_belongs_to_no_bot_until_scoped() {
+    use secret_store::FillError;
+
+    let r = rig();
+    let new_bot = |name: &'static str| {
+        let r = &r;
+        async move {
+            let profile = super::PROFILE
+                .replace("id = \"tester\"", &format!("id = \"{name}\""))
+                .replace("name = \"Tester\"", &format!("name = \"{name}\""));
+            let resp = call(
+                &r.t,
+                Method::POST,
+                "/v1/bots",
+                Some(json!({ "profile_toml": profile })),
+            )
+            .await;
+            assert_eq!(resp.status, StatusCode::CREATED, "{:?}", resp.json());
+            resp.json()["id"].as_str().unwrap().to_owned()
+        }
+    };
+    let active = new_bot("active").await;
+    let other = new_bot("other").await;
+    let name = "pasted/openai-style-key";
+    let composer_body = json!({ "name": name, "value": VALUE });
+    let before_audit = audit_actions(&r.t).len();
+
+    // A caller with only the API token (a CLI engine, a script) cannot store or scope anything.
+    let denied = super::call_token_only(
+        &r.t,
+        Method::POST,
+        "/v1/fill-secrets",
+        Some(composer_body.clone()),
+    )
+    .await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    assert_eq!(denied.json()["error"]["code"], "owner_key_required");
+    assert!(!txt(&denied).contains(VALUE));
+    assert!(r.store.writes.lock().is_empty(), "nothing was written");
+    assert_eq!(
+        audit_actions(&r.t).len(),
+        before_audit,
+        "nothing was audited"
+    );
+    assert!(r.secrets.list().unwrap().is_empty());
+
+    // The owner's request: stored, scoped to nobody, and a bot id that is not one of the owner's
+    // bots is refused by the server (nothing written).
+    let writes = r.store.writes.lock().len();
+    for (bots, status) in [
+        (json!(["not-a-bot-id"]), StatusCode::BAD_REQUEST),
+        (
+            json!(["00000000-0000-4000-8000-000000000000"]),
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        let refused = call(
+            &r.t,
+            Method::POST,
+            "/v1/fill-secrets",
+            Some(json!({ "name": name, "value": VALUE, "bot_ids": bots })),
+        )
+        .await;
+        assert_eq!(refused.status, status, "{:?}", refused.json());
+    }
+    assert_eq!(
+        r.store.writes.lock().len(),
+        writes,
+        "a refused scope writes nothing"
+    );
+    let created = call(&r.t, Method::POST, "/v1/fill-secrets", Some(composer_body)).await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.json());
+    assert_eq!(created.json()["bot_ids"], json!([]));
+    assert_eq!(created.json()["ask_before_use"], true);
+
+    // No bot can use it: the chat's own bot, another bot, or a caller that names no bot.
+    for bot in [Some(active.as_str()), Some(other.as_str()), None] {
+        assert!(
+            matches!(
+                r.secrets.check_bot(name, bot),
+                Err(FillError::NotAllowed(_))
+            ),
+            "{bot:?}"
+        );
+        assert!(
+            matches!(
+                r.secrets.resolve_value_for(name, bot),
+                Err(FillError::NotAllowed(_))
+            ),
+            "{bot:?}"
+        );
+        assert!(!r.secrets.exists_for_bot(name, bot), "{bot:?}");
+        assert!(r.secrets.list_for_bot(bot).unwrap().is_empty(), "{bot:?}");
+    }
+
+    // Scoping it is the owner's too, and it reaches that bot only.
+    let scope = json!({ "bot_ids": [active] });
+    let path = format!("/v1/fill-secrets/{name}");
+    let denied = super::call_token_only(&r.t, Method::PUT, &path, Some(scope.clone())).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    assert!(r.secrets.check_bot(name, Some(&active)).is_err());
+    let scoped = call(&r.t, Method::PUT, &path, Some(scope)).await;
+    assert_eq!(scoped.status, StatusCode::OK, "{:?}", scoped.json());
+    assert!(r.secrets.check_bot(name, Some(&active)).is_ok());
+    assert!(matches!(
+        r.secrets.check_bot(name, Some(&other)),
+        Err(FillError::NotAllowed(_))
+    ));
+    assert!(matches!(
+        r.secrets.resolve_value_for(name, Some(&other)),
+        Err(FillError::NotAllowed(_))
+    ));
+    assert!(!audit_dump(&r.t).contains(VALUE));
+}
