@@ -6409,6 +6409,7 @@
     "neverSeen": "Der Bot sieht nicht, was du eingibst. Er erfährt nur, ob es gespeichert wurde.",
     "notConnected": "Keine Verbindung zum Dienst. Es wurde nichts gesendet, Ihre Eingabe ist noch da.",
     "origins": "Websites, auf denen es eingetippt werden darf (optional, eine pro Zeile)",
+    "parked": "This is for a long-running task. That task is paused only on this item and keeps working on the rest. Your answer lets it continue.",
     "password": "Passwort",
     "programs": "Programme, in die es eingetippt werden darf (optional)",
     "purposeLabel": "Vom Bot geschrieben (von Praxi nicht geprüft):",

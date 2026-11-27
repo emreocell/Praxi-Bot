@@ -2,7 +2,7 @@
  * Pure rules of the credential-request card (`SecretRequestCard`), kept apart from React so they
  * can be tested. Nothing here stores, logs or returns a value other than the body the card posts.
  */
-/** Thrown instead of returning quietly when there is no daemon connection: the card keeps the value. */
+/** Thrown instead of returning quietly when there is no daemon connection: the card stays open. */
 export class NoClientError extends Error {
   constructor() {
     super("no daemon connection");
@@ -16,32 +16,19 @@ export interface SubmitBody {
   value?: string;
   username?: string;
   password?: string;
-  origins: string[];
-  programs: string[];
 }
 
-/** Entries of an allow-list box: one per line, comma or space; trimmed, no repeats. */
-export function parseAllowList(text: string): string[] {
-  const out: string[] = [];
-  for (const part of text.split(/[\s,]+/)) {
-    const v = part.trim();
-    if (v !== "" && !out.includes(v)) out.push(v);
-  }
-  return out;
-}
-
-/** The body for `POST /v1/secret-requests/{call_id}`, or `null` while a required field is empty. */
+/** The daemon's redactor needs at least six bytes. The form requires six characters per field. */
 export function buildSubmitBody(
   fields: SecretFields,
-  input: { value?: string; username?: string; password?: string },
-  origins: string[],
-  programs: string[]
+  input: { value?: string; username?: string; password?: string }
 ): SubmitBody | null {
+  const filled = (value: string | undefined): value is string => (value?.length ?? 0) >= 6;
   if (fields === "secret") {
-    return input.value ? { value: input.value, origins, programs } : null;
+    return filled(input.value) ? { value: input.value } : null;
   }
-  return input.username && input.password
-    ? { username: input.username, password: input.password, origins, programs }
+  return filled(input.username) && filled(input.password)
+    ? { username: input.username, password: input.password }
     : null;
 }
 

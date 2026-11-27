@@ -6409,6 +6409,7 @@
     "neverSeen": "El bot nunca ve lo que escribes. Solo se le informa si se guardó.",
     "notConnected": "Se perdió la conexión con el servicio. No se envió nada y lo que escribiste sigue aquí.",
     "origins": "Sitios web donde el bot puede introducir el dato (opcional, uno por línea)",
+    "parked": "This is for a long-running task. That task is paused only on this item and keeps working on the rest. Your answer lets it continue.",
     "password": "Contraseña",
     "programs": "Programas donde el bot puede introducir el dato (opcional)",
     "purposeLabel": "Motivo escrito por el bot (Praxi no lo verifica):",

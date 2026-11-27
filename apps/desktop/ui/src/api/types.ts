@@ -377,10 +377,14 @@ export type DaemonEvent =
       name: string;
       /** Untrusted model text: render as plain text only. */
       purpose: string;
+      /** Absent in older journal events, which cannot reopen an input form. */
+      origin?: string;
       fields: "secret" | "login";
       replaces_existing: boolean;
       untrusted_content: boolean;
       expires_in_secs: number;
+      /** A mission asked: no run waits, the answer releases the parked item. */
+      parked?: boolean;
     }
   | {
       type: "model_fallback";

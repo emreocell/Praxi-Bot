@@ -58,3 +58,33 @@ test("a managed host update sends the exact tag and accepts an empty 202 respons
     client.dispose();
   }
 });
+
+test("a secure form only sends its body to the verified local owner daemon", async () => {
+  const local = new ApiClient({ base_url: "http://127.0.0.1:47821", token: "t" });
+  const proxy = new ApiClient({ base_url: "http://127.0.0.1:50999", token: "p" });
+  const unmark = markRemoteBaseUrl(proxy.baseUrl);
+  const fetch = globalThis.fetch;
+  const ownerProvider = ApiClient.ownerKeyProvider;
+  const requests: RequestInit[] = [];
+  globalThis.fetch = async (_url, init) => {
+    requests.push(init ?? {});
+    return Response.json({ outcome: "stored" });
+  };
+  const body = { value: "canary-input-142" };
+  try {
+    ApiClient.ownerKeyProvider = async () => null;
+    await assert.rejects(local.submitSecretRequest("test-id", body), { code: "owner_key_required" });
+    ApiClient.ownerKeyProvider = async () => "owner-key-for-test";
+    await assert.rejects(proxy.submitSecretRequest("test-id", body), { code: "owner_key_required" });
+    assert.equal(requests.length, 0);
+
+    await local.submitSecretRequest("test-id", body);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].redirect, "error");
+    assert.deepEqual(JSON.parse(String(requests[0].body)), body);
+  } finally {
+    unmark();
+    globalThis.fetch = fetch;
+    ApiClient.ownerKeyProvider = ownerProvider;
+  }
+});

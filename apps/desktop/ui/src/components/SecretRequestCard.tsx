@@ -12,7 +12,6 @@ import {
   buildSubmitBody,
   formatCountdown,
   isGone,
-  parseAllowList,
   secondsLeft,
   type SubmitBody
 } from "../lib/secretRequestForm";
@@ -39,8 +38,6 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
   const valueRef = useRef<HTMLInputElement | null>(null);
   const userRef = useRef<HTMLInputElement | null>(null);
   const passRef = useRef<HTMLInputElement | null>(null);
-  const originsRef = useRef<HTMLTextAreaElement>(null);
-  const programsRef = useRef<HTMLTextAreaElement>(null);
   const firstRef = useRef<HTMLInputElement | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
@@ -51,7 +48,7 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
   const left = secondsLeft(item.expiresMs, now);
   const done = item.outcome !== undefined;
   const expired = left === 0;
-  const locked = done || item.closed === true || gone || expired;
+  const locked = done || item.closed === true || gone || expired || !item.origin;
   const login = item.fields === "login";
 
   // While the form is open: tick the countdown, keep the window out of screen capture, and move
@@ -94,28 +91,25 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
         value: valueRef.current?.value,
         username: userRef.current?.value,
         password: passRef.current?.value
-      },
-      parseAllowList(originsRef.current?.value ?? ""),
-      parseAllowList(programsRef.current?.value ?? "")
+      }
     );
     if (!body) {
       setError(t("secretRequest.fillAll"));
       return;
     }
+    wipe();
     setBusy(true);
     setError(null);
     try {
       await onSubmit(body);
-      wipe();
     } catch (err) {
-      // The form stays (a 400 or 409 can be corrected); the message never carries the value.
       if (err instanceof ApiError && isGone(err.code)) {
-        wipe();
         setGone(true);
       }
       setError(describe(err));
     } finally {
       body.value = undefined;
+      body.username = undefined;
       body.password = undefined;
       setBusy(false);
     }
@@ -123,14 +117,13 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
 
   const cancel = async () => {
     if (busy || locked) return;
+    wipe();
     setBusy(true);
     setError(null);
     try {
       await onCancel();
-      wipe();
     } catch (err) {
       if (err instanceof ApiError && isGone(err.code)) {
-        wipe();
         setGone(true);
       }
       setError(describe(err));
@@ -148,6 +141,7 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
 
   const titleId = `${uid}-title`;
   const purposeId = `${uid}-purpose`;
+  const originId = `${uid}-origin`;
   const warnId = `${uid}-warn`;
   const type = login ? t("secretRequest.typeLogin") : t("secretRequest.typeSecret");
   const inputProps = {
@@ -164,7 +158,7 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
       data-testid="secret-request-card"
       data-call-id={item.callId}
       aria-labelledby={titleId}
-      aria-describedby={`${purposeId}${item.untrustedContent ? ` ${warnId}` : ""}`}
+      aria-describedby={`${purposeId}${item.origin ? ` ${originId}` : ""}${item.untrustedContent ? ` ${warnId}` : ""}`}
     >
       <div className={styles.head}>
         <h3 className={styles.title} id={titleId}>
@@ -189,11 +183,22 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
         {t("secretRequest.destination", { type })}{" "}
         <span className={styles.mono}>{escapeInvisible(item.name)}</span>
       </p>
+      {item.origin ? (
+        <p className={styles.dest} id={originId} data-testid="secret-request-origin">
+          {t("handover.siteLabel")}{" "}
+          <bdi className={styles.mono}>{escapeInvisible(item.origin)}</bdi>
+        </p>
+      ) : null}
       <p className={styles.status}>{t("secretRequest.neverSeen")}</p>
 
       {item.untrustedContent ? (
         <p className={styles.warn} id={warnId} role="alert">
           {t("secretRequest.untrusted")}
+        </p>
+      ) : null}
+      {item.parked ? (
+        <p className={styles.note} data-testid="secret-request-parked">
+          {t("secretRequest.parked")}
         </p>
       ) : null}
       {item.replacesExisting ? (
@@ -225,7 +230,7 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
                     firstRef.current = el;
                   }}
                   className={formStyles.input}
-                  type="text"
+                  type="password"
                   {...inputProps}
                 />
               </div>
@@ -255,30 +260,6 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
               />
             </div>
           )}
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor={`${uid}-origins`}>{t("secretRequest.origins")}</label>
-            <textarea
-              id={`${uid}-origins`}
-              ref={originsRef}
-              className={formStyles.textarea}
-              rows={2}
-              placeholder="https://example.com"
-              spellCheck={false}
-              disabled={busy}
-            />
-          </div>
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor={`${uid}-programs`}>{t("secretRequest.programs")}</label>
-            <textarea
-              id={`${uid}-programs`}
-              ref={programsRef}
-              className={formStyles.textarea}
-              rows={1}
-              spellCheck={false}
-              disabled={busy}
-            />
-            <p className={formStyles.hint}>{t("secretRequest.allowHint")}</p>
-          </div>
           {item.untrustedContent ? (
             <label className={styles.confirm}>
               <input

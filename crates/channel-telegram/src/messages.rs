@@ -82,6 +82,7 @@ pub(crate) enum Message<'a> {
     ApprovalDesktopOnly {
         tool: &'a str,
     },
+    SecretRequestNotice,
     LanguageSet,
     LanguageUsage {
         current: Language,
@@ -280,6 +281,8 @@ impl<'a> Message<'a> {
             (Self::CouldNotProcess { id }, true) => format!("{id} numaralı mesaj işlenemedi.").into(),
             (Self::RunError { message }, false) => format!("⚠️ Error: {message}").into(),
             (Self::RunError { message }, true) => format!("⚠️ Hata: {message}").into(),
+            (Self::SecretRequestNotice, false) => "A credential request is waiting. Open Praxi on your computer to answer. Keep credentials out of this chat.".into(),
+            (Self::SecretRequestNotice, true) => "Yanıtınızı bekleyen bir gizli bilgi isteği var. Yanıtlamak için bilgisayarınızda Praxi’yi açın. Gizli bilgilerinizi bu sohbette paylaşmayın.".into(),
             (Self::LanguageSet, false) => "This chat now uses English.".into(),
             (Self::LanguageSet, true) => "Bu sohbet artık Türkçe.".into(),
             (Self::LanguageUsage { current }, false) => {
@@ -385,6 +388,7 @@ mod tests {
             | Message::Denied
             | Message::Answered
             | Message::ApprovalIncomplete
+            | Message::SecretRequestNotice
             | Message::LanguageSet
             | Message::LanguageUsage { .. }
             | Message::VoiceUnavailable
@@ -447,6 +451,7 @@ mod tests {
             Message::ApprovalTooLarge { tool },
             Message::ApprovalIncomplete,
             Message::ApprovalDesktopOnly { tool },
+            Message::SecretRequestNotice,
             Message::LanguageSet,
             Message::LanguageUsage {
                 current: Language::EN,

@@ -80,9 +80,12 @@ export interface SecretRequestItem {
   name: string;
   /** Untrusted model text. */
   purpose: string;
+  origin?: string;
   fields: "secret" | "login";
   replacesExisting: boolean;
   untrustedContent: boolean;
+  /** A mission asked: its item is parked and no run waits, so the card outlives the tool call. */
+  parked?: boolean;
   requestedMs: number;
   expiresMs: number;
   /** How the owner answered here; `closed` when the run moved on or the request expired. */
@@ -311,7 +314,7 @@ function closeOpenItems(items: TimelineItem[]): TimelineItem[] {
   return items.map((i) =>
     i.kind === "question" && i.answer === undefined
       ? { ...i, closed: true }
-      : i.kind === "secret" || i.kind === "handover"
+      : (i.kind === "secret" && !i.parked) || i.kind === "handover"
         ? { ...i, closed: true }
         : i.kind === "tool" &&
           (i.status === "awaiting_approval" ||
@@ -457,7 +460,9 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : (i.kind === "secret" || i.kind === "handover") && i.callId === e.call_id
+              : (i.kind === "secret" || i.kind === "handover") &&
+                  i.callId === e.call_id &&
+                  !(i.kind === "secret" && i.parked)
                 ? { ...i, closed: true }
                 : i
           )
@@ -484,7 +489,9 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : (i.kind === "secret" || i.kind === "handover") && i.callId === e.call_id
+              : (i.kind === "secret" || i.kind === "handover") &&
+                  i.callId === e.call_id &&
+                  !(i.kind === "secret" && i.parked)
                 ? { ...i, closed: true }
                 : i
           )
@@ -651,9 +658,11 @@ function reduce(
           callId: e.call_id,
           name: e.name,
           purpose: e.purpose,
+          origin: e.origin,
           fields: e.fields,
           replacesExisting: e.replaces_existing,
           untrustedContent: e.untrusted_content,
+          ...(e.parked ? { parked: true } : {}),
           requestedMs: ts,
           expiresMs: ts + Math.max(0, e.expires_in_secs) * 1000
         };
@@ -864,8 +873,9 @@ export function reconcile(
         runChanged = true;
         return { ...i, closed: true };
       }
+      // A mission's form outlives its session run: it closes on its own expiry or answer.
       if (
-        (i.kind === "secret" || i.kind === "handover") &&
+        ((i.kind === "secret" && !i.parked) || i.kind === "handover") &&
         !i.closed &&
         i.outcome === undefined &&
         i.requestedMs < asOfMs &&
@@ -978,7 +988,7 @@ export function needsYou(
           sinceMs: i.requestedMs,
           question: i
         });
-      } else if (i.kind === "secret" && i.outcome === undefined && !i.closed && i.expiresMs > nowMs) {
+      } else if (i.kind === "secret" && i.origin && i.outcome === undefined && !i.closed && i.expiresMs > nowMs) {
         out.push({
           kind: "secret",
           runId: run.id,

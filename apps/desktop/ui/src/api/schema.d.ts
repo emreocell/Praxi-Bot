@@ -11515,8 +11515,10 @@ export interface components {
             /** @description `stored` or `cancelled`. */
             outcome: string;
             /**
-             * @description The waiting run was told. `false` when the run stopped or the request
-             *     expired in the same instant (a stored value stays stored).
+             * @description The waiting run was told, or (a mission's request) the parked item was released.
+             *     `false` when the run stopped or the request expired in the same instant, the item
+             *     was already released by hand, or the request was cancelled (a stored value stays
+             *     stored).
              */
             run_notified: boolean;
         };
@@ -12122,15 +12124,11 @@ export interface components {
          *     request, or `username` and `password` for a `login` request.
          */
         SubmitSecretRequest: {
-            /** @description Exact origins the entry may be typed on, like `https://example.com`. */
-            origins?: string[];
             /** @description Password of a `login` request (write-only). */
             password?: string | null;
-            /** @description Verified desktop program identities the entry may be typed into. */
-            programs?: string[];
-            /** @description Username of a `login` request. */
+            /** @description Username of a `login` request (write-only). */
             username?: string | null;
-            /** @description The secret (write-only: no route returns it). */
+            /** @description The secret (write-only). */
             value?: string | null;
         };
         TakeoverAccepted: {
@@ -24257,7 +24255,7 @@ export interface operations {
                     "application/json": components["schemas"]["SecretRequestAnswer"];
                 };
             };
-            /** @description wrong fields, empty value or bad allow-list entry; the request keeps waiting */
+            /** @description wrong fields or empty value; the request keeps waiting */
             400: {
                 headers: {
                     [name: string]: unknown;

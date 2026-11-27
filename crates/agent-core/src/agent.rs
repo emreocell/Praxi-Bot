@@ -2024,7 +2024,7 @@ impl AgentLoop {
         if refused {
             return Err(LoopError::OnceOnly(call_id));
         }
-        self.take_pending(call_id)?
+        self.take_pending(call_id, &[PendingKind::Approval])?
             .tx
             .send(Verdict::Approved { scope, by })
             .map_err(|_| LoopError::NoPendingApproval(call_id))
@@ -2054,7 +2054,9 @@ impl AgentLoop {
     /// # Errors
     /// As [`Self::approve`].
     pub fn deny(&self, call_id: ToolCallId, by: UserId, reason: Option<String>) -> Result<()> {
-        self.take_pending(call_id)?
+        // A question can be declined too; a credential or handover card only through its
+        // own owner-only route.
+        self.take_pending(call_id, &[PendingKind::Approval, PendingKind::Question])?
             .tx
             .send(Verdict::Denied { by, reason })
             .map_err(|_| LoopError::NoPendingApproval(call_id))
@@ -2066,7 +2068,7 @@ impl AgentLoop {
     /// [`LoopError::NoPendingApproval`] if no question is waiting under that id.
     pub fn answer_question(&self, call_id: ToolCallId, answer: &str) -> Result<()> {
         self.refuse_if_stopped(call_id)?;
-        self.take_pending(call_id)?
+        self.take_pending(call_id, &[PendingKind::Question])?
             .tx
             .send(Verdict::Answered {
                 answer: answer.to_owned(),
@@ -2078,7 +2080,12 @@ impl AgentLoop {
     /// `None` when no request waits under `call_id`.
     #[must_use]
     pub fn secret_request(&self, call_id: ToolCallId) -> Option<crate::SecretRequestInfo> {
-        self.sh.secret_requests.lock().get(&call_id).cloned()
+        self.sh
+            .secret_requests
+            .lock()
+            .get(&call_id)
+            .filter(|info| tokio::time::Instant::now() < info.deadline)
+            .cloned()
     }
 
     /// Claim a waiting `secret_request` for submission: exactly one caller gets
@@ -2086,13 +2093,51 @@ impl AgentLoop {
     /// [`Self::restore_secret_request`] if storing failed.
     #[must_use]
     pub fn claim_secret_request(&self, call_id: ToolCallId) -> Option<crate::SecretRequestInfo> {
-        self.sh.secret_requests.lock().remove(&call_id)
+        let mut requests = self.sh.secret_requests.lock();
+        let info = requests.get(&call_id)?;
+        if tokio::time::Instant::now() >= info.deadline {
+            return None;
+        }
+        if let Some(target) = &info.mission {
+            // No run waits on a mission's form, so there is no parked call to check: the
+            // mission must still be open, or the answer would store a value for nothing.
+            let open = self
+                .sh
+                .mission_store
+                .read()
+                .as_ref()
+                .and_then(|store| store.get(&target.mission_id).ok().flatten())
+                .is_some_and(|m| !m.state.is_terminal());
+            if !open {
+                requests.remove(&call_id);
+                return None;
+            }
+            return requests.remove(&call_id);
+        }
+        drop(requests);
+        self.refuse_if_stopped(call_id).ok()?;
+        let pending = self.sh.pending.lock();
+        if pending.get(&call_id)?.kind != PendingKind::Secret {
+            return None;
+        }
+        let mut requests = self.sh.secret_requests.lock();
+        if tokio::time::Instant::now() >= requests.get(&call_id)?.deadline {
+            return None;
+        }
+        requests.remove(&call_id)
     }
 
     /// Undo [`Self::claim_secret_request`] after a failed store, so the owner can
     /// fix the form and submit again.
     pub fn restore_secret_request(&self, call_id: ToolCallId, info: crate::SecretRequestInfo) {
-        if self.sh.pending.lock().contains_key(&call_id) {
+        if info.mission.is_some() {
+            if tokio::time::Instant::now() < info.deadline {
+                self.sh.secret_requests.lock().insert(call_id, info);
+            }
+            return;
+        }
+        let pending = self.sh.pending.lock();
+        if pending.contains_key(&call_id) {
             self.sh.secret_requests.lock().insert(call_id, info);
         }
     }
@@ -2117,7 +2162,7 @@ impl AgentLoop {
         } else {
             Verdict::Denied { by, reason: None }
         };
-        self.take_pending(call_id)?
+        self.take_pending(call_id, &[PendingKind::Secret])?
             .tx
             .send(verdict)
             .map_err(|_| LoopError::NoPendingApproval(call_id))
@@ -2157,7 +2202,7 @@ impl AgentLoop {
         } else {
             Verdict::Denied { by, reason: None }
         };
-        let pending = self.take_pending(call_id)?;
+        let pending = self.take_pending(call_id, &[PendingKind::Handover])?;
         if !done {
             builtin_tools::handover_hub().disarm(&pending.run_id.to_string());
         }
@@ -2488,12 +2533,16 @@ impl AgentLoop {
         Ok(())
     }
 
-    fn take_pending(&self, call_id: ToolCallId) -> Result<Pending> {
-        self.sh
-            .pending
-            .lock()
-            .remove(&call_id)
-            .ok_or(LoopError::NoPendingApproval(call_id))
+    fn take_pending(&self, call_id: ToolCallId, kinds: &[PendingKind]) -> Result<Pending> {
+        let mut pending = self.sh.pending.lock();
+        match pending.entry(call_id) {
+            std::collections::hash_map::Entry::Occupied(entry)
+                if kinds.contains(&entry.get().kind) =>
+            {
+                Ok(entry.remove())
+            }
+            _ => Err(LoopError::NoPendingApproval(call_id)),
+        }
     }
 
     /// Cancel a run (in-flight step becomes `Interrupted`); unfinished

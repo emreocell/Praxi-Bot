@@ -162,6 +162,9 @@ pub struct SecretRequested {
     pub name: String,
     /// Why the bot asks. Plain text written by the model: untrusted, never markup.
     pub purpose: String,
+    /// The exact browser origin the owner authorizes. Missing in old journal events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     pub fields: SecretFields,
     /// An entry with this name already exists and the bot asked to replace it.
     pub replaces_existing: bool,
@@ -170,6 +173,11 @@ pub struct SecretRequested {
     pub untrusted_content: bool,
     /// Seconds until the request expires on its own.
     pub expires_in_secs: u64,
+    /// A mission asked: no run waits for the answer. The item that needs it is parked as
+    /// blocked and the session moved on; the owner's answer releases that item. The card
+    /// stays open after the tool call has returned.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parked: bool,
 }
 
 // ── Handover to the owner ─────────────────────────────────────────────────────

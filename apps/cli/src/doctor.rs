@@ -814,24 +814,16 @@ fn check_mcp(dir: &Path) -> Check {
     }
 }
 
-/// `secret_request` is experimental and off by default until the desktop form exists.
+/// Report the owner's switch. The running daemon also requires its local desktop.
 fn check_secret_request(dir: &Path) -> Check {
     let host = std::fs::read_to_string(dir.join("host.toml")).unwrap_or_default();
     let env = std::env::var("BOT_SECRET_REQUESTS").ok();
-    if crate::serve::secret_requests_enabled(&host, env.as_deref()) {
-        Check::warn(
-            "secret_request",
-            "secret request (experimental)",
-            "on: the bot may ask for a credential; the desktop form is not available yet, so a request waits until it expires",
-            "turn it off: remove `secret_request = true` under [experimental] in host.toml and unset BOT_SECRET_REQUESTS",
-        )
+    let detail = if crate::serve::secret_requests_enabled(&host, env.as_deref()) {
+        "enabled for the local owner desktop with a vault"
     } else {
-        Check::ok(
-            "secret_request",
-            "secret request (experimental)",
-            "off (default): the bot is not offered the secret_request tool",
-        )
-    }
+        "disabled in configuration"
+    };
+    Check::ok("secret_request", "secure credential requests", detail)
 }
 
 /// The Full access lane's switch as `bot serve` would read it now (`host.toml`, `BOT_FULL_ACCESS_LANE`).

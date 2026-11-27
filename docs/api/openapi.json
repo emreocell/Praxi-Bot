@@ -17355,7 +17355,7 @@
             }
           },
           "400": {
-            "description": "wrong fields, empty value or bad allow-list entry; the request keeps waiting",
+            "description": "wrong fields or empty value; the request keeps waiting",
             "content": {
               "application/json": {
                 "schema": {
@@ -35734,7 +35734,7 @@
           },
           "run_notified": {
             "type": "boolean",
-            "description": "The waiting run was told. `false` when the run stopped or the request\nexpired in the same instant (a stored value stays stored)."
+            "description": "The waiting run was told, or (a mission's request) the parked item was released.\n`false` when the run stopped or the request expired in the same instant, the item\nwas already released by hand, or the request was cancelled (a stored value stays\nstored)."
           }
         }
       },
@@ -37116,42 +37116,32 @@
         "type": "object",
         "description": "Body of `POST /v1/secret-requests/{call_id}`. Give `value` for a `secret`\nrequest, or `username` and `password` for a `login` request.",
         "properties": {
-          "origins": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Exact origins the entry may be typed on, like `https://example.com`."
-          },
           "password": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Password of a `login` request (write-only)."
-          },
-          "programs": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Verified desktop program identities the entry may be typed into."
+            "description": "Password of a `login` request (write-only).",
+            "writeOnly": true
           },
           "username": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Username of a `login` request."
+            "description": "Username of a `login` request (write-only).",
+            "writeOnly": true
           },
           "value": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The secret (write-only: no route returns it)."
+            "description": "The secret (write-only).",
+            "writeOnly": true
           }
-        }
+        },
+        "additionalProperties": false
       },
       "TakeoverAccepted": {
         "type": "object",

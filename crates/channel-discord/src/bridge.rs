@@ -322,6 +322,31 @@ impl DiscordChannel {
         Ok(channel)
     }
 
+    /// Notify only the paired owner, via a private DM, with a navigation-only URI.
+    pub async fn notify_secret_request(&self, chat: protocol::ChatId) {
+        if !self.is_running() {
+            return;
+        }
+        let Some(user) = self.inner.state.owner() else {
+            return;
+        };
+        let rest = self.transport().rest();
+        let result = async {
+            let channel = rest.create_dm(&user).await?;
+            let language = self.inner.lang();
+            let notice = Msg::SecretRequestNotice.render(language);
+            let locale = if language.code() == "tr" { "tr/" } else { "" };
+            let launcher = channel_api::DESKTOP_CHAT_LAUNCHER;
+            let link = format!("{launcher}{locale}open/#{chat}");
+            rest.create_message(&channel, &format!("{notice}\n<{link}>"), None)
+                .await
+        }
+        .await;
+        if result.is_err() {
+            eprintln!("discord: could not send a secure request notice");
+        }
+    }
+
     /// A new one-time pairing code (valid 10 minutes).
     #[must_use]
     pub fn create_pair_code(&self) -> String {

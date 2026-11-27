@@ -1198,6 +1198,14 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
             }
         });
     }
+    let desktop_session = matches!(
+        command,
+        Command::Serve {
+            owner_key_stdin: true,
+            desktop_control_stdin: true,
+            ..
+        }
+    );
     let owner_key = if matches!(
         command,
         Command::Serve {
@@ -1211,13 +1219,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         if key.len() < 32 {
             return Err("Praxi could not read a valid owner key from standard input.".into());
         }
-        if matches!(
-            command,
-            Command::Serve {
-                desktop_control_stdin: true,
-                ..
-            }
-        ) {
+        if desktop_session {
             let pipe_stop = stop_tx.clone();
             std::thread::spawn(move || {
                 let mut line = String::new();
@@ -1273,6 +1275,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
             host_mode,
             peer_enabled,
             owner_key,
+            desktop_session,
             stop: stop_rx,
             safe_mode,
         };
@@ -1314,6 +1317,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         host_mode,
         peer_enabled,
         owner_key,
+        desktop_session,
         stop: stop_rx,
         safe_mode,
     };

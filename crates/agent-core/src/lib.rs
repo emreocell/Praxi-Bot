@@ -132,9 +132,9 @@ pub use profile::{
 pub use scoped_grant::{Scope, ScopeKind};
 pub use shared::{
     ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, HandoverInfo,
-    LoopError, MessageMode, Providers, QueuedMessage, ScheduleWork, SecretRequestInfo, SkillHintFn,
-    SkillHints, StreamItem, WorkspaceWarningEvent, build_providers, embedding_key_resolver,
-    initiator_of, occurrence_kind, schedule_id_of,
+    LoopError, MessageMode, MissionTarget, Providers, QueuedMessage, ScheduleWork,
+    SecretRequestInfo, SkillHintFn, SkillHints, StreamItem, WorkspaceWarningEvent, build_providers,
+    embedding_key_resolver, initiator_of, occurrence_kind, schedule_id_of,
 };
 pub use site_profiles::ApprovalSubject;
 pub use subagent::MAX_DEPTH as MAX_SUBAGENT_DEPTH;

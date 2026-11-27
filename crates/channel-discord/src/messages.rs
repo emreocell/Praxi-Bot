@@ -40,6 +40,8 @@ impl Lang {
 /// A line the bot can say. Arguments are plain data (already safe to show).
 #[derive(Debug, Clone, Copy)]
 pub enum Msg<'a> {
+    /// A credential request is waiting in the desktop app.
+    SecretRequestNotice,
     /// A stranger wrote to the bot.
     NotPaired,
     /// Pairing worked.
@@ -131,6 +133,8 @@ impl Msg<'_> {
     pub fn render(self, lang: Lang) -> String {
         use Lang::{De, En, Tr};
         match (self, lang) {
+            (Msg::SecretRequestNotice, En | De) => "A credential request is waiting. Open Praxi on your computer to answer. Keep credentials out of this chat.".into(),
+            (Msg::SecretRequestNotice, Tr) => "Yanıtınızı bekleyen bir gizli bilgi isteği var. Yanıtlamak için bilgisayarınızda Praxi’yi açın. Gizli bilgilerinizi bu sohbette paylaşmayın.".into(),
             (Msg::NotPaired, En) => "This bot is private. If it is yours, create a pairing code on your computer and send `!pair 123456` here in a private message.".into(),
             (Msg::NotPaired, Tr) => "Bu bot özeldir. Sizinse, bilgisayarınızda bir eşleştirme kodu oluşturun ve burada özel mesajla `!pair 123456` yazın.".into(),
             (Msg::NotPaired, De) => "Dieser Bot ist privat. Wenn es Ihrer ist, erzeugen Sie am Computer einen Kopplungscode und senden Sie hier privat `!pair 123456`.".into(),

@@ -24,6 +24,8 @@ export interface NotifyDecision {
   detail: string;
   /** Set for an approval: what the call is, so the toast can say it in words and offer buttons. */
   approval?: ApprovalFacts;
+  /** A secure form opens in the app. The notice carries no request details or actions. */
+  secretRequest?: true;
 }
 
 export interface ApprovalFacts {
@@ -162,6 +164,10 @@ export function decideNotification(
               details: e.details
             }
           }
+        : null;
+    case "secret_requested":
+      return ctx.prefs.notifyNeedsYou && e.origin && env.ts_ms + e.expires_in_secs * 1000 > Date.now()
+        ? { kind: "needsYou", runId: e.run_id, ...base, detail: "", secretRequest: true }
         : null;
     case "question_asked":
       return ctx.prefs.notifyNeedsYou
@@ -365,6 +371,9 @@ export function notificationText(
   const generic = t(`notify.generic.${d.kind}`);
   if (privateMode) {
     return { title: botName, body: generic };
+  }
+  if (d.secretRequest) {
+    return { title: t("secretRequest.title", { bot: botName }), body: generic };
   }
   if (d.approval) {
     const actions = approvalActions(d.approval).map((id) => ({

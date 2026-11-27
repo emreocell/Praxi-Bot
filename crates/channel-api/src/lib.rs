@@ -16,6 +16,9 @@ pub mod notice;
 pub mod pairing;
 pub use error::{ChannelError, Result};
 
+/// Published launcher URL through which a messaging client can open a local chat.
+pub const DESKTOP_CHAT_LAUNCHER: &str = "https://emreocell.github.io/Praxi-Bot/";
+
 /// Destination within one adapter; use `protocol::ChannelRef` to qualify it
 /// with a channel name when storing it across adapters.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

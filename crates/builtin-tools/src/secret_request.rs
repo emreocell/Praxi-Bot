@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use secret_store::{FillSecrets, validate_fill_name};
+use secret_store::{FillSecrets, canonical_origin, validate_fill_name};
 use serde_json::{Value, json};
 use tool_registry::{
     ContentPart, Effect, PermissionCategory, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
@@ -58,6 +58,8 @@ pub struct SecretCard {
     pub name: String,
     /// Plain text, single line, at most [`PURPOSE_CAP`] characters.
     pub purpose: String,
+    /// Canonical exact HTTPS origin the owner is asked to authorize.
+    pub origin: String,
     /// What to ask for.
     pub fields: Fields,
     /// The bot asked to replace an existing entry.
@@ -71,6 +73,7 @@ impl SecretCard {
         Some(Self {
             name: data.get("name")?.as_str()?.to_owned(),
             purpose: data.get("purpose")?.as_str()?.to_owned(),
+            origin: data.get("origin")?.as_str()?.to_owned(),
             fields: match data.get("fields")?.as_str()? {
                 "secret" => Fields::Secret,
                 "login" => Fields::Login,
@@ -102,13 +105,14 @@ pub fn secret_request_tool(secrets: Arc<FillSecrets>) -> Arc<dyn Tool> {
     Arc::new(SecretRequest {
         spec: spec(
             SECRET_REQUEST,
-            "Ask the owner to enter a credential in a form the app shows. The value goes straight into the owner's vault; you never see it, so NEVER ask for it in chat. Use it only when the owner's task needs a login or key that `secrets_list` does not have. `name` is the entry name (letters, digits, . _ - and /), `purpose` is one short plain-text sentence shown to the owner (no links or markup), `fields` is `secret` (one value) or `login` (username + password). If the name exists, pass `replace`:true to ask for a new value. Returns `stored` or `cancelled`; afterwards use `secrets_list` and the `secret` parameter of browser_fill. A request is refused outside the owner's own desktop session. Example: {\"name\":\"login/example\",\"purpose\":\"Sign in to example.com to download the invoice\",\"fields\":\"login\"}",
-            json!({"type":"object","properties":{
+            "Use this form whenever the owner's task needs an existing login, API key or backup code for a browser origin that secrets_list does not have. Never ask for credentials in chat or request payment credentials. The owner sees the exact HTTPS origin and a short plain-text purpose. `fields` is `secret` (one value) or `login` (username + password). If the existing entry is scoped to this bot and origin, pass `replace`:true to ask for a new value. After `stored`, use secrets_list and browser_fill's `secret` parameter. A request requires the owner's local desktop. Example: {\"name\":\"login/example\",\"origin\":\"https://example.com\",\"purpose\":\"Sign in to download the invoice\",\"fields\":\"login\"}",
+            json!({"type":"object","additionalProperties":false,"properties":{
                 "name":{"type":"string","description":"Entry name, for example login/example."},
+                "origin":{"type":"string","description":"The exact HTTPS origin of the field, such as https://example.com, with no path, query, fragment or wildcard."},
                 "purpose":{"type":"string","maxLength":PURPOSE_CAP,"description":"One short plain-text sentence for the owner."},
                 "fields":{"type":"string","enum":["secret","login"],"description":"One value, or username + password (default secret)."},
                 "replace":{"type":"boolean","description":"Ask to replace an existing entry (default false)."}
-            },"required":["name","purpose"]}),
+            },"required":["name","origin","purpose"]}),
             Effect::Write,
             PermissionCategory::Meta,
         ),
@@ -146,20 +150,41 @@ impl Tool for SecretRequest {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        if input.as_object().is_none_or(|object| {
+            object.keys().any(|key| {
+                !matches!(
+                    key.as_str(),
+                    "name" | "origin" | "purpose" | "fields" | "replace"
+                )
+            })
+        }) {
+            return Err(ToolError::InvalidInput(
+                "only `name`, `origin`, `purpose`, `fields` and `replace` are accepted; never send a credential to this tool".into(),
+            ));
+        }
         let name = input
             .get("name")
             .and_then(Value::as_str)
             .ok_or_else(|| ToolError::InvalidInput("`name` must be a string".into()))?;
         validate_fill_name(name).map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+        let origin = input
+            .get("origin")
+            .and_then(Value::as_str)
+            .and_then(|raw| canonical_origin(raw).ok())
+            .filter(|origin| origin.starts_with("https://"))
+            .ok_or_else(|| {
+                ToolError::InvalidInput("`origin` must be an exact HTTPS origin".into())
+            })?;
         let purpose = plain_purpose(
             input
                 .get("purpose")
                 .and_then(Value::as_str)
                 .ok_or_else(|| ToolError::InvalidInput("`purpose` must be a string".into()))?,
         )?;
-        let fields = match input.get("fields").and_then(Value::as_str) {
-            None | Some("secret") => Fields::Secret,
-            Some("login") => Fields::Login,
+        let fields = match input.get("fields") {
+            None => Fields::Secret,
+            Some(Value::String(kind)) if kind == "secret" => Fields::Secret,
+            Some(Value::String(kind)) if kind == "login" => Fields::Login,
             Some(_) => {
                 return Err(ToolError::InvalidInput(
                     "`fields` must be `secret` or `login`".into(),
@@ -201,6 +226,7 @@ impl Tool for SecretRequest {
         let card = json!({
             "kind": SECRET_REQUEST_CARD_KIND,
             "name": name,
+            "origin": origin,
             "purpose": purpose,
             "fields": fields.as_str(),
             "replace": replace && taken,
@@ -240,7 +266,7 @@ mod tests {
         let (_s, t) = tool();
         let out = run(
             &t,
-            json!({"name":"login/example","purpose":"Sign in to download the invoice","fields":"login"}),
+            json!({"name":"login/example","origin":"HTTPS://Example.com:443/","purpose":"Sign in to download the invoice","fields":"login"}),
         )
         .await
         .unwrap();
@@ -250,20 +276,45 @@ mod tests {
         let card = SecretCard::from_part(data).unwrap();
         assert_eq!(card.name, "login/example");
         assert_eq!(card.fields, Fields::Login);
+        assert_eq!(card.origin, "https://example.com");
         assert!(!card.replace);
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_non_https_and_non_origin_destinations() {
+        let (_s, tool) = tool();
+        let mut input = json!({"name":"login/example","purpose":"Sign in"});
+        assert!(run(&tool, input.clone()).await.is_err());
+        for bad in [
+            "http://example.com",
+            "https://example.com/reset",
+            "https://example.com?key=value",
+            "https://value@example.com",
+            "https://*.example.com",
+        ] {
+            input["origin"] = json!(bad);
+            let error = run(&tool, input.clone()).await.unwrap_err().to_string();
+            assert!(error.contains("exact HTTPS origin"));
+            assert!(!error.contains(bad));
+        }
+        input["origin"] = json!("https://example.com");
+        input["value"] = json!("canary-input-7842");
+        let error = run(&tool, input).await.unwrap_err().to_string();
+        assert!(!error.contains("canary-input-7842"));
     }
 
     #[tokio::test]
     async fn refuses_reserved_names_markup_and_silent_overwrite() {
         let (s, t) = tool();
         for bad in [
-            json!({"name":"composio/gmail","purpose":"x"}),
-            json!({"name":"mcp/x","purpose":"x"}),
-            json!({"name":"login/x","purpose":"see https://evil.example"}),
-            json!({"name":"login/x","purpose":"<b>bank</b>"}),
-            json!({"name":"login/x","purpose":"a".repeat(PURPOSE_CAP + 1)}),
-            json!({"name":"login/x","purpose":"x","fields":"card"}),
-            json!({"name":"login/x","purpose":""}),
+            json!({"name":"composio/gmail","origin":"https://example.com","purpose":"x"}),
+            json!({"name":"mcp/x","origin":"https://example.com","purpose":"x"}),
+            json!({"name":"login/x","origin":"https://example.com","purpose":"see https://evil.example"}),
+            json!({"name":"login/x","origin":"https://example.com","purpose":"<b>bank</b>"}),
+            json!({"name":"login/x","origin":"https://example.com","purpose":"a".repeat(PURPOSE_CAP + 1)}),
+            json!({"name":"login/x","origin":"https://example.com","purpose":"x","fields":"card"}),
+            json!({"name":"login/x","origin":"https://example.com","purpose":"x","fields":true}),
+            json!({"name":"login/x","origin":"https://example.com","purpose":""}),
         ] {
             assert!(run(&t, bad.clone()).await.is_err(), "{bad}");
         }
@@ -281,14 +332,17 @@ mod tests {
             ..ToolContext::default()
         };
         let err = t
-            .call(&ctx, json!({"name":"login/taken","purpose":"x"}))
+            .call(
+                &ctx,
+                json!({"name":"login/taken","origin":"https://example.com","purpose":"x"}),
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("replace"), "{err}");
         assert!(
             t.call(
                 &ctx,
-                json!({"name":"login/taken","purpose":"x","replace":true})
+                json!({"name":"login/taken","origin":"https://example.com","purpose":"x","replace":true})
             )
             .await
             .is_ok()
@@ -325,7 +379,7 @@ mod tests {
             bot_id: bot.map(str::to_owned),
             ..ToolContext::default()
         };
-        let ask = |name: &str, replace: bool| json!({"name": name, "purpose": "Sign in", "replace": replace});
+        let ask = |name: &str, replace: bool| json!({"name": name, "origin":"https://example.com","purpose": "Sign in", "replace": replace});
         let card = |out: Result<ToolOutput, ToolError>| {
             let out = out.expect("a card, like for a free name");
             let ContentPart::Json { data } = &out.content[0] else {

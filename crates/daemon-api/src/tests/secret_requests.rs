@@ -8,7 +8,7 @@ use axum::http::{Method, StatusCode};
 use secret_store::{FillSecrets, MemoryStore, SecretStore};
 use serde_json::json;
 
-use super::{T, call, call_token_only, make_chat, send_msg, setup_with_config, wait_state};
+use super::{T, auth, call, call_token_only, make_chat, send, setup_with_config, wait_state};
 
 const CANARY: &str = "canary-Correct-Horse-Battery-4417!";
 const USER_CANARY: &str = "canary-user-name-7731";
@@ -24,7 +24,7 @@ fn rig() -> Rig {
 }
 
 fn rig_on(store: Arc<dyn SecretStore>) -> Rig {
-    // The tool is off by default (no desktop form yet); these tests switch it on.
+    // This test embeds the loop without the desktop-launch configuration.
     let t = setup_with_config(
         |_| {},
         agent_core::LoopConfig {
@@ -72,10 +72,17 @@ async fn open_form_prepared(
 ) -> (String, String, String) {
     let (bot, chat) = make_chat(&r.t).await;
     before(&bot);
-    let run = send_msg(&r.t, &chat, text, "queue").await["run_id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let (key, value) = auth();
+    let response = send(
+        &r.t.app,
+        Method::POST,
+        &format!("/v1/chats/{chat}/messages"),
+        Some(json!({"text": text, "mode": "queue"})),
+        &[(key, &value), ("x-praxi-message-source", "local_ui")],
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::ACCEPTED);
+    let run = response.json()["run_id"].as_str().unwrap().to_owned();
     let id: uuid::Uuid = run.parse().unwrap();
     for _ in 0..200 {
         let log = storage::read_event_log(r.t.state.storage().data_dir(), protocol::RunId(id))
@@ -117,7 +124,7 @@ fn grant(r: &Rig, name: &str, bots: &[&str]) {
         .unwrap();
 }
 
-const ASK: &str = r#"call:secret_request {"name":"login/example","purpose":"Sign in to download the invoice","fields":"login"}"#;
+const ASK: &str = r#"call:secret_request {"name":"login/example","origin":"https://example.com","purpose":"Sign in to download the invoice","fields":"login"}"#;
 
 fn everything_stored_about_the_run(r: &Rig, run: &str) -> String {
     let id: uuid::Uuid = run.parse().unwrap();
@@ -134,13 +141,13 @@ fn everything_stored_about_the_run(r: &Rig, run: &str) -> String {
 /// route only; the run ends `succeeded` having learnt only `stored`; no event,
 /// journal step, audit row or response carries the value; the form is single-use.
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // one ordered walk through the route and everything it must not touch
 async fn the_owner_submits_and_the_value_only_reaches_the_vault() {
     let r = rig();
     let (run, call_id) = open_form(&r, ASK).await;
     wait_state(&r.t, &run, "waiting_approval").await;
     let path = format!("/v1/secret-requests/{call_id}");
-    let body =
-        json!({"username": USER_CANARY, "password": CANARY, "origins": ["https://Example.com/"]});
+    let body = json!({"username": USER_CANARY, "password": CANARY});
 
     // A token holder is not the owner: refused, and the form keeps waiting.
     let denied = call_token_only(&r.t, Method::POST, &path, Some(body.clone())).await;
@@ -148,20 +155,20 @@ async fn the_owner_submits_and_the_value_only_reaches_the_vault() {
     assert_eq!(denied.json()["error"]["code"], "owner_key_required");
     assert!(!r.secrets.exists("login/example/password"));
 
-    // A wrong shape is refused without quoting the body and keeps the form open.
-    let bad = call(
-        &r.t,
-        Method::POST,
-        &path,
-        Some(json!({"value": CANARY, "origins": 5})),
-    )
-    .await;
-    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
-    assert!(!String::from_utf8_lossy(&bad.body).contains(CANARY));
-    let wrong_fields = call(&r.t, Method::POST, &path, Some(json!({"value": CANARY}))).await;
-    assert_eq!(wrong_fields.status, StatusCode::BAD_REQUEST);
-    assert!(!String::from_utf8_lossy(&wrong_fields.body).contains(CANARY));
+    // A submission cannot change the destination, and errors carry no values.
+    let invalid = [
+        json!({"username": USER_CANARY, "password": CANARY, "origins": ["https://other.example"]}),
+        json!({"value": CANARY}),
+        json!({"username": "short", "password": CANARY}),
+    ];
+    for input in invalid {
+        let bad = call(&r.t, Method::POST, &path, Some(input)).await;
+        assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+        let response = String::from_utf8_lossy(&bad.body);
+        assert!(!response.contains(CANARY) && !response.contains(USER_CANARY));
+    }
     assert!(!r.secrets.exists("login/example/password"));
+    assert!(!r.secrets.exists("login/example/username"));
 
     let ok = call(&r.t, Method::POST, &path, Some(body.clone())).await;
     assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json());
@@ -179,7 +186,46 @@ async fn the_owner_submits_and_the_value_only_reaches_the_vault() {
     );
     let list = call(&r.t, Method::GET, "/v1/fill-secrets", None).await;
     let list_text = String::from_utf8_lossy(&list.body).into_owned();
-    assert!(list_text.contains("https://example.com") && !list_text.contains(CANARY));
+    assert!(list_text.contains("https://example.com"));
+    assert!(!list_text.contains(CANARY) && !list_text.contains(USER_CANARY));
+    let metadata =
+        std::fs::read_to_string(secret_store::metadata_path(r.t.state.data_dir().as_path()))
+            .unwrap();
+    assert!(metadata.contains("Sign in to download the invoice"));
+    assert!(!metadata.contains(CANARY) && !metadata.contains(USER_CANARY));
+    let bot = r.secrets.list().unwrap().remove(0).bot_ids.remove(0);
+    for name in ["login/example/username", "login/example/password"] {
+        assert!(
+            r.secrets
+                .check_browser_in(
+                    name,
+                    Some("https://example.com"),
+                    Some("https://example.com"),
+                    Some(&bot)
+                )
+                .is_ok()
+        );
+        assert!(
+            r.secrets
+                .check_browser_in(
+                    name,
+                    Some("https://other.example"),
+                    Some("https://example.com"),
+                    Some(&bot)
+                )
+                .is_err()
+        );
+        assert!(
+            r.secrets
+                .check_browser_in(
+                    name,
+                    Some("https://example.com"),
+                    Some("https://example.com"),
+                    Some("other-bot")
+                )
+                .is_err()
+        );
+    }
     assert!(r.redactor.contains_secret(CANARY), "masked at once");
 
     let kept = everything_stored_about_the_run(&r, &run);
@@ -187,7 +233,22 @@ async fn the_owner_submits_and_the_value_only_reaches_the_vault() {
         !kept.contains(CANARY) && !kept.contains(USER_CANARY),
         "{kept}"
     );
-    assert!(kept.contains("secret_request.submit"));
+    assert!(kept.contains("secret_request.submit") && kept.contains("secret_request.stored"));
+    let chat =
+        r.t.state
+            .storage()
+            .get_run(protocol::RunId(run.parse().unwrap()))
+            .unwrap()
+            .unwrap()
+            .chat_id
+            .unwrap();
+    let transcript = r.t.state.storage().list_messages(chat).unwrap();
+    assert!(
+        transcript
+            .iter()
+            .all(|message| !message.content.contains(CANARY)
+                && !message.content.contains(USER_CANARY))
+    );
 
     // Single use.
     let again = call(&r.t, Method::POST, &path, Some(body)).await;
@@ -218,7 +279,7 @@ async fn cancel_leaves_nothing_and_an_existing_name_is_not_replaced_silently() {
         &r.t,
         Method::POST,
         &path,
-        Some(json!({"username": "u", "password": CANARY})),
+        Some(json!({"username": "valid-user", "password": CANARY})),
     )
     .await;
     assert_eq!(clash.status, StatusCode::CONFLICT);
@@ -247,7 +308,7 @@ async fn a_form_cannot_replace_another_bots_account_that_appeared_while_it_was_o
     let r = rig();
     let (run, call_id) = open_form(
         &r,
-        r#"call:secret_request {"name":"login/example","purpose":"Sign in","fields":"login","replace":true}"#,
+        r#"call:secret_request {"name":"login/example","origin":"https://example.com","purpose":"Sign in","fields":"login","replace":true}"#,
     )
     .await;
     let path = format!("/v1/secret-requests/{call_id}");
@@ -273,7 +334,7 @@ async fn a_form_cannot_replace_another_bots_account_that_appeared_while_it_was_o
         &r.t,
         Method::POST,
         &path,
-        Some(json!({"username": "u", "password": CANARY})),
+        Some(json!({"username": "valid-user", "password": CANARY})),
     )
     .await;
     assert_eq!(denied.status, StatusCode::FORBIDDEN, "{:?}", denied.json());
@@ -354,10 +415,15 @@ async fn a_failed_login_replace_keeps_the_old_username_and_password() {
     // does the owner get a "replace" form.
     let (run, call_id, bot) = open_form_prepared(
         &r,
-        r#"call:secret_request {"name":"login/example","purpose":"Sign in","fields":"login","replace":true}"#,
+        r#"call:secret_request {"name":"login/example","origin":"https://example.com","purpose":"Sign in","fields":"login","replace":true}"#,
         |bot| {
-            grant(&r, "login/example/username", &[bot]);
-            grant(&r, "login/example/password", &[bot]);
+            for name in ["login/example/username", "login/example/password"] {
+                r.secrets.upsert_with(name, secret_store::FillSecretUpdate {
+                    bot_ids: Some(&[bot.to_owned()]),
+                    origins: Some(&["https://example.com".to_owned()]),
+                    ..secret_store::FillSecretUpdate::default()
+                }).unwrap();
+            }
         },
     )
     .await;
@@ -428,7 +494,7 @@ async fn a_form_cannot_take_over_an_owner_made_entry_granted_to_other_bots() {
     }
     let (run, call_id) = open_form(
         &r,
-        r#"call:secret_request {"name":"login/example","purpose":"Session expired, re-enter the password","fields":"login","replace":true}"#,
+        r#"call:secret_request {"name":"login/example","origin":"https://example.com","purpose":"Session expired, re-enter the password","fields":"login","replace":true}"#,
     )
     .await;
     // Scope check at the root: bot B never gets a "replace" form for an entry it
@@ -442,7 +508,7 @@ async fn a_form_cannot_take_over_an_owner_made_entry_granted_to_other_bots() {
         &r.t,
         Method::POST,
         &path,
-        Some(json!({"username": USER_CANARY, "password": CANARY, "origins": ["https://evil.example"]})),
+        Some(json!({"username": USER_CANARY, "password": CANARY})),
     )
     .await;
     assert_eq!(denied.status, StatusCode::FORBIDDEN, "{:?}", denied.json());
@@ -460,4 +526,224 @@ async fn a_form_cannot_take_over_an_owner_made_entry_granted_to_other_bots() {
     let cancelled = call(&r.t, Method::POST, &format!("{path}/cancel"), None).await;
     assert_eq!(cancelled.status, StatusCode::OK);
     wait_state(&r.t, &run, "succeeded").await;
+}
+
+const FULL_BOT: &str = r#"
+[bot]
+id = "tester"
+name = "Tester"
+
+[models]
+executor = "fake/echo"
+
+[permissions]
+preset = "full"
+"#;
+
+/// A mission with a parked item `a.example` (and `b.example` still to do), plus a form that a
+/// mission session opened for it. The session is over: nothing waits on the form.
+async fn mission_form(r: &Rig) -> (String, String, agent_core::SecretRequestInfo) {
+    r.t.state.enable_missions().unwrap();
+    r.t.state.start_missions();
+    let (run, call_id, bot) = open_form_as(r, ASK).await;
+    // Hand the live form over to a mission: take the run's own copy and stop that run.
+    let id = protocol::ToolCallId(call_id.parse().unwrap());
+    let mut info = r.t.agent.claim_secret_request(id).expect("form is open");
+    r.t.agent
+        .cancel(protocol::RunId(run.parse().unwrap()))
+        .unwrap();
+    wait_state(&r.t, &run, "cancelled").await;
+
+    let made = call(
+        &r.t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({"profile_toml": FULL_BOT, "name": "Ada"})),
+    )
+    .await;
+    let full = made.json()["id"].as_str().unwrap().to_owned();
+    let created = call(
+        &r.t,
+        Method::POST,
+        "/v1/missions",
+        Some(json!({"bot_id": full, "goal": "Sign up on sites"})),
+    )
+    .await;
+    let mission = created.json()["mission"]["id"].as_str().unwrap().to_owned();
+    // Keep the supervisor out of the way while the ledger is edited.
+    call(
+        &r.t,
+        Method::POST,
+        &format!("/v1/missions/{mission}/pause"),
+        None,
+    )
+    .await;
+    let store = r.t.state.mission_store().unwrap();
+    let items: Vec<missions::NewItem> = ["a.example", "b.example"]
+        .iter()
+        .map(|k| missions::NewItem {
+            key: (*k).into(),
+            kind: "site".into(),
+            title: format!("Sign up on {k}"),
+            payload: None,
+        })
+        .collect();
+    store.upsert_items(&mission, &items, 1).unwrap();
+    store
+        .update_item(
+            &mission,
+            "a.example",
+            &missions::ItemUpdate {
+                status: Some(missions::ItemStatus::Blocked),
+                blocked_reason: Some("needs the credential \"login/example\"".into()),
+                ..missions::ItemUpdate::default()
+            },
+            false,
+            2,
+        )
+        .unwrap();
+    info.mission = Some(agent_core::MissionTarget {
+        mission_id: mission.clone(),
+        item: "a.example".into(),
+    });
+    info.deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
+    r.t.agent.restore_secret_request(id, info.clone());
+    assert_eq!(bot, info.bot_id);
+    (mission, call_id, info)
+}
+
+/// Missions: the owner's answer stores the value (bound to the asking bot and origin), and
+/// releases only the parked item, with the entry name and no value.
+#[tokio::test]
+async fn a_mission_form_stores_the_value_and_releases_only_its_item() {
+    let r = rig();
+    let (mission, call_id, info) = mission_form(&r).await;
+    let store = r.t.state.mission_store().unwrap();
+    let path = format!("/v1/secret-requests/{call_id}");
+    let body = json!({"username": USER_CANARY, "password": CANARY});
+
+    let denied = call_token_only(&r.t, Method::POST, &path, Some(body.clone())).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        store
+            .items(&mission, Some(missions::ItemStatus::Blocked))
+            .unwrap()
+            .len(),
+        1,
+        "a token holder released nothing"
+    );
+
+    let ok = call(&r.t, Method::POST, &path, Some(body.clone())).await;
+    assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json());
+    assert_eq!(ok.json()["outcome"], "stored");
+    assert_eq!(ok.json()["run_notified"], true, "the item was released");
+    assert!(!String::from_utf8_lossy(&ok.body).contains(CANARY));
+
+    let items = store.items(&mission, None).unwrap();
+    let a = items.iter().find(|i| i.key == "a.example").unwrap();
+    assert_eq!(a.status, missions::ItemStatus::Todo);
+    let answer = a.owner_answer.as_deref().unwrap();
+    assert!(answer.contains("login/example"), "{answer}");
+    assert!(!answer.contains(CANARY) && !answer.contains(USER_CANARY));
+    let b = items.iter().find(|i| i.key == "b.example").unwrap();
+    assert_eq!(b.status, missions::ItemStatus::Todo);
+    assert!(b.owner_answer.is_none(), "the other item is untouched");
+
+    // Bound to the bot, origin and purpose that were shown on the form.
+    for name in ["login/example/username", "login/example/password"] {
+        assert!(
+            r.secrets
+                .check_browser_in(
+                    name,
+                    Some(&info.origin),
+                    Some(&info.origin),
+                    Some(&info.bot_id)
+                )
+                .is_ok()
+        );
+        assert!(
+            r.secrets
+                .check_browser_in(
+                    name,
+                    Some("https://other.example"),
+                    Some("https://other.example"),
+                    Some(&info.bot_id)
+                )
+                .is_err()
+        );
+    }
+    let metadata =
+        std::fs::read_to_string(secret_store::metadata_path(r.t.state.data_dir().as_path()))
+            .unwrap();
+    assert!(!metadata.contains(CANARY) && !metadata.contains(USER_CANARY));
+    let audit = format!(
+        "{:?}",
+        r.t.state.storage().list_audit(r.t.state.user_id()).unwrap()
+    );
+    assert!(audit.contains("secret_request.stored") && audit.contains("a.example"));
+    assert!(!audit.contains(CANARY) && !audit.contains(USER_CANARY));
+
+    let again = call(&r.t, Method::POST, &path, Some(body)).await;
+    assert_eq!(again.json()["error"]["code"], "secret_request_gone");
+}
+
+#[tokio::test]
+async fn cancelling_a_mission_form_stores_nothing_and_keeps_the_item_parked() {
+    let r = rig();
+    let (mission, call_id, _) = mission_form(&r).await;
+    let store = r.t.state.mission_store().unwrap();
+    let cancelled = call(
+        &r.t,
+        Method::POST,
+        &format!("/v1/secret-requests/{call_id}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(cancelled.status, StatusCode::OK);
+    assert_eq!(cancelled.json()["outcome"], "cancelled");
+    assert!(!r.secrets.exists("login/example/password"));
+    assert_eq!(
+        store
+            .items(&mission, Some(missions::ItemStatus::Blocked))
+            .unwrap()
+            .len(),
+        1
+    );
+    let audit = format!(
+        "{:?}",
+        r.t.state.storage().list_audit(r.t.state.user_id()).unwrap()
+    );
+    assert!(audit.contains("secret_request.cancelled"));
+    let again = call(
+        &r.t,
+        Method::POST,
+        &format!("/v1/secret-requests/{call_id}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(again.json()["error"]["code"], "secret_request_gone");
+}
+
+#[tokio::test]
+async fn a_mission_form_takes_no_value_once_the_mission_was_stopped() {
+    let r = rig();
+    let (mission, call_id, _) = mission_form(&r).await;
+    let stopped = call(
+        &r.t,
+        Method::POST,
+        &format!("/v1/missions/{mission}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(stopped.status, StatusCode::OK, "{:?}", stopped.json());
+    let late = call(
+        &r.t,
+        Method::POST,
+        &format!("/v1/secret-requests/{call_id}"),
+        Some(json!({"username": USER_CANARY, "password": CANARY})),
+    )
+    .await;
+    assert_eq!(late.status, StatusCode::NOT_FOUND);
+    assert_eq!(late.json()["error"]["code"], "secret_request_gone");
+    assert!(!r.secrets.exists("login/example/password"));
 }

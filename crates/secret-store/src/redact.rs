@@ -7,7 +7,7 @@ use crate::secret::SecretStore;
 pub const REDACTED: &str = "[REDACTED]";
 
 /// Values shorter than this are not registered (masking "abc" would wreck text).
-const MIN_SECRET_LEN: usize = 6;
+pub const MIN_REDACTABLE_SECRET_BYTES: usize = 6;
 
 /// Always-on shapes of common credentials as `(id, regex)`. The ids are
 /// stable names that [`crate::detect`] maps to kinds. [`crate::scan`] runs
@@ -117,7 +117,7 @@ impl Redactor {
 
     /// Register a concrete secret value (ignored when very short).
     pub fn add_secret(&mut self, value: &str) {
-        if value.len() >= MIN_SECRET_LEN && !self.values.iter().any(|v| v == value) {
+        if value.len() >= MIN_REDACTABLE_SECRET_BYTES && !self.values.iter().any(|v| v == value) {
             self.values.push(value.to_string());
             // Longest first so a secret containing another is masked whole.
             self.values.sort_by_key(|v| std::cmp::Reverse(v.len()));

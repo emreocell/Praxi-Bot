@@ -222,6 +222,9 @@ struct Entry {
     login_id: Option<String>,
     #[serde(default)]
     note: Option<String>,
+    /// Owner-confirmed reason for a credential supplied through a request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    request_purpose: Option<String>,
     #[serde(default = "default_true")]
     ask_before_use: bool,
     #[serde(default)]
@@ -239,6 +242,7 @@ impl Default for Entry {
             site_name: None,
             login_id: None,
             note: None,
+            request_purpose: None,
             ask_before_use: true,
             updated_at_ms: 0,
         }
@@ -614,8 +618,13 @@ pub fn validate_fill_name(name: &str) -> Result<(), FillError> {
 enum WriteScope<'a> {
     /// The owner's own write: no bot scope applies.
     Owner,
-    /// On behalf of a bot (`None`: a call without a bot id, which owns no account).
-    Bot(Option<&'a str>),
+    /// An existing vault write on behalf of a bot, with optional non-secret metadata.
+    Bot {
+        requested_by: Option<&'a str>,
+        login_id: Option<&'a str>,
+    },
+    /// The owner answered a browser-only secret request for this bot.
+    Request { bot: &'a str, purpose: &'a str },
 }
 
 fn store_key(name: &str) -> String {
@@ -908,15 +917,7 @@ impl FillSecrets {
         programs: &[String],
         replace: bool,
     ) -> Result<bool, FillError> {
-        self.upsert_all_scoped(
-            items,
-            origins,
-            programs,
-            &[],
-            None,
-            replace,
-            WriteScope::Owner,
-        )
+        self.upsert_all_scoped(items, origins, programs, &[], replace, WriteScope::Owner)
     }
 
     /// [`Self::upsert_all`] for a write that a BOT asked for (a `secret_request` the
@@ -940,24 +941,16 @@ impl FillSecrets {
         bot: Option<&str>,
     ) -> Result<bool, FillError> {
         let bots: Vec<String> = bot.map(str::to_owned).into_iter().collect();
-        self.upsert_all_scoped(
-            items,
-            origins,
-            programs,
-            &bots,
-            None,
-            replace,
-            WriteScope::Bot(bot),
-        )
+        self.upsert_all_for_bots(items, origins, programs, &bots, None, replace, bot)
     }
 
-    /// [`Self::upsert_all_for_bot`] with an explicit per-bot scope `bot_ids` and the
-    /// non-secret `login_id` shown in the Vault; `requested_by` is the bot the
-    /// request came from (see [`Self::upsert_all_for_bot`] for the refusal rule).
+    /// [`Self::upsert_all_for_bot`] with an explicit bot allow-list and optional
+    /// non-secret login display metadata. Use [`Self::store_request`] for private
+    /// values submitted through a credential request.
     ///
     /// # Errors
     /// As [`Self::upsert_all_for_bot`].
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // Existing Vault write API.
     pub fn upsert_all_for_bots(
         &self,
         items: &[(String, String)],
@@ -973,9 +966,62 @@ impl FillSecrets {
             origins,
             programs,
             bot_ids,
-            login_id,
             replace,
-            WriteScope::Bot(requested_by),
+            WriteScope::Bot {
+                requested_by,
+                login_id,
+            },
+        )
+    }
+
+    /// Store an owner-confirmed request for exactly one bot and HTTPS origin.
+    /// Both fields of a login are secret values. The purpose is vault metadata.
+    /// Replacing an entry requires the same exclusive bot and origin, and clears
+    /// any standing grants so the new credential starts with ask-before-use.
+    ///
+    /// # Errors
+    /// As [`Self::upsert_all_for_bot`].
+    pub fn store_request(
+        &self,
+        items: &[(String, SecretValue)],
+        origin: &str,
+        bot: &str,
+        purpose: &str,
+        replace: bool,
+    ) -> Result<bool, FillError> {
+        if items
+            .iter()
+            .any(|(_, value)| value.expose().len() < crate::MIN_REDACTABLE_SECRET_BYTES)
+        {
+            return Err(FillError::InvalidEntry(format!(
+                "each requested credential field must be at least {} bytes so it can be redacted",
+                crate::MIN_REDACTABLE_SECRET_BYTES,
+            )));
+        }
+        let origin = canonical_origin(origin)?;
+        if !origin.starts_with("https://") {
+            return Err(FillError::InvalidEntry(
+                "a request requires an HTTPS origin".into(),
+            ));
+        }
+        let bot = clean_bot_id(bot)?;
+        let purpose = sanitize_label(purpose, 200);
+        if purpose.is_empty() {
+            return Err(FillError::InvalidEntry(
+                "a request requires a purpose".into(),
+            ));
+        }
+        let items: Vec<_> = items.iter().map(|(n, v)| (n.clone(), v.expose())).collect();
+        self.upsert_all_scoped(
+            &items,
+            &[origin],
+            &[],
+            std::slice::from_ref(&bot),
+            replace,
+            WriteScope::Request {
+                bot: &bot,
+                purpose: &purpose,
+            },
         )
     }
 
@@ -984,33 +1030,43 @@ impl FillSecrets {
     /// fails the previous values and metadata are put back, so the vault never
     /// holds a mix of old and new. Returns whether an existing entry was
     /// replaced. `scope`: who the write is for (see [`WriteScope`]).
-    #[allow(clippy::too_many_arguments)]
-    fn upsert_all_scoped(
+    #[allow(clippy::too_many_lines)] // One locked write, with rollback on failure.
+    fn upsert_all_scoped<V: AsRef<str>>(
         &self,
-        items: &[(String, String)],
+        items: &[(String, V)],
         origins: &[String],
         programs: &[String],
         bot_ids: &[String],
-        login_id: Option<&str>,
         replace: bool,
         scope: WriteScope<'_>,
     ) -> Result<bool, FillError> {
         for (n, v) in items {
             validate_fill_name(n)?;
-            check_value_size(v)?;
+            check_value_size(v.as_ref())?;
         }
         let origins = clean_origins(origins)?;
         let programs = clean_programs(programs)?;
         let bot_ids = clean_bot_ids(bot_ids)?;
-        let login_id = login_id.and_then(|l| clean_optional_label(l, MAX_LOGIN_ID_CHARS));
         let mut meta = self.meta.lock();
-        if let WriteScope::Bot(bot) = scope {
-            for (n, _) in items {
-                // A bot's request never takes over an entry it may not use, account or
-                // not: an owner-made or owner-granted entry is replaced only through the
-                // owner's own Vault route, whatever the form said.
-                if let Some(e) = meta.secrets.get(n) {
-                    Self::scope_check(n, e, bot)?;
+        for (n, _) in items {
+            let Some(entry) = meta.secrets.get(n) else {
+                continue;
+            };
+            match scope {
+                WriteScope::Owner => {}
+                WriteScope::Bot { requested_by, .. } => Self::scope_check(n, entry, requested_by)?,
+                WriteScope::Request { bot, .. } => {
+                    Self::scope_check(n, entry, Some(bot))?;
+                    if replace
+                        && (entry.origins != origins
+                            || !entry.programs.is_empty()
+                            || entry.bot_ids != bot_ids
+                            || entry.account.is_some())
+                    {
+                        return Err(FillError::NotAllowed(
+                            "a request can only replace an entry restricted to the same bot and origin".into(),
+                        ));
+                    }
                 }
             }
         }
@@ -1046,18 +1102,19 @@ impl FillSecrets {
             }
         };
         for (i, (n, v)) in items.iter().enumerate() {
-            if self.store.set(&store_key(n), v).is_err() {
+            if self.store.set(&store_key(n), v.as_ref()).is_err() {
                 restore(i + 1);
                 return Err(unavailable("the secret store rejected the write"));
             }
-            self.registered(v);
+            self.registered(v.as_ref());
         }
         let before = meta.clone();
         for (n, _) in items {
             // A bot-scoped write over an entry that already exists (the bot's own, as
             // checked above) changes the VALUE only: the scope, account facts, origins
             // and programs stay as the owner set them. A form cannot widen them.
-            let keep_scope = matches!(scope, WriteScope::Bot(_)) && meta.secrets.contains_key(n);
+            let keep_scope =
+                matches!(scope, WriteScope::Bot { .. }) && meta.secrets.contains_key(n);
             let entry = meta.secrets.entry(n.clone()).or_default();
             if !keep_scope {
                 entry.origins.clone_from(&origins);
@@ -1067,13 +1124,27 @@ impl FillSecrets {
                     a.bot_ids.clone_from(&bot_ids);
                 }
             }
-            if login_id.is_some() {
-                entry.login_id.clone_from(&login_id);
-            }
+            let request = if let WriteScope::Request { purpose, .. } = scope {
+                entry.request_purpose = Some(purpose.to_owned());
+                entry.ask_before_use = true;
+                // Older requests copied the submitted username here.
+                entry.login_id = None;
+                true
+            } else {
+                if let WriteScope::Bot {
+                    login_id: Some(login_id),
+                    ..
+                } = scope
+                    && let Some(label) = clean_optional_label(login_id, MAX_LOGIN_ID_CHARS)
+                {
+                    entry.login_id = Some(label);
+                }
+                false
+            };
             entry.updated_at_ms = now_ms();
             let allowed: BTreeSet<String> = entry.origins.iter().cloned().collect();
             meta.grants
-                .retain(|g| g.secret != *n || allowed.contains(&g.origin));
+                .retain(|g| g.secret != *n || (!request && allowed.contains(&g.origin)));
         }
         if let Err(e) = self.persist(&meta) {
             *meta = before;

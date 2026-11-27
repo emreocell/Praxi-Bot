@@ -263,6 +263,9 @@ pub trait ChannelControl: Send + Sync {
     fn start(&self) {}
     /// Stop polling before relinquishing leadership.
     async fn stop(&self) {}
+    /// Notify the paired owner about a secure form in the local desktop chat.
+    /// A chat id is navigation only and conveys no authority or request content.
+    async fn notify_secret_request(&self, _chat: protocol::ChatId) {}
     /// Current state of the channel.
     fn info(&self) -> dto::ChannelDto;
     /// A fresh one-time pairing code.
@@ -2196,6 +2199,7 @@ async fn serve_with_startup_timeout(
     // A Smart recall model comes back after a restart (or recall falls back to Basic).
     memory_embed::restore_smart(&state);
     knowledge_watch::spawn(&state);
+    secret_request_routes::start_channel_notifications(&state);
     let stopping = state.clone();
     let served = axum::serve(listener, router(state.clone()))
         .with_graceful_shutdown(async move {

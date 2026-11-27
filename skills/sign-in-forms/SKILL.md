@@ -11,7 +11,7 @@ Goal: sign in safely without ever typing raw passwords from chat or bypassing ve
 
 1. Run `browser_snapshot` to inspect the login form before acting.
 2. Check whether the form is single-step (email + password together) or split across pages (email first, "Next" / "Continue", then password).
-3. If an email or username field is shown and the user provided an identifier, fill it with `browser_fill`. For passwords or passcodes, only use `browser_fill` with a `secret` reference if the owner has configured one.
+3. Look for an existing entry with `secrets_list`. If the owner's task needs an existing login and no entry is available, use `secret_request` when offered. Give the exact HTTPS origin of the field and a short reason for the owner. For a login pair, fill the saved `<name>/username` and `<name>/password` references through `browser_fill` with its `secret` parameter. If the secure form is unavailable, direct the owner to the Vault in the desktop app.
 4. For SSO ("Continue with Google / GitHub / Microsoft") or multi-step redirects, click the provider button, then `browser_wait` for navigation to settle and re-snapshot.
 5. When a CAPTCHA, human verification gate, 2FA/OTP prompt, or security key check appears, stop and use `ask_user` so the user can complete it directly.
 6. After sign-in completes, run `browser_snapshot` to confirm the expected account or dashboard view is loaded.

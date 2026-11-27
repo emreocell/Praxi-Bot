@@ -277,6 +277,7 @@ pub fn build_agent_with_live_views(
         skills,
         None,
         false,
+        false,
     )
     .expect("test agent skill wiring")
 }
@@ -301,6 +302,7 @@ fn build_agent_with_skills(
     skills: SkillIndex,
     fill_secrets: Option<Arc<secret_store::FillSecrets>>,
     safe_mode: bool,
+    owner_desktop: bool,
 ) -> Result<AgentLoop> {
     if !skills.has_assignments() {
         return Err("skill index must carry the per-bot assignment source".into());
@@ -327,10 +329,13 @@ fn build_agent_with_skills(
         developer: true,
     };
     tools.fill_secrets = fill_secrets;
-    let secret_requests = secret_requests_enabled(
-        &std::fs::read_to_string(data_dir.join("host.toml")).unwrap_or_default(),
-        std::env::var("BOT_SECRET_REQUESTS").ok().as_deref(),
-    );
+    let secret_requests = owner_desktop
+        && !safe_mode
+        && tools.fill_secrets.is_some()
+        && secret_requests_enabled(
+            &std::fs::read_to_string(data_dir.join("host.toml")).unwrap_or_default(),
+            std::env::var("BOT_SECRET_REQUESTS").ok().as_deref(),
+        );
     tools.secret_requests = secret_requests;
     tools.provenance = Some(Arc::new(builtin_tools::provenance::StorageProvenance(
         Arc::clone(storage),
@@ -451,16 +456,13 @@ struct ComputerLimits {
     max_computer_runs: Option<usize>,
     browser_idle_seconds: Option<u64>,
 }
-/// The owner's switch for `secret_request` (experimental, **off by default**): `host.toml`
-/// `[experimental] secret_request = true`, overridden by `BOT_SECRET_REQUESTS`
+/// The owner's switch for `secret_request` (on by default on the owner's desktop):
+/// `host.toml` `[experimental] secret_request = false`, overridden by `BOT_SECRET_REQUESTS`
 /// (`on`/`1`/`true`/`yes` or `off`/`0`/`false`/`no`). Off: the tool is not offered to the
 /// model and the loop refuses it.
 pub(crate) fn secret_requests_enabled(host: &str, env: Option<&str>) -> bool {
     let file = toml::from_str::<ExperimentalFile>(host)
-        .unwrap_or_default()
-        .experimental
-        .secret_request
-        .unwrap_or(false);
+        .is_ok_and(|file| file.experimental.secret_request.unwrap_or(true));
     match env.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
         Some("on" | "1" | "true" | "yes") => true,
         Some("off" | "0" | "false" | "no") => false,
@@ -1044,6 +1046,8 @@ pub struct ServeOptions {
     /// Owner key handed over by the desktop app on stdin (never argv, a file
     /// or the environment). A host without one creates the `owner-key` file.
     pub owner_key: Option<String>,
+    /// The shell is supervising this daemon over its persistent desktop pipe.
+    pub desktop_session: bool,
     /// Private desktop pipe or native installer stop event (no new HTTP authority).
     pub stop: tokio::sync::watch::Receiver<bool>,
     /// Safe mode: no tools for the model, no scheduler, channels, MCP servers,
@@ -1099,6 +1103,7 @@ pub fn serve(
         host_mode,
         peer_enabled,
         owner_key,
+        desktop_session,
         stop,
         safe_mode,
     } = opts;
@@ -1213,6 +1218,7 @@ pub fn serve(
         skill_index.clone(),
         fill_secrets.clone(),
         safe_mode,
+        *desktop_session && owner_key.is_some() && !host_is_host,
     )?;
     step("agent built");
     // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
@@ -1851,8 +1857,8 @@ paths:
     }
 
     #[test]
-    fn secret_requests_switch_is_off_by_default_and_reads_file_and_environment() {
-        assert!(!secret_requests_enabled("", None));
+    fn secret_requests_switch_defaults_on_and_reads_file_and_environment() {
+        assert!(secret_requests_enabled("", None));
         assert!(!secret_requests_enabled(
             "[experimental]
 secret_request=false",
@@ -2745,6 +2751,7 @@ body
             false,
             plain,
             None,
+            false,
             false,
         );
         assert!(

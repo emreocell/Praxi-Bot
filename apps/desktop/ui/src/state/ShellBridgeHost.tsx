@@ -127,6 +127,7 @@ export function ShellBridgeHost({
     // The listener runs before the timeline state folds the event in, so keep
     // our own little run index (chat / bot / start) for the decision.
     const runs = new Map<string, RunState>();
+    const pendingSecrets = new Set<string>();
     const known = (id: string): RunState =>
       runs.get(id) ?? {
         id,
@@ -173,9 +174,17 @@ export function ShellBridgeHost({
         resolveNotificationByCallId(e.call_id, "approved");
         return;
       }
+      if (e.type === "tool_call_completed" && pendingSecrets.delete(e.call_id)) {
+        resolveNotificationByCallId(e.call_id, e.error ? "denied" : "answered");
+        return;
+      }
       if (e.type === "tool_call_denied") {
+        pendingSecrets.delete(e.call_id);
         resolveNotificationByCallId(e.call_id, "denied");
         return;
+      }
+      if (e.type === "secret_requested" && e.origin && !e.parked && env.ts_ms >= appStartMs) {
+        pendingSecrets.add(e.call_id);
       }
       const runId = "run_id" in e && typeof e.run_id === "string" ? e.run_id : "";
       const run = runId ? runs.get(runId) : undefined;
@@ -183,6 +192,7 @@ export function ShellBridgeHost({
       if (
         e.type !== "approval_needed" &&
         e.type !== "question_asked" &&
+        e.type !== "secret_requested" &&
         e.type !== "run_finished"
       ) {
         return;
@@ -199,7 +209,7 @@ export function ShellBridgeHost({
           prefs: s,
           ...(scheduleNotify ? { scheduleNotify } : {})
         });
-        if (!d) {
+        if (!d || (e.type === "secret_requested" && !e.parked && !pendingSecrets.has(e.call_id))) {
           return;
         }
         const bot = botsRef.current.find((b) => b.id === d.botId);
@@ -218,13 +228,13 @@ export function ShellBridgeHost({
         const held = holdReason(now, s.quietHours, d.kind, d.botId, s.mutedBotIds);
         const hold = held !== null;
         const callId = !s.notifyPrivate
-          ? d.approval?.callId ?? (e.type === "question_asked" ? e.call_id : undefined)
+          ? d.approval?.callId ?? (e.type === "question_asked" || e.type === "secret_requested" ? e.call_id : undefined)
           : undefined;
         const isQuestion = !s.notifyPrivate && e.type === "question_asked";
         recordNotification({
-          id: `${env.ts_ms}-${d.runId}-${d.kind}-${d.approval?.callId ?? ""}`,
+          id: `${env.ts_ms}-${d.runId}-${d.kind}-${callId ?? ""}`,
           kind: d.kind,
-          title: isQuestion ? tRef.current("notify.question.title", { bot: name }) : text.body,
+          title: isQuestion ? tRef.current("notify.question.title", { bot: name }) : d.secretRequest ? text.title : text.body,
           body: isQuestion ? text.body : "",
           botId: d.botId,
           botName: name,

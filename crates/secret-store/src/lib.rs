@@ -46,7 +46,7 @@ pub use open::{
     BackendChoice, BackendKind, KEYRING_SERVICE, PASSPHRASE_ENV, SECRETS_FILE_NAME, open_store,
     secrets_file_path,
 };
-pub use redact::{REDACTED, Redactor, secret_variants};
+pub use redact::{MIN_REDACTABLE_SECRET_BYTES, REDACTED, Redactor, secret_variants};
 pub use scan::{Finding, scan_text};
 pub use secret::{
     FILL_PREFIX, RESERVED_PREFIX, SecretRef, SecretStore, SecretValue, WEBHOOK_PREFIX,

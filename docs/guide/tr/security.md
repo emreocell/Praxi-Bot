@@ -601,21 +601,34 @@ bellek, çökme dökümlerinden ya da takas alanından hariç tutulmaz.
   yürütmeyi engeller. Yerel onaylar ve izinler `server:<key>` kapsamına alınır. Bkz.
   [Eşleşmiş bir sunucuyu botun tarayıcı bilgisayarı olarak kullanmak](remote-host.md).
 
-### Asistanın bir kimlik bilgisi istemesine izin vermek (deneysel, varsayılan olarak kapalı)
+### Asistanın gizli bilgi istemesi
 
-`secret_request` aracı, asistanın senden masaüstü uygulamasındaki bir forma bir kullanıcı
-adı/parola (ya da tek bir gizli bilgi) yazmanı istemesini sağlar, böylece değer sohbetten hiç
-geçmez. Formu uygulama kendisi çizer: isteyen botu adlandırır, botun nedenini "bot tarafından
-yazıldı" etiketiyle düz metin olarak gösterir, değerin nereye gideceğini (bu bilgisayardaki
-kasada bir girdi) gösterir ve girdi zaten varsa ya da çalışma dışarıdan içerik okumuşsa uyarır.
-Değer doğrudan kasaya gider; bot yalnızca "kaydedildi" ya da "iptal edildi" bilgisini öğrenir.
-Form açıkken uygulama penceresi, sistemin izin verdiği yerde (Windows, macOS) ekran
-yakalamadan gizlenir.
+Asistanın bir web sitesi için mevcut bir kullanıcı adı ve parola, anahtar
+veya yedek kod kullanması gerekirse, masaüstü uygulamasındaki güvenli form
+üzerinden bunları isteyebilir. Formda botun gerekçesi ve bilginin
+kullanılabileceği HTTPS adresi görünür. Yalnızca tanıdığın bir görev ve
+adres için formu doldur. Ödeme bilgileri kapsam dışıdır.
 
-Araç, sen açmadıkça **sunulmaz**. Ayarlar'da henüz bir anahtar yok: veri klasöründeki
-`host.toml` dosyasına `[experimental]` / `secret_request = true` ekle (ya da daemon'u
-`BOT_SECRET_REQUESTS=on` ile başlat; `off` zorla kapatır) ve servisi yeniden başlat.
-`praxi doctor` güncel durumu gösterir.
+Praxi gizli bilgiyi yalnızca o bot ve adres için yerel kasaya kaydeder.
+Bot, bilginin kaydedilip kaydedilmediğini öğrenir ve kaydı adıyla
+kullanır. Kullanıcı adı ve parola formda maskelenir. Uygulama, platform
+destekliyorsa (Windows ve macOS) form açıkken pencereyi ekran
+yakalamadan korur.
+
+Telegram veya Discord eşleştirdiysen, özel bildirim seni masaüstü
+uygulamasındaki ilgili sohbete götüren bir bağlantı içerir. Formu
+uygulamada yanıtlayabilir, isteği iptal edebilir veya süresinin dolmasını
+bekleyebilirsin.
+
+Bir görevde (mission) form işi durdurmaz. Gizli bilgiye ihtiyaç duyan madde
+beklemeye alınır, görevin geri kalanı sürer ve form 24 saat açık kalır.
+Kaydedersen yalnızca o madde yeniden başlar. İptal edersen ya da süre dolarsa
+madde beklemede kalır.
+
+Kasa bulunan yerel masaüstünde istekler varsayılan olarak açıktır.
+Kapatmak için `BOT_SECRET_REQUESTS=off` ayarla veya veri dizinindeki
+`host.toml` dosyasında `[experimental]` altına `secret_request = false`
+ekle ve Praxi’yi yeniden başlat. `praxi doctor` ayarı gösterir.
 
 ### Mesaj kutusuna yapıştırılmış bir parola
 

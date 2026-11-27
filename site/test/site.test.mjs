@@ -5,6 +5,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { locales, shots } from "../src/content.mjs";
 import { renderPage } from "../src/render.mjs";
+import { renderOpenPage } from "../src/open.mjs";
+import { desktopUri } from "../src/open-app.js";
 import { summarizeRelease, isTrustedDownloadUrl } from "../src/release.mjs";
 import { themeTokens } from "../scripts/build-tokens.mjs";
 import { ogSvg, token } from "../scripts/og.mjs";
@@ -79,4 +81,20 @@ test("social image uses the app's theme tokens", () => {
   const svg = ogSvg(tokens);
   assert.ok(svg.includes(token(tokens, "color-background")));
   assert.ok(svg.includes(token(tokens, "color-accent")));
+});
+
+test("the secure request launcher accepts only a canonical chat id and has no form or remote assets", () => {
+  const id = "01926087-289c-7637-9e70-5ad332026346";
+  assert.equal(desktopUri(`#${id}`), `praxi://chat/${id}`);
+  for (const bad of ["", `#${id}/extra`, `#${id}?secret=other`, `#${id.toUpperCase()}`, `#${id}\n`, "#https://example.com"]) {
+    assert.equal(desktopUri(bad), null);
+  }
+  const en = renderOpenPage("en");
+  const tr = renderOpenPage("tr");
+  assert.notEqual(en, tr);
+  for (const page of [en, tr]) {
+    assert.match(page, /id="open-app" hidden/);
+    assert.match(page, /name="referrer" content="no-referrer"/);
+    assert.doesNotMatch(page, /<form|<input|https?:\/\//i);
+  }
 });

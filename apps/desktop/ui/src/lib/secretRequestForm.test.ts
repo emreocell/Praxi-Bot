@@ -4,32 +4,20 @@ import { escapeInvisible } from "./approvalPlain.ts";
 import {
   buildSubmitBody,
   formatCountdown,
-  parseAllowList,
   secondsLeft
 } from "./secretRequestForm.ts";
 
 test("a login needs username and password, a secret needs its value, and the shapes never mix", () => {
-  assert.equal(buildSubmitBody("login", { username: "u" }, [], []), null);
-  assert.equal(buildSubmitBody("secret", { value: "" }, [], []), null);
-  assert.deepEqual(buildSubmitBody("login", { username: "u", password: "p", value: "ignored" }, ["https://a.example"], []), {
-    username: "u",
-    password: "p",
-    origins: ["https://a.example"],
-    programs: []
+  assert.equal(buildSubmitBody("login", { username: "user01" }), null);
+  assert.equal(buildSubmitBody("secret", { value: "" }), null);
+  assert.equal(buildSubmitBody("login", { username: "short", password: "passwd" }), null);
+  assert.deepEqual(buildSubmitBody("login", { username: "user01", password: "passwd", value: "ignored" }), {
+    username: "user01",
+    password: "passwd"
   });
-  assert.deepEqual(buildSubmitBody("secret", { value: "v", username: "ignored" }, [], []), {
-    value: "v",
-    origins: [],
-    programs: []
+  assert.deepEqual(buildSubmitBody("secret", { value: "single", username: "ignored" }), {
+    value: "single"
   });
-});
-
-test("allow-lists split on lines, commas and spaces without repeats", () => {
-  assert.deepEqual(parseAllowList("https://a.example,\nhttps://b.example  https://a.example\n"), [
-    "https://a.example",
-    "https://b.example"
-  ]);
-  assert.deepEqual(parseAllowList("  "), []);
 });
 
 test("the countdown never goes negative and reads m:ss", () => {

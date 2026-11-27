@@ -543,7 +543,7 @@ export class ApiClient {
   protected async request<T>(
     method: string,
     path: string,
-    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; headers?: Record<string, string>; raw?: Blob; keepalive?: boolean } = {}
+    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; headers?: Record<string, string>; raw?: Blob; keepalive?: boolean; localOwnerOnly?: boolean } = {}
   ): Promise<T> {
     const res = await this.send(method, path, opts);
     if (res.status === 204) {
@@ -584,6 +584,7 @@ export class ApiClient {
       raw?: Blob;
       /** Let the request finish while the page is closing or reloading. */
       keepalive?: boolean;
+      localOwnerOnly?: boolean;
     } = {}
   ): Promise<Response> {
     const url = new URL(`${this.baseUrl}/v1${path}`);
@@ -604,6 +605,9 @@ export class ApiClient {
         headers["x-praxi-owner-key"] = key;
       }
     }
+    if (opts.localOwnerOnly && (!isLocalBaseUrl(this.baseUrl) || !headers["x-praxi-owner-key"])) {
+      throw new ApiError(403, "owner_key_required", "the local owner key is required");
+    }
     if (opts.body !== undefined) {
       headers["Content-Type"] = "application/json";
     } else if (opts.raw !== undefined) {
@@ -614,6 +618,7 @@ export class ApiClient {
       res = await fetch(url, {
         method,
         headers,
+        ...(opts.localOwnerOnly ? { redirect: "error" } : {}),
         body: opts.raw ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
         ...(opts.keepalive ? { keepalive: true } : {}),
         signal: AbortSignal.any([
@@ -1213,9 +1218,9 @@ export class ApiClient {
    */
   submitSecretRequest(
     callId: string,
-    body: { value?: string; username?: string; password?: string; origins: string[]; programs: string[] }
+    body: { value?: string; username?: string; password?: string }
   ): Promise<SecretRequestAnswer> {
-    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}`, { body });
+    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}`, { body, localOwnerOnly: true });
   }
 
   /**
@@ -1236,7 +1241,7 @@ export class ApiClient {
   }
 
   cancelSecretRequest(callId: string): Promise<SecretRequestAnswer> {
-    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}/cancel`);
+    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}/cancel`, { localOwnerOnly: true });
   }
 
   /** List Vault / fill secrets (metadata and allow-lists only; never values). */

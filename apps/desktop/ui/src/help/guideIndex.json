@@ -755,7 +755,7 @@
       "Live screen privacy and human control",
       "What is still asked in the Full level",
       "Secrets the assistant may type (fill secrets)",
-      "Letting the assistant ask for a credential (experimental, off by default)",
+      "Letting the assistant ask for a credential",
       "A password pasted into the message box",
       "Prompt-injection evaluation pack"
     ],

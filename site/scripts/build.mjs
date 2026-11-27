@@ -5,6 +5,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writ
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderPage } from "../src/render.mjs";
+import { renderOpenPage } from "../src/open.mjs";
 import { SITE } from "../src/content.mjs";
 import { ogSvg } from "./og.mjs";
 import { themeTokens } from "./build-tokens.mjs";
@@ -20,6 +21,12 @@ mkdirSync(join(dist, "tr"), { recursive: true });
 
 writeFileSync(join(dist, "index.html"), renderPage("en"));
 writeFileSync(join(dist, "tr", "index.html"), renderPage("tr"));
+for (const lang of ["en", "tr"]) {
+  const open = join(dist, lang === "tr" ? "tr/open" : "open");
+  mkdirSync(open, { recursive: true });
+  writeFileSync(join(open, "index.html"), renderOpenPage(lang));
+}
+copyFileSync(join(site, "src/open-app.js"), join(dist, "open-app.js"));
 writeFileSync(join(dist, "style.css"), `${themeTokens()}\n${readFileSync(join(site, "src/style.css"), "utf8")}`);
 // Ship .js (some static servers send .mjs as text/plain, which breaks module scripts).
 writeFileSync(join(dist, "app.js"), readFileSync(join(site, "src/app.js"), "utf8").replace("./release.mjs", "./release.js"));

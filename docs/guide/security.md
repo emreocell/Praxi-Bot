@@ -679,21 +679,32 @@ from crash dumps or swap.
   Local approvals and grants are scoped to `server:<key>`. See
   [Using a paired server as a bot's browser computer](remote-host.md#using-a-paired-server-as-a-bots-browser-computer).
 
-### Letting the assistant ask for a credential (experimental, off by default)
+### Letting the assistant ask for a credential
 
-The `secret_request` tool lets the assistant ask you to type a username/password
-(or one secret) into a form in the desktop app, so the value never passes through
-the chat. The app draws the form itself: it names the bot that asks, shows the
-bot's reason as plain text labelled "written by the bot", shows where the value
-goes (an entry in the vault on this computer) and warns when the entry exists or
-when the run has read content from outside. The value goes straight to the vault;
-the bot only learns "stored" or "cancelled". While the form is open the app
-window is hidden from screen capture where the system allows it (Windows, macOS).
+When the assistant needs an existing login, key, or backup code for a
+website, it can ask you through a secure form in the desktop app. The form
+shows the bot's reason and the exact HTTPS address where the credential can
+be used. Enter credentials in the form. Use it only for a task and address
+you recognize. Payment credentials are out of scope.
 
-The tool is **not offered** unless you switch it on. There is no switch in
-Settings yet: add `[experimental]` / `secret_request = true` to `host.toml` in
-the data directory (or start the daemon with `BOT_SECRET_REQUESTS=on`; `off`
-forces it off) and restart the service. `praxi doctor` shows the current state.
+Praxi saves the credential in the local vault for that bot and address.
+The bot learns whether it was saved and uses the entry by name. Both fields
+of a login are masked in the form. The app hides the window from screen
+capture where the platform supports it (Windows and macOS).
+
+If you paired Telegram or Discord, your private notification contains a link
+to the request's chat in the desktop app. The form is available under
+**Needs you** as well. You can cancel the request or let it expire.
+
+In a [mission](missions.md) the form does not stop the work. The item that
+needs the credential is parked, the rest of the mission carries on, and the
+form stays open for 24 hours. Saving it releases only that item; cancelling or
+letting it expire leaves the item parked.
+
+Requests are on by default for the local desktop with a vault. You can turn
+them off by setting `BOT_SECRET_REQUESTS=off` or adding `secret_request = false`
+under `[experimental]` in `host.toml` in the data directory and restarting
+Praxi. `praxi doctor` reports the setting.
 
 ### A password pasted into the message box
 

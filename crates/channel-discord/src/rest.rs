@@ -268,6 +268,14 @@ impl DiscordRest {
             .ok_or_else(|| DiscordError::Network("Discord did not return a channel id".into()))
     }
 
+    /// Get the private DM channel for a user (the same channel [`Self::open_dm`] finds).
+    ///
+    /// # Errors
+    /// Invalid user id, network or API errors.
+    pub(crate) async fn create_dm(&self, user: &str) -> Result<String> {
+        self.open_dm(user).await
+    }
+
     /// Send a message. `components` are the button rows, if any. Mentions are
     /// always switched off for the request.
     ///

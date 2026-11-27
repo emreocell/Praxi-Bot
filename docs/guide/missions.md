@@ -134,6 +134,15 @@ authority, and links in it are not judged against a page: the bot opens the site
 and uses `email_wait_for`, which finds the mail at once and lists the links it
 may follow.
 
+**A code is never an answer.** A 2FA or verification code is single-use, so it
+is never stored in the list and never shown to the bot. An item that waits for a
+code only offers "Skip this one": enter the code on the site yourself, then skip
+the item. The same holds for passwords: never write one in an answer. When the
+bot needs a login or key it asked for on a site, that item shows a secure form in
+the app (see [security](security.md)): the value goes straight to the vault, the
+bot never sees it, and your answer releases only that item. The rest of the
+mission keeps working while the form is open (24 hours).
+
 ## When a mission stops
 
 * **Done:** the goal you set is met. The daemon checks it from the list; the

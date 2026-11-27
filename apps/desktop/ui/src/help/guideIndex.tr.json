@@ -730,7 +730,7 @@
       "Bir güvenlik açığını bildirmek",
       "Canlı ekran gizliliği ve insan denetimi",
       "Asistanın yazabileceği gizli bilgiler (fill secrets)",
-      "Asistanın bir kimlik bilgisi istemesine izin vermek (deneysel, varsayılan olarak kapalı)",
+      "Asistanın gizli bilgi istemesi",
       "Mesaj kutusuna yapıştırılmış bir parola",
       "Prompt injection değerlendirme paketi"
     ],

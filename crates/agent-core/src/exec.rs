@@ -2594,7 +2594,7 @@ impl TurnExecutor {
                 true,
             ),
             Ok(Err(e)) => (format!("Error: {e}"), true),
-            Ok(Ok(out)) if meta => self.meta_output(ctx, call, &out).await,
+            Ok(Ok(out)) if meta => self.meta_output(ctx, call, &tool.spec().name, &out).await,
             Ok(Ok(out)) => {
                 own_spill = out.spill.as_ref().map(|s| s.path.clone());
                 (render_output(&out), false)
@@ -2628,6 +2628,7 @@ impl TurnExecutor {
         &self,
         ctx: &RunCtx,
         call: ToolCallId,
+        tool_name: &str,
         out: &ToolOutput,
     ) -> (String, bool) {
         let json_part = out.content.iter().find_map(|p| match p {
@@ -2706,10 +2707,14 @@ impl TurnExecutor {
                     ),
                 }
             }
-            Some((SECRET_REQUEST_CARD_KIND, data)) => match SecretCard::from_part(data) {
-                Some(card) => self.sh.request_secret(ctx, call, &card).await,
-                None => ("secret_request: malformed request.".to_owned(), true),
-            },
+            Some((SECRET_REQUEST_CARD_KIND, data))
+                if tool_name == builtin_tools::SECRET_REQUEST =>
+            {
+                match SecretCard::from_part(data) {
+                    Some(card) => self.sh.request_secret(ctx, call, &card).await,
+                    None => ("secret_request: malformed request.".to_owned(), true),
+                }
+            }
             Some((HANDOVER_CARD_KIND, data)) => match HandoverCard::from_part(data) {
                 Some(card) => self.sh.request_handover(ctx, call, &card).await,
                 None => ("browser_handover: malformed request.".to_owned(), true),

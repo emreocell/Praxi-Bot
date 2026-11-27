@@ -211,7 +211,7 @@ impl Drop for PendingGuard {
     fn drop(&mut self) {
         self.sh.pending.lock().remove(&self.id);
         // A parked `secret_request` must not stay submittable once its wait is gone.
-        self.sh.secret_requests.lock().remove(&self.id);
+        self.sh.discard_secret_request(self.id);
         self.sh.handovers.lock().remove(&self.id);
         forget_parked(&self.sh, self.id);
         let abandoned = !self.released;
@@ -2538,7 +2538,7 @@ impl Shared {
                 .collect()
         };
         for (call_id, p) in drained {
-            self.secret_requests.lock().remove(&call_id);
+            self.discard_secret_request(call_id);
             self.record_stop_denial(run_id, call_id, p.approval_id);
         }
         #[cfg(test)]
@@ -3214,6 +3214,14 @@ impl Shared {
     }
 }
 
+/// What a mission's `secret_request` shows, worked out before the item is parked.
+struct MissionSecretForm {
+    purpose: String,
+    tainted: bool,
+    limit: std::time::Duration,
+    deadline: tokio::time::Instant,
+}
+
 /// What the model reads when a `secret_request` ends. Never a value.
 fn secret_outcome(name: &str, stored: bool, why: &str) -> (String, bool) {
     if stored {
@@ -3232,6 +3240,21 @@ fn secret_outcome(name: &str, stored: bool, why: &str) -> (String, bool) {
 }
 
 impl Shared {
+    fn discard_secret_request(&self, call_id: ToolCallId) {
+        let request = self.secret_requests.lock().remove(&call_id);
+        if let Some(request) = request
+            && let Ok(Some(run)) = self.storage.get_run(request.run_id)
+        {
+            let _ = self.storage.append_audit(
+                run.user_id,
+                Some(run.id),
+                "system",
+                "secret_request.cancelled",
+                &json!({"call_id": call_id, "name": request.name, "reason": "run ended"}),
+            );
+        }
+    }
+
     /// Run a `secret_request`: show the owner's form and park the run until the
     /// owner's app submits it to the daemon, cancels it, or it expires. The
     /// value never passes through here: the owner-only submit route writes it
@@ -3266,7 +3289,15 @@ impl Shared {
         if !self.cfg.secret_requests {
             return refuse("secret requests are switched off");
         }
-        if ctx.initiator != InitiatorKind::Human && ctx.mission.is_none() {
+        if ctx.mission.is_none()
+            && (ctx.initiator != InitiatorKind::Human
+                || !self
+                    .storage
+                    .run_user_message_sources(ctx.run_id)
+                    .is_ok_and(|sources| {
+                        !sources.is_empty() && sources.iter().all(|source| source == "owner")
+                    }))
+        {
             return refuse(
                 "only a run the owner started at the desktop can ask for a credential; ask the owner to add it in the app instead",
             );
@@ -3279,15 +3310,12 @@ impl Shared {
             }
             st.secret_requests += 1;
         }
-        // Nobody is at the keyboard in a mission: the item that needs the credential is
-        // parked in the ledger and the session moves on.
-        if let Some(mission) = &ctx.mission {
-            return self.park_item_for_secret(ctx, mission, name);
-        }
         let tainted = self
             .root_run_id(ctx)
             .is_none_or(|r| self.router.tainted_runs.lock().contains(&r));
-        let limit = if self.cfg.approval_timeout.is_zero() {
+        let limit = if ctx.mission.is_some() {
+            self.cfg.mission_secret_request_timeout
+        } else if self.cfg.approval_timeout.is_zero() {
             self.cfg.secret_request_timeout
         } else {
             self.cfg
@@ -3298,6 +3326,41 @@ impl Shared {
             builtin_tools::SecretFields::Secret => protocol::event::SecretFields::Secret,
             builtin_tools::SecretFields::Login => protocol::event::SecretFields::Login,
         };
+        let purpose = self.redact(card.purpose.clone());
+        if self.redact(card.origin.clone()) != card.origin {
+            return refuse("the exact destination cannot be displayed");
+        }
+        if self
+            .storage
+            .append_audit(
+                ctx.user_id,
+                Some(ctx.run_id),
+                "system",
+                "secret_request.requested",
+                &json!({"call_id": call_id, "name": name, "origin": card.origin}),
+            )
+            .is_err()
+        {
+            return refuse("the request could not be audited");
+        }
+        let deadline = tokio::time::Instant::now() + limit;
+        // Nobody is at the keyboard in a mission and no run waits: the item that needs the
+        // credential is parked in the ledger, the session moves on, and the owner's answer
+        // on the form releases that item.
+        if let Some(mission) = &ctx.mission {
+            return self.park_item_for_secret(
+                ctx,
+                call_id,
+                mission,
+                card,
+                MissionSecretForm {
+                    purpose,
+                    tainted,
+                    limit,
+                    deadline,
+                },
+            );
+        }
         let summary = format!("secret request: {}", truncate_utf8(name, 80));
         let (approval_id, mut guard, rx) =
             self.park(ctx, call_id, &summary, true, false, PendingKind::Secret);
@@ -3306,16 +3369,14 @@ impl Shared {
             crate::shared::SecretRequestInfo {
                 run_id: ctx.run_id,
                 name: name.to_owned(),
+                origin: card.origin.clone(),
+                purpose: purpose.clone(),
+                deadline,
                 fields,
                 replace: card.replace,
                 bot_id: ctx.bot_id.to_string(),
+                mission: None,
             },
-        );
-        self.audit(
-            ctx,
-            "system",
-            "secret_request.requested",
-            &json!({"name": name}),
         );
         self.emit(
             ctx,
@@ -3323,15 +3384,17 @@ impl Shared {
                 run_id: ctx.run_id,
                 call_id,
                 name: name.to_owned(),
-                purpose: self.redact(card.purpose.clone()),
+                purpose,
+                origin: Some(card.origin.clone()),
                 fields,
                 replaces_existing: card.replace,
                 untrusted_content: tainted,
                 expires_in_secs: limit.as_secs(),
+                parked: false,
             }),
         );
         let mut rx = rx;
-        let mut waited = tokio::time::timeout(limit, &mut rx).await;
+        let mut waited = tokio::time::timeout_at(deadline, &mut rx).await;
         // The timer may end the wait only while the form is still unclaimed. A
         // submit that claimed it is writing the value to the vault right now: wait
         // for it to finish, so the model hears `stored` (never a false "nothing was
@@ -3351,16 +3414,19 @@ impl Shared {
             _ => (false, "the owner cancelled", "declined"),
         };
         let _ = self.storage.decide_approval(approval_id, decision);
-        self.audit(
-            ctx,
-            "user",
-            if stored {
-                "secret_request.stored"
+        if !stored {
+            let action = if decision == "expired" {
+                "secret_request.expired"
             } else {
                 "secret_request.cancelled"
-            },
-            &json!({"name": name, "reason": decision}),
-        );
+            };
+            self.audit(
+                ctx,
+                "user",
+                action,
+                &json!({"call_id": call_id, "name": name, "reason": decision}),
+            );
+        }
         secret_outcome(name, stored, why)
     }
 }
@@ -3562,12 +3628,22 @@ impl Shared {
         )
     }
 
-    /// A credential the bot needs in a mission session: park the item being worked on, like a
-    /// CAPTCHA. The owner adds the secret in the app (never in the answer text) and releases the item.
-    fn park_item_for_secret(&self, ctx: &RunCtx, mission: &str, name: &str) -> (String, bool) {
-        let name = truncate_utf8(name, 80);
+    /// A credential the bot needs in a mission session. No run waits: the item being worked
+    /// on is parked as blocked (like a CAPTCHA), the owner gets the same app-owned form, and
+    /// answering it stores the value and releases that item (see `daemon-api`'s secret
+    /// request route). Nothing is asked, and no form shown, unless exactly one item is
+    /// `doing` to park: the model is then told to park it itself.
+    fn park_item_for_secret(
+        self: &Arc<Self>,
+        ctx: &RunCtx,
+        call_id: ToolCallId,
+        mission: &str,
+        card: &builtin_tools::SecretCard,
+        form: MissionSecretForm,
+    ) -> (String, bool) {
+        let name = truncate_utf8(&card.name, 80);
         let reason = format!(
-            "needs the credential {name:?}: add it in the app (never write a password in the answer), then release this item"
+            "needs the credential {name:?}: the owner answers the secure form in the app (or adds it in the Vault; never write a password in the answer), then releases this item"
         );
         let store = self.mission_store.read().clone();
         let key = store.and_then(|s| {
@@ -3579,9 +3655,66 @@ impl Shared {
             ctx,
             "system",
             "secret_request.parked",
-            &json!({"name": name, "item": key}),
+            &json!({"call_id": call_id, "name": name, "item": key}),
         );
-        (mission_park_text(key.as_deref(), &reason), true)
+        let Some(item) = key else {
+            return (mission_park_text(None, &reason), true);
+        };
+        let fields = match card.fields {
+            builtin_tools::SecretFields::Secret => protocol::event::SecretFields::Secret,
+            builtin_tools::SecretFields::Login => protocol::event::SecretFields::Login,
+        };
+        self.secret_requests.lock().insert(
+            call_id,
+            crate::shared::SecretRequestInfo {
+                run_id: ctx.run_id,
+                name: card.name.clone(),
+                origin: card.origin.clone(),
+                purpose: form.purpose.clone(),
+                deadline: form.deadline,
+                fields,
+                replace: card.replace,
+                bot_id: ctx.bot_id.to_string(),
+                mission: Some(crate::shared::MissionTarget {
+                    mission_id: mission.to_owned(),
+                    item: item.clone(),
+                }),
+            },
+        );
+        self.emit(
+            ctx,
+            Event::SecretRequested(protocol::event::SecretRequested {
+                run_id: ctx.run_id,
+                call_id,
+                name: card.name.clone(),
+                purpose: form.purpose,
+                origin: Some(card.origin.clone()),
+                fields,
+                replaces_existing: card.replace,
+                untrusted_content: form.tainted,
+                expires_in_secs: form.limit.as_secs(),
+                parked: true,
+            }),
+        );
+        // The form stays open for `limit` and then closes by itself, audited. The item stays
+        // parked: the owner can still add the value in the Vault and release it.
+        let this = Arc::downgrade(self);
+        let (user_id, run_id, entry) = (ctx.user_id, ctx.run_id, card.name.clone());
+        let parked_item = item.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep_until(form.deadline).await;
+            let Some(this) = this.upgrade() else { return };
+            if this.secret_requests.lock().remove(&call_id).is_some() {
+                let _ = this.storage.append_audit(
+                    user_id,
+                    Some(run_id),
+                    "system",
+                    "secret_request.expired",
+                    &json!({"call_id": call_id, "name": entry, "mission_item": parked_item}),
+                );
+            }
+        });
+        (mission_park_text(Some(&item), &reason), true)
     }
 
     /// Run a `browser_handover`: show the owner's card and park the run until the

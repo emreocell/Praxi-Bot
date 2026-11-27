@@ -259,3 +259,21 @@ test("a scheduled job follows the notification choice; an approval always notifi
   assert.equal(pick(finished("boom"), "never"), null);
   assert.equal(pick(approval, "never")?.kind, "needsYou");
 });
+
+test("a secure request notification opens the chat and exposes no request content or actions", () => {
+  const time = Date.now();
+  const event: DaemonEvent = {
+    type: "secret_requested", run_id: run.id, call_id: "secret-1",
+    name: "private-name", purpose: "private-purpose", origin: "https://example.com",
+    fields: "secret", replaces_existing: false, untrusted_content: false, expires_in_secs: 300
+  };
+  const decision = decideNotification(env(event, time), ctx());
+  assert.ok(decision);
+  assert.equal(decision.chatId, run.chatId);
+  assert.deepEqual(notificationText(decision, "Bot", false, (key) => key), {
+    title: "secretRequest.title",
+    body: "notify.generic.needsYou"
+  });
+  assert.doesNotMatch(JSON.stringify(decision), /private-name|private-purpose|example\.com/);
+  assert.equal(decideNotification(env(event, time - 301_000), ctx()), null);
+});

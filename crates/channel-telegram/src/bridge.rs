@@ -633,6 +633,29 @@ impl TelegramChannel {
         Ok(channel)
     }
 
+    /// Notify paired users in their private chats. The URI only opens a local chat.
+    pub async fn notify_secret_request(&self, chat: protocol::ChatId) {
+        if self.status() != ChannelStatus::Running {
+            return;
+        }
+        for user in self.pairing().paired_users() {
+            let language = self.language(user);
+            let notice = Message::SecretRequestNotice.render(language);
+            let locale = if language.code() == "tr" { "tr/" } else { "" };
+            let launcher = channel_api::DESKTOP_CHAT_LAUNCHER;
+            let link = format!("{launcher}{locale}open/#{chat}");
+            let text = format!("{notice}\n{link}");
+            if self
+                .bot_api()
+                .send_message(user, &text, None)
+                .await
+                .is_err()
+            {
+                eprintln!("telegram: could not send a secure request notice");
+            }
+        }
+    }
+
     /// Underlying [`PairingStore`].
     #[must_use]
     pub fn pairing(&self) -> &PairingStore {

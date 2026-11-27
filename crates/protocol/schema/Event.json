@@ -375,6 +375,17 @@
           "description": "The `fill/` entry name the value will be stored under (without the prefix).",
           "type": "string"
         },
+        "origin": {
+          "description": "The exact browser origin the owner authorizes. Missing in old journal events.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parked": {
+          "description": "A mission asked: no run waits for the answer. The item that needs it is parked as blocked and the session moved on; the owner's answer releases that item. The card stays open after the tool call has returned.",
+          "type": "boolean"
+        },
         "purpose": {
           "description": "Why the bot asks. Plain text written by the model: untrusted, never markup.",
           "type": "string"

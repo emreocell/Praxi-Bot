@@ -703,6 +703,12 @@ pub struct SecretRequestInfo {
     pub run_id: RunId,
     /// Entry name (after `fill/`).
     pub name: String,
+    /// Canonical HTTPS destination confirmed by the owner.
+    pub origin: String,
+    /// Owner-visible, sanitized purpose saved as vault metadata.
+    pub purpose: String,
+    /// Claims after this instant are refused even if the timer has not run yet.
+    pub deadline: tokio::time::Instant,
     /// One value or username + password.
     pub fields: protocol::event::SecretFields,
     /// The bot asked to replace an existing entry; without it the submit route
@@ -711,6 +717,17 @@ pub struct SecretRequestInfo {
     /// The bot that asked (its id as text); the submit route writes on its behalf, so
     /// it cannot replace another bot's account.
     pub bot_id: String,
+    /// Set when a mission asked: no run waits, the answer releases this item instead.
+    pub mission: Option<MissionTarget>,
+}
+
+/// The parked mission item a `secret_request` of a mission releases when it is answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissionTarget {
+    /// The mission.
+    pub mission_id: String,
+    /// The item that was `doing` when the bot asked (now `blocked`).
+    pub item: String,
 }
 
 // Independent offer flags of one card; folding them into an enum would hide which

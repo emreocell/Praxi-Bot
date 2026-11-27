@@ -564,6 +564,7 @@ impl Tool for SecretTool {
                     "kind": builtin_tools::SECRET_REQUEST_CARD_KIND,
                     "name": "example_login",
                     "purpose": "sign in",
+                    "origin": "https://a.example",
                     "fields": "login",
                     "replace": false,
                 }),
@@ -622,7 +623,151 @@ async fn a_credential_the_mission_needs_parks_the_item_instead_of_stalling_the_s
     );
     let audit = w.env.storage.list_audit(w.env.user).unwrap();
     assert!(audit.iter().any(|a| a.action == "secret_request.parked"));
-    assert!(!audit.iter().any(|a| a.action == "secret_request.requested"));
+    assert!(audit.iter().any(|a| a.action == "secret_request.requested"));
+    // The model was told to move on, and was told nothing about a value or a form id.
+    let tools = crate::tests::tool_messages(&without_ledger(fake.request(2)));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.contains("parked as blocked") && t.contains("Take the next open item")),
+        "{tools:?}"
+    );
+}
+
+/// Run a session that asks for `example_login` on a.example and parks that item; returns the
+/// loop, the call id of the open form and the first run's events.
+async fn parked_request(w: &World) -> (crate::AgentLoop, protocol::ToolCallId, Vec<Event>) {
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
+        calls(&[("c1", "secret_request", json!({"name": "example_login"}))]),
+        text("Done: parked one."),
+    ]);
+    let lp = lp_with(w, &fake, |c| c.secret_requests = true);
+    lp.sh.tools.register(secret_tool());
+    let mut events = lp.subscribe();
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let mut seen = Vec::new();
+    while let Ok(item) = events.try_recv() {
+        seen.push(item.envelope.event);
+    }
+    let call_id = seen
+        .iter()
+        .find_map(|e| match e {
+            Event::SecretRequested(r) => Some(r.call_id),
+            _ => None,
+        })
+        .expect("the owner's form was opened");
+    (lp, call_id, seen)
+}
+
+#[tokio::test]
+async fn a_mission_credential_opens_the_form_for_the_parked_item_and_no_run_waits_on_it() {
+    let w = world(&["a.example", "b.example"]);
+    let (lp, call_id, events) = parked_request(&w).await;
+    let Some(Event::SecretRequested(card)) = events
+        .iter()
+        .find(|e| matches!(e, Event::SecretRequested(_)))
+    else {
+        unreachable!()
+    };
+    assert!(card.parked, "the card says nothing waits on it");
+    assert_eq!(card.origin.as_deref(), Some("https://a.example"));
+    // The session is over, the form is not: it names the mission item it releases.
+    let info = lp.secret_request(call_id).expect("the form stays open");
+    let target = info.mission.expect("bound to the mission item");
+    assert_eq!(target.mission_id, w.mission);
+    assert_eq!(target.item, "a.example");
+    assert_eq!(info.origin, "https://a.example");
+    // Claimed once; a failed store puts it back; a second claim finds nothing.
+    let claimed = lp.claim_secret_request(call_id).expect("claimed");
+    assert!(lp.claim_secret_request(call_id).is_none());
+    lp.restore_secret_request(call_id, claimed);
+    assert!(lp.claim_secret_request(call_id).is_some());
+    // The other item was never touched.
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
+    assert_eq!(blocked.len(), 1);
+}
+
+#[tokio::test]
+async fn a_mission_form_is_refused_after_the_mission_ended() {
+    let w = world(&["a.example"]);
+    let (lp, call_id, _) = parked_request(&w).await;
+    w.store
+        .set_state(
+            &w.mission,
+            missions::MissionState::Cancelled,
+            Some("the owner stopped it"),
+            storage::now_ms(),
+        )
+        .unwrap();
+    assert!(
+        lp.claim_secret_request(call_id).is_none(),
+        "a value must not be stored for a mission that is over"
+    );
+    assert!(lp.secret_request(call_id).is_none(), "and the form is gone");
+}
+
+#[tokio::test]
+async fn a_mission_form_expires_by_itself_and_leaves_the_item_parked() {
+    let w = world(&["a.example"]);
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
+        calls(&[("c1", "secret_request", json!({"name": "example_login"}))]),
+        text("Done: parked one."),
+    ]);
+    let lp = lp_with(&w, &fake, |c| {
+        c.secret_requests = true;
+        c.mission_secret_request_timeout = std::time::Duration::from_millis(50);
+    });
+    lp.sh.tools.register(secret_tool());
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    for _ in 0..100 {
+        let expired = w
+            .env
+            .storage
+            .list_audit(w.env.user)
+            .unwrap()
+            .iter()
+            .any(|a| a.action == "secret_request.expired");
+        if expired {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        w.env
+            .storage
+            .list_audit(w.env.user)
+            .unwrap()
+            .iter()
+            .any(|a| a.action == "secret_request.expired")
+    );
+    assert!(lp.sh.secret_requests.lock().is_empty());
+    assert_eq!(
+        w.store
+            .items(&w.mission, Some(ItemStatus::Blocked))
+            .unwrap()
+            .len(),
+        1,
+        "the owner can still release it by hand"
+    );
 }
 
 /// A `browser_handover` whose card asks the owner for a 2FA code.
