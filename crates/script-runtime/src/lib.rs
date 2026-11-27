@@ -587,6 +587,16 @@ impl ScriptRuntime {
             Ok(s) => s,
             Err(Failure::Js(e)) if is_oom(&e.message) => return Err(oom()),
             Err(Failure::Js(e)) => return Err(ScriptError::Js(e)),
+            Err(Failure::NullThrown(e)) => {
+                // The engine raises "out of memory" as an error object. When the heap is
+                // so full that even that object cannot be built, it unwinds with a bare
+                // `null` instead. A script that really did `throw null` leaves the heap
+                // far from its limit, so a full heap tells the two apart.
+                if heap_is_nearly_full(&rt, limits.memory_bytes).await {
+                    return Err(oom());
+                }
+                return Err(ScriptError::Js(e));
+            }
             Err(Failure::Oom) => return Err(oom()),
             Err(Failure::Internal(m)) => return Err(ScriptError::Internal(m)),
         };
@@ -609,12 +619,21 @@ impl ScriptRuntime {
 
 enum Failure {
     Js(JsError),
+    /// The script unwound with a `null` or `undefined` and no error object.
+    NullThrown(JsError),
     Oom,
     Internal(String),
 }
 
 fn internal(e: &QjsError) -> ScriptError {
     ScriptError::Internal(e.to_string())
+}
+
+/// True when the JS heap is within a tenth of its limit.
+async fn heap_is_nearly_full(rt: &AsyncRuntime, limit_bytes: usize) -> bool {
+    let used = rt.memory_usage().await.malloc_size;
+    let limit = i64::try_from(limit_bytes).unwrap_or(i64::MAX);
+    used >= limit - limit / 10
 }
 
 fn is_oom(message: &str) -> bool {
@@ -665,7 +684,15 @@ async fn execute(ctx: &Ctx<'_>, source: &str, state: &Arc<RunState>) -> Result<S
 fn classify(ctx: &Ctx<'_>, err: QjsError) -> Failure {
     match err {
         QjsError::Allocation => Failure::Oom,
-        QjsError::Exception => Failure::Js(describe_exception(&ctx.catch())),
+        QjsError::Exception => {
+            let thrown = ctx.catch();
+            let described = describe_exception(&thrown);
+            if thrown.is_null() || thrown.is_undefined() {
+                Failure::NullThrown(described)
+            } else {
+                Failure::Js(described)
+            }
+        }
         other => Failure::Internal(other.to_string()),
     }
 }

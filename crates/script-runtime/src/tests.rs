@@ -527,9 +527,16 @@ impl ScriptHost for SlowAndFastHost {
 /// It must not stop the compute clock while the script computes in the meantime.
 #[tokio::test]
 async fn a_pending_fire_and_forget_call_does_not_hide_a_busy_loop() {
+    // The second script starts a promise per turn of its loop and keeps all of them
+    // pending, so its heap grows for as long as it runs. The default heap is small
+    // enough for that to end the run before the compute budget does, and which of
+    // the two comes first depends on the machine. This test is about the compute
+    // clock, so it gets a heap the loop cannot fill within the budget; the heap
+    // limit has its own test below.
     let limits = Limits {
         cpu_timeout: Duration::from_millis(300),
         total_timeout: Duration::from_secs(30),
+        memory_bytes: 1024 * 1024 * 1024,
         ..Limits::default()
     };
     for code in [
@@ -585,4 +592,39 @@ async fn awaiting_the_slow_call_while_others_finish_still_spends_no_budget() {
         .await
         .unwrap();
     assert_eq!(out.result, json!(1));
+}
+
+/// A loop of calls that are never awaited fills the heap. That must always read as
+/// the memory limit: when the heap is so full that the engine cannot even build its
+/// out-of-memory error, it unwinds with a bare `null`, which used to surface as an
+/// unnamed script error.
+#[tokio::test]
+async fn a_loop_of_unawaited_calls_that_fills_the_heap_is_the_memory_limit() {
+    let limits = Limits {
+        cpu_timeout: Duration::from_secs(60),
+        total_timeout: Duration::from_secs(60),
+        memory_bytes: 4 * 1024 * 1024,
+        max_tool_calls: 10_000_000,
+        ..Limits::default()
+    };
+    for round in 0..20 {
+        let err = ScriptRuntime::run(
+            "while (true) { tools.call('fast', 5).catch(() => {}); }",
+            Arc::new(SlowAndFastHost),
+            limits.clone(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, ScriptError::MemoryLimitExceeded { .. }),
+            "round {round}: {err:?}"
+        );
+    }
+}
+
+/// Throwing `null` is the script's own error, not an exhausted heap.
+#[tokio::test]
+async fn throwing_null_is_a_script_error_not_the_memory_limit() {
+    let err = run("throw null;").await.unwrap_err();
+    assert!(matches!(err, ScriptError::Js(_)), "{err:?}");
 }
