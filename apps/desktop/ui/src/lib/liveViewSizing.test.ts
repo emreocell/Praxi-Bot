@@ -10,7 +10,16 @@ import {
   STEP_UP_AFTER,
   streamHealth
 } from "./liveViewAdaptive.ts";
-import { applyMode, cardAspect, fitWithin, requestBox, scaleBox } from "./liveViewSizing.ts";
+import {
+  applyMode,
+  aspectRatio,
+  cardAspect,
+  fitWithin,
+  requestBox,
+  resolutionLabel,
+  scaleBox,
+  sourceSize
+} from "./liveViewSizing.ts";
 import { loadQualityMode, saveQualityMode } from "./liveViewQualityPref.ts";
 import { sessionRequest } from "../state/liveViewRequest.ts";
 
@@ -45,9 +54,23 @@ test("scaleBox never goes below a readable size or above the box", () => {
   assert.deepEqual(scaleBox({ width: 640, height: 400 }, 1), { width: 640, height: 400 });
 });
 
+test("the label and aspect follow source_rect, not the encoded size that changes with the view", () => {
+  // A 1280x800 display can be encoded as 960x600 in the card and 1280x800 in the viewer.
+  const sourceRect = { x: 0, y: 0, width: 1280, height: 800, units: "physical_px" as const };
+  const source = sourceSize(sourceRect);
+  assert.deepEqual(source, { width: 1280, height: 800 });
+  assert.equal(resolutionLabel(source), "1280×800");
+  assert.equal(cardAspect(resolutionLabel(source)), "1600 / 1000");
+  assert.equal(aspectRatio(source), "1600 / 1000");
+  assert.equal(resolutionLabel(sourceSize(null)), null);
+  assert.equal(resolutionLabel(sourceSize({ width: 0, height: 0 })), null);
+});
+
 test("the card follows the screen's aspect ratio instead of letterboxing in a 16:9 box", () => {
   assert.equal(cardAspect("1280×800"), "1600 / 1000");
   assert.equal(cardAspect("1920x1080"), "1778 / 1000");
+  assert.equal(cardAspect("1080×1920"), "563 / 1000");
+  assert.equal(aspectRatio({ width: 1080, height: 1920 }), "563 / 1000");
   assert.equal(cardAspect(null), "16 / 10");
   assert.equal(cardAspect("0×0"), "16 / 10");
 });

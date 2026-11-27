@@ -32,7 +32,7 @@ export interface ComputerViewModel {
   /** The current frame (blob URL) while `live`. */
   frameUrl: string | null;
   previewUrl: string | null;
-  /** `1280×800` once a frame is known. */
+  /** `1280×800` from `source_rect` once a frame is known; stable across view sizes. */
   resolution: string | null;
   /** Frames per second, measured; `null` until measured. */
   fps: number | null;

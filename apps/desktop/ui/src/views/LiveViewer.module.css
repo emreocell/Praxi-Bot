@@ -284,7 +284,9 @@
 .stageFrame[data-has-frame="true"] {
   flex: 0 1 auto;
   width: auto;
-  height: 100%;
+  /* Let the inline aspect-ratio decide the height: a definite height plus max-width clamps only
+     one axis on narrow panes, which stretches the frame and leaves bars inside the picture. */
+  height: auto;
   background-color: var(--color-background);
 }
 

@@ -268,7 +268,7 @@
   background-color: var(--color-media-scrim);
 }
 
-/* "Doldur" (the owner's default): no bars around the picture, edges cropped around the centre. */
+/* "Doldur" (opt-in): no bars around the picture, edges cropped around the centre. */
 .frame[data-fit="cover"] {
   object-fit: cover;
 }

@@ -11,17 +11,17 @@ function mapStorage(store = new Map<string, string>()): Pick<Storage, "getItem" 
   };
 }
 
-test("the screen fills its box (cover) unless the owner chose otherwise", () => {
-  assert.equal(DEFAULT_SCREEN_FIT, "cover");
+test("the whole screen is shown (contain) unless the owner chose to crop", () => {
+  assert.equal(DEFAULT_SCREEN_FIT, "contain");
   const storage = mapStorage();
-  assert.equal(loadScreenFit(storage), "cover");
-  saveScreenFit("contain", storage);
   assert.equal(loadScreenFit(storage), "contain");
   saveScreenFit("cover", storage);
   assert.equal(loadScreenFit(storage), "cover");
-  assert.equal(loadScreenFit(mapStorage(new Map([["praxi.liveView.screenFit", "stretch"]]))), "cover");
-  assert.equal(toggleScreenFit("cover"), "contain");
+  saveScreenFit("contain", storage);
+  assert.equal(loadScreenFit(storage), "contain");
+  assert.equal(loadScreenFit(mapStorage(new Map([["praxi.liveView.screenFit", "stretch"]]))), "contain");
   assert.equal(toggleScreenFit("contain"), "cover");
+  assert.equal(toggleScreenFit("cover"), "contain");
 });
 
 test("a blocked storage never breaks the choice", () => {
@@ -33,7 +33,7 @@ test("a blocked storage never breaks the choice", () => {
       throw new Error("blocked");
     }
   };
-  assert.equal(loadScreenFit(throwing), "cover");
-  assert.doesNotThrow(() => saveScreenFit("contain", throwing));
-  assert.equal(loadScreenFit(null), "cover");
+  assert.equal(loadScreenFit(throwing), "contain");
+  assert.doesNotThrow(() => saveScreenFit("cover", throwing));
+  assert.equal(loadScreenFit(null), "contain");
 });

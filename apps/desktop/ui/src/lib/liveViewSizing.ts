@@ -74,15 +74,42 @@ export function scaleBox(box: Box, scale: number): Box {
 }
 
 /**
- * CSS `aspect-ratio` for the card from a `1280×800` resolution label, so a 16:10 screen is not
- * letterboxed in a 16:9 box. Unknown or absurd sizes fall back to 16 / 10.
+ * The remote display size carried by a frame. `width`/`height` on the frame are the encoded
+ * (down-scaled) picture; `source_rect` is the actual screen, which does not change when the
+ * viewer asks for a different size.
+ */
+export function sourceSize(sourceRect: Box | null | undefined): Box | null {
+  if (
+    !sourceRect ||
+    !Number.isFinite(sourceRect.width) ||
+    !Number.isFinite(sourceRect.height)
+  ) {
+    return null;
+  }
+  const width = Math.round(sourceRect.width);
+  const height = Math.round(sourceRect.height);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** Stable display label from the source display size, never from the encoded frame size. */
+export function resolutionLabel(size: Box | null | undefined): string | null {
+  const valid = sourceSize(size);
+  return valid ? `${valid.width}×${valid.height}` : null;
+}
+
+/** CSS `aspect-ratio` for any display size, including portrait screens. */
+export function aspectRatio(size: Box | null | undefined): string {
+  const valid = sourceSize(size);
+  if (!valid) return "16 / 10";
+  return `${Math.round((valid.width / valid.height) * 1000)} / 1000`;
+}
+
+/**
+ * CSS `aspect-ratio` for the card from a stable `1280×800` display label, so a 16:10 screen is
+ * not letterboxed in a 16:9 box. An unreadable label falls back to 16 / 10.
  */
 export function cardAspect(resolution: string | null): string {
   const m = resolution ? /^(\d+)\s*[×x]\s*(\d+)$/.exec(resolution.trim()) : null;
   if (!m) return "16 / 10";
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  if (w <= 0 || h <= 0) return "16 / 10";
-  const ratio = Math.min(2.4, Math.max(1.2, w / h));
-  return `${Math.round(ratio * 1000)} / 1000`;
+  return aspectRatio({ width: Number(m[1]), height: Number(m[2]) });
 }

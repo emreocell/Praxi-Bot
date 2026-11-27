@@ -3,11 +3,11 @@ import type { ScreenFit } from "./liveViewInput.ts";
 const KEY = "praxi.liveView.screenFit";
 
 /**
- * How a screen share sits in its box, by default: `cover` fills the box and crops the edges
- * (no bars around the picture); `contain` shows the whole screen with bars. A per-viewer
- * convenience, so any storage failure falls back to the default.
+ * How a screen share sits in its box, by default: `contain` shows the whole screen with bars;
+ * `cover` fills the box and crops the edges (the opt-in toggle). A per-viewer convenience, so
+ * any storage failure falls back to the default.
  */
-export const DEFAULT_SCREEN_FIT: ScreenFit = "cover";
+export const DEFAULT_SCREEN_FIT: ScreenFit = "contain";
 
 export function isScreenFit(value: unknown): value is ScreenFit {
   return value === "cover" || value === "contain";

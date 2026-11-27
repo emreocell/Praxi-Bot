@@ -786,11 +786,12 @@ export class MockLiveViewService {
       codec: "jpeg",
       width: w,
       height: h,
+      // The mock desktop is 1280x800; `w`/`h` are only the down-scaled encoded picture.
       source_rect: {
         x: 0,
         y: 0,
-        width: w,
-        height: h,
+        width: 1280,
+        height: 800,
         units: "physical_px"
       },
       geometry_revision: s.geometryRevision,

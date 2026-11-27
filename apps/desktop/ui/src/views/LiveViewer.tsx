@@ -20,6 +20,7 @@ import {
   computeImageRect,
   mapClientPointToNormalized
 } from "../lib/liveViewInput";
+import { aspectRatio, sourceSize } from "../lib/liveViewSizing";
 import { useScreenFit } from "../state/useScreenFit";
 import {
   createStageController,
@@ -464,6 +465,9 @@ export function LiveViewer({
         ? t("liveView.states.stale")
         : t(`liveView.states.${state.viewState}`);
 
+  // The frame's source rect is the remote display: its aspect must not follow the request size.
+  const stageSourceSize = state.latestFrame ? sourceSize(state.latestFrame.sourceRect) : null;
+
   const contained =
     state.latestFrame && stageBox.w > 0 && stageBox.h > 0
       ? computeImageRect(
@@ -689,9 +693,7 @@ export function LiveViewer({
               data-has-frame={frameUrl && state.latestFrame ? "true" : "false"}
               style={
                 frameUrl && state.latestFrame && screenFit === "contain"
-                  ? {
-                      aspectRatio: `${state.latestFrame.width} / ${state.latestFrame.height}`
-                    }
+                  ? { aspectRatio: aspectRatio(stageSourceSize) }
                   : undefined
               }
             >

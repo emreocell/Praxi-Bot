@@ -6,6 +6,7 @@ import { isMockMode } from "../api/mockMode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serverScreenIssue } from "../lib/botComputer";
 import { noScreenCode } from "../lib/computerLabel";
+import { resolutionLabel, sourceSize } from "../lib/liveViewSizing";
 import {
   type ComputerView, deriveView, IDLE_PAUSE_MS, measureFps, SCREEN_START_TIMEOUT_MS, type UnavailableReason
 } from "../lib/computerView";
@@ -208,6 +209,8 @@ export function useComputerView(opts: {
   const openBrowser = useCallback(() => openViewer(browserId), [openViewer, browserId]);
 
   const frame = state.latestFrame;
+  // The encoded frame is scaled to the request; only source_rect names the remote display.
+  const displaySize = live && frame ? sourceSize(frame.sourceRect) : null;
   // Design review (mock mode only): `?cv=starting|paused|offline` shows a state that is hard to catch.
   const forced = isMockMode() ? new URLSearchParams(window.location.search).get("cv") : null;
   const kind = forced === "starting" || forced === "paused" ? forced : forced === "offline" ? "unavailable" : derived.kind;
@@ -221,7 +224,7 @@ export function useComputerView(opts: {
         : derived.unavailable,
     frameUrl: live ? frameUrl : null,
     previewUrl,
-    resolution: live && frame ? `${frame.width}×${frame.height}` : null,
+    resolution: resolutionLabel(displaySize),
     fps: live ? fps : null,
     liveSinceMs,
     start,
