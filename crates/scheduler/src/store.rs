@@ -67,10 +67,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0018_schedule_author",
         include_str!("../migrations/0018_schedule_author.sql"),
     ),
+    (
+        "0019_standing_order_days",
+        include_str!("../migrations/0019_standing_order_days.sql"),
+    ),
 ];
 
 /// Schema version produced by the newest embedded migration.
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// Manual retries allowed per occurrence.
 pub const MAX_OCCURRENCE_RETRIES: u32 = 5;
@@ -227,6 +231,7 @@ impl ScheduleStore {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         schedule.spec.validate()?;
+        schedule.payload.validate()?;
         if let Some(precheck) = &schedule.precheck {
             precheck.validate()?;
         }
@@ -276,6 +281,7 @@ impl ScheduleStore {
     /// Fails if `schedule.spec` is invalid or on SQLite/JSON errors.
     pub fn upsert(&self, schedule: &Schedule) -> Result<()> {
         schedule.spec.validate()?;
+        schedule.payload.validate()?;
         if let Some(precheck) = &schedule.precheck {
             precheck.validate()?;
         }
@@ -401,6 +407,7 @@ impl ScheduleStore {
     /// Fails if the specification is invalid or on SQLite/JSON errors.
     pub fn update_definition(&self, schedule: &Schedule) -> Result<bool> {
         schedule.spec.validate()?;
+        schedule.payload.validate()?;
         if let Some(precheck) = &schedule.precheck {
             precheck.validate()?;
         }
@@ -1390,6 +1397,55 @@ impl ScheduleStore {
         }
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Count one run of a standing order against its daily cap. Returns `false`, counting
+    /// nothing, when `day` already has `cap` runs. Earlier days are forgotten.
+    ///
+    /// # Errors
+    /// Database error.
+    pub fn claim_standing_order_run(&self, id: TaskId, day: &str, cap: u32) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let id = id.to_string();
+        tx.execute(
+            "DELETE FROM standing_order_days WHERE schedule_id = ?1 AND day < ?2",
+            params![id, day],
+        )?;
+        let runs: u32 = tx
+            .query_row(
+                "SELECT runs FROM standing_order_days WHERE schedule_id = ?1 AND day = ?2",
+                params![id, day],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        if runs >= cap {
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO standing_order_days (schedule_id, day, runs) VALUES (?1, ?2, 1) \
+             ON CONFLICT(schedule_id, day) DO UPDATE SET runs = runs + 1",
+            params![id, day],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Runs a standing order has started on `day`.
+    ///
+    /// # Errors
+    /// Database error.
+    pub fn standing_order_runs(&self, id: TaskId, day: &str) -> Result<u32> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT runs FROM standing_order_days WHERE schedule_id = ?1 AND day = ?2",
+                params![id.to_string(), day],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0))
     }
 }
 

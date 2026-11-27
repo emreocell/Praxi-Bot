@@ -70,6 +70,11 @@ pub(crate) fn work_of(payload: &Payload) -> Result<ScheduleWork, SchedulerError>
             name: name.clone(),
             input: input.clone(),
         },
+        Payload::StandingOrder { .. } => ScheduleWork::Prompt(
+            payload
+                .standing_prompt()
+                .ok_or_else(|| exec_err("standing order prompt unavailable"))?,
+        ),
     })
 }
 
@@ -86,7 +91,10 @@ impl DaemonExecutor {
     /// The chat a firing posts to: the schedule's own, else the newest chat of
     /// the bot titled like the schedule, else a new one.
     fn chat_for(&self, s: &Schedule) -> Result<ChatId, SchedulerError> {
-        if s.external_input.is_none() && s.precheck.is_none() {
+        // A standing order runs often and mostly says "OK": each run gets a fresh chat so a
+        // long history never makes the next check dearer.
+        let fresh = matches!(s.payload, Payload::StandingOrder { .. });
+        if s.external_input.is_none() && s.precheck.is_none() && !fresh {
             if let Some(id) = s.chat_id {
                 let chat = self
                     .storage
@@ -224,7 +232,10 @@ impl DaemonExecutor {
     ) -> scheduler::Result<()> {
         // Network checks happen before a chat/run or any action exists. Only prompt payloads
         // require a model; local tools and workflow replay keep their existing gate paths.
-        if matches!(schedule.payload, Payload::AgentPrompt { .. }) {
+        if matches!(
+            schedule.payload,
+            Payload::AgentPrompt { .. } | Payload::StandingOrder { .. }
+        ) {
             let skip = schedule.misfire_policy == scheduler::MisfirePolicy::Skip;
             let attempts = if skip { 1 } else { 3 };
             let mut available = false;

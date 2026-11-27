@@ -9,6 +9,9 @@ export function usesEnglishFallback(locale: string, key: string): boolean {
     key.startsWith("chat.step.desktop_window.") ||
     // The newer pasted-secret kinds (labelled values, card numbers), #421.
     key.startsWith("pastedSecret.kind.labelled_") ||
-    key === "pastedSecret.kind.payment_card"
+    key === "pastedSecret.kind.payment_card" ||
+    // Standing orders (quiet checks), English and Turkish first.
+    key === "schedules.form.payloadKeptStanding" ||
+    key === "schedules.payload.standingOrder"
   );
 }

@@ -571,9 +571,11 @@ function ScheduleRow({
             <p className={`${styles.rowDoes} ${styles.clamp}`}>
               {payload.kind === "agent_prompt"
                 ? payload.text
-                : payload.kind === "unknown"
-                  ? t("schedules.payload.unknown")
-                  : t(`schedules.payload.${payload.kind}`, { name: payload.name })}
+                : payload.kind === "standing_order"
+                  ? t("schedules.payload.standingOrder", { text: payload.checklist })
+                  : payload.kind === "unknown"
+                    ? t("schedules.payload.unknown")
+                    : t(`schedules.payload.${payload.kind}`, { name: payload.name })}
             </p>
           </div>
           <div className={styles.rowControls}>
@@ -1681,7 +1683,13 @@ function ScheduleForm({
         </div>
 
         {keepsPayload ? (
-          <p className={formStyles.hint}>{t("schedules.form.payloadKept")}</p>
+          <p className={formStyles.hint}>
+            {t(
+              parsePayload(editing?.payload).kind === "standing_order"
+                ? "schedules.form.payloadKeptStanding"
+                : "schedules.form.payloadKept"
+            )}
+          </p>
         ) : (
           <label className={formStyles.field}>
             <span className={formStyles.label}>

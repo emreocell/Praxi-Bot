@@ -1057,7 +1057,11 @@ pub struct ScheduleDto {
     pub spec: Value,
     /// What it does: `{"kind": "agent_prompt", "text": "..."}`,
     /// `{"kind": "workflow", "name": "...", "params": {}}` or
-    /// `{"kind": "tool", "name": "...", "input": {}}`.
+    /// `{"kind": "tool", "name": "...", "input": {}}`, or a standing order that speaks only
+    /// when something needs you: `{"kind": "standing_order", "checklist": "...",
+    /// "active_hours": {"start": "08:00", "end": "22:00", "timezone": "Europe/Istanbul"},
+    /// "max_runs_per_day": 24}` (`active_hours` optional; each run ends `OK`, which creates
+    /// no notice, or `NEEDS_OWNER(reason)`, which does).
     pub payload: Value,
     /// Whether the timer is armed.
     pub enabled: bool,

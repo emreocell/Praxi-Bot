@@ -6763,6 +6763,7 @@
         "problems": "Sadece bir sorun olursa"
       },
       "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
+      "payloadKeptStanding": "Bu zamanlama bir kalıcı talimat: sana bir şey gerekmedikçe sessiz kalır. Kontrol listesi, etkin saatler ve günlük sınır burada değişmez.",
       "preview": "Önizle",
       "prompt": "İstem",
       "promptHint": "Bottan her seferinde yapması istenen şey.",
@@ -6797,6 +6798,7 @@
     "originBot": "Bot oluşturdu",
     "originBotHint": "Onayınla bir bot oluşturdu. Botlar yalnızca kendi oluşturdukları zamanlamaları değiştirebilir.",
     "payload": {
+      "standingOrder": "Kalıcı talimat: {{text}}",
       "tool": "{{name}} aracını çağırır",
       "unknown": "Özel görev",
       "workflow": "{{name}} iş akışını çalıştırır"

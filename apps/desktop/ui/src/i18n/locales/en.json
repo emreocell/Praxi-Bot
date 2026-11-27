@@ -6763,6 +6763,7 @@
         "problems": "Only if something goes wrong"
       },
       "payloadKept": "This schedule runs a workflow or tool; that part stays unchanged.",
+      "payloadKeptStanding": "This schedule is a standing order: it stays quiet unless something needs you. Its checklist, active hours and daily limit stay unchanged here.",
       "preview": "Preview",
       "prompt": "Prompt",
       "promptHint": "What the bot is asked to do each time.",
@@ -6797,6 +6798,7 @@
     "originBot": "Made by bot",
     "originBotHint": "A bot created this after you approved it. Bots can change only schedules they made themselves.",
     "payload": {
+      "standingOrder": "Standing order: {{text}}",
       "tool": "Calls tool {{name}}",
       "unknown": "Custom task",
       "workflow": "Runs workflow {{name}}"

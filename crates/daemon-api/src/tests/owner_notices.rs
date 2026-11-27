@@ -781,3 +781,173 @@ async fn a_run_that_asks_endlessly_makes_one_bounded_notice() {
         "the first are kept"
     );
 }
+
+// ------------------------------------------------------------ standing orders
+
+/// A standing order of `bot`, made through the API (so its definition is validated), and the
+/// durable kind of a run of it.
+async fn standing_order(t: &T, bot: &str) -> String {
+    let r = call(
+        t,
+        Method::POST,
+        "/v1/schedules",
+        Some(json!({
+            "bot_id": bot,
+            "name": "Backup disk",
+            "spec": {"every": {"seconds": 1800}},
+            "payload": {
+                "kind": "standing_order",
+                "checklist": "Is the backup disk under 90% full?",
+                "active_hours": {"start": "08:00", "end": "22:00", "timezone": "Europe/Istanbul"},
+                "max_runs_per_day": 12,
+            },
+        })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let id = r.json()["id"].as_str().unwrap().to_owned();
+    format!("turn:schedule:{id}")
+}
+
+fn finish(t: &T, run: RunId) {
+    t.state.agent().emit_run_event(
+        run,
+        Event::RunFinished(protocol::event::RunFinished {
+            run_id: run,
+            error: None,
+        }),
+    );
+}
+
+#[tokio::test]
+async fn a_standing_order_is_refused_when_its_definition_is_unreadable() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    for payload in [
+        json!({"kind": "standing_order", "checklist": "  "}),
+        json!({"kind": "standing_order", "checklist": "x", "max_runs_per_day": 0}),
+        json!({"kind": "standing_order", "checklist": "x", "max_runs_per_day": 289}),
+        json!({"kind": "standing_order", "checklist": "x",
+               "active_hours": {"start": "8am", "end": "22:00", "timezone": "UTC"}}),
+        json!({"kind": "standing_order", "checklist": "x",
+               "active_hours": {"start": "08:00", "end": "22:00", "timezone": "Nowhere/Land"}}),
+    ] {
+        let r = call(
+            &t,
+            Method::POST,
+            "/v1/schedules",
+            Some(json!({
+                "bot_id": bot, "name": "x", "spec": {"every": {"seconds": 600}}, "payload": payload,
+            })),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{payload}");
+        assert_eq!(r.json()["error"]["code"], "bad_schedule", "{payload}");
+    }
+}
+
+#[tokio::test]
+async fn a_standing_order_that_says_ok_makes_no_notice_and_one_that_needs_you_makes_one() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    t.state.start_notice_watcher();
+    let kind = standing_order(&t, &bot).await;
+    // The watcher handles events in order: if the OK runs made a notice it would come first.
+    for (n, said) in [
+        "Disk is at 41%.\n\nOK",
+        "**OK**",
+        "Mail from a client was already answered. OK so far.\nOK\n",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        finish(
+            &t,
+            scheduled_run_saying(&t, &bot, &format!("{kind}:{n}:1"), said, false),
+        );
+    }
+    let run = scheduled_run_saying(
+        &t,
+        &bot,
+        &format!("{kind}:9:1"),
+        "Disk is at 95%.\nNEEDS_OWNER(the backup disk is 95% full)",
+        false,
+    );
+    finish(&t, run);
+    wait_for_notices(&t, 1).await;
+    // Give a (wrong) notice from an OK run time to show up too.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let list = call(&t, Method::GET, "/v1/owner-notices", None)
+        .await
+        .json();
+    assert_eq!(list.as_array().unwrap().len(), 1, "{list}");
+    let n = &list[0];
+    assert_eq!(n["kind"], "blocked");
+    assert_eq!(n["title"], "Backup disk");
+    assert_eq!(n["reason"], "the backup disk is 95% full");
+    assert_eq!(n["run_id"], run.to_string());
+    assert_eq!(n["done"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn a_standing_order_without_a_clear_answer_is_reported_not_swallowed() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    t.state.start_notice_watcher();
+    let kind = standing_order(&t, &bot).await;
+    finish(
+        &t,
+        scheduled_run_saying(&t, &bot, &format!("{kind}:1:1"), "Looks fine to me.", false),
+    );
+    let list = wait_for_notices(&t, 1).await;
+    let n = &list[0];
+    assert_eq!(n["kind"], "blocked");
+    assert!(
+        n["reason"].as_str().unwrap().contains("without a clear OK"),
+        "{n}"
+    );
+}
+
+#[tokio::test]
+async fn what_a_standing_order_read_privately_stays_out_of_the_reason() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    t.state.start_notice_watcher();
+    let kind = standing_order(&t, &bot).await;
+    finish(
+        &t,
+        scheduled_run_saying(
+            &t,
+            &bot,
+            &format!("{kind}:1:1"),
+            "NEEDS_OWNER(your landlord wants the 4,200 EUR deposit by the 3rd)",
+            true,
+        ),
+    );
+    let list = wait_for_notices(&t, 1).await;
+    let reason = list[0]["reason"].as_str().unwrap();
+    assert!(reason.contains("open it in the app"), "{reason}");
+    assert!(!list.to_string().contains("landlord"));
+}
+
+#[tokio::test]
+async fn a_failed_standing_order_is_reported_like_any_failed_run() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    t.state.start_notice_watcher();
+    let kind = standing_order(&t, &bot).await;
+    let run = scheduled_run_saying(&t, &bot, &format!("{kind}:1:1"), "OK", false);
+    t.state
+        .storage()
+        .update_run_state(run, "failed", Some("provider unreachable"))
+        .unwrap();
+    t.state.agent().emit_run_event(
+        run,
+        Event::RunFinished(protocol::event::RunFinished {
+            run_id: run,
+            error: Some("provider unreachable".into()),
+        }),
+    );
+    let list = wait_for_notices(&t, 1).await;
+    assert_eq!(list[0]["kind"], "failed");
+}

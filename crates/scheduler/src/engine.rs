@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Clock, SystemClock};
 use crate::error::{Result, SchedulerError};
-use crate::model::{AttemptRun, MisfirePolicy, Schedule, ScheduleSpec};
+use crate::model::{AttemptRun, MisfirePolicy, Payload, Schedule, ScheduleSpec};
 use crate::store::ScheduleStore;
 use crate::webhook::{PendingReplay, ReplayGuard, WebhookMeta, prepare_webhook};
 
@@ -850,6 +850,30 @@ pub(crate) enum Dispatch {
     Skipped,
 }
 
+/// A standing order fires only inside its active hours and within its daily cap; nothing is
+/// started (and no model is called) otherwise. Takes the cap slot, so call it right before
+/// dispatching. Other payloads always may run.
+fn standing_order_may_run(store: &ScheduleStore, schedule: &Schedule, now: i64) -> Result<bool> {
+    let Payload::StandingOrder {
+        active_hours,
+        max_runs_per_day,
+        ..
+    } = &schedule.payload
+    else {
+        return Ok(true);
+    };
+    if let Some(hours) = active_hours
+        && !hours.contains(now)?
+    {
+        return Ok(false);
+    }
+    store.claim_standing_order_run(
+        schedule.id,
+        &schedule.payload.day_key(now),
+        *max_runs_per_day,
+    )
+}
+
 /// Every ingress shares this no-run-before-precheck boundary. A stale definition
 /// cannot finish its check and start work after an owner edit or deletion.
 pub(crate) async fn execute_checked(
@@ -912,6 +936,9 @@ pub(crate) async fn execute_checked(
         };
         fired.external_input = Some(input);
     }
+    if !standing_order_may_run(store, &current, now)? {
+        return Ok(Dispatch::Skipped);
+    }
     // The tenth failed check still fails open; the next firing is paused.
     let outcome = match occurrence {
         Some((due, attempt)) => executor.execute_attempt(&fired, due, attempt).await,
@@ -947,6 +974,8 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
                         .ok()
                         .flatten()
                         .is_some_and(|s| s.revision == fired.revision)
+                        && standing_order_may_run(&inner.store, &fired, inner.clock.wall_ms())
+                            .unwrap_or(false)
                         && inner.executor.execute(&fired).await.is_err()
                     {
                         let _ = inner.store.registry_failed(&fired);
