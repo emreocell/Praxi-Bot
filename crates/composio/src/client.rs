@@ -1018,16 +1018,7 @@ fn parse_tool(i: &Value) -> Option<RemoteTool> {
             300,
         ),
         schema,
-        tags: i
-            .get("tags")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .filter(|t| t.len() <= 40 && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-            .take(32)
-            .map(str::to_owned)
-            .collect(),
+        tags: parse_tags(i),
         method: ["http_method", "method"]
             .iter()
             .find_map(|k| i.get(k).and_then(Value::as_str))
@@ -1041,6 +1032,34 @@ fn parse_tool(i: &Value) -> Option<RemoteTool> {
     })
 }
 
+/// Tags as lower case letters and digits (`read-only-hint` is `readonlyhint`),
+/// so the risk class sees every spelling Composio may use. Over-long or empty
+/// tags are dropped with a warning; the hints the class depends on are kept
+/// first, so a long tag list cannot push `destructiveHint` out.
+fn parse_tags(i: &Value) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for raw in i
+        .get("tags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        let tag = crate::risk::normalize_tag(raw);
+        if raw.len() > 40 || tag.is_empty() {
+            eprintln!("warning: composio: dropped a tool tag (empty or longer than 40 bytes)");
+        } else if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags.sort_by_key(|t| !crate::risk::is_hint_tag(t));
+    if tags.len() > 32 {
+        eprintln!("warning: composio: dropped {} tool tags", tags.len() - 32);
+        tags.truncate(32);
+    }
+    tags
+}
+
 /// Body of `POST /tools/execute/{slug}`.
 ///
 /// Explicit account and concrete version fields verified against the local
@@ -1052,6 +1071,27 @@ fn execute_body(user_id: &str, version: &str, account_id: &str, arguments: &Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_tags_are_normalised_and_the_hints_survive_a_long_list() {
+        let many: Vec<String> = (0..40).map(|n| format!("tag-{n}")).collect();
+        let mut raw = many.clone();
+        raw.push("destructive-hint".to_owned());
+        raw.push("Read:Only_Hint".to_owned());
+        raw.push("x".repeat(41));
+        raw.push("--".to_owned());
+        raw.push("readOnlyHint".to_owned());
+        let tags = parse_tags(&json!({ "tags": raw }));
+        assert_eq!(tags.len(), 32);
+        assert!(tags.contains(&"destructivehint".to_owned()));
+        assert_eq!(tags.iter().filter(|t| *t == "readonlyhint").count(), 1);
+        assert!(
+            tags.iter()
+                .all(|t| t.chars().all(|c| c.is_ascii_alphanumeric()))
+        );
+        assert!(!tags.iter().any(|t| t.starts_with('x')));
+        assert_eq!(parse_tags(&json!({})), Vec::<String>::new());
+    }
 
     #[test]
     fn only_hosted_connect_links_on_composio_hosts_are_accepted() {

@@ -70,8 +70,13 @@ async fn mount_toolkit(h: &Harness, slug: &str, status: &str) {
         .mount(&h.server)
         .await;
     let action = |name: &str| {
+        let method = if name.starts_with("LIST") {
+            "GET"
+        } else {
+            "POST"
+        };
         json!({"slug": format!("{up}_{name}"), "description": name, "toolkit": {"slug": slug},
-            "version": "20260901_00",
+            "version": "20260901_00", "http_method": method,
             "input_parameters": {"type": "object", "properties": {"x": {"type": "string"}}}})
     };
     Mock::given(method("GET"))

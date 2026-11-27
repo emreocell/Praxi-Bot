@@ -110,7 +110,7 @@ async fn mount_accounts(h: &Harness, status: &str) {
             "input_parameters": {"type": "object", "properties": {"x": {"type": "string"}}}}),
         );
     }
-    items.push(json!({"slug": "GITHUB_LIST_REPOSITORY_ISSUES", "description": "list issues", "toolkit":{"slug":"github"}, "version":"20260901_00",
+    items.push(json!({"slug": "GITHUB_LIST_REPOSITORY_ISSUES", "description": "list issues", "toolkit":{"slug":"github"}, "version":"20260901_00", "http_method": "GET",
         "input_parameters": {"type": "object", "properties": {"owner": {"type": "string"}, "repo": {"type": "string"}},
         "required": ["owner", "repo"]}}));
     Mock::given(method("GET"))
@@ -597,7 +597,8 @@ async fn actions_can_be_previewed_before_connecting_and_use_the_bot_filter_on_ev
     let action = |slug, toolkit| {
         json!({
             "slug": slug, "description": "Find records", "toolkit": {"slug": toolkit},
-            "version": "20260901_00", "input_parameters": {"type": "object", "properties": {}}
+            "version": "20260901_00", "http_method": "GET",
+            "input_parameters": {"type": "object", "properties": {}}
         })
     };
     Mock::given(path("/tools"))
@@ -1791,7 +1792,7 @@ async fn a_slug_in_an_odd_letter_case_is_refused_as_unsupported_not_connected() 
 
 async fn mount_user_probe(h: &Harness, execute: ResponseTemplate) {
     let user_action = json!({"slug": "GITHUB_GET_THE_AUTHENTICATED_USER", "description": "who am I",
-        "toolkit": {"slug": "github"}, "version": "20260901_00",
+        "toolkit": {"slug": "github"}, "version": "20260901_00", "http_method": "GET",
         "input_parameters": {"type": "object", "properties": {}}});
     Mock::given(method("GET"))
         .and(path("/tools"))

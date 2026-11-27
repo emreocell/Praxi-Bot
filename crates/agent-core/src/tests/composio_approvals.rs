@@ -12,7 +12,14 @@ impl composio::Audit for Audit {
 }
 
 fn tool(slug: &str) -> Value {
+    // A lookup is a read only when Composio says GET.
+    let method = if slug.contains("_LIST_") {
+        "GET"
+    } else {
+        "POST"
+    };
     json!({"slug":slug,"toolkit":{"slug":"github"},"version":"20260901_00","description":slug,
+        "http_method":method,
         "input_parameters":{"type":"object","properties":{"owner":{"type":"string"}}}})
 }
 

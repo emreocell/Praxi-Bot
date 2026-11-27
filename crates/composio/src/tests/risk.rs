@@ -22,7 +22,7 @@ fn item(slug: &str, extra: Value) -> Value {
 /// One fake catalogue entry per class, plus the awkward ones.
 async fn with_catalog(h: &Harness) {
     let items = vec![
-        item("GITHUB_LIST_ISSUES", json!({})),
+        item("GITHUB_LIST_ISSUES", json!({"http_method": "GET"})),
         item("GITHUB_CREATE_ISSUE", json!({})),
         item("GITHUB_ODD_THING", json!({})),
         item("GITHUB_DELETE_REPOSITORY", json!({"http_method": "DELETE"})),
@@ -32,6 +32,12 @@ async fn with_catalog(h: &Harness) {
             json!({"http_method": "POST", "tags": ["readOnlyHint"]}),
         ),
         item("GITHUB_LIST_STARRED", json!({"http_method": "POST"})),
+        item("GITHUB_LIST_WATCHED", json!({})),
+        item("GITHUB_CREATE_INVOICE", json!({"http_method": "POST"})),
+        item(
+            "GITHUB_FIND_FORKS",
+            json!({"http_method": "POST", "tags": ["read-only-hint"]}),
+        ),
     ];
     Mock::given(path("/tools"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": items})))
@@ -93,6 +99,18 @@ async fn every_class_maps_to_its_effect_category_and_asking() {
         class_of("list_starred"),
         Risk::Write,
         "a POST lookup without the hint"
+    );
+
+    assert_eq!(
+        class_of("list_watched"),
+        Risk::Write,
+        "a lookup name with no method from Composio is not a read"
+    );
+    assert_eq!(class_of("create_invoice"), Risk::Money);
+    assert_eq!(
+        class_of("find_forks"),
+        Risk::Read,
+        "a hyphenated read-only tag is normalised"
     );
 
     let acc = PermissionCategory::Accounts;

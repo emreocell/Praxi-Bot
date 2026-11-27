@@ -2,8 +2,10 @@
 //! about it (HTTP method, tags, the words of its slug) and never from anything
 //! the model says. Unknown or ambiguous means `write`.
 //!
-//! - `read`: only looks something up. Runs without a card on every level that
-//!   allows reads.
+//! - `read`: only looks something up, and Composio says so: an explicit `GET` /
+//!   `HEAD` or a read-only hint. A POST, a missing or unknown method is at
+//!   least `write`, whatever the name or the shipped read table says. Runs
+//!   without a card on every level that allows reads.
 //! - `write` / `destructive`: change something in the app. They follow the
 //!   bot's level (on Full nothing asks).
 //! - `money`: spends, moves or commits money. Asks on every level, Full
@@ -95,14 +97,41 @@ const DESTRUCTIVE_NOUNS: &[&str] = &["ARCHIVE", "TRASH", "DROP", "BAN", "KICK", 
 const MONEY_VERBS: &[&str] = &["PAY", "PURCHASE", "BUY", "SUBSCRIBE", "WITHDRAW", "DONATE"];
 
 /// Words that mean money only when the action is not a lookup (`LIST_CHARGES`
-/// reads, `CREATE_CHARGE` charges).
+/// reads, `CREATE_CHARGE` charges). `UPGRADE` covers `UPGRADE_PLAN_TO_PRO`,
+/// `ORDER` covers `PLACE_ORDER`.
 const MONEY_WORDS: &[&str] = &[
     "CHARGE", "TRANSFER", "REFUND", "PAYMENT", "PAYOUT", "CHECKOUT", "MONEY", "FUNDS", "TOPUP",
+    "INVOICE", "INVOICES", "BILLING", "ORDER", "ORDERS", "UPGRADE",
 ];
 
-/// Verbs that change something. Words that are also nouns (`POST`, `COMMENT`,
-/// `LABEL`, `RUN`) are left out on purpose: a name without any listed word is
-/// `write` anyway, and a lookup like `GET_A_POST` must stay a read.
+/// Words that reach other people or change who may do what. Nouns too (`POST`,
+/// `ROLE`), so only a pure `LIST` / `SEARCH` over a `GET` may carry them and
+/// stay a read (`LIST_POSTS`, `LIST_ROLES`); `GET_INVITE_LINK` and
+/// `GET_A_POST` are `write`.
+const SIDE_EFFECT_WORDS: &[&str] = &[
+    "SHARE",
+    "SHARED",
+    "INVITE",
+    "INVITES",
+    "INVITATION",
+    "FORWARD",
+    "REPLY",
+    "POST",
+    "POSTS",
+    "TWEET",
+    "TWEETS",
+    "PERMISSION",
+    "PERMISSIONS",
+    "PERMIT",
+    "ROLE",
+    "ROLES",
+    "MEMBER",
+    "MEMBERS",
+];
+
+/// Verbs that change something. Words that are also nouns (`COMMENT`, `LABEL`,
+/// `RUN`) are left out on purpose: a name without any listed word is `write`
+/// anyway (a read needs explicit evidence).
 const WRITE: &[&str] = &[
     "CREATE",
     "SEND",
@@ -152,8 +181,30 @@ fn has(tokens: &[&str], words: &[&str]) -> bool {
     tokens.iter().any(|t| words.contains(t))
 }
 
-fn tag(meta: ActionMeta<'_>, name: &str) -> bool {
-    meta.tags.iter().any(|t| t.eq_ignore_ascii_case(name))
+/// Lower case letters and digits only, so `readOnlyHint`, `read-only-hint` and
+/// `READ_ONLY_HINT` are one tag.
+#[must_use]
+pub fn normalize_tag(tag: &str) -> String {
+    tag.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// Whether `meta` carries one of the (already normalised) spellings of a hint.
+fn tag(meta: ActionMeta<'_>, spellings: &[&str]) -> bool {
+    meta.tags
+        .iter()
+        .any(|t| spellings.contains(&normalize_tag(t).as_str()))
+}
+
+const READ_ONLY_TAGS: &[&str] = &["readonlyhint", "readonlyhinttrue", "readonly"];
+const DESTRUCTIVE_TAGS: &[&str] = &["destructivehint", "destructivehinttrue", "destructive"];
+
+/// Whether a normalised tag is one of the hints `classify` reads.
+#[must_use]
+pub fn is_hint_tag(normalized: &str) -> bool {
+    READ_ONLY_TAGS.contains(&normalized) || DESTRUCTIVE_TAGS.contains(&normalized)
 }
 
 /// The risk class of one action. `known_read` is the shipped table of
@@ -171,7 +222,7 @@ pub fn classify(toolkit: &str, tool_slug: &str, meta: ActionMeta<'_>, known_read
     let destructive = has(&tokens, DESTRUCTIVE)
         || (!read_head && has(&tokens, DESTRUCTIVE_NOUNS))
         || method == Some("DELETE")
-        || tag(meta, "destructiveHint");
+        || tag(meta, DESTRUCTIVE_TAGS);
     let money_verb = has(&tokens, MONEY_VERBS);
     let money_word = !read_head && !destructive && has(&tokens, MONEY_WORDS);
     // A slug that mentions a charge or a transfer after a lookup verb is
@@ -182,22 +233,22 @@ pub fn classify(toolkit: &str, tool_slug: &str, meta: ActionMeta<'_>, known_read
     if destructive {
         return Risk::Destructive;
     }
-    if known_read && !matches!(method, Some("PUT" | "PATCH" | "DELETE")) {
-        return Risk::Read;
-    }
-    let writes = has(&tokens, WRITE) || matches!(method, Some("PUT" | "PATCH"));
-    if writes {
+    if has(&tokens, WRITE) || matches!(method, Some("PUT" | "PATCH")) {
         return Risk::Write;
     }
-    let read_hint = tag(meta, "readOnlyHint");
-    // A POST that only reads says so with the hint; a lookup name alone is
-    // not enough then.
-    let method_allows = match method {
-        None | Some("GET" | "HEAD") => true,
-        Some("POST") => read_hint,
-        Some(_) => false,
-    };
-    if (read_head || read_hint) && method_allows {
+    let safe_method = matches!(method, Some("GET" | "HEAD"));
+    // Only a pure lookup over a GET may carry a side-effect word.
+    let pure_lookup = matches!(tokens.first(), Some(&("LIST" | "SEARCH"))) && safe_method;
+    if has(&tokens, SIDE_EFFECT_WORDS) && !pure_lookup {
+        return Risk::Write;
+    }
+    let read_hint = tag(meta, READ_ONLY_TAGS);
+    // Evidence a read needs: an explicit GET/HEAD, or the read-only hint on a
+    // request that is not a PUT/PATCH/DELETE (a POST that only reads, or a
+    // method Composio did not give). Without it the action is a write, even
+    // for a lookup name or a slug of the shipped table.
+    let evidence = safe_method || (read_hint && matches!(method, None | Some("POST")));
+    if evidence && (read_head || read_hint || known_read) {
         return Risk::Read;
     }
     Risk::Write
@@ -211,12 +262,17 @@ mod tests {
         ActionMeta { tags, method }
     }
 
+    /// The class of `slug` when Composio says it is a GET.
     fn c(slug: &str) -> Risk {
-        classify("x", slug, ActionMeta::default(), false)
+        classify("x", slug, meta(&[], Some("GET")), false)
+    }
+
+    fn tags(t: &[&str]) -> Vec<String> {
+        t.iter().map(ToString::to_string).collect()
     }
 
     #[test]
-    fn names_decide_when_metadata_is_silent() {
+    fn names_decide_over_a_get() {
         for (slug, want) in [
             ("X_LIST_ALL_CHANNELS", Risk::Read),
             ("X_GET_A_USER", Risk::Read),
@@ -226,7 +282,8 @@ mod tests {
             ("X_GET_PAYMENT", Risk::Read),
             ("X_LIST_SUBSCRIPTIONS", Risk::Read),
             ("X_LIST_UPDATED_FILES", Risk::Read),
-            ("X_GET_A_POST", Risk::Read),
+            ("X_GET_A_POST", Risk::Write),
+            ("X_LIST_POSTS", Risk::Read),
             ("X_GET_REPOSITORY_ARCHIVE", Risk::Read),
             ("X_ARCHIVE_REPOSITORY", Risk::Destructive),
             ("X_POST_A_TWEET", Risk::Write),
@@ -253,7 +310,6 @@ mod tests {
 
     #[test]
     fn metadata_can_only_raise_a_class_except_for_the_read_hint() {
-        let tags = |t: &[&str]| t.iter().map(ToString::to_string).collect::<Vec<_>>();
         let ro = tags(&["readOnlyHint"]);
         let destructive = tags(&["destructiveHint"]);
         let none: Vec<String> = Vec::new();
@@ -298,15 +354,214 @@ mod tests {
             classify("x", "X_PAY_ITEM", meta(&ro, None), false),
             Risk::Money
         );
-        // The shipped table of read-only slugs counts as read evidence, but a
-        // write method still wins.
+    }
+
+    #[test]
+    fn money_covers_invoices_billing_orders_and_plan_upgrades() {
+        for slug in [
+            "X_CREATE_INVOICE",
+            "X_CREATE_INVOICES",
+            "X_SEND_INVOICE",
+            "X_UPDATE_BILLING",
+            "X_UPDATE_BILLING_DETAILS",
+            "X_CREATE_ORDER",
+            "X_PLACE_ORDER",
+            "X_PLACE_ORDERS",
+            "X_UPGRADE_PLAN_TO_PRO",
+            "X_UPGRADE_PLAN",
+            "X_UPGRADE_SUBSCRIPTION",
+        ] {
+            assert_eq!(c(slug), Risk::Money, "{slug}");
+            assert_eq!(
+                classify("x", slug, ActionMeta::default(), false),
+                Risk::Money,
+                "{slug} without a method"
+            );
+        }
+        // Lookups stay reads; a delete is a delete, not a spend.
+        for slug in [
+            "X_LIST_INVOICES",
+            "X_GET_INVOICE",
+            "X_LIST_ORDERS",
+            "X_GET_ORDER",
+            "X_GET_BILLING_INFO",
+            "X_SEARCH_ORDERS",
+        ] {
+            assert_eq!(c(slug), Risk::Read, "{slug}");
+        }
+        assert_eq!(c("X_DELETE_INVOICE"), Risk::Destructive);
+        assert_eq!(c("X_CANCEL_ORDER"), Risk::Destructive);
+    }
+
+    #[test]
+    fn the_shipped_read_table_cannot_launder_a_post_or_a_missing_method() {
+        let none: Vec<String> = Vec::new();
+        let ro = tags(&["readOnlyHint"]);
+        for (method, want) in [
+            (Some("GET"), Risk::Read),
+            (Some("HEAD"), Risk::Read),
+            (Some("POST"), Risk::Write),
+            (Some("PUT"), Risk::Write),
+            (Some("PATCH"), Risk::Write),
+            (Some("DELETE"), Risk::Destructive),
+            (Some("TRACE"), Risk::Write),
+            (None, Risk::Write),
+        ] {
+            assert_eq!(
+                classify("x", "X_LIST_ITEMS", meta(&none, method), true),
+                want,
+                "{method:?}"
+            );
+            // The table counts as a name, never as evidence by itself.
+            assert_eq!(
+                classify("x", "X_ODD_NAME", meta(&none, method), true),
+                if method.is_some_and(|m| m == "GET" || m == "HEAD") {
+                    Risk::Read
+                } else if method == Some("DELETE") {
+                    Risk::Destructive
+                } else {
+                    Risk::Write
+                },
+                "{method:?} odd name"
+            );
+        }
+        // The hint is evidence on a POST and on an unknown method.
         assert_eq!(
-            classify("x", "X_ODD_NAME", meta(&none, None), true),
+            classify("x", "X_ODD_NAME", meta(&ro, Some("POST")), true),
             Risk::Read
         );
         assert_eq!(
-            classify("x", "X_ODD_NAME", meta(&none, Some("PUT")), true),
+            classify("x", "X_ODD_NAME", meta(&ro, None), true),
+            Risk::Read
+        );
+        assert_eq!(
+            classify("x", "X_ODD_NAME", meta(&ro, Some("PUT")), true),
             Risk::Write
+        );
+    }
+
+    #[test]
+    fn a_lookup_name_alone_is_not_a_read() {
+        // Missing or misspelled method keys reach classify as `None`.
+        for slug in [
+            "X_LIST_ITEMS",
+            "X_GET_A_USER",
+            "X_FETCH_EMAILS",
+            "X_SEARCH_X",
+        ] {
+            assert_eq!(
+                classify("x", slug, ActionMeta::default(), false),
+                Risk::Write,
+                "{slug}"
+            );
+        }
+        let ro = tags(&["readOnlyHint"]);
+        assert_eq!(
+            classify("x", "X_LIST_ITEMS", meta(&ro, None), false),
+            Risk::Read
+        );
+        // Unrecognised tags are no evidence.
+        let odd = tags(&["safe", "idempotent", "read"]);
+        assert_eq!(
+            classify("x", "X_LIST_ITEMS", meta(&odd, Some("POST")), false),
+            Risk::Write
+        );
+        assert_eq!(
+            classify("x", "X_LIST_ITEMS", meta(&odd, None), false),
+            Risk::Write
+        );
+    }
+
+    #[test]
+    fn side_effect_words_make_a_write_unless_a_pure_list_or_search_over_get() {
+        for slug in [
+            "X_GET_INVITE_LINK",
+            "X_GET_SHARED_LINK",
+            "X_FETCH_PERMISSIONS_FOR_FILE",
+            "X_GET_MEMBER",
+            "X_GET_A_POST",
+            "X_FIND_ROLE",
+            "X_FORWARD_MESSAGE",
+            "X_REPLY_TO_THREAD",
+            "X_TWEET",
+            "X_POST_A_TWEET",
+            "X_INVITE_USER",
+            "X_SHARE_FILE",
+        ] {
+            assert_eq!(c(slug), Risk::Write, "{slug} over GET");
+            assert_eq!(
+                classify("x", slug, ActionMeta::default(), false),
+                Risk::Write,
+                "{slug} without a method"
+            );
+            // Not even the hint or the shipped table lifts them off a POST.
+            let ro = tags(&["readOnlyHint"]);
+            assert_eq!(
+                classify("x", slug, meta(&ro, Some("POST")), true),
+                Risk::Write,
+                "{slug} with hint on POST"
+            );
+        }
+        for slug in [
+            "X_LIST_MEMBERS",
+            "X_LIST_ROLES",
+            "X_LIST_PERMISSIONS",
+            "X_SEARCH_POSTS",
+            "X_LIST_INVITES",
+            "X_LIST_SHARED_DRIVES",
+        ] {
+            assert_eq!(c(slug), Risk::Read, "{slug}");
+            assert_eq!(
+                classify("x", slug, ActionMeta::default(), false),
+                Risk::Write,
+                "{slug} without a method"
+            );
+        }
+        // Removing a member is a delete, not a plain write.
+        assert_eq!(c("X_REMOVE_MEMBER"), Risk::Destructive);
+    }
+
+    #[test]
+    fn tag_spellings_are_normalised() {
+        let none: Vec<String> = Vec::new();
+        for spelling in [
+            "readOnlyHint",
+            "read-only-hint",
+            "READ_ONLY_HINT",
+            "readOnlyHint:true",
+            "read only hint",
+        ] {
+            let t = tags(&[spelling]);
+            assert_eq!(
+                classify("x", "X_DO_THING", meta(&t, Some("POST")), false),
+                Risk::Read,
+                "{spelling}"
+            );
+        }
+        // `:false` is not the hint.
+        let t = tags(&["readOnlyHint:false"]);
+        assert_eq!(
+            classify("x", "X_DO_THING", meta(&t, Some("POST")), false),
+            Risk::Write
+        );
+        for spelling in [
+            "destructiveHint",
+            "destructive-hint",
+            "DESTRUCTIVE",
+            "destructive:hint",
+        ] {
+            let t = tags(&[spelling]);
+            assert_eq!(
+                classify("x", "X_LIST_ITEMS", meta(&t, Some("GET")), false),
+                Risk::Destructive,
+                "{spelling}"
+            );
+        }
+        assert_eq!(normalize_tag("Read-Only/Hint:1"), "readonlyhint1");
+        assert!(is_hint_tag("readonlyhint") && !is_hint_tag("safe"));
+        assert_eq!(
+            classify("x", "X_LIST_ITEMS", meta(&none, Some("GET")), false),
+            Risk::Read
         );
     }
 
@@ -316,14 +571,14 @@ mod tests {
             classify(
                 "stripe",
                 "STRIPE_LIST_CHARGES",
-                ActionMeta::default(),
+                meta(&[], Some("GET")),
                 false
             ),
             Risk::Read
         );
         // A toolkit named like a verb must not change the class of its actions.
         assert_eq!(
-            classify("send", "SEND_LIST_ITEMS", ActionMeta::default(), false),
+            classify("send", "SEND_LIST_ITEMS", meta(&[], Some("GET")), false),
             Risk::Read
         );
     }

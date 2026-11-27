@@ -35,15 +35,17 @@ Composio integration. Tool inputs and results pass through Composio.
 
 Each action on an app's page has a class next to it. Praxi decides the class
 from what Composio says about the action (its request method, its tags and the
-words in its name), never from what a bot says. When Praxi cannot tell, the
-action counts as **Changes things**.
+words in its name), never from what a bot says. An action is **Read only**
+only when Composio says it is a `GET` or `HEAD` request, or marks it read-only.
+When Praxi cannot tell (a `POST`, or no request method), the action counts as
+**Changes things**, even if its name starts with `list` or `get`.
 
 | Class | What it does | Does it ask? |
 |---|---|---|
 | **Read only** | Looks things up (list, get, search, fetch). | No card on any level that allows reading. |
 | **Changes things** | Creates, sends or updates something. This is also the default for an unclear name. | Follows the bot's access level: it asks on Ask and Balanced, and runs on Full. |
 | **Deletes** | Deletes, removes or revokes something. | Follows the bot's access level, like the row above. |
-| **Moves money** | Pays, charges, buys, subscribes, transfers or refunds. | Always asks, on every level, Full included. No "always allow" covers it. |
+| **Moves money** | Pays, charges, buys, subscribes, transfers, refunds, invoices, orders, changes billing or upgrades a plan. | Always asks, on every level, Full included. No "always allow" covers it. |
 
 On Full, a write or delete runs without a card, in the same runs the Full
 level covers everywhere else (see "Full access: asks only before spending
@@ -51,8 +53,11 @@ money" in [Chatting and approvals](chatting-and-approvals.md)). Before Full, a
 bot that has read untrusted content (a web page, a mail) is also asked before a
 write, delete or payment that would send data out; that check does not apply to
 reads.
-Names with a charge or payment word that only look something up, such as
-`list charges`, stay **Read only**. A name that mixes a lookup with a payment
+Names with a charge or payment word that only look something up over a `GET`,
+such as `list charges`, stay **Read only**. Names that share, invite, forward,
+reply, post or change roles, permissions or members (`get invite link`) count
+as **Changes things**; only a plain `list` or `search` over a `GET` (`list
+members`) stays **Read only**. A name that mixes a lookup with a payment
 verb, such as `get and pay`, counts as **Moves money**.
 
 Use **Sign out of Composio** on the account card to suspend access to all

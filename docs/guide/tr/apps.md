@@ -34,22 +34,29 @@ Praxi'nin bot erişimi ve onay kuralları geçerlidir.
 
 Uygulama sayfasında her işlemin yanında bir sınıf görürsün. Sınıfı Praxi,
 Composio'nun işlem hakkında söylediklerinden (istek yöntemi, etiketler ve adındaki
-sözcükler) belirler; botun söylediği hiçbir şey sınıfı değiştirmez. Praxi
-emin olamazsa işlem **Değişiklik yapar** sayılır.
+sözcükler) belirler; botun söylediği hiçbir şey sınıfı değiştirmez. Bir işlem
+yalnızca Composio onun `GET` ya da `HEAD` isteği olduğunu söylerse ya da salt
+okunur diye işaretlerse **Sadece okur** olur. Praxi emin olamazsa (`POST` ya da
+istek yöntemi yok) adı `list` veya `get` ile başlasa bile işlem **Değişiklik
+yapar** sayılır.
 
 | Sınıf | Ne yapar | Sorar mı? |
 |---|---|---|
 | **Sadece okur** | Bilgi arar (listeler, getirir, arar). | Okumaya izin veren her düzeyde kart çıkmaz. |
 | **Değişiklik yapar** | Bir şey oluşturur, gönderir ya da günceller. Adı belirsiz işlemler de buraya düşer. | Botun erişim düzeyine bağlıdır: Sor ve Dengeli'de sorar, Tam erişimde sormadan çalışır. |
 | **Siler** | Bir şeyi siler, kaldırır ya da iptal eder. | Botun erişim düzeyine bağlıdır, üstteki satır gibi. |
-| **Para hareketi yapar** | Ödeme yapar, çeker, satın alır, abone olur, para aktarır ya da iade eder. | Her düzeyde, Tam erişim dahil, her zaman sorar. Hiçbir "her zaman izin ver" bunu kapsamaz. |
+| **Para hareketi yapar** | Ödeme yapar, çeker, satın alır, abone olur, para aktarır, iade eder, fatura keser, sipariş verir, fatura bilgisini değiştirir ya da planı yükseltir. | Her düzeyde, Tam erişim dahil, her zaman sorar. Hiçbir "her zaman izin ver" bunu kapsamaz. |
 
 Tam erişimde bir değişiklik ya da silme kart çıkmadan çalışır; bu, Tam erişimin
 her yerde kapsadığı çalıştırmalar için geçerlidir (bkz. "Tam erişim" bölümü,
 Sohbet ve onaylar). Tam erişim dışında, güvenilmeyen içerik (bir web sayfası, bir
 e-posta) okumuş bir bot, veri gönderebilecek bir değişiklik, silme ya da
 ödemeden önce ayrıca sorulur; bu denetim okumalar için uygulanmaz.
-Yalnızca bilgi arayan `list charges` gibi adlar **Sadece okur** kalır;
+`GET` ile yalnızca bilgi arayan `list charges` gibi adlar **Sadece okur** kalır.
+Paylaşan, davet eden, ileten, yanıtlayan, gönderi atan ya da rol, izin veya üye
+değiştiren adlar (`get invite link`) **Değişiklik yapar** sayılır; yalnızca
+`GET` üzerinden düz bir `list` ya da `search` (`list members`) **Sadece okur**
+kalır.
 `get and pay` gibi arama ile ödeme fiilini karıştıran adlar **Para hareketi
 yapar** sayılır.
 
