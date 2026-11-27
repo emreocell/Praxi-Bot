@@ -7,9 +7,11 @@
 //! `BYMONTHDAY`, `BYMONTH` and `WKST`. Anything else is reported as not
 //! expandable so the caller can fall back to the series master.
 
+use std::collections::HashSet;
+
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc, Weekday};
 
-use crate::ical::{Moment, Vevent, parse_duration};
+use crate::ical::{Budget, Moment, Vevent, parse_duration};
 
 /// Most occurrences one expansion returns.
 const MAX_OCCURRENCES: usize = 2000;
@@ -72,6 +74,10 @@ pub fn parse(rule: &str) -> Result<Rule, String> {
     let rule = rule.trim();
     if rule.is_empty() || rule.len() > 400 || rule.contains(['\r', '\n']) {
         return Err("the recurrence rule is empty or too long".into());
+    }
+    // A rule is plain ASCII; anything else is not one (and `BYDAY` is cut by byte below).
+    if !rule.is_ascii() {
+        return Err("the recurrence rule may only use plain ASCII characters".into());
     }
     let mut r = Rule {
         freq: Freq::Daily,
@@ -159,7 +165,46 @@ pub fn parse(rule: &str) -> Result<Rule, String> {
     if r.freq == Freq::Yearly && !r.by_day.is_empty() {
         r.expandable = false;
     }
+    // A repeated value must not repeat the work (or the occurrence).
+    let mut seen = Vec::new();
+    r.by_day.retain(|d| {
+        let new = !seen.contains(d);
+        if new {
+            seen.push(*d);
+        }
+        new
+    });
+    r.by_month_day.sort_unstable();
+    r.by_month_day.dedup();
+    r.by_month.sort_unstable();
+    r.by_month.dedup();
+    never_matches(&r)?;
     Ok(r)
+}
+
+/// Longest each month can be (February 29 counts).
+const LONGEST_MONTH: [i32; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/// Reject a rule whose `BYMONTH` and `BYMONTHDAY` can never meet (the 31st of
+/// February): it would be walked for every period and never produce a date.
+fn never_matches(r: &Rule) -> Result<(), String> {
+    if r.freq == Freq::Weekly || r.by_month_day.is_empty() {
+        return Ok(());
+    }
+    let possible = |m: u32| {
+        let longest = LONGEST_MONTH[usize::try_from(m - 1).unwrap_or(0).min(11)];
+        r.by_month_day.iter().any(|d| d.abs() <= longest)
+    };
+    let any = if r.by_month.is_empty() {
+        (1..=12).any(possible)
+    } else {
+        r.by_month.iter().copied().any(possible)
+    };
+    if any {
+        Ok(())
+    } else {
+        Err("the recurrence rule never produces a date (for example the 31st of February)".into())
+    }
 }
 
 /// `UNTIL`: a date, a local time or a UTC time. The flag says it is UTC.
@@ -177,7 +222,7 @@ fn until(v: &str) -> Result<(NaiveDateTime, bool), String> {
 
 fn days_in_month(y: i32, m: u32) -> u32 {
     let next = if m == 12 {
-        NaiveDate::from_ymd_opt(y + 1, 1, 1)
+        NaiveDate::from_ymd_opt(y.saturating_add(1), 1, 1)
     } else {
         NaiveDate::from_ymd_opt(y, m + 1, 1)
     };
@@ -223,10 +268,23 @@ fn add_months(y: i32, m0: u32, add: u32) -> (i32, u32) {
     )
 }
 
+fn add_days(d: NaiveDate, n: i64) -> Option<NaiveDate> {
+    d.checked_add_signed(Duration::try_days(n)?)
+}
+
 impl Rule {
     /// Walk the dates of the series from `start` (local time); `visit` returns `false` to stop.
+    /// Every period costs `budget`; the walk ends quietly when it is gone.
     #[allow(clippy::too_many_lines)] // one arm per frequency, each short; splitting hides the shared `emit`
-    fn walk(&self, start: NaiveDateTime, mut visit: impl FnMut(NaiveDateTime) -> bool) {
+    fn walk(
+        &self,
+        start: NaiveDateTime,
+        budget: &mut Budget,
+        mut visit: impl FnMut(NaiveDateTime) -> bool,
+    ) {
+        // A period looks at every listed value: that is what it costs.
+        let per_period =
+            1 + (self.by_day.len() + self.by_month_day.len() + self.by_month.len()) as u64;
         let time = start.time();
         let first = start.date();
         let day_ok = |d: NaiveDate| {
@@ -250,10 +308,13 @@ impl Rule {
             visit(d.and_time(time))
         };
         for k in 0..MAX_PERIODS {
+            if !budget.spend(per_period) {
+                return;
+            }
             let step = i64::from(k) * i64::from(self.interval);
             match self.freq {
                 Freq::Daily => {
-                    let Some(d) = first.checked_add_signed(Duration::days(step)) else {
+                    let Some(d) = add_days(first, step) else {
                         return;
                     };
                     if day_ok(d) && !emit(d) {
@@ -262,16 +323,15 @@ impl Rule {
                 }
                 Freq::Weekly => {
                     let back = i64::from(first.weekday().days_since(self.wkst));
-                    let Some(week) = first.checked_add_signed(Duration::days(step * 7 - back))
-                    else {
+                    let Some(week) = add_days(first, step * 7 - back) else {
                         return;
                     };
                     let mut days: Vec<NaiveDate> = if self.by_day.is_empty() {
-                        vec![week + Duration::days(back)]
+                        add_days(week, back).into_iter().collect()
                     } else {
                         self.by_day
                             .iter()
-                            .map(|(_, w)| week + Duration::days(i64::from(w.days_since(self.wkst))))
+                            .filter_map(|(_, w)| add_days(week, i64::from(w.days_since(self.wkst))))
                             .collect()
                     };
                     days.sort();
@@ -286,6 +346,9 @@ impl Rule {
                 }
                 Freq::Monthly => {
                     let (y, m) = add_months(first.year(), first.month0(), k * self.interval);
+                    if NaiveDate::from_ymd_opt(y, m, 1).is_none() {
+                        return; // past the last year a date can name
+                    }
                     let mut days: Vec<u32> = if !self.by_day.is_empty() {
                         self.by_day
                             .iter()
@@ -321,6 +384,9 @@ impl Rule {
                     let y = first
                         .year()
                         .saturating_add(i32::try_from(step).unwrap_or(i32::MAX));
+                    if y > NaiveDate::MAX.year() {
+                        return;
+                    }
                     let months = if self.by_month.is_empty() {
                         vec![first.month()]
                     } else {
@@ -338,6 +404,7 @@ impl Rule {
                                 .collect()
                         };
                         days.sort_unstable();
+                        days.dedup();
                         for d in days {
                             if let Some(date) = NaiveDate::from_ymd_opt(y, m, d)
                                 && !emit(date)
@@ -360,6 +427,7 @@ pub(crate) fn occurrences(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
     skip: &[DateTime<Utc>],
+    budget: &mut Budget,
 ) -> Option<Vec<(Moment, Moment)>> {
     let rule = parse(&master.get("RRULE")?.value)
         .ok()
@@ -372,7 +440,7 @@ pub(crate) fn occurrences(
             .and_then(|p| parse_duration(&p.value))
             .unwrap_or_else(Duration::zero),
     };
-    let excluded: Vec<DateTime<Utc>> = master
+    let excluded: HashSet<DateTime<Utc>> = master
         .all("EXDATE")
         .flat_map(|p| {
             p.value.split(',').filter_map(move |v| {
@@ -397,7 +465,7 @@ pub(crate) fn occurrences(
         Moment::Local(_, _) => Moment::Local(n, tz),
     };
     let mut out = Vec::new();
-    rule.walk(naive, |n| {
+    rule.walk(naive, budget, |n| {
         let s = make(n);
         let Some(s_utc) = s.to_utc() else {
             return true;
@@ -408,7 +476,9 @@ pub(crate) fn occurrences(
         if past_until || s_utc >= to || out.len() >= MAX_OCCURRENCES {
             return false;
         }
-        let e = s.plus(length);
+        let Some(e) = s.plus(length) else {
+            return true;
+        };
         let e_utc = e.to_utc().unwrap_or(s_utc);
         let overlaps = e_utc > from || (length.is_zero() && s_utc >= from);
         if overlaps && !excluded.contains(&s_utc) {
@@ -436,11 +506,17 @@ mod tests {
     }
 
     fn starts(v: &Vevent, from: &str, to: &str) -> Vec<String> {
-        occurrences(v, utc(from), utc(to), &[])
-            .unwrap()
-            .into_iter()
-            .map(|(s, _)| s.display())
-            .collect()
+        occurrences(
+            v,
+            utc(from),
+            utc(to),
+            &[],
+            &mut Budget::new(100_000, 10_000_000),
+        )
+        .unwrap()
+        .into_iter()
+        .map(|(s, _)| s.display())
+        .collect()
     }
 
     #[test]
@@ -554,5 +630,121 @@ mod tests {
                 .unwrap()
                 .expandable
         );
+    }
+
+    #[test]
+    fn a_rule_is_plain_ascii_and_a_weekday_is_never_cut_inside_a_character() {
+        for bad in [
+            "FREQ=WEEKLY;BYDAY=\u{e9}a",
+            "FREQ=MONTHLY;BYDAY=1\u{e9}a",
+            "FREQ=MONTHLY;BYDAY=\u{e9}\u{e9}",
+            "FREQ=WEEKLY;BYDAY=M\u{d6}",
+            "FREQ=DAILY;BYMONTH=\u{ff11}",
+            "FREQ=WEEKLY;BYDAY=\u{1F600}",
+        ] {
+            assert!(parse(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn repeated_values_do_not_repeat_the_work_or_the_occurrence() {
+        let r = parse("FREQ=MONTHLY;BYMONTH=3,3,3,11;BYMONTHDAY=5,5,-1,-1;BYDAY=MO,MO").unwrap();
+        assert_eq!(r.by_month, [3, 11]);
+        assert_eq!(r.by_month_day, [-1, 5]);
+        assert_eq!(r.by_day.len(), 1);
+        // Each date comes out once, not once per repeat.
+        let v = series("RRULE:FREQ=YEARLY;BYMONTH=11,11;BYMONTHDAY=2,2,2;COUNT=3");
+        assert_eq!(
+            starts(&v, "2026-01-01T00:00:00Z", "2031-01-01T00:00:00Z"),
+            [
+                "2026-11-02T09:00:00Z",
+                "2027-11-02T09:00:00Z",
+                "2028-11-02T09:00:00Z"
+            ]
+        );
+        // Two hundred copies of one weekday are one weekday.
+        let many = format!("FREQ=WEEKLY;BYDAY={}", vec!["MO"; 90].join(","));
+        assert_eq!(parse(&many).unwrap().by_day.len(), 1);
+    }
+
+    #[test]
+    fn a_rule_that_can_never_produce_a_date_is_refused() {
+        for bad in [
+            "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=31",
+            "FREQ=DAILY;BYMONTH=4,6;BYMONTHDAY=31",
+            "FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=30,-31",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        for ok in [
+            "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+            "FREQ=MONTHLY;BYMONTHDAY=31",
+            "FREQ=YEARLY;BYMONTH=2,3;BYMONTHDAY=31",
+            "FREQ=MONTHLY;BYMONTHDAY=-1",
+        ] {
+            assert!(parse(ok).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn the_work_budget_ends_a_walk_that_keeps_finding_nothing() {
+        // The 29th of February: nothing for years at a time, so the walk would run for ever.
+        let v = series("RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=29");
+        let mut budget = Budget::new(10, 2_000);
+        let found = occurrences(
+            &v,
+            utc("2026-01-01T00:00:00Z"),
+            utc("2090-01-01T00:00:00Z"),
+            &[],
+            &mut budget,
+        )
+        .unwrap();
+        assert!(budget.exhausted());
+        assert!(found.len() <= 1, "{}", found.len());
+        // With room it finds them all.
+        let mut roomy = Budget::new(1_000, 20_000_000);
+        let found = occurrences(
+            &v,
+            utc("2026-01-01T00:00:00Z"),
+            utc("2040-01-01T00:00:00Z"),
+            &[],
+            &mut roomy,
+        )
+        .unwrap();
+        assert!(!roomy.exhausted());
+        assert_eq!(found.len(), 3); // 2028, 2032, 2036
+    }
+
+    #[test]
+    fn dates_past_the_last_year_end_the_walk_instead_of_panicking() {
+        for rule in [
+            "FREQ=WEEKLY;INTERVAL=1000;BYDAY=MO,TU",
+            "FREQ=WEEKLY;INTERVAL=1000",
+            "FREQ=DAILY;INTERVAL=1000",
+            "FREQ=MONTHLY;INTERVAL=1000",
+            "FREQ=YEARLY;INTERVAL=1000",
+            "FREQ=YEARLY;INTERVAL=1000;BYMONTH=2,3;BYMONTHDAY=1,-1",
+        ] {
+            let v = series(&format!("RRULE:{rule}"));
+            // A window in the far future keeps the walk going through every period.
+            let _ = occurrences(
+                &v,
+                DateTime::<Utc>::MAX_UTC - Duration::days(1),
+                DateTime::<Utc>::MAX_UTC,
+                &[],
+                &mut Budget::new(100, 100_000_000),
+            );
+        }
+        // A series that starts on the last day of the calendar.
+        let ics = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:s\nDTSTART:99991231T090000Z\nDTEND:99991231T100000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,SU\nEND:VEVENT\nEND:VCALENDAR\n";
+        let v = vevents(ics).remove(0);
+        let got = occurrences(
+            &v,
+            utc("9999-12-01T00:00:00Z"),
+            utc("9999-12-31T23:59:59Z"),
+            &[],
+            &mut Budget::new(100, 10_000_000),
+        );
+        assert!(got.is_some());
     }
 }

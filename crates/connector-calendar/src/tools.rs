@@ -82,7 +82,7 @@ fn account_prop() -> Value {
 pub fn tools(connector: &Arc<CalendarConnector>) -> Vec<Arc<dyn Tool>> {
     let when = "YYYY-MM-DD (whole day) or RFC 3339 with offset, e.g. 2026-11-20T09:00:00+01:00";
     let attendees = json!({"type":"array","maxItems":MAX_ATTENDEES,"items":{"type":"string"},
-        "description":"E-mail addresses to invite. The user is asked before anything is sent."});
+        "description":"E-mail addresses to invite. Invitations are sent, so depending on the permission level the user is asked first."});
     let recurrence = "iCalendar recurrence rule, e.g. FREQ=WEEKLY;BYDAY=MO,WE;COUNT=10 or FREQ=MONTHLY;BYDAY=2TU;UNTIL=20271231";
     let specs = [
         (
@@ -124,8 +124,9 @@ pub fn tools(connector: &Arc<CalendarConnector>) -> Vec<Arc<dyn Tool>> {
                     "utc_offset":{"type":"string","description":"Local time zone as an offset, e.g. +01:00 or -05:00. Default: the offset of `from`, else UTC."}
                 },"required":["from","to"]}),
                 Effect::Read,
-                // Times only, no event text: private, but nothing a third party wrote.
-                ContentClass::private_read(),
+                // Times only, no event text: private, but nothing a third party wrote. The
+                // requested range does go to the calendar servers, so it is egress too.
+                ContentClass::declared(false, true, true),
             ),
         ),
         (
@@ -134,7 +135,7 @@ pub fn tools(connector: &Arc<CalendarConnector>) -> Vec<Arc<dyn Tool>> {
                 CREATE,
                 "Add an event to the calendar, optionally repeating (`recurrence`) and with attendees. \
                  With `attendees` invitations are sent (by the calendar server, or by e-mail with an .ics) \
-                 and the user is asked first; without them nobody is notified. \
+                 and, depending on the permission level, the user is asked first; without them nobody is notified. \
                  Example: {\"summary\":\"Dentist\",\"start\":\"2026-11-20T09:00:00+01:00\",\"end\":\"2026-11-20T10:00:00+01:00\"}",
                 json!({"type":"object","properties":{
                     "account": account_prop(),
@@ -158,7 +159,8 @@ pub fn tools(connector: &Arc<CalendarConnector>) -> Vec<Arc<dyn Tool>> {
                  notes, repeat rule or attendees. Only the fields you pass change. If only `start` is given \
                  the event keeps its length. For a repeating event the whole series changes. `attendees` is \
                  the complete new list (people left out are removed and told). Changing an event that has \
-                 attendees tells them, so pass notify_attendees=true; the user is asked first. \
+                 attendees tells them (whatever the change, a note included), so pass notify_attendees=true; \
+                 depending on the permission level the user is asked first. \
                  Example: {\"uid\":\"abc123@example.com\",\"start\":\"2026-11-21T09:00:00+01:00\"}",
                 json!({"type":"object","properties":{
                     "account": account_prop(),
@@ -180,7 +182,9 @@ pub fn tools(connector: &Arc<CalendarConnector>) -> Vec<Arc<dyn Tool>> {
             Kind::Delete,
             spec(
                 DELETE,
-                "Delete one event by its uid (from calendar_list_events). Irreversible: requires user approval. \
+                "Delete one event by its uid (from calendar_list_events). Irreversible. Depending on the \
+                 permission level the user may be asked first. If other people are on the event and \
+                 the calendar server cancels it for them, they are told. \
                  Example: {\"uid\":\"abc123@example.com\"}",
                 json!({"type":"object","properties":{
                     "account": account_prop(),
@@ -401,7 +405,10 @@ impl Tool for CalendarTool {
     }
 
     /// A call that tells other people (invitations, a change to an event that
-    /// has attendees) is confirmed every time, however permissive the policy.
+    /// has attendees) goes to the approval gate like `email_send` does. What the gate
+    /// does with it (ask, or let a trusted Full-access run through) is the permission
+    /// engine's rule, not this tool's. A delete has none of its own: it is
+    /// `Effect::Destructive` and follows the level.
     fn always_ask_for(&self, input: &Value) -> bool {
         let names = |k: &str| {
             input
@@ -535,14 +542,15 @@ impl Tool for CalendarTool {
             }
             Kind::Delete => {
                 let i: DeleteInput = parse(input)?;
-                let deleted = self
+                let client = self.conn.pick(i.account.as_deref()).map_err(fail)?;
+                let removed = self
                     .conn
-                    .pick(i.account.as_deref())
-                    .map_err(fail)?
-                    .delete(&i.uid)
+                    .delete_event(&client, bot, &i.uid)
                     .await
                     .map_err(fail)?;
-                Ok(json_out(json!({"deleted": deleted})))
+                Ok(json_out(
+                    json!({"deleted": removed.deleted, "invitations": removed.invitations}),
+                ))
             }
         }
     }

@@ -1635,6 +1635,7 @@ dependencies = [
  "tool-registry",
  "url",
  "uuid",
+ "web-tools",
 ]
 
 [[package]]

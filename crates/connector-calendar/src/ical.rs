@@ -1,6 +1,8 @@
 //! Just enough iCalendar (RFC 5545): read `VEVENT`s, write one, and patch an
 //! existing one without losing the properties we do not understand.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
@@ -118,7 +120,9 @@ fn escape(v: &str) -> String {
             ';' => out.push_str("\\;"),
             ',' => out.push_str("\\,"),
             '\n' => out.push_str("\\n"),
-            '\r' => {}
+            '\t' => out.push(c),
+            // Other control characters (and a bare CR) cannot be written in a content line.
+            c if c.is_control() => {}
             c => out.push(c),
         }
     }
@@ -223,10 +227,10 @@ impl Vevent {
         }
         let start = self.start()?;
         if let Some(d) = self.get("DURATION").and_then(|p| parse_duration(&p.value)) {
-            return Some(start.plus(d));
+            return start.plus(d);
         }
         match start {
-            Moment::Date(_) => Some(start.plus(Duration::days(1))),
+            Moment::Date(_) => start.plus(Duration::days(1)),
             _ => None,
         }
     }
@@ -334,11 +338,15 @@ impl Moment {
         matches!(self, Self::Date(_))
     }
 
-    pub fn plus(self, d: Duration) -> Self {
+    /// `self` moved by `d`; `None` when that leaves the range of dates (a hostile
+    /// `DURATION` or `DTSTART` must not be able to panic the daemon).
+    pub fn plus(self, d: Duration) -> Option<Self> {
         match self {
-            Self::Date(x) => Self::Date(x + Duration::days(d.num_days().max(1))),
-            Self::Utc(t) => Self::Utc(t + d),
-            Self::Local(n, tz) => Self::Local(n + d, tz),
+            Self::Date(x) => x
+                .checked_add_signed(Duration::try_days(d.num_days().max(1))?)
+                .map(Self::Date),
+            Self::Utc(t) => t.checked_add_signed(d).map(Self::Utc),
+            Self::Local(n, tz) => n.checked_add_signed(d).map(|n| Self::Local(n, tz)),
         }
     }
 
@@ -370,7 +378,7 @@ pub(crate) fn parse_duration(v: &str) -> Option<Duration> {
             'W' | 'D' | 'H' | 'M' | 'S' => {
                 let n: i64 = num.parse().ok()?;
                 num.clear();
-                secs += n * match (c, in_time) {
+                let unit: i64 = match (c, in_time) {
                     ('W', false) => 7 * 86_400,
                     ('D', false) => 86_400,
                     ('H', true) => 3600,
@@ -378,6 +386,7 @@ pub(crate) fn parse_duration(v: &str) -> Option<Duration> {
                     ('S', true) => 1,
                     _ => return None,
                 };
+                secs = secs.checked_add(n.checked_mul(unit)?)?;
             }
             _ => return None,
         }
@@ -385,7 +394,7 @@ pub(crate) fn parse_duration(v: &str) -> Option<Duration> {
     if !num.is_empty() {
         return None;
     }
-    Some(Duration::seconds(if neg { -secs } else { secs }))
+    Duration::try_seconds(if neg { -secs } else { secs })
 }
 
 /// Every top-level `VEVENT` of a document, in order.
@@ -428,44 +437,116 @@ pub fn parse_events(text: &str) -> Vec<Event> {
     vevents(text).iter().map(Vevent::to_event).collect()
 }
 
+/// What one server answer may cost: how many events it may expand to and how many
+/// steps may be spent walking recurrence rules. A hostile `.ics` (a million `VEVENT`s,
+/// rules that never produce a date) runs out of it instead of the daemon's memory or CPU.
+#[derive(Debug, Clone)]
+pub struct Budget {
+    events: usize,
+    work: u64,
+    exhausted: bool,
+}
+
+impl Budget {
+    /// At most `events` events and `work` rule-walking steps.
+    #[must_use]
+    pub const fn new(events: usize, work: u64) -> Self {
+        Self {
+            events,
+            work,
+            exhausted: false,
+        }
+    }
+
+    /// Whether anything was cut off.
+    #[must_use]
+    pub const fn exhausted(&self) -> bool {
+        self.exhausted
+    }
+
+    /// Room for one more event?
+    pub(crate) fn take_event(&mut self) -> bool {
+        match self.events.checked_sub(1) {
+            Some(left) => {
+                self.events = left;
+                true
+            }
+            None => {
+                self.exhausted = true;
+                false
+            }
+        }
+    }
+
+    /// Pay for `steps` of rule walking; `false` when the budget is gone.
+    pub(crate) fn spend(&mut self, steps: u64) -> bool {
+        match self.work.checked_sub(steps) {
+            Some(left) => {
+                self.work = left;
+                true
+            }
+            None => {
+                self.exhausted = true;
+                false
+            }
+        }
+    }
+}
+
 /// The events of `text` that overlap `[from, to)`. A server that honoured
 /// `<c:expand>` already sent one `VEVENT` per occurrence; one that did not sent
-/// the series master with its `RRULE`, which is expanded here.
+/// the series master with its `RRULE`, which is expanded here. `budget` is shared
+/// by every document of one answer; check [`Budget::exhausted`] afterwards.
 #[must_use]
-pub fn events_in_range(text: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
+pub fn events_in_range(
+    text: &str,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    budget: &mut Budget,
+) -> Vec<Event> {
     let all = vevents(text);
-    let moved: Vec<(String, DateTime<Utc>)> = all
-        .iter()
-        .filter_map(|v| {
-            let id = v
-                .get("RECURRENCE-ID")
-                .and_then(Moment::from_prop)?
-                .to_utc()?;
-            Some((v.uid(), id))
-        })
-        .collect();
+    // The occurrences of a series that an override moved or cancelled, by `UID`.
+    let mut moved: HashMap<String, Vec<DateTime<Utc>>> = HashMap::new();
+    for v in &all {
+        if let Some(id) = v
+            .get("RECURRENCE-ID")
+            .and_then(Moment::from_prop)
+            .and_then(Moment::to_utc)
+        {
+            moved.entry(v.uid()).or_default().push(id);
+        }
+    }
     let mut out = Vec::new();
     for v in &all {
+        if budget.exhausted() {
+            break;
+        }
         if v.get("RRULE").is_none() || v.get("RECURRENCE-ID").is_some() {
-            out.push(v.to_event());
+            if budget.take_event() {
+                out.push(v.to_event());
+            }
             continue;
         }
-        let uid = v.uid();
-        let skip: Vec<DateTime<Utc>> = moved
-            .iter()
-            .filter(|(u, _)| *u == uid)
-            .map(|(_, t)| *t)
-            .collect();
-        match rrule::occurrences(v, from, to, &skip) {
-            Some(list) => out.extend(list.into_iter().map(|(s, e)| {
-                let mut ev = v.to_event();
-                ev.start = s.display();
-                ev.end = e.display();
-                ev.span = s.to_utc().zip(e.to_utc());
-                ev
-            })),
+        let skip = moved.get(&v.uid()).map_or(&[][..], Vec::as_slice);
+        match rrule::occurrences(v, from, to, skip, budget) {
+            Some(list) => {
+                for (s, e) in list {
+                    if !budget.take_event() {
+                        break;
+                    }
+                    let mut ev = v.to_event();
+                    ev.start = s.display();
+                    ev.end = e.display();
+                    ev.span = s.to_utc().zip(e.to_utc());
+                    out.push(ev);
+                }
+            }
             // A rule we cannot expand: the series master is better than nothing.
-            None => out.push(v.to_event()),
+            None => {
+                if budget.take_event() {
+                    out.push(v.to_event());
+                }
+            }
         }
     }
     out
@@ -761,7 +842,8 @@ fn rebuild(
 struct Plan {
     drop: Vec<&'static str>,
     add: Vec<String>,
-    /// Something the invitees care about changes.
+    /// Something the invitees see changes (any edit does: the `SEQUENCE` moves and a
+    /// server that schedules tells them).
     material: bool,
 }
 
@@ -772,7 +854,7 @@ impl Plan {
         if !v.is_empty() {
             self.add.push(format!("{name}:{}", escape(v)));
         }
-        self.material |= name != "DESCRIPTION";
+        self.material = true;
     }
 
     /// Start and end: the length is kept when only the start moves.
@@ -797,7 +879,12 @@ impl Plan {
                         .and_then(|(s, e)| length(s, e))
                         .filter(|_| same)
                         .ok_or("`end` is needed here: the start changed between a whole day and a time")?;
-                    Some(start.moment().plus(kept))
+                    Some(
+                        start
+                            .moment()
+                            .plus(kept)
+                            .ok_or("the new end is outside the dates a calendar can hold")?,
+                    )
                 }
             }
             (None, None) => None,
@@ -925,11 +1012,14 @@ pub fn edit(ics: &str, patch: &Patch) -> Result<Edited, String> {
         }
     }
     let people = plan_people(&old, patch, &mut plan)?;
+    // Any edit moves the `SEQUENCE`, and a calendar server that schedules then tells the
+    // attendees whatever changed (a note included): so every edit of an event that has
+    // attendees needs the caller's agreement, not only a change of time or place.
     let told = old.attendees().len();
-    if plan.material && told > 0 && patch.attendees.is_none() && !patch.notify {
+    if told > 0 && patch.attendees.is_none() && !patch.notify {
         return Err(format!(
-            "this event has {told} attendee(s) and the change would notify them: \
-             call again with notify_attendees=true (the user is asked first)"
+            "this event has {told} attendee(s) and any change tells them: \
+             call again with notify_attendees=true (the user may be asked first)"
         ));
     }
     let seq = old
@@ -1006,7 +1096,11 @@ pub fn itip(ics: &str, method: &str, only: Option<&[String]>) -> String {
 
 #[cfg(test)]
 mod unit {
-    use super::{parse_events, unescape, unfold};
+    use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
+
+    use super::{
+        Budget, Moment, escape, events_in_range, parse_duration, parse_events, unescape, unfold,
+    };
 
     #[test]
     fn unfold_joins_space_and_tab_continuations() {
@@ -1083,5 +1177,105 @@ mod unit {
         assert_eq!(event.start, "2026-11-20T09:00:00Z");
         assert_eq!(event.location, "");
         assert_eq!(event.end, "");
+    }
+
+    #[test]
+    fn a_hostile_duration_is_refused_not_computed() {
+        for bad in [
+            "P99999999999999999999D",
+            "P9223372036854775807W",
+            "PT9223372036854775807H",
+            "PT9223372036854775807S",
+            "P106751991167301D",
+            "-P9223372036854775807D",
+            "P1D1D9223372036854775807D",
+        ] {
+            assert_eq!(parse_duration(bad), None, "{bad}");
+        }
+        assert_eq!(parse_duration("PT1H30M"), Some(Duration::minutes(90)));
+        assert_eq!(parse_duration("-P1W"), Some(Duration::weeks(-1)));
+    }
+
+    #[test]
+    fn moving_a_moment_past_the_last_date_is_none_not_a_panic() {
+        let tz = chrono_tz::UTC;
+        assert!(
+            Moment::Date(NaiveDate::MAX)
+                .plus(Duration::days(1))
+                .is_none()
+        );
+        assert!(
+            Moment::Utc(DateTime::<Utc>::MAX_UTC)
+                .plus(Duration::seconds(1))
+                .is_none()
+        );
+        assert!(
+            Moment::Local(NaiveDateTime::MAX, Some(tz))
+                .plus(Duration::seconds(1))
+                .is_none()
+        );
+        assert!(Moment::Date(NaiveDate::MAX).plus(Duration::MAX).is_none());
+        assert!(
+            Moment::Utc(DateTime::<Utc>::MIN_UTC)
+                .plus(Duration::MIN)
+                .is_none()
+        );
+        // Ordinary moves still work.
+        let d = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
+        assert_eq!(
+            Moment::Date(d).plus(Duration::days(2)),
+            Some(Moment::Date(NaiveDate::from_ymd_opt(2026, 11, 22).unwrap()))
+        );
+    }
+
+    #[test]
+    fn a_crafted_event_cannot_panic_the_parser_or_the_expansion() {
+        let from: DateTime<Utc> = "2026-01-01T00:00:00Z".parse().unwrap();
+        let to: DateTime<Utc> = "2027-01-01T00:00:00Z".parse().unwrap();
+        for body in [
+            "DTSTART;VALUE=DATE:99991231\nDURATION:P99999999999W",
+            "DTSTART:99991231T235959Z\nDURATION:PT9223372036854775807S",
+            "DTSTART;VALUE=DATE:99991231",
+            "DTSTART:20261120T090000Z\nDURATION:P999999999999999999999D",
+            "DTSTART:20261120T090000Z\nDURATION:PT9223372036854775807S\nRRULE:FREQ=DAILY",
+            "DTSTART;VALUE=DATE:99991231\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU",
+        ] {
+            let ics = format!(
+                "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:x\n{body}\nEND:VEVENT\nEND:VCALENDAR\n"
+            );
+            assert_eq!(parse_events(&ics).len(), 1, "{body}");
+            let _ = events_in_range(&ics, from, to, &mut Budget::new(100, 100_000));
+        }
+    }
+
+    #[test]
+    fn a_document_cannot_expand_past_its_event_budget() {
+        let mut ics = String::from("BEGIN:VCALENDAR\n");
+        for i in 0..50 {
+            ics.push_str(&format!(
+                "BEGIN:VEVENT\nUID:e{i}\nDTSTART:20261120T090000Z\nDTEND:20261120T100000Z\nEND:VEVENT\n"
+            ));
+        }
+        ics.push_str("END:VCALENDAR\n");
+        let from: DateTime<Utc> = "2026-11-01T00:00:00Z".parse().unwrap();
+        let to: DateTime<Utc> = "2026-12-01T00:00:00Z".parse().unwrap();
+        let mut budget = Budget::new(20, 1_000);
+        let got = events_in_range(&ics, from, to, &mut budget);
+        assert_eq!(got.len(), 20);
+        assert!(budget.exhausted());
+        // One budget is shared by the documents of one answer.
+        let more = events_in_range(&ics, from, to, &mut budget);
+        assert!(more.is_empty());
+        // A roomy budget is not touched.
+        let mut roomy = Budget::new(100, 1_000);
+        assert_eq!(events_in_range(&ics, from, to, &mut roomy).len(), 50);
+        assert!(!roomy.exhausted());
+    }
+
+    #[test]
+    fn control_characters_never_reach_a_content_line() {
+        assert_eq!(escape("a\u{7}b\rc\u{1b}d\u{0}e"), "abcde");
+        assert_eq!(escape("one\ntwo\tthree"), "one\\ntwo\tthree");
+        assert_eq!(escape("semi;comma,back\\"), "semi\\;comma\\,back\\\\");
     }
 }

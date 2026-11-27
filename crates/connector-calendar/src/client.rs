@@ -2,6 +2,7 @@
 //! collection. TLS is required (plain HTTP only for loopback), redirects are
 //! never followed (the password must not travel to another host), and an
 //! `href` the server returns is used only when it stays on the configured origin.
+//! Every connection goes through a [`web_tools::UrlPolicy`] (see [`crate::policy`]).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,12 +13,24 @@ use quick_xml::events::Event as Xml;
 use reqwest::{Method, StatusCode};
 use secret_store::{SecretRef, SecretStore, resolve};
 use serde::{Deserialize, Serialize};
-use url::Url;
+use url::{Host, Url};
+use web_tools::UrlPolicy;
 
-use crate::ical::{self, Edited, Event, EventSpec, Patch, When};
+use crate::ical::{self, Budget, Edited, Event, EventSpec, Patch, When};
+use crate::policy::{GuardedResolver, calendar_policy, names_loopback};
 
 /// Largest response body read from a server.
 const MAX_BODY: usize = 4 << 20;
+/// Most events one listing may expand to, however many the server sends.
+const MAX_EXPANDED_EVENTS: usize = 10_000;
+/// Most recurrence-rule steps one listing may spend.
+const MAX_RULE_WORK: u64 = 20_000_000;
+/// Longest event `UID` accepted from the agent.
+const MAX_UID: usize = 255;
+/// Services whose calendars live on several hosts of one domain (iCloud keeps them on
+/// `pNN-caldav.icloud.com`). A discovery link may move between hosts of the same one of
+/// these; for every other server it must stay on the host that was configured.
+const PROVIDER_DOMAINS: [&str; 3] = ["icloud.com", "fastmail.com", "googleusercontent.com"];
 
 /// One calendar the agent can use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,39 +78,51 @@ pub struct CalendarClient {
     base: Url,
     store: Arc<dyn SecretStore>,
     http: reqwest::Client,
-}
-
-fn is_loopback(host: &str) -> bool {
-    host == "localhost" || host == "::1" || host == "[::1]" || host.starts_with("127.")
+    policy: Arc<dyn UrlPolicy>,
 }
 
 impl CalendarClient {
+    /// A client under the default [`calendar_policy`].
+    ///
     /// # Errors
     /// [`CalendarError::Invalid`] for a bad URL or plain HTTP to a non-loopback host.
     pub fn new(
         account: CalendarAccount,
         store: Arc<dyn SecretStore>,
     ) -> Result<Self, CalendarError> {
-        let mut base = Url::parse(&account.url).map_err(|e| {
-            CalendarError::Invalid(format!("calendar `{}`: bad url: {e}", account.name))
-        })?;
-        let host = base.host_str().unwrap_or_default().to_owned();
-        match base.scheme() {
-            "https" => {}
-            "http" if is_loopback(&host) => {}
+        Self::with_policy(account, store, calendar_policy(&[]))
+    }
+
+    /// A client that only dials what `policy` allows.
+    ///
+    /// # Errors
+    /// [`CalendarError::Invalid`] for a bad URL, plain HTTP to a host that is not this
+    /// machine, or an address the policy refuses.
+    pub fn with_policy(
+        account: CalendarAccount,
+        store: Arc<dyn SecretStore>,
+        policy: Arc<dyn UrlPolicy>,
+    ) -> Result<Self, CalendarError> {
+        let invalid =
+            |m: String| CalendarError::Invalid(format!("calendar `{}`: {m}", account.name));
+        let mut base = Url::parse(&account.url).map_err(|e| invalid(format!("bad url: {e}")))?;
+        let plain = match base.scheme() {
+            "https" => false,
+            "http" if names_loopback(&base) => true,
             _ => {
-                return Err(CalendarError::Invalid(format!(
-                    "calendar `{}`: the url must be https (plain http only for localhost)",
-                    account.name
-                )));
+                return Err(invalid(
+                    "the url must be https (plain http only for localhost)".into(),
+                ));
             }
-        }
+        };
         if !base.username().is_empty() || base.password().is_some() {
-            return Err(CalendarError::Invalid(format!(
-                "calendar `{}`: put the login in `username`/`password`, not in the url",
-                account.name
-            )));
+            return Err(invalid(
+                "put the login in `username`/`password`, not in the url".into(),
+            ));
         }
+        policy
+            .check_url(&base)
+            .map_err(|e| invalid(e.to_string()))?;
         if !base.path().ends_with('/') {
             let p = format!("{}/", base.path());
             base.set_path(&p);
@@ -105,6 +130,13 @@ impl CalendarClient {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(account.timeout_secs.clamp(1, 120)))
+            // A proxy would resolve names itself and skip the address checks.
+            .no_proxy()
+            .dns_resolver(Arc::new(GuardedResolver {
+                policy: Arc::clone(&policy),
+                port: base.port_or_known_default().unwrap_or(443),
+                loopback_only: plain,
+            }))
             .build()
             .map_err(|e| CalendarError::Server(e.to_string()))?;
         Ok(Self {
@@ -112,6 +144,7 @@ impl CalendarClient {
             base,
             store,
             http,
+            policy,
         })
     }
 
@@ -151,7 +184,7 @@ impl CalendarClient {
         if let Some(b) = body {
             req = req.body(b);
         }
-        let resp = req
+        let mut resp = req
             .send()
             .await
             .map_err(|e| CalendarError::Server(redact(&e.to_string())))?;
@@ -162,12 +195,25 @@ impl CalendarClient {
             )));
         }
         let headers = resp.headers().clone();
-        let bytes = resp
-            .bytes()
+        let too_large = || CalendarError::Server("response too large".into());
+        if resp
+            .content_length()
+            .is_some_and(|n| n > u64::try_from(MAX_BODY).unwrap_or(u64::MAX))
+        {
+            return Err(too_large());
+        }
+        // Read chunk by chunk and stop at the cap: a server that streams without end
+        // (or lies about its length) never gets more than `MAX_BODY` into memory.
+        let mut bytes: Vec<u8> = Vec::new();
+        while let Some(chunk) = resp
+            .chunk()
             .await
-            .map_err(|e| CalendarError::Server(redact(&e.to_string())))?;
-        if bytes.len() > MAX_BODY {
-            return Err(CalendarError::Server("response too large".into()));
+            .map_err(|e| CalendarError::Server(redact(&e.to_string())))?
+        {
+            if bytes.len() + chunk.len() > MAX_BODY {
+                return Err(too_large());
+            }
+            bytes.extend_from_slice(&chunk);
         }
         Ok(Reply {
             status,
@@ -244,10 +290,23 @@ impl CalendarClient {
         );
         let (status, text) = self.report(body).await?;
         Self::check(status, "listing events")?;
-        let mut events: Vec<Event> = multistatus(&text)
-            .into_iter()
-            .flat_map(|r| ical::events_in_range(&r.data, from.utc(), to.utc()))
-            .collect();
+        // One budget for the whole answer: a hostile server cannot make this expand forever.
+        let mut budget = Budget::new(MAX_EXPANDED_EVENTS, MAX_RULE_WORK);
+        let mut events: Vec<Event> = Vec::new();
+        for r in multistatus(&text) {
+            events.extend(ical::events_in_range(
+                &r.data,
+                from.utc(),
+                to.utc(),
+                &mut budget,
+            ));
+        }
+        if budget.exhausted() {
+            return Err(CalendarError::Server(
+                "the calendar holds too many events in this range to list; ask for a shorter range"
+                    .into(),
+            ));
+        }
         events.sort_by(|x, y| x.start.cmp(&y.start));
         events.truncate(limit);
         Ok(events)
@@ -290,7 +349,8 @@ impl CalendarClient {
     }
 
     /// The stored event with this `UID`, with its link and version.
-    async fn fetch(&self, uid: &str) -> Result<Option<Stored>, CalendarError> {
+    pub(crate) async fn fetch(&self, uid: &str) -> Result<Option<Stored>, CalendarError> {
+        check_uid(uid)?;
         let want = quick_xml::escape::escape(uid);
         let body = format!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
@@ -326,36 +386,37 @@ impl CalendarClient {
     /// # Errors
     /// See [`CalendarError`].
     pub async fn get(&self, uid: &str) -> Result<Option<Event>, CalendarError> {
-        Ok(self
-            .fetch(uid)
-            .await?
-            .and_then(|s| ical::parse_events(&s.ics).into_iter().next()))
+        Ok(self.fetch(uid).await?.and_then(|s| s.event()))
     }
 
-    /// Change an event (the whole series when it recurs). `None` when there is none.
+    /// The edit `patch` makes to a stored event, worked out but not written yet (so the
+    /// caller can check who it would tell before anything changes on the server).
     ///
     /// # Errors
-    /// See [`CalendarError`].
-    pub async fn update(&self, uid: &str, patch: &Patch) -> Result<Option<Updated>, CalendarError> {
-        let Some(stored) = self.fetch(uid).await? else {
-            return Ok(None);
-        };
+    /// [`CalendarError::Invalid`] when the change makes no sense for this event.
+    pub(crate) fn plan_update(stored: &Stored, patch: &Patch) -> Result<Edited, CalendarError> {
         if stored.ics.trim().is_empty() {
             return Err(CalendarError::Server(
                 "the server did not return the event's data".into(),
             ));
         }
-        let edited = ical::edit(&stored.ics, patch).map_err(CalendarError::Invalid)?;
+        ical::edit(&stored.ics, patch).map_err(CalendarError::Invalid)
+    }
+
+    /// Write an edit made by [`CalendarClient::plan_update`] over the stored event.
+    pub(crate) async fn put_edited(
+        &self,
+        stored: Stored,
+        edited: &Edited,
+    ) -> Result<(), CalendarError> {
         let mut headers = vec![("Content-Type", "text/calendar; charset=utf-8")];
-        let etag = stored.etag.clone();
-        if let Some(t) = etag.as_deref() {
+        if let Some(t) = stored.etag.as_deref() {
             headers.push(("If-Match", t));
         }
         let (status, _) = self
             .send("PUT", stored.url, &headers, Some(edited.ics.clone()))
             .await?;
-        Self::check(status, "updating the event")?;
-        Ok(Some(Updated { edited }))
+        Self::check(status, "updating the event")
     }
 
     /// Whether the server delivers invitations itself when an event with
@@ -376,14 +437,8 @@ impl CalendarClient {
             })
     }
 
-    /// Delete the event with this `UID`. Returns `false` when there is none.
-    ///
-    /// # Errors
-    /// See [`CalendarError`].
-    pub async fn delete(&self, uid: &str) -> Result<bool, CalendarError> {
-        let Some(found) = self.fetch(uid).await? else {
-            return Ok(false);
-        };
+    /// Delete a stored event found by [`CalendarClient::fetch`]. `false` when it is already gone.
+    pub(crate) async fn remove(&self, found: Stored) -> Result<bool, CalendarError> {
         let (status, _) = self.send("DELETE", found.url, &[], None).await?;
         if status == StatusCode::NOT_FOUND {
             return Ok(false);
@@ -412,31 +467,53 @@ impl CalendarClient {
         Ok(dav_entries(&r.body))
     }
 
-    /// Resolve a link the server gave during discovery: it may live on another
-    /// host of the same service (iCloud keeps calendars on `pNN-caldav.icloud.com`)
-    /// but never on an unrelated one, and never over plain `http` from `https`.
-    fn discovered(&self, from: &Url, href: &str) -> Result<Url, CalendarError> {
+    /// Resolve a link the server gave during discovery. It must stay on the configured
+    /// host. The one exception is a service that spreads its calendars over several
+    /// hosts of its own domain (iCloud: `pNN-caldav.icloud.com`): there it may move
+    /// between hosts of that domain, named in [`PROVIDER_DOMAINS`], never to an address
+    /// literal and never by comparing a few trailing labels (`evil.co.uk` is not
+    /// `a.co.uk`). It never changes scheme or port, carries no login in the url, and
+    /// must pass the address policy.
+    pub(crate) fn discovered(&self, from: &Url, href: &str) -> Result<Url, CalendarError> {
+        let refuse =
+            || CalendarError::Server("the server pointed to another service; refusing".into());
         let url = from
             .join(href)
             .map_err(|e| CalendarError::Server(format!("bad link from the server: {e}")))?;
-        let site = |u: &Url| -> Option<String> {
-            let h = u.host_str()?.trim_end_matches('.').to_ascii_lowercase();
-            let labels: Vec<&str> = h.split('.').collect();
-            Some(labels[labels.len().saturating_sub(2)..].join("."))
-        };
-        let same = url.scheme() == self.base.scheme()
-            && url.port_or_known_default() == self.base.port_or_known_default()
-            && (url.host_str() == self.base.host_str()
-                || (!is_loopback(url.host_str().unwrap_or_default())
-                    && site(&url).is_some()
-                    && site(&url) == site(&self.base)));
-        if same {
-            Ok(url)
-        } else {
-            Err(CalendarError::Server(
-                "the server pointed to another service; refusing".into(),
-            ))
+        if url.scheme() != self.base.scheme()
+            || url.port_or_known_default() != self.base.port_or_known_default()
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(refuse());
         }
+        let name = |u: &Url| match u.host() {
+            Some(Host::Domain(d)) => Some(d.trim_end_matches('.').to_ascii_lowercase()),
+            _ => None,
+        };
+        let same_host = match (url.host(), self.base.host()) {
+            (Some(Host::Domain(_)), Some(Host::Domain(_))) => name(&url) == name(&self.base),
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+        let same_provider = match (name(&url), name(&self.base)) {
+            (Some(a), Some(b)) => {
+                let provider = |h: &str| {
+                    PROVIDER_DOMAINS
+                        .iter()
+                        .find(|d| h == **d || h.ends_with(&format!(".{d}")))
+                };
+                provider(&a).is_some() && provider(&a) == provider(&b)
+            }
+            _ => false,
+        };
+        if !(same_host || same_provider) {
+            return Err(refuse());
+        }
+        self.policy.check_url(&url).map_err(|e| {
+            CalendarError::Server(format!("the server pointed somewhere not allowed: {e}"))
+        })?;
+        Ok(url)
     }
 
     /// The calendars reachable from the account's url: the url itself when it
@@ -512,23 +589,35 @@ pub struct Created {
     pub ics: String,
 }
 
-/// An event after [`CalendarClient::update`].
-#[derive(Debug, Clone)]
-pub struct Updated {
-    /// What changed and who is affected.
-    pub edited: Edited,
-}
-
 struct Reply {
     status: StatusCode,
     headers: reqwest::header::HeaderMap,
     body: String,
 }
 
-struct Stored {
+/// An event as the server holds it.
+pub(crate) struct Stored {
     url: Url,
     etag: Option<String>,
     ics: String,
+}
+
+impl Stored {
+    /// The event (the series master when it recurs).
+    pub(crate) fn event(&self) -> Option<Event> {
+        ical::parse_events(&self.ics).into_iter().next()
+    }
+}
+
+/// An event `UID` the agent gave: it goes into an XML query, so it must be plain text.
+fn check_uid(uid: &str) -> Result<(), CalendarError> {
+    if uid.is_empty() || uid.len() > MAX_UID || uid.chars().any(char::is_control) {
+        return Err(CalendarError::Invalid(
+            "`uid` must be the uid of an event, as listed (plain text, up to 255 characters)"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 fn stamp(t: DateTime<Utc>) -> String {
@@ -547,6 +636,21 @@ fn redact(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The text an entity reference (`&amp;`, `&#38;`) stands for.
+fn general_ref(r: &quick_xml::events::BytesRef<'_>) -> Option<String> {
+    match r.resolve_char_ref() {
+        Ok(Some(c)) => Some(c.to_string()),
+        _ => match &**r {
+            "lt" => Some("<".to_owned()),
+            "gt" => Some(">".to_owned()),
+            "amp" => Some("&".to_owned()),
+            "quot" => Some("\"".to_owned()),
+            "apos" => Some("'".to_owned()),
+            _ => None,
+        },
+    }
 }
 
 #[derive(Default)]
@@ -590,17 +694,7 @@ fn multistatus(xml: &str) -> Vec<Response> {
             }
             Ok(Xml::Text(t)) => Some(t.xml10_content().into_owned()),
             Ok(Xml::CData(t)) => Some(t.xml10_content().into_owned()),
-            Ok(Xml::GeneralRef(r)) => match r.resolve_char_ref() {
-                Ok(Some(c)) => Some(c.to_string()),
-                _ => match &*r {
-                    "lt" => Some("<".to_owned()),
-                    "gt" => Some(">".to_owned()),
-                    "amp" => Some("&".to_owned()),
-                    "quot" => Some("\"".to_owned()),
-                    "apos" => Some("'".to_owned()),
-                    _ => None,
-                },
-            },
+            Ok(Xml::GeneralRef(r)) => general_ref(&r),
             Ok(Xml::Eof) | Err(_) => break,
             _ => None,
         };
@@ -637,7 +731,8 @@ fn dav_entries(xml: &str) -> Vec<DavEntry> {
     let mut out: Vec<DavEntry> = Vec::new();
     let mut path: Vec<String> = Vec::new();
     loop {
-        match reader.read_event() {
+        // Text arrives in pieces: plain text, CDATA and one piece per entity (`&amp;`).
+        let piece: Option<String> = match reader.read_event() {
             Ok(Xml::Start(e)) => {
                 let name = e.local_name().as_ref().to_owned();
                 if name == "response" {
@@ -645,34 +740,40 @@ fn dav_entries(xml: &str) -> Vec<DavEntry> {
                 }
                 note_dav_element(&mut out, &path, &name, &e);
                 path.push(name);
+                None
             }
             Ok(Xml::Empty(e)) => {
                 let name = e.local_name().as_ref().to_owned();
                 note_dav_element(&mut out, &path, &name, &e);
+                None
             }
             Ok(Xml::End(_)) => {
                 path.pop();
+                None
             }
-            Ok(Xml::Text(t)) => {
-                if let (Some(last), Some(here)) = (out.last_mut(), path.last()) {
-                    let text = t.xml10_content().into_owned();
-                    let inside = |n: &str| path.iter().any(|p| p == n);
-                    match here.as_str() {
-                        "href" if inside("current-user-principal") => {
-                            last.principal.push_str(text.trim());
-                        }
-                        "href" if inside("calendar-home-set") => {
-                            last.home.push_str(text.trim());
-                        }
-                        "href" => last.href.push_str(text.trim()),
-                        "displayname" => last.display_name.push_str(&text),
-                        _ => {}
-                    }
-                }
-            }
+            Ok(Xml::Text(t)) => Some(t.xml10_content().into_owned()),
+            Ok(Xml::CData(t)) => Some(t.xml10_content().into_owned()),
+            Ok(Xml::GeneralRef(r)) => general_ref(&r),
             Ok(Xml::Eof) | Err(_) => break,
-            _ => {}
+            _ => None,
+        };
+        if let (Some(text), Some(last), Some(here)) = (piece, out.last_mut(), path.last()) {
+            let inside = |n: &str| path.iter().any(|p| p == n);
+            // Whitespace between elements is a piece too; an address only ever grows by
+            // its own characters, so pieces are joined and trimmed once, below.
+            match here.as_str() {
+                "href" if inside("current-user-principal") => last.principal.push_str(&text),
+                "href" if inside("calendar-home-set") => last.home.push_str(&text),
+                "href" => last.href.push_str(&text),
+                "displayname" => last.display_name.push_str(&text),
+                _ => {}
+            }
         }
+    }
+    for e in &mut out {
+        e.href = e.href.trim().to_owned();
+        e.principal = e.principal.trim().to_owned();
+        e.home = e.home.trim().to_owned();
     }
     out
 }
@@ -696,5 +797,52 @@ fn note_dav_element(
             .find(|a| a.key.local_name().as_ref() == "name")
     {
         last.components.push(a.value.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_and_links_keep_their_entities_and_cdata() {
+        let xml = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response>
+  <d:href>
+    /cal/R&amp;D/team&#38;co/
+  </d:href>
+  <d:propstat><d:prop>
+   <d:displayname>Work &amp; Play &lt;2026&gt; &quot;a&quot; &apos;b&apos; &#169;</d:displayname>
+   <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+  </d:prop></d:propstat>
+ </d:response>
+ <d:response>
+  <d:href><![CDATA[/cal/a&b/]]></d:href>
+  <d:propstat><d:prop>
+   <d:displayname><![CDATA[Fish & <Chips>]]></d:displayname>
+   <d:current-user-principal><d:href>/principals/a&amp;b/</d:href></d:current-user-principal>
+   <c:calendar-home-set><d:href>/home/a&amp;b/</d:href></c:calendar-home-set>
+  </d:prop></d:propstat>
+ </d:response>
+</d:multistatus>"#;
+        let got = dav_entries(xml);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].href, "/cal/R&D/team&co/");
+        assert_eq!(got[0].display_name, "Work & Play <2026> \"a\" 'b' \u{a9}");
+        assert!(got[0].is_calendar);
+        assert_eq!(got[1].href, "/cal/a&b/");
+        assert_eq!(got[1].display_name, "Fish & <Chips>");
+        assert_eq!(got[1].principal, "/principals/a&b/");
+        assert_eq!(got[1].home, "/home/a&b/");
+    }
+
+    #[test]
+    fn a_uid_is_plain_text_of_a_sane_length() {
+        assert!(check_uid("abc123@example.com").is_ok());
+        assert!(check_uid(&"x".repeat(255)).is_ok());
+        for bad in ["", "a\nb", "a\u{0}b", "\u{7f}", &"x".repeat(256)] {
+            assert!(check_uid(bad).is_err(), "{bad:?}");
+        }
     }
 }

@@ -1222,6 +1222,7 @@ pub fn serve(
             &mcp_tools,
             telegram_store.as_ref(),
             email.as_ref().map(|e| e.connector()),
+            port,
         );
         register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
         (email, calendar)

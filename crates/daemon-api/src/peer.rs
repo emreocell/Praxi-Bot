@@ -1129,6 +1129,47 @@ mod tests {
                 "/v1/chats/x/skill-draft",
                 true,
             ),
+            // Calendar logins are credentials, like the mail accounts: a phone never changes
+            // them and an ordinary desktop of a host does not either. Reading the list is fine.
+            (PeerRole::Phone, Method::POST, "/v1/calendar/accounts", true),
+            (
+                PeerRole::Phone,
+                Method::PUT,
+                "/v1/calendar/accounts/home",
+                true,
+            ),
+            (
+                PeerRole::Phone,
+                Method::DELETE,
+                "/v1/calendar/accounts/home",
+                true,
+            ),
+            (PeerRole::Phone, Method::POST, "/v1/calendar/test", true),
+            (
+                PeerRole::Desktop,
+                Method::POST,
+                "/v1/calendar/accounts",
+                true,
+            ),
+            (
+                PeerRole::Desktop,
+                Method::PUT,
+                "/v1/calendar/accounts/home",
+                true,
+            ),
+            (
+                PeerRole::Desktop,
+                Method::DELETE,
+                "/v1/calendar/accounts/home",
+                true,
+            ),
+            (PeerRole::Desktop, Method::POST, "/v1/calendar/test", true),
+            (
+                PeerRole::Desktop,
+                Method::GET,
+                "/v1/calendar/accounts",
+                false,
+            ),
         ] {
             assert_eq!(
                 owner_denial(&method, path, role, true).is_some(),
@@ -1139,6 +1180,14 @@ mod tests {
         // A desktop of a daemon that is not a host keeps its older reach.
         assert!(owner_denial(&Method::PUT, "/v1/policy", PeerRole::Desktop, false).is_none());
         assert!(owner_denial(&Method::PUT, "/v1/policy", PeerRole::Phone, false).is_some());
+        // The calendar is no different from the mail accounts there: the paired desktop is the
+        // owner's other computer. What it cannot do is read a saved password back by pointing
+        // the account elsewhere (the daemon refuses an update that moves the address or the
+        // login without the password typed again), so it needs no extra wall here.
+        for path in ["/v1/calendar/accounts/home", "/v1/email/accounts/work"] {
+            assert!(owner_denial(&Method::PUT, path, PeerRole::Desktop, false).is_none());
+            assert!(owner_denial(&Method::PUT, path, PeerRole::Phone, false).is_some());
+        }
     }
 
     #[test]

@@ -13,7 +13,7 @@ use tokio::net::TcpListener;
 use tool_registry::{ContentPart, Effect, ToolContext, ToolError, ToolRegistry};
 
 use crate::tools::tools;
-use crate::{CalendarAccount, CalendarConnector, InviteMailer, register};
+use crate::{CalendarAccount, CalendarConnector, InviteMailer, calendar_policy, register};
 
 type Events = Arc<Mutex<BTreeMap<String, String>>>;
 
@@ -355,17 +355,43 @@ fn connector(port: u16) -> Arc<CalendarConnector> {
 /// `(to, subject, method, ics)` of one mail.
 type Mail = (Vec<String>, String, String, String);
 
+/// A mailer that records what it is asked and can refuse an address (the owner's mail rules).
 #[derive(Default)]
-struct Outbox(Mutex<Vec<Mail>>);
+struct Outbox {
+    mails: Mutex<Vec<Mail>>,
+    /// `(bot, to)` of every rules check.
+    checked: Mutex<Vec<(Option<String>, Vec<String>)>>,
+    /// `(bot, to, subject)` of every mail the calendar server delivered by itself.
+    server: Mutex<Vec<(Option<String>, Vec<String>, String)>>,
+    /// An address the rules refuse.
+    refuse: Mutex<Option<String>>,
+}
 
 impl Outbox {
     fn sent(&self) -> Vec<Mail> {
-        self.0.lock().unwrap().clone()
+        self.mails.lock().unwrap().clone()
+    }
+
+    fn refusing(addr: &str) -> Arc<Self> {
+        let out = Self::default();
+        *out.refuse.lock().unwrap() = Some(addr.to_owned());
+        Arc::new(out)
     }
 }
 
 #[async_trait]
 impl InviteMailer for Outbox {
+    async fn check(&self, bot: Option<&str>, to: &[String]) -> Result<(), String> {
+        self.checked
+            .lock()
+            .unwrap()
+            .push((bot.map(str::to_owned), to.to_vec()));
+        match self.refuse.lock().unwrap().as_deref() {
+            Some(a) if to.iter().any(|t| t == a) => Err(format!("{a} asked not to be written to")),
+            _ => Ok(()),
+        }
+    }
+
     async fn send(
         &self,
         _bot: Option<&str>,
@@ -375,7 +401,7 @@ impl InviteMailer for Outbox {
         ics: &str,
         method: &str,
     ) -> Result<(), String> {
-        self.0.lock().unwrap().push((
+        self.mails.lock().unwrap().push((
             to.to_vec(),
             subject.to_owned(),
             method.to_owned(),
@@ -383,16 +409,48 @@ impl InviteMailer for Outbox {
         ));
         Ok(())
     }
+
+    fn record_server_delivery(
+        &self,
+        bot: Option<&str>,
+        _organizer: &str,
+        to: &[String],
+        subject: &str,
+    ) {
+        self.server
+            .lock()
+            .unwrap()
+            .push((bot.map(str::to_owned), to.to_vec(), subject.to_owned()));
+    }
 }
 
 async fn call(c: &Arc<CalendarConnector>, name: &str, input: Value) -> Result<Value, ToolError> {
+    call_in(c, &ToolContext::default(), name, input).await
+}
+
+/// A call made by the bot `bot`.
+async fn call_as(
+    c: &Arc<CalendarConnector>,
+    bot: &str,
+    name: &str,
+    input: Value,
+) -> Result<Value, ToolError> {
+    let ctx = ToolContext {
+        bot_id: Some(bot.to_owned()),
+        ..ToolContext::default()
+    };
+    call_in(c, &ctx, name, input).await
+}
+
+async fn call_in(
+    c: &Arc<CalendarConnector>,
+    ctx: &ToolContext,
+    name: &str,
+    input: Value,
+) -> Result<Value, ToolError> {
     let reg = ToolRegistry::new();
     assert_eq!(register(&reg, c), 5);
-    let out = reg
-        .get(name)
-        .unwrap()
-        .call(&ToolContext::default(), input)
-        .await?;
+    let out = reg.get(name).unwrap().call(ctx, input).await?;
     match out.content.into_iter().next() {
         Some(ContentPart::Json { data }) => Ok(data),
         other => panic!("unexpected output {other:?}"),
@@ -544,6 +602,31 @@ async fn inviting_or_notifying_people_always_asks_the_user() {
     ));
     assert!(!ask("calendar_list_events", json!({})));
     assert!(!ask("calendar_free_busy", json!({})));
+    // A delete has no always-ask of its own. Like the other tools that act outward it follows
+    // the permission level: lower levels ask, the Full level lets a trusted run through (the
+    // owner's rule for Full access), and what the server cancels is checked by the mail rules.
+    assert!(!ask("calendar_delete_event", json!({"uid":"u"})));
+}
+
+#[tokio::test]
+async fn every_tool_that_reaches_a_server_declares_egress() {
+    let f = fake(false).await;
+    let all = tools(&connector(f.port));
+    assert_eq!(all.len(), crate::TOOL_NAMES.len());
+    for t in &all {
+        let spec = t.spec();
+        assert!(
+            spec.content.egress,
+            "{} sends its request to the calendar server",
+            spec.name
+        );
+    }
+    // Free/busy sends the requested range to every calendar but reads no outside text.
+    let fb = all
+        .iter()
+        .find(|t| t.spec().name == "calendar_free_busy")
+        .unwrap();
+    assert!(!fb.spec().content.ingests_untrusted);
 }
 
 #[tokio::test]
@@ -572,7 +655,7 @@ async fn create_a_repeating_event_with_attendees_on_a_scheduling_server() {
     assert!(raw.contains("mailto:bob@example.com"), "{raw}");
     // The server delivers: no e-mail goes out from here.
     assert_eq!(made["invitations"]["method"], "calendar_server");
-    assert!(out.0.lock().unwrap().is_empty());
+    assert!(out.mails.lock().unwrap().is_empty());
     // The server was asked what it supports.
     assert!(f.requests.lock().unwrap().iter().any(|r| r.0 == "OPTIONS"));
 }
@@ -800,7 +883,7 @@ async fn changing_attendees_tells_the_new_and_the_removed_and_a_move_needs_conse
     .await
     .unwrap();
     let uid = made["uid"].as_str().unwrap().to_owned();
-    out.0.lock().unwrap().clear();
+    out.mails.lock().unwrap().clear();
     // Mark Bob as having accepted: that answer must survive the edit.
     {
         let mut map = f.events.lock().unwrap();
@@ -817,7 +900,7 @@ async fn changing_attendees_tells_the_new_and_the_removed_and_a_move_needs_conse
     .await
     .unwrap_err();
     assert!(err.to_string().contains("notify_attendees"), "{err}");
-    assert!(out.0.lock().unwrap().is_empty());
+    assert!(out.mails.lock().unwrap().is_empty());
 
     // Swap Carol for Dave.
     let done = call(
@@ -856,7 +939,7 @@ async fn changing_attendees_tells_the_new_and_the_removed_and_a_move_needs_conse
     );
 
     // With consent, a move goes to everyone who is on the event.
-    out.0.lock().unwrap().clear();
+    out.mails.lock().unwrap().clear();
     call(
         &c,
         "calendar_update_event",
@@ -868,16 +951,28 @@ async fn changing_attendees_tells_the_new_and_the_removed_and_a_move_needs_conse
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].0, ["bob@example.com", "dave@example.com"]);
 
-    // A change nobody needs to hear about (notes) sends nothing and needs no consent.
-    out.0.lock().unwrap().clear();
-    call(
+    // Even a note changes the `SEQUENCE`, and a scheduling server then tells everyone, so a
+    // notes-only edit of an event with attendees needs the same consent as a move.
+    out.mails.lock().unwrap().clear();
+    let before = the_event(&f);
+    let err = call(
         &c,
         "calendar_update_event",
         json!({"uid": uid, "description":"new notes"}),
     )
     .await
+    .unwrap_err();
+    assert!(err.to_string().contains("notify_attendees"), "{err}");
+    assert_eq!(the_event(&f), before, "a refused edit writes nothing");
+    assert!(out.mails.lock().unwrap().is_empty());
+    call(
+        &c,
+        "calendar_update_event",
+        json!({"uid": uid, "description":"new notes","notify_attendees":true}),
+    )
+    .await
     .unwrap();
-    assert!(out.0.lock().unwrap().is_empty());
+    assert_eq!(out.sent().len(), 1, "the attendees are told of the edit");
 }
 
 fn days_with_hours(list: &Value) -> Vec<String> {
@@ -1103,4 +1198,705 @@ async fn discovery_finds_the_calendars_from_the_server_root_or_one_calendar() {
         .to_string();
     assert!(err.contains("not found"), "{err}");
     assert!(!err.contains("s3cret-pw"));
+}
+
+// ---- the owner's mail rules, control characters, deletes ----
+
+fn puts(f: &Fake) -> usize {
+    f.requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|r| r.0 == "PUT")
+        .count()
+}
+
+fn requests_of(f: &Fake, method: &str) -> usize {
+    f.requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|r| r.0 == method)
+        .count()
+}
+
+async fn scheduling_fake() -> Fake {
+    fake_with(Opts {
+        scheduling: true,
+        ..Opts::default()
+    })
+    .await
+}
+
+#[tokio::test]
+async fn invitation_mail_is_one_line_whatever_the_event_title_holds() {
+    let f = fake(false).await;
+    let c = connector(f.port);
+    let out = Arc::new(Outbox::default());
+    c.set_mailer(out.clone());
+    let made = call(
+        &c,
+        "calendar_create_event",
+        json!({"summary":"Lunch\r\nBcc: evil@example.com\u{7}\u{1b}[31m","location":"Cafe\nBack room",
+               "start":"2026-11-24T12:00:00Z","end":"2026-11-24T13:00:00Z","attendees":["bob@example.com"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(made["invitations"]["method"], "email");
+    let raw = the_event(&f);
+    assert!(
+        !raw.chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\r'),
+        "no control character reaches the stored event: {raw:?}"
+    );
+    let sent = out.sent();
+    let (_, subject, _, _) = &sent[0];
+    assert!(!subject.chars().any(char::is_control), "{subject:?}");
+    assert_eq!(subject, "Invitation: Lunch Bcc: evil@example.com[31m");
+}
+
+#[tokio::test]
+async fn a_title_the_server_holds_with_control_characters_cannot_split_a_mail_header() {
+    let f = fake(false).await;
+    let c = connector(f.port);
+    let out = Arc::new(Outbox::default());
+    c.set_mailer(out.clone());
+    let made = call(
+        &c,
+        "calendar_create_event",
+        json!({"summary":"Sync","start":"2026-11-25T14:00:00Z","end":"2026-11-25T15:00:00Z",
+               "attendees":["bob@example.com","carol@example.com"]}),
+    )
+    .await
+    .unwrap();
+    // Someone else's client wrote raw control characters and an escaped line break into the title.
+    {
+        let mut map = f.events.lock().unwrap();
+        let ics = map.values_mut().next().unwrap();
+        *ics = ics.replacen(
+            "SUMMARY:Sync",
+            "SUMMARY:Sy\u{7}nc\\nBcc: x@evil.example\u{b}",
+            1,
+        );
+    }
+    out.mails.lock().unwrap().clear();
+    call(
+        &c,
+        "calendar_update_event",
+        json!({"uid": made["uid"], "attendees":["bob@example.com","dave@example.com"]}),
+    )
+    .await
+    .unwrap();
+    let sent = out.sent();
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    for (_, subject, _, _) in &sent {
+        assert!(!subject.chars().any(char::is_control), "{subject:?}");
+        assert!(subject.contains("Sy nc Bcc: x@evil.example"), "{subject:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_address_the_mail_rules_refuse_stops_the_event_before_it_is_written() {
+    // Whoever would deliver the invitation (this daemon by mail, or the server by itself),
+    // the owner's opt-out list is consulted first.
+    for scheduling in [false, true] {
+        let f = fake_with(Opts {
+            scheduling,
+            ..Opts::default()
+        })
+        .await;
+        let c = connector(f.port);
+        let out = Outbox::refusing("bob@example.com");
+        c.set_mailer(out.clone());
+        let input = |who: &[&str]| {
+            json!({"summary":"Sync","start":"2026-11-25T14:00:00Z","end":"2026-11-25T15:00:00Z",
+                   "attendees": who})
+        };
+        let err = call_as(
+            &c,
+            "bot-7",
+            "calendar_create_event",
+            input(&["carol@example.com", "bob@example.com"]),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("asked not to be written to"),
+            "scheduling={scheduling}: {err}"
+        );
+        assert!(
+            f.events.lock().unwrap().is_empty(),
+            "scheduling={scheduling}"
+        );
+        assert_eq!(puts(&f), 0, "nothing is sent to the server: {scheduling}");
+        assert!(out.sent().is_empty());
+        assert_eq!(
+            out.checked.lock().unwrap()[0].0.as_deref(),
+            Some("bot-7"),
+            "the rules see which bot acts"
+        );
+
+        // Without the refused address it goes through; and what the SERVER delivers is logged.
+        let made = call_as(
+            &c,
+            "bot-7",
+            "calendar_create_event",
+            input(&["carol@example.com"]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(puts(&f), 1);
+        let server = out.server.lock().unwrap().clone();
+        if scheduling {
+            assert_eq!(made["invitations"]["method"], "calendar_server");
+            assert_eq!(
+                server,
+                [(
+                    Some("bot-7".to_owned()),
+                    vec!["carol@example.com".to_owned()],
+                    "Invitation: Sync".to_owned()
+                )]
+            );
+            assert!(out.sent().is_empty());
+        } else {
+            assert_eq!(made["invitations"]["method"], "email");
+            assert!(server.is_empty());
+            assert_eq!(out.sent().len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_update_that_would_tell_a_refused_address_writes_nothing() {
+    for scheduling in [false, true] {
+        let f = fake_with(Opts {
+            scheduling,
+            ..Opts::default()
+        })
+        .await;
+        let c = connector(f.port);
+        let out = Arc::new(Outbox::default());
+        c.set_mailer(out.clone());
+        let made = call(
+            &c,
+            "calendar_create_event",
+            json!({"summary":"Sync","start":"2026-11-25T14:00:00Z","end":"2026-11-25T15:00:00Z",
+                   "attendees":["bob@example.com","carol@example.com"]}),
+        )
+        .await
+        .unwrap();
+        let uid = made["uid"].as_str().unwrap().to_owned();
+        let before = the_event(&f);
+        *out.refuse.lock().unwrap() = Some("carol@example.com".into());
+
+        // A move tells everyone, Carol too; removing her tells her it is cancelled.
+        for patch in [
+            json!({"uid": uid, "start":"2026-11-25T16:00:00Z","notify_attendees":true}),
+            json!({"uid": uid, "attendees":["bob@example.com"]}),
+        ] {
+            let err = call(&c, "calendar_update_event", patch.clone())
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("asked not to be written to"),
+                "scheduling={scheduling} {patch}: {err}"
+            );
+            assert_eq!(the_event(&f), before, "{patch}");
+        }
+        assert_eq!(puts(&f), 1, "only the creation was written: {scheduling}");
+
+        // Once the rules allow it the same edit goes through.
+        *out.refuse.lock().unwrap() = None;
+        call(
+            &c,
+            "calendar_update_event",
+            json!({"uid": uid, "start":"2026-11-25T16:00:00Z","notify_attendees":true}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(puts(&f), 2);
+    }
+}
+
+#[tokio::test]
+async fn deleting_an_event_applies_the_mail_rules_to_what_the_server_cancels() {
+    let f = scheduling_fake().await;
+    let c = connector(f.port);
+    let out = Arc::new(Outbox::default());
+    c.set_mailer(out.clone());
+    let made = call(
+        &c,
+        "calendar_create_event",
+        json!({"summary":"Standup","start":"2026-11-25T14:00:00Z","end":"2026-11-25T14:30:00Z",
+               "attendees":["bob@example.com"]}),
+    )
+    .await
+    .unwrap();
+    out.server.lock().unwrap().clear();
+
+    // The owner's rules say no: the event stays, and no DELETE reaches the server.
+    *out.refuse.lock().unwrap() = Some("bob@example.com".into());
+    let err = call_as(
+        &c,
+        "bot-7",
+        "calendar_delete_event",
+        json!({"uid": made["uid"]}),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("asked not to be written to"),
+        "{err}"
+    );
+    assert_eq!(f.events.lock().unwrap().len(), 1);
+    assert_eq!(requests_of(&f, "DELETE"), 0);
+
+    // Allowed: it is deleted, the server cancels, and the send log is told who acted.
+    *out.refuse.lock().unwrap() = None;
+    let done = call_as(
+        &c,
+        "bot-7",
+        "calendar_delete_event",
+        json!({"uid": made["uid"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(done["deleted"], true);
+    assert_eq!(done["invitations"]["method"], "calendar_server");
+    assert!(f.events.lock().unwrap().is_empty());
+    assert_eq!(
+        out.server.lock().unwrap().clone(),
+        [(
+            Some("bot-7".to_owned()),
+            vec!["bob@example.com".to_owned()],
+            "Canceled: Standup".to_owned()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn deleting_says_plainly_when_nobody_was_told_and_leaves_other_peoples_events_alone() {
+    // A server that does not schedule: deleted, and the answer says the attendees were not told.
+    let f = fake(false).await;
+    let c = connector(f.port);
+    let out = Arc::new(Outbox::default());
+    c.set_mailer(out.clone());
+    let made = call(
+        &c,
+        "calendar_create_event",
+        json!({"summary":"Standup","start":"2026-11-25T14:00:00Z","end":"2026-11-25T14:30:00Z",
+               "attendees":["bob@example.com"]}),
+    )
+    .await
+    .unwrap();
+    out.checked.lock().unwrap().clear();
+    let done = call(&c, "calendar_delete_event", json!({"uid": made["uid"]}))
+        .await
+        .unwrap();
+    assert_eq!(done["deleted"], true);
+    assert_eq!(done["invitations"]["method"], "not_sent");
+    assert!(
+        done["invitations"]["note"]
+            .as_str()
+            .unwrap()
+            .contains("not told"),
+        "{done}"
+    );
+    assert!(out.server.lock().unwrap().is_empty());
+    assert!(out.checked.lock().unwrap().is_empty());
+
+    // An event somebody else organises: the server cancels nothing for the others.
+    let f = scheduling_fake().await;
+    let c = connector(f.port);
+    let out = Arc::new(Outbox::default());
+    c.set_mailer(out.clone());
+    let made = call(
+        &c,
+        "calendar_create_event",
+        json!({"summary":"Board","start":"2026-11-25T14:00:00Z","end":"2026-11-25T15:00:00Z",
+               "attendees":["bob@example.com"]}),
+    )
+    .await
+    .unwrap();
+    {
+        let mut map = f.events.lock().unwrap();
+        let ics = map.values_mut().next().unwrap();
+        *ics = ics.replace(
+            "ORGANIZER:mailto:me@example.com",
+            "ORGANIZER:mailto:boss@example.com",
+        );
+    }
+    out.server.lock().unwrap().clear();
+    let done = call(&c, "calendar_delete_event", json!({"uid": made["uid"]}))
+        .await
+        .unwrap();
+    assert_eq!(done["deleted"], true);
+    assert_eq!(done["invitations"]["method"], "none");
+    assert!(out.server.lock().unwrap().is_empty());
+
+    // Nothing to delete is not an error.
+    let gone = call(&c, "calendar_delete_event", json!({"uid":"no-such-event"}))
+        .await
+        .unwrap();
+    assert_eq!(gone["deleted"], false);
+}
+
+#[tokio::test]
+async fn a_uid_is_plain_text_before_it_goes_into_a_query() {
+    let f = fake(false).await;
+    let c = connector(f.port);
+    for bad in ["", "a\u{0}b", "line\nbreak", &"x".repeat(300)] {
+        for tool in ["calendar_delete_event", "calendar_update_event"] {
+            let err = call(&c, tool, json!({"uid": bad, "summary":"x"}))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::InvalidInput(_)),
+                "{tool} {bad:?}: {err}"
+            );
+        }
+    }
+    assert_eq!(
+        requests_of(&f, "REPORT"),
+        0,
+        "nothing was asked of the server"
+    );
+}
+
+// ---- where a calendar may be dialled ----
+
+#[test]
+fn plain_http_is_for_this_machine_only_and_judged_on_the_parsed_host() {
+    let st = store(&[]);
+    let problems = |url: &str| {
+        let mut a = account("x", 1, "");
+        a.url = url.into();
+        CalendarConnector::new(vec![a], &st).1
+    };
+    // `127.attacker.com` only starts like loopback; the password must never go there in clear.
+    for bad in [
+        "http://127.attacker.com/dav/",
+        "http://127.0.0.1.nip.io/dav/",
+        "http://localhost.attacker.com/dav/",
+        "http://10.0.0.5/dav/",
+    ] {
+        let p = problems(bad);
+        assert!(
+            p.iter().any(|m| m.contains("must be https")),
+            "{bad}: {p:?}"
+        );
+    }
+    for ok in [
+        "http://localhost:5232/",
+        "http://127.0.0.1:5232/dav/",
+        "http://[::1]:5232/",
+        "http://dav.localhost/",
+    ] {
+        assert!(problems(ok).is_empty(), "{ok}");
+    }
+}
+
+#[test]
+fn addresses_in_metadata_and_link_local_space_are_refused_even_over_https() {
+    let st = store(&[]);
+    for bad in [
+        "https://169.254.169.254/latest/meta-data/",
+        "https://[::ffff:169.254.169.254]/",
+        "https://[fe80::1]/",
+        "https://0.0.0.0/",
+        "https://2852039166/",
+    ] {
+        let mut a = account("x", 1, "");
+        a.url = bad.into();
+        let (c, problems) = CalendarConnector::new(vec![a], &st);
+        assert!(c.names().is_empty(), "{bad}");
+        assert_eq!(problems.len(), 1, "{bad}: {problems:?}");
+    }
+}
+
+#[tokio::test]
+async fn the_daemons_own_port_is_never_dialled_and_nothing_is_sent_there() {
+    // The fake stands in for the daemon's API: its port is the protected one.
+    let f = fake(false).await;
+    let st = store(&["home"]);
+    let policy = calendar_policy(&[std::net::SocketAddr::from(([127, 0, 0, 1], f.port))]);
+    let conn = CalendarConnector::with_policy(policy);
+    // The address, the name of this machine and the other spellings of it are all refused when
+    // the account is built (so `POST /v1/calendar/test` cannot probe the daemon's own port).
+    for url in [
+        format!("http://127.0.0.1:{}/cal", f.port),
+        format!("http://localhost:{}/cal", f.port),
+        format!("http://dav.localhost:{}/cal", f.port),
+        format!("http://2130706433:{}/cal", f.port),
+        format!("http://[::ffff:127.0.0.1]:{}/cal", f.port),
+    ] {
+        let mut a = account("home", f.port, "/cal");
+        a.url = url.clone();
+        let problems = conn.replace_accounts(vec![a], &st);
+        assert_eq!(problems.len(), 1, "{url}: {problems:?}");
+        assert!(conn.names().is_empty(), "{url}");
+    }
+    // Another port of this machine (a Radicale next door) is still a calendar.
+    let mut other = account("home", f.port, "/cal");
+    other.url = "http://127.0.0.1:5232/cal".into();
+    assert!(conn.replace_accounts(vec![other], &st).is_empty());
+    assert_eq!(conn.names(), ["home"]);
+    assert!(
+        f.requests.lock().unwrap().is_empty(),
+        "not one request reached the protected port: {:?}",
+        f.requests.lock().unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_discovery_link_stays_on_the_configured_host() {
+    let st = store(&[]);
+    let client = |url: &str| {
+        let mut a = account("x", 1, "");
+        a.url = url.into();
+        a.password = SecretRef::new("calendar/x/password").unwrap();
+        crate::CalendarClient::new(a, st.clone()).unwrap()
+    };
+    // (configured address, link the server sent, allowed)
+    for (base, link, allowed) in [
+        // the same host, a path or a full link
+        ("https://dav.example.com/dav/", "/dav/home/", true),
+        (
+            "https://dav.example.com/dav/",
+            "https://dav.example.com/other/",
+            true,
+        ),
+        (
+            "https://DAV.example.com./dav/",
+            "https://dav.example.com/other/",
+            true,
+        ),
+        // another host is refused, however alike the last labels
+        ("https://a.co.uk/dav/", "https://evil.co.uk/dav/", false),
+        (
+            "https://dav.example.com/dav/",
+            "https://evil.example.com/dav/",
+            false,
+        ),
+        (
+            "https://dav.example.com/dav/",
+            "https://example.com/dav/",
+            false,
+        ),
+        (
+            "https://dav.example.com/dav/",
+            "https://dav.example.com.evil.net/",
+            false,
+        ),
+        // address literals never match by their last octets
+        (
+            "https://10.0.169.254/dav/",
+            "https://169.254.169.254/dav/",
+            false,
+        ),
+        ("https://10.0.0.5/dav/", "https://10.0.0.6/dav/", false),
+        // scheme, port and a login in the link are never changed
+        (
+            "https://dav.example.com/dav/",
+            "http://dav.example.com/dav/",
+            false,
+        ),
+        (
+            "https://dav.example.com/dav/",
+            "https://dav.example.com:8443/dav/",
+            false,
+        ),
+        (
+            "https://dav.example.com/dav/",
+            "https://u:p@dav.example.com/dav/",
+            false,
+        ),
+        (
+            "https://dav.example.com/dav/",
+            "https://u@dav.example.com/dav/",
+            false,
+        ),
+        // a service that spreads calendars over its own hosts may move between them
+        (
+            "https://caldav.icloud.com/",
+            "https://p42-caldav.icloud.com/123/",
+            true,
+        ),
+        (
+            "https://p42-caldav.icloud.com/",
+            "https://p51-caldav.icloud.com/9/",
+            true,
+        ),
+        // ... but not to a look-alike, and not out of the service
+        (
+            "https://caldav.icloud.com/",
+            "https://p42-caldav.icloud.com.evil.net/",
+            false,
+        ),
+        (
+            "https://caldav.icloud.com/",
+            "https://evilicloud.com/",
+            false,
+        ),
+        (
+            "https://caldav.icloud.com/",
+            "https://p42-caldav.fastmail.com/",
+            false,
+        ),
+        (
+            "https://dav.example.com/dav/",
+            "https://p42-caldav.icloud.com/",
+            false,
+        ),
+        // never into metadata space, whatever the host says
+        (
+            "https://dav.example.com/dav/",
+            "https://169.254.169.254/",
+            false,
+        ),
+    ] {
+        let c = client(base);
+        let from = url::Url::parse(base).unwrap();
+        let got = c.discovered(&from, link);
+        assert_eq!(got.is_ok(), allowed, "{base} -> {link}: {got:?}");
+    }
+}
+
+// ---- a hostile server ----
+
+/// Read one request (head and body) off `sock`.
+async fn read_request(sock: &mut tokio::net::TcpStream) {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = sock.read(&mut chunk).await.unwrap_or(0);
+        if n == 0 {
+            return;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        if let Some((head, body)) = text.split_once("\r\n\r\n") {
+            let len = head
+                .to_ascii_lowercase()
+                .lines()
+                .find_map(|l| {
+                    l.strip_prefix("content-length:")
+                        .map(|v| v.trim().parse().unwrap_or(0))
+                })
+                .unwrap_or(0usize);
+            if body.len() >= len {
+                return;
+            }
+        }
+    }
+}
+
+/// A server that answers every request with `reply` as it is (head included).
+async fn serve_bytes(reply: Vec<u8>) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let reply = Arc::new(reply);
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let reply = reply.clone();
+            tokio::spawn(async move {
+                read_request(&mut sock).await;
+                let _ = sock.write_all(&reply).await;
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+    port
+}
+
+/// A server that streams a body without end (up to `limit` bytes, then it gives up).
+async fn serve_endless(limit: usize) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                read_request(&mut sock).await;
+                let head = "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nConnection: close\r\n\r\n<d:multistatus xmlns:d=\"DAV:\">";
+                if sock.write_all(head.as_bytes()).await.is_err() {
+                    return;
+                }
+                let filler = vec![b' '; 64 << 10];
+                let mut sent = 0;
+                while sent < limit && sock.write_all(&filler).await.is_ok() {
+                    sent += filler.len();
+                }
+            });
+        }
+    });
+    port
+}
+
+const LIST_ARGS: &str = r#"{"from":"2026-11-01","to":"2026-12-01"}"#;
+
+#[tokio::test]
+async fn a_response_is_read_up_to_the_cap_and_no_further() {
+    // A body that never ends: the read stops at the cap with an answer, and does not hang or grow.
+    let port = serve_endless(256 << 20).await;
+    let c = connector(port);
+    let started = std::time::Instant::now();
+    let err = call(
+        &c,
+        "calendar_list_events",
+        serde_json::from_str(LIST_ARGS).unwrap(),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("response too large"), "{err}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+
+    // A length that announces more than the cap is refused before a byte of it is read.
+    let head = "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: 10485760\r\nConnection: close\r\n\r\n";
+    let port = serve_bytes(head.as_bytes().to_vec()).await;
+    let c = connector(port);
+    let err = call(
+        &c,
+        "calendar_list_events",
+        serde_json::from_str(LIST_ARGS).unwrap(),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("response too large"), "{err}");
+}
+
+#[tokio::test]
+async fn an_answer_that_expands_to_too_many_events_is_refused_not_listed() {
+    let mut ics = String::from("BEGIN:VCALENDAR\r\n");
+    for i in 0..10_500 {
+        ics.push_str(&format!(
+            "BEGIN:VEVENT\r\nUID:e{i}\r\nDTSTART:20261120T090000Z\r\nDTEND:20261120T100000Z\r\nEND:VEVENT\r\n"
+        ));
+    }
+    ics.push_str("END:VCALENDAR\r\n");
+    let xml = format!(
+        "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:response><d:href>/cal/a.ics</d:href><d:propstat><d:prop><c:calendar-data>{ics}</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>"
+    );
+    assert!(
+        xml.len() < 4 << 20,
+        "the body itself is within the cap: {}",
+        xml.len()
+    );
+    let reply = format!(
+        "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{xml}",
+        xml.len()
+    );
+    let port = serve_bytes(reply.into_bytes()).await;
+    let c = connector(port);
+    let err = call(
+        &c,
+        "calendar_list_events",
+        serde_json::from_str(LIST_ARGS).unwrap(),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("too many events"), "{err}");
 }
