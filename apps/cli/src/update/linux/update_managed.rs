@@ -411,6 +411,22 @@ mod systemd {
         Ok(())
     }
 
+    /// Root works inside the data directory and the snapshot directory below it: the way there must
+    /// be root's own (`/var/lib` above the data directory; above the updater's own state directory
+    /// the same). The directories themselves are opened without following a link and checked by
+    /// `db_snapshot`.
+    fn trusted_data_paths() -> Result<()> {
+        for ancestor in [
+            Path::new(db_snapshot::DATA_DIR).parent(),
+            Path::new(db_snapshot::SNAPSHOT_DIR)
+                .parent()
+                .and_then(Path::parent),
+        ] {
+            super::super::trusted_root_path(ancestor.ok_or("invalid data path")?)?;
+        }
+        Ok(())
+    }
+
     /// Stop the stack, then make sure nothing of the service user runs. The data directory belongs
     /// to that user: a process that outlived its unit (outside the control group, or a straggler of
     /// a crashed release) could swap what root is about to read or replace. Fails, with nothing
@@ -566,19 +582,8 @@ mod systemd {
     }
 
     async fn activate(prefix: &Path, target: &Path, port: u16) -> Result<HostUpdateState> {
-        use super::super::{read_version_link, trusted_root_path};
-        // Root works inside the data directory and the snapshot directory below it: the way there
-        // must be root's own. (The directories themselves are opened without following a link and
-        // checked by `db_snapshot`.)
-        // `/var/lib` above the data directory; above the updater's own state directory the same.
-        for ancestor in [
-            Path::new(db_snapshot::DATA_DIR).parent(),
-            Path::new(db_snapshot::SNAPSHOT_DIR)
-                .parent()
-                .and_then(Path::parent),
-        ] {
-            trusted_root_path(ancestor.ok_or("invalid data path")?)?;
-        }
+        use super::super::read_version_link;
+        trusted_data_paths()?;
         let current = read_version_link(prefix, "current")?.ok_or("missing rollback baseline")?;
         let previous = read_version_link(prefix, "previous")?;
         let mut live = Live {
@@ -762,7 +767,7 @@ mod systemd {
         // `Ok(None)`: no rollback of the data was left unfinished.
         let restored = match db_snapshot::restore_pending(snapshot) {
             Ok(false) => Ok(None),
-            Ok(true) => match db_snapshot::data_owner(data) {
+            Ok(true) => match trusted_data_paths().and_then(|()| db_snapshot::data_owner(data)) {
                 Ok(owner) => finish_restore(
                     &System,
                     data,
