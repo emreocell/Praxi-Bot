@@ -6265,6 +6265,43 @@
     "switchBot": "Switch to {{name}}",
     "title": "Command palette"
   },
+  "panelTabs": {
+    "browser": {
+      "caution": "On signed-in sites, this bot can act as you.",
+      "searchSites": "Search sites",
+      "status": {
+        "signingIn": "Signing in…",
+        "sites": "{{count}} saved sites",
+        "sites_one": "{{count}} saved site",
+        "sites_other": "{{count}} saved sites",
+        "unavailable": "Site names unavailable"
+      }
+    },
+    "library": {
+      "keeps": "What it keeps",
+      "knows": "What it knows",
+      "learned": "Learned",
+      "searchDocuments": "Search documents",
+      "searchNotes": "Search notes",
+      "searchSkills": "Search skills"
+    },
+    "list": {
+      "found": "{{count}} found",
+      "found_one": "{{count}} found",
+      "found_other": "{{count}} found",
+      "noMatches": "Nothing matches your search.",
+      "showAll": "Show all {{count}}",
+      "showFewer": "Show fewer"
+    },
+    "mail": {
+      "more": "More",
+      "status": {
+        "problem": "Needs attention",
+        "secretMissing": "Password missing",
+        "untested": "Not checked yet"
+      }
+    }
+  },
   "pastedSecret": {
     "back": "Keep editing",
     "body": "Your message seems to contain: {{kinds}}. Anything you send goes to the AI provider and stays in the chat history.",

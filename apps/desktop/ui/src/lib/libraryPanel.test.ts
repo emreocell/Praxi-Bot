@@ -15,6 +15,17 @@ test("the Library tab is shelves in a fixed order: skills, documents, notes, mem
   assert.equal([...panel.matchAll(/<Shelf\b/g)].length, [...panel.matchAll(/\n\s+line=\{t\(/g)].length);
 });
 
+test("the shelves sit in two named groups and long lists get a search", () => {
+  const knows = panel.indexOf('testId="library-group-knows"');
+  const keeps = panel.indexOf('testId="library-group-keeps"');
+  assert.ok(knows >= 0 && keeps > knows, "knows, then keeps");
+  const at = (id: string) => panel.indexOf(`testId="${id}"`);
+  for (const id of ["library-skills", "library-documents", "library-notes", "library-memory"]) assert.ok(at(id) > knows && at(id) < keeps, id);
+  for (const id of ["library-files", "library-chats"]) assert.ok(at(id) > keeps, id);
+  assert.match(panel, /searchLabel=\{t\("panelTabs\.library\.searchDocuments"\)\}/);
+  assert.match(panel, /searchLabel=\{t\("panelTabs\.library\.searchNotes"\)\}/);
+});
+
 test("every Library text exists in English and Turkish, and the kinds cover every source kind", () => {
   const keys = new Set([...panel.matchAll(/t\("(library\.[a-zA-Z.]+)"/g)].map((m) => m[1]));
   for (const kind of ["file", "folder", "saved_web", "conversation", "email", "note", "shared_brain"]) keys.add(`library.kind.${kind}`);

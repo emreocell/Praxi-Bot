@@ -393,143 +393,29 @@
   color: var(--color-text);
 }
 
-/* ── panel summary ── */
+/* ── Library tab: skills list ── */
 
-.panelHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
-
-/* Same small caps as every right-panel section title. */
-.panelLabel {
-  margin: var(--space-0);
-  padding-inline: var(--space-half);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: var(--letter-spacing-wide);
-  text-transform: uppercase;
-}
-
-.panelTools {
+.panelManage {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-half);
-}
-
-.panelTool {
-  display: inline-grid;
-  place-items: center;
-  width: var(--space-6);
-  height: var(--space-6);
-  padding: var(--space-0);
+  min-height: var(--size-control-sm);
+  padding: var(--space-0) var(--space-2);
   border: none;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
   cursor: pointer;
 }
 
-.panelTool:hover:not(:disabled) {
-  background-color: var(--color-surface-elevated);
+.panelManage:hover {
   color: var(--color-text);
 }
 
-.panelTool:focus-visible {
+.panelManage:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
-}
-
-.panelTool:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.panelTool > svg {
-  width: var(--size-icon-sm);
-  height: var(--size-icon-sm);
-}
-
-.panelCard {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-3);
-  border: none;
-  border-radius: var(--radius-card);
-  background-color: transparent;
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 5%, transparent), transparent);
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
-}
-
-.panelCard:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--color-text) 4%, transparent);
-}
-
-.panelCard:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
-
-.panelCard:disabled {
-  cursor: default;
-}
-
-.panelSummary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  font-size: var(--font-size-ui);
-  color: var(--color-text-secondary);
-}
-
-.panelSummary > svg {
-  flex: none;
-  width: var(--size-icon-sm);
-  height: var(--size-icon-sm);
-  color: var(--color-text-faint);
-}
-
-.panelChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.panelChip {
-  max-width: 100%;
-  padding: var(--space-half) var(--space-2);
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background-color: color-mix(in srgb, var(--color-text) 7%, transparent);
-  font-size: var(--font-size-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-muted);
-}
-
-.panelWarn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--font-size-xs);
-  color: var(--color-warning);
-}
-
-.panelWarn > svg {
-  flex: none;
-  width: var(--size-icon-sm);
-  height: var(--size-icon-sm);
 }
 
 .panelMuted {
@@ -557,7 +443,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .item,
-  .panelCard,
   .disclosure > svg {
     transition: none;
   }

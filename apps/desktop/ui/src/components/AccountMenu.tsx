@@ -1,4 +1,4 @@
-import { CalendarClock, ChevronsUpDown, CircleHelp, Download, Gauge, KeyRound, Palette, Settings2, Sparkles, type LucideIcon } from "lucide-react";
+import { CalendarClock, CircleHelp, Download, Gauge, KeyRound, Palette, Settings2, Sparkles, type LucideIcon } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ComputerTarget } from "../lib/settingsPrefs";
@@ -17,6 +17,9 @@ export type AccountAction =
   | "apps"
   | "computer";
 
+/** The menu only needs a little more than the name: three tiles side by side and the longest row. */
+const MENU_WIDTH = 228;
+
 const QUICK: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string }> = [
   { id: "appearance", icon: Palette, key: "account.appearance" },
   { id: "ai", icon: Sparkles, key: "account.ai" },
@@ -32,8 +35,8 @@ const ROWS: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string; kb
 ];
 
 /**
- * Bottom-left profile button (avatar and name) with its menu: three quick tiles, then
- * settings, scheduled tasks, updates and help.  The menu is a portal popover, so it may reach
+ * Bottom-left profile button (avatar and name, only as wide as the name needs) with its menu:
+ * three quick tiles, then settings, scheduled tasks, updates and help.  The menu is a portal popover, so it may reach
  * outside a narrow rail.  `compact` = icon-only rail.
  */
 export function AccountMenu({
@@ -82,9 +85,8 @@ export function AccountMenu({
           {initial}
         </span>
         {compact ? null : <span className={styles.name}>{label}</span>}
-        {compact ? null : <ChevronsUpDown className={styles.chevron} aria-hidden="true" />}
       </button>
-      <Popover open={open} anchor={trigger} onClose={close} placement="top-start" label={label} width={272} className={styles.menu}>
+      <Popover open={open} anchor={trigger} onClose={close} placement="top-start" label={label} width={MENU_WIDTH} className={styles.menu}>
         <div className={styles.head}>
           <span className={`${styles.avatar} ${styles.avatarLg}`} aria-hidden="true">
             {initial}

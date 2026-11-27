@@ -6265,6 +6265,43 @@
     "switchBot": "{{name}} botuna geç",
     "title": "Komut paleti"
   },
+  "panelTabs": {
+    "browser": {
+      "caution": "Giriş yapılan sitelerde bot senin adına işlem yapabilir.",
+      "searchSites": "Sitelerde ara",
+      "status": {
+        "signingIn": "Giriş yapılıyor…",
+        "sites": "{{count}} kayıtlı site",
+        "sites_one": "{{count}} kayıtlı site",
+        "sites_other": "{{count}} kayıtlı site",
+        "unavailable": "Site adları okunamıyor"
+      }
+    },
+    "library": {
+      "keeps": "Sakladıkları",
+      "knows": "Bildikleri",
+      "learned": "Öğrendi",
+      "searchDocuments": "Belgelerde ara",
+      "searchNotes": "Notlarda ara",
+      "searchSkills": "Yeteneklerde ara"
+    },
+    "list": {
+      "found": "{{count}} sonuç",
+      "found_one": "{{count}} sonuç",
+      "found_other": "{{count}} sonuç",
+      "noMatches": "Aramana uyan bir şey yok.",
+      "showAll": "Tümünü göster ({{count}})",
+      "showFewer": "Daha az göster"
+    },
+    "mail": {
+      "more": "Daha fazla",
+      "status": {
+        "problem": "İlgilenmen gerekiyor",
+        "secretMissing": "Parola eksik",
+        "untested": "Henüz denenmedi"
+      }
+    }
+  },
   "pastedSecret": {
     "back": "Düzenlemeye devam et",
     "body": "Mesajınız şunu içeriyor gibi görünüyor: {{kinds}}. Gönderdiğiniz her şey yapay zekâ sağlayıcısına gider ve sohbet geçmişinde kalır.",

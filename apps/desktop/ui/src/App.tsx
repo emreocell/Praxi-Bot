@@ -1398,7 +1398,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
               </div>
             </div>
           </SidebarHeader>
-          <SidebarSection>
+          <SidebarSection className={styles.railScroll}>
             <span className={styles.srOnly} role="status" aria-live="polite">{orderNote}</span>
             <div
               ref={reorder.containerRef}
@@ -1449,7 +1449,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                   </span>
                   <span className={styles.srOnly}>{dotLabel}</span>
                   <div className={`${styles.botMeta} ${styles.railText}`}><span className={styles.botName}><span className={styles.botNameText}>{view.name}</span>{index === 0 && botIds.length > 1 ? <span className={styles.mainMark} role="img" title={t("sidebar.mainBotHint")} aria-label={t("sidebar.mainBotHint")}><Star aria-hidden="true" /></span> : null}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? chatTitleLabel(latest?.title, t("bots.newChat"))}</span></div>
-                  {unreadBots.has(bot.id) ? <span className={styles.unreadDot} role="img" aria-label={t("sidebar.unreadBot")} data-testid="bot-unread" /> : null}
+                  {unreadBots.has(bot.id) && routeBotId !== bot.id ? <span className={styles.unreadDot} role="img" aria-label={t("sidebar.unreadBot")} data-testid="bot-unread" /> : null}
                 </SidebarItem>
                 {canReorder && !mini && botIds.length > 1 ? <button type="button" className={styles.grip} aria-label={t("sidebar.reorderBot", { name: view.name })} title={t("sidebar.reorderHint")} {...reorder.gripProps(bot.id)}><GripVertical aria-hidden="true" /></button> : null}
               </div>;

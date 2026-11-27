@@ -1,23 +1,4 @@
-/* Mail block of the right panel. */
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
-
-/* Same small caps as every right-panel section title. */
-.label {
-  margin: var(--space-0);
-  padding-inline: var(--space-half);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: var(--letter-spacing-wide);
-  text-transform: uppercase;
-}
+/* Mail group of the Tools tab (the title row is PanelGroup). */
 
 .tool {
   display: inline-grid;
@@ -51,7 +32,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  margin: var(--space-0) var(--space-0) var(--space-3);
+  margin: var(--space-0);
   padding: var(--space-0);
   list-style: none;
 }
@@ -87,20 +68,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.tag {
-  padding: var(--space-0) var(--space-2);
-  border-radius: var(--radius-pill);
-  background-color: var(--color-surface-elevated);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
 }
 
 .row {
@@ -212,4 +179,55 @@
 .from {
   font-size: var(--font-size-xs);
   color: var(--color-text-faint);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.scope {
+  padding-inline-start: calc(var(--size-icon-sm) + var(--space-2));
+  margin-top: calc(var(--space-1) * -1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.more > summary {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.more > summary:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-focus);
+}
+
+.more > .row {
+  justify-content: flex-start;
+  margin-top: var(--space-2);
+}
+
+.more > :not(summary, .row) {
+  margin-top: var(--space-2);
+}
+
+.top svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  flex: none;
+}
+
+.access {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
 }

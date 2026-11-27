@@ -79,6 +79,9 @@ const screens = [
   { name: 'context-menu-user-message', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=chat', act: [{ rightClick: '[data-message-row=user]' }] },
   { name: 'context-menu-chat-row', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=bot&panel=1', act: [{ click: '#bot-panel-tab-library' }, { rightClick: '[data-testid=chat-row-panel] button' }] },
   { name: 'context-menu-bot-row', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=bot', act: [{ rightClick: '[data-bot-id] button' }] },
+  // The bot panel's Tools and Library tabs (grouped cards, one-line rows, folded details).
+  { name: 'bot-panel-tools', expect: '[data-testid=browser-profile]', query: 'screen=bot&panel=1', act: [{ click: '#bot-panel-tab-tools' }] },
+  { name: 'bot-panel-library', expect: '[data-testid=bot-library]', query: 'screen=bot&panel=1', act: [{ click: '#bot-panel-tab-library' }] },
   { name: 'command-popover', expect: '[role=listbox]', query: 'screen=chat', act: [{ type: ['textarea', '/'] }] },
   { name: 'mention-popover', expect: '[role=listbox]', query: 'screen=chat', act: [{ type: ['textarea', '@'] }] },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, query: `screen=settings&section=${s}` }))
