@@ -893,6 +893,16 @@ const MOCK_BOT_TERMINALS: BotTerminal[] = [
 ];
 
 export class MockApiClient extends ApiClient {
+  override synthesizeVoice(_text: string, _language: string, signal: AbortSignal): Promise<Blob> {
+    signal.throwIfAborted();
+    if (!this.localVoice.tts_model.installed) {
+      return Promise.reject(new ApiError(409, "voice_not_configured", "read-aloud model is not installed"));
+    }
+    // Minimal 24 kHz mono PCM WAV with one silent sample for browser tests.
+    const wav = Uint8Array.from("RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\xc0\x5d\0\0\x80\xbb\0\0\x02\0\x10\0data\x02\0\0\0\0\0", (c) => c.charCodeAt(0));
+    return Promise.resolve(new Blob([wav], { type: "audio/wav" }));
+  }
+
   private readonly incomingWebhooks = new Map<string, IncomingWebhook[]>();
   private botCursor: BotCursorSettings = { enabled: true };
   private ownerNotify: OwnerNotifySettings = {
@@ -2992,21 +3002,23 @@ export class MockApiClient extends ApiClient {
       case "PUT /control":
       case "POST /control":
         return ok(this.control(method, seg, opts.body));
-      case "GET /voice/local":
-        return ok(this.localVoice);
-      case "POST /voice/local/install":
-        this.localVoice = {
-          ...this.localVoice,
-          vad_installed: true,
-          models: this.localVoice.models.map((m) =>
-            m.id === (opts.body as { model?: string } | undefined)?.model ? { ...m, installed: true } : m
-          )
-        };
-        return ok(this.localVoice);
       case "GET /voice":
+        return ok(path === "/voice/local" ? this.localVoice : this.voiceConfig(opts.body));
       case "PUT /voice":
         return ok(this.voiceConfig(opts.body));
       case "POST /voice":
+        if (path === "/voice/local/install") {
+          const id = (opts.body as { model?: string } | undefined)?.model;
+          if (id === this.localVoice.tts_model.id) {
+            this.localVoice.tts_model.installed = true;
+          } else {
+            const model = this.localVoice.models.find((m) => m.id === id);
+            if (!model) throw new ApiError(422, "bad_voice_config", "unknown model");
+            model.installed = true;
+            this.localVoice.vad_installed = true;
+          }
+          return ok(this.localVoice);
+        }
         return ok({ text: "This is a mock dictation." });
       case "GET /web":
       case "PUT /web":
@@ -3474,6 +3486,16 @@ export class MockApiClient extends ApiClient {
     vad_installed: false,
     installing: null as string | null,
     last_error: null as string | null,
+    tts_model: {
+      id: "supertonic-3",
+      label: "Supertonic 3",
+      description: "Local CPU speech synthesis.",
+      size_mb: 146,
+      license: "OpenRAIL-M",
+      license_url: "https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE",
+      source_host: "huggingface.co",
+      installed: false
+    },
     models: [
       ["whisper-tiny", "Whisper tiny (fast, rough)", 104],
       ["whisper-base", "Whisper base (balanced)", 161],

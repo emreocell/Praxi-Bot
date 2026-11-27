@@ -9150,6 +9150,38 @@
     "micDenied": "Praxi-Bot için mikrofon erişimine izin verin. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde Mikrofon erişimi ve Masaüstü uygulamalarının mikrofonunuza erişmesine izin ver seçeneklerini açın. Ardından Praxi-Bot uygulamasını yeniden başlatıp tekrar deneyin.",
     "micMissing": "Mikrofon bulunamadı. Bir mikrofon bağlayıp tekrar dene.",
     "notConfigured": "Dikte henüz ayarlanmadı. Ayarlar → Genel → Sesli dikte bölümünden bir yazıya dökme hizmeti ekle.",
+    "offlineDiagnostics": {
+      "both": "Dikte ve sesli okuma modellerinin dosyaları hazır.",
+      "dictationMissing": "Seçili dikte modelinin ve sesli okuma modelinin dosyaları yok veya eksik.",
+      "dictationMissingWithTts": "Seçili dikte modelinin dosyaları yok veya eksik. Sesli okuma modelinin dosyaları hazır.",
+      "hint": "Ayarlar → Genel → Sesli dikte bölümünden modeli yeniden indir.",
+      "off": "Çevrimdışı dikte kapalı. Sesli okuma modelinin dosyaları yok veya eksik.",
+      "sttOnly": "Dikte modelinin dosyaları hazır. Sesli okuma modelinin dosyaları yok veya eksik.",
+      "title": "Çevrimdışı ses",
+      "ttsOnly": "Sesli okuma modelinin dosyaları hazır. Çevrimdışı dikte kapalı.",
+      "unavailable": "Bu sürüm çevrimdışı ses özelliği içermiyor."
+    },
+    "offlineModels": {
+      "baseDescription": "Türkçe ve Almanca dahil birçok dilde hız ve doğruluk arasında denge sağlar.",
+      "baseLabel": "Whisper base (dengeli)",
+      "downloadFailed": "İndirme başarısız oldu. Yeniden denemek için İndir’e bas.",
+      "smallDescription": "Bu modeller arasında Türkçe ve Almancada en isabetli olanı. Daha fazla disk alanı ve işlemci gücü ister.",
+      "smallLabel": "Whisper small (en isabetli)",
+      "tinyDescription": "En az disk alanı ve işlemci gücü gereken model. Türkçe ve Almancada daha az isabetli.",
+      "tinyLabel": "Whisper tiny (en hızlı)",
+      "vad": "Silero VAD (MIT) dahildir."
+    },
+    "offlineReadAloud": {
+      "busy": "Çevrimdışı ses özelliği şu anda meşgul. Biraz sonra yeniden dene.",
+      "description": "Sohbet yanıtlarını bu bilgisayarda uygulamanın dilinde sesli okur. İşlemciyi kullanır ve ilk sesin gelmesi birkaç saniye sürebilir.",
+      "model": "{{name}} Türkçe, İngilizce, Almanca ve başka dilleri destekler.",
+      "notInstalled": "Yanıtları çevrimdışı okumak için Ayarlar → Genel → Ses bölümünden modeli indir.",
+      "playbackFailed": "Yanıt çevrimdışı sesli okunamadı. Ayarlar → Genel → Ses bölümünden modeli kontrol et.",
+      "ready": "Yanıtlar internet bağlantısı olmadan sesli okunabilir.",
+      "title": "Çevrimdışı sesli okuma",
+      "unavailable": "Yerel arka plan hizmetine ulaşılamıyor.",
+      "unsupported": "Bu sürüm çevrimdışı sesli okuma özelliğini içermiyor."
+    },
     "online": "çevrimiçi",
     "speak": "Sesli oku",
     "speakAuto": {

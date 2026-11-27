@@ -7,6 +7,7 @@ type SpeakOpts = { voiceName: string; rate: number; lang: string };
 
 let speechSupported: () => boolean;
 let speak: (id: string, text: string, opts: SpeakOpts) => void;
+let speakOffline: typeof import("./speaker.ts").speakOffline;
 let stopSpeaking: () => void;
 let currentSpeakingId: () => string | null;
 let server: ViteDevServer;
@@ -19,7 +20,7 @@ before(async () => {
     server: { middlewareMode: true, watch: null, hmr: false },
     ssr: { noExternal: ["ui"] }
   });
-  ({ speechSupported, speak, stopSpeaking, currentSpeakingId } = await server.ssrLoadModule("/src/lib/speaker.ts"));
+  ({ speechSupported, speak, speakOffline, stopSpeaking, currentSpeakingId } = await server.ssrLoadModule("/src/lib/speaker.ts"));
 });
 
 after(async () => {
@@ -141,5 +142,46 @@ test("stopSpeaking cancels and clears the speaking id", () => {
   calls = [];
   stopSpeaking();
   assert.deepEqual(calls, ["cancel"]);
+  assert.equal(currentSpeakingId(), null);
+});
+
+test("offline read-aloud passes the app language and plays bounded chunks in order", async () => {
+  installSpeech();
+  const text = `${"Günaydın. ".repeat(45)}Son cümle.`;
+  const chunks: string[] = [];
+  const play = async (wav: Blob, rate: number) => {
+    assert.equal(currentSpeakingId(), "offline");
+    assert.equal(rate, 1.25);
+    chunks.push(await wav.text());
+  };
+  await speakOffline("offline", text, {
+    lang: "tr-TR", rate: 1.25,
+    synthesize: async (piece, lang) => {
+      assert.equal(lang, "tr-TR");
+      assert.ok(piece.length <= 400);
+      return new Blob([piece], { type: "audio/wav" });
+    }
+  }, play);
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.join(" "), text);
+  assert.equal(spoken.length, 0);
+  assert.equal(currentSpeakingId(), null);
+});
+
+test("stopping pending synthesis prevents late playback", async () => {
+  let finish!: (blob: Blob) => void;
+  let requestSignal: AbortSignal | undefined;
+  const audio = new Promise<Blob>((resolve) => { finish = resolve; });
+  const pending = speakOffline("offline", "Hello.", {
+    lang: "en", rate: 1,
+    synthesize: (_piece, _lang, signal) => {
+      requestSignal = signal;
+      return audio;
+    }
+  }, () => assert.fail("cancelled audio played"));
+  stopSpeaking();
+  assert.equal(requestSignal?.aborted, true);
+  finish(new Blob([]));
+  await pending;
   assert.equal(currentSpeakingId(), null);
 });

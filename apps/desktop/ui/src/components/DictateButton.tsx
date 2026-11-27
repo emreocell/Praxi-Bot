@@ -36,7 +36,7 @@ const MAX_RECORD_MS = 120_000;
  */
 export function DictateButton({ onText, className }: { onText: (text: string) => void; className?: string }) {
   const { t, i18n } = useTranslation();
-  const { client } = useDaemon();
+  const { client, localApi } = useDaemon();
   const toast = useToast();
   const [state, setState] = useState<DictationState>(IDLE);
   const [level, setLevel] = useState(0);
@@ -47,8 +47,8 @@ export function DictateButton({ onText, className }: { onText: (text: string) =>
   const timer = useRef<number | null>(null);
   const discard = useRef(false);
   // Latest props/callbacks for the long-lived listeners below.
-  const live = useRef({ client, onText, lang: i18n.language, t });
-  live.current = { client, onText, lang: i18n.language, t };
+  const live = useRef({ client, localApi, onText, lang: i18n.language, t });
+  live.current = { client, localApi, onText, lang: i18n.language, t };
 
   const release = useCallback(() => {
     if (timer.current !== null) {
@@ -64,22 +64,26 @@ export function DictateButton({ onText, className }: { onText: (text: string) =>
 
   const send = useCallback(
     async (blob: Blob) => {
-      const { client: c, onText: done, lang, t: tr } = live.current;
+      const { client: c, localApi: local, onText: done, lang, t: tr } = live.current;
       try {
-        if (!c) {
+        const active = c ?? local;
+        if (!active) {
           return;
         }
-        const provider = await c
-          .getVoice()
-          .then((cfg) => cfg.stt_provider)
-          .catch(() => undefined);
-        const out = await c.transcribe({
+        const own = local && local.baseUrl !== active.baseUrl ? await local.getVoice() : null;
+        const target = own?.stt_provider === "local_voice" && local ? local : active;
+        const provider = target === local && own ? own.stt_provider : (await target.getVoice()).stt_provider;
+        const out = await target.transcribe({
           ...(await transcribePayload(blob, provider)),
-          language: lang.split("-")[0]
+          language: lang.split("-")[0],
+          local_only: provider === "local_voice"
         });
         done(out.text);
       } catch (e) {
-        toast.show(e instanceof ApiError && e.status === 409 ? tr("voice.notConfigured") : humanLine(e), "danger");
+        const note = e instanceof ApiError && e.status === 409 ? tr("voice.notConfigured")
+          : e instanceof ApiError && e.status === 429 && e.code === "busy" ? tr("voice.offlineReadAloud.busy")
+            : humanLine(e);
+        toast.show(note, "danger");
       } finally {
         dispatchRef.current({ type: "sent" });
       }

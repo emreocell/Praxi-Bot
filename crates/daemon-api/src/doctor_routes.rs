@@ -245,6 +245,16 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
     let mut add = |id: &'static str, title: &'static str, f: Box<dyn FnOnce() -> Check + Send>| {
         jobs.push((id, title, f));
     };
+    let voice = s.voice();
+    add(
+        "offline_voice",
+        "offline voice",
+        Box::new(move || {
+            voice.map_or_else(crate::voice::offline_voice_unavailable, |v| {
+                v.offline_check()
+            })
+        }),
+    );
     add(
         "daemon",
         "daemon",

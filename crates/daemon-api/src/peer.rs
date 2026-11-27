@@ -207,6 +207,9 @@ pub(crate) fn admin_desktop_never(method: &Method, check_path: &str) -> Option<&
     if under(check_path, "/v1/doctor") {
         return Some("host-local diagnostics are not allowed for peers");
     }
+    if check_path == "/v1/voice/synthesize" || check_path == "/v1/voice/local/install" {
+        return Some("offline voice downloads and synthesis are done at the host's own app");
+    }
     if *method == Method::POST && check_path == "/v1/channels/telegram/pair-code" {
         return Some("host transfer and channel pairing are done on the host itself");
     }

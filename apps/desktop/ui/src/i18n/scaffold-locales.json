@@ -1,4 +1,4 @@
 {
   "scaffold": ["fr", "id", "pt"],
-  "englishFallbackPrefixes": ["serverConnectionStatus.", "botPanel.modelHint.", "engineConsent.action.", "engineConsent.notice.", "terminal.rootHint.", "apps.homeAssistant.", "botCursor.", "settingsModal.connectMail.", "settingsUi.", "apps.imports.", "apps.composioRow.", "apps.catalogOrder.", "apps.mcpForm.", "settingsModal.learn.terms.mcpTrust.", "panelTabs."]
+  "englishFallbackPrefixes": ["serverConnectionStatus.", "botPanel.modelHint.", "engineConsent.action.", "engineConsent.notice.", "terminal.rootHint.", "apps.homeAssistant.", "botCursor.", "settingsModal.connectMail.", "settingsUi.", "apps.imports.", "apps.composioRow.", "apps.catalogOrder.", "apps.mcpForm.", "settingsModal.learn.terms.mcpTrust.", "panelTabs.", "voice.offlineModels.", "voice.offlineReadAloud.", "voice.offlineDiagnostics."]
 }

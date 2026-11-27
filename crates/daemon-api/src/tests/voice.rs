@@ -7,9 +7,10 @@ use axum::http::{Method, StatusCode};
 use parking_lot::Mutex;
 use serde_json::json;
 
-use super::{T, call, setup};
+use super::{T, call, call_token_only, setup};
 use crate::voice::{
-    TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl, VoiceControlError,
+    SynthesizeInput, TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl,
+    VoiceControlError,
 };
 
 const SECRET: &str = "sk-voice-writeonly-secret";
@@ -17,7 +18,10 @@ const SECRET: &str = "sk-voice-writeonly-secret";
 struct FakeVoice {
     key: Mutex<Option<String>>,
     last_audio_len: Mutex<usize>,
+    last_synthesis: Mutex<Option<SynthesizeInput>>,
 }
+
+const WAV: &[u8] = b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\xc0\x5d\0\0\x80\xbb\0\0\x02\0\x10\0data\x02\0\0\0\0\0";
 
 #[async_trait]
 impl VoiceControl for FakeVoice {
@@ -58,6 +62,11 @@ impl VoiceControl for FakeVoice {
             text: "hello world".into(),
         })
     }
+
+    async fn synthesize(&self, input: SynthesizeInput) -> Result<Vec<u8>, VoiceControlError> {
+        *self.last_synthesis.lock() = Some(input);
+        Ok(WAV.to_vec())
+    }
 }
 
 fn with_voice() -> (T, Arc<FakeVoice>) {
@@ -65,6 +74,7 @@ fn with_voice() -> (T, Arc<FakeVoice>) {
     let v = Arc::new(FakeVoice {
         key: Mutex::new(None),
         last_audio_len: Mutex::new(0),
+        last_synthesis: Mutex::new(None),
     });
     t.state.set_voice(Arc::clone(&v) as Arc<dyn VoiceControl>);
     (t, v)
@@ -147,4 +157,34 @@ async fn local_voice_routes_default_to_unavailable_and_install_is_owner_only() {
             .iter()
             .any(|(m, p)| *m == "POST" && *p == "/v1/voice/local/install")
     );
+}
+
+#[tokio::test]
+async fn offline_synthesis_accepts_local_owner_and_returns_uncached_wav() {
+    const ROUTE: &str = "/v1/voice/synthesize";
+    let (t, v) = with_voice();
+    let body = json!({"text": "  Günaydın.  ", "language": "tr-TR"});
+    let denied = call_token_only(&t, Method::POST, ROUTE, Some(body.clone())).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    assert!(crate::peer::admin_desktop_never(&Method::POST, ROUTE).is_some());
+    assert!(v.last_synthesis.lock().is_none());
+    for text in ["\0".to_owned(), " ".to_owned(), "ğ".repeat(1001)] {
+        let bad = call(
+            &t,
+            Method::POST,
+            ROUTE,
+            Some(json!({"text": text, "language": "tr"})),
+        )
+        .await;
+        assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    }
+    assert!(v.last_synthesis.lock().is_none());
+    let response = call(&t, Method::POST, ROUTE, Some(body)).await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.headers["content-type"], "audio/wav");
+    assert_eq!(response.headers["cache-control"], "no-store");
+    assert_eq!(response.body, WAV);
+    let input = v.last_synthesis.lock().take().unwrap();
+    assert_eq!(input.text, "Günaydın.");
+    assert_eq!(input.language, "tr-TR");
 }

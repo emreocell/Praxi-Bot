@@ -1,4 +1,4 @@
-//! Speech-to-text for dictation (`/v1/voice*`, ADR 0021): DTOs and the [`VoiceControl`] trait the
+//! Speech-to-text and local speech synthesis (`/v1/voice*`, ADR 0021): DTOs and the [`VoiceControl`] trait the
 //! embedder implements (`apps/cli/src/voice_host.rs`).
 //!
 //! Recorded audio is sent, on the owner's explicit action, to an OpenAI-compatible
@@ -135,6 +135,8 @@ pub struct LocalVoiceStatusDto {
     pub vad_installed: bool,
     /// Models the owner can install.
     pub models: Vec<LocalVoiceModelDto>,
+    /// Optional downloadable model for offline read-aloud.
+    pub tts_model: Option<LocalVoiceModelDto>,
     /// Id of the model being downloaded right now, if any.
     pub installing: Option<String>,
     /// Plain-language reason the last download failed, if it did.
@@ -170,6 +172,15 @@ pub struct TranscribeOutput {
     pub text: String,
 }
 
+/// Text and app language for local synthesis (`POST /v1/voice/synthesize`).
+#[derive(Clone, Deserialize, ToSchema)]
+pub struct SynthesizeInput {
+    /// Plain text, at most 1,000 Unicode characters.
+    pub text: String,
+    /// App language (BCP 47, e.g. `tr` or `en-US`).
+    pub language: String,
+}
+
 /// Why a [`VoiceControl`] operation failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceControlError {
@@ -177,6 +188,8 @@ pub enum VoiceControlError {
     Invalid(String),
     /// Dictation is not configured yet (`409`).
     NotConfigured,
+    /// Another local voice request is already using the inference process (`429`).
+    Busy,
     /// The transcription service failed (`502`).
     Upstream(String),
     /// Persistence / secret-store failure (`500`).
@@ -213,6 +226,7 @@ pub trait VoiceControl: Send + Sync {
             available: false,
             vad_installed: false,
             models: Vec::new(),
+            tts_model: None,
             installing: None,
             last_error: None,
         }
@@ -230,4 +244,25 @@ pub trait VoiceControl: Send + Sync {
             "on-device voice is not available in this build".into(),
         ))
     }
+
+    /// Synthesize mono PCM WAV without contacting a provider.
+    ///
+    /// # Errors
+    /// [`VoiceControlError`].
+    async fn synthesize(&self, _input: SynthesizeInput) -> Result<Vec<u8>, VoiceControlError> {
+        Err(VoiceControlError::NotConfigured)
+    }
+
+    /// Local voice health for doctor. Runs on a blocking thread.
+    fn offline_check(&self) -> crate::doctor::Check {
+        offline_voice_unavailable()
+    }
+}
+
+pub(crate) fn offline_voice_unavailable() -> crate::doctor::Check {
+    crate::doctor::Check::skipped(
+        "offline_voice",
+        "offline voice",
+        "this build does not include offline voice",
+    )
 }

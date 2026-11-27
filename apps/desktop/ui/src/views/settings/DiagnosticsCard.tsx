@@ -43,6 +43,16 @@ const TONE_ICON = {
 /** Checks whose "skipped" means the platform lacks the capability. */
 const PLATFORM_CHECKS = new Set(["desktop_automation", "capabilities"]);
 
+const OFFLINE_VOICE_DETAILS = new Map<string, string>([
+  ["this build does not include offline voice", "voice.offlineDiagnostics.unavailable"],
+  ["offline dictation is off, read-aloud model files missing or incomplete", "voice.offlineDiagnostics.off"],
+  ["offline dictation is off, read-aloud model files present", "voice.offlineDiagnostics.ttsOnly"],
+  ["dictation model files present, read-aloud model files missing or incomplete", "voice.offlineDiagnostics.sttOnly"],
+  ["dictation model files present, read-aloud model files present", "voice.offlineDiagnostics.both"],
+  ["selected dictation model files missing or incomplete, read-aloud model files missing or incomplete", "voice.offlineDiagnostics.dictationMissing"],
+  ["selected dictation model files missing or incomplete, read-aloud model files present", "voice.offlineDiagnostics.dictationMissingWithTts"]
+] as const);
+
 function errorText(e: unknown): string {
   return humanLine(e);
 }
@@ -141,10 +151,15 @@ export function DiagnosticsCard() {
       ? t("settingsModal.diagnostics.status.unsupported")
       : t(`settingsModal.diagnostics.status.${tone}`);
 
-  const detailOf = (tone: CheckTone, check: DoctorCheck) =>
-    tone === "neutral" && PLATFORM_CHECKS.has(check.id) && check.detail === "not available on this platform"
+  const detailOf = (tone: CheckTone, check: DoctorCheck) => {
+    if (check.id === "offline_voice") {
+      const key = OFFLINE_VOICE_DETAILS.get(check.detail);
+      if (key) return t(key);
+    }
+    return tone === "neutral" && PLATFORM_CHECKS.has(check.id) && check.detail === "not available on this platform"
       ? t("settingsModal.diagnostics.notOnPlatform")
       : check.detail;
+  };
 
   const SummaryIcon = loading && state.checks.length === 0 ? LoaderCircle : summary.overall === "ok" ? ShieldCheck : TONE_ICON[summary.overall];
 
@@ -221,7 +236,9 @@ export function DiagnosticsCard() {
               ? t(`settingsModal.diagnostics.repairRunning.${button.repair}`, { defaultValue: "" })
               : "";
             const hint = check.status === "warn" || check.status === "fail"
-              ? t(`settingsModal.diagnostics.hints.${check.id}`, check.hint ?? "")
+              ? check.id === "offline_voice" && check.hint === "download the model again in Settings > Dictation"
+                ? t("voice.offlineDiagnostics.hint")
+                : t(`settingsModal.diagnostics.hints.${check.id}`, check.hint ?? "")
               : "";
             return (
               <li key={check.id} className={styles.item} data-testid={`diagnostics-${check.id}`} data-tone={tone}>
@@ -230,7 +247,7 @@ export function DiagnosticsCard() {
                 </span>
                 <div className={styles.text}>
                   <span className={styles.name}>
-                    {t(`settingsModal.diagnostics.checks.${check.id}`, check.title)}
+                    {check.id === "offline_voice" ? t("voice.offlineDiagnostics.title") : t(`settingsModal.diagnostics.checks.${check.id}`, check.title)}
                   </span>
                   <span className={styles.detail}>{detailOf(tone, check)}</span>
                   {hint ? <span className={styles.hint}>{hint}</span> : null}

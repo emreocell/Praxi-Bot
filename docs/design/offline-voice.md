@@ -4,5 +4,5 @@ Main already has Whisper and Silero dictation, push-to-talk and Telegram voice n
 
 - Reuse the managed local runtime downloader and the pinned voice catalog. Preserve the voice download host allowlist, verify SHA-256 and size before use, and check disk space before downloading. The owner sees the model licence, source and size before choosing to download.
 - Keep inference behind the existing `local-voice` feature. Run native inference in a bounded child process with private standard I/O and no listening socket. Use the loopback daemon API for desktop read-aloud. Never fall back to a cloud or OS voice when offline synthesis is requested.
-- Evaluate Sherpa ONNX's Supertonic 3 CPU model for English, Turkish and German. The downloadable weights use OpenRAIL-M. The project will not bundle them or introduce a GPL engine or phonemizer. The model licence choice is open for maintainer review.
+- Use Sherpa ONNX's int8 Supertonic 3 CPU model for English, Turkish and German. Its weights are an owner-initiated download under OpenRAIL-M. The model licence and release build defaults are open for maintainer review.
 - Exercise download, HTTP and audio boundaries with hermetic fixtures. An opt-in smoke test can use the pinned models to check actual synthesis without downloading anything in CI.

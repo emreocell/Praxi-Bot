@@ -389,6 +389,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/openapi-apps/{}"),
     ("DELETE", "/v1/openapi-apps/{}"),
     ("POST", "/v1/openapi-apps/{}/refresh"),
+    ("POST", "/v1/voice/synthesize"),
     // Account identities, the catalog and its logos, and action discovery are for the confirmed
     // owner: the app lists they feed are owner-only, and no phone or node shows them.
     ("GET", "/v1/composio"),

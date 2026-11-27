@@ -21037,6 +21037,107 @@
         ]
       }
     },
+    "/v1/voice/synthesize": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Synthesize speech on this computer (local owner only).",
+        "operationId": "synthesize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesizeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid text or language",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "local owner required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "offline read-aloud is not installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "offline voice is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "offline synthesis failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "voice is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/voice/transcribe": {
       "post": {
         "tags": [
@@ -21077,6 +21178,16 @@
           },
           "409": {
             "description": "dictation is not set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "offline voice is busy",
             "content": {
               "application/json": {
                 "schema": {
@@ -32933,6 +33044,17 @@
             },
             "description": "Models the owner can install."
           },
+          "tts_model": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalVoiceModelDto",
+                "description": "Optional downloadable model for offline read-aloud."
+              }
+            ]
+          },
           "vad_installed": {
             "type": "boolean",
             "description": "Whether the voice-activity model (end-of-speech detection) is installed."
@@ -40091,6 +40213,24 @@
           }
         },
         "additionalProperties": false
+      },
+      "SynthesizeInput": {
+        "type": "object",
+        "description": "Text and app language for local synthesis (`POST /v1/voice/synthesize`).",
+        "required": [
+          "text",
+          "language"
+        ],
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "App language (BCP 47, e.g. `tr` or `en-US`)."
+          },
+          "text": {
+            "type": "string",
+            "description": "Plain text, at most 1,000 Unicode characters."
+          }
+        }
       },
       "TakeoverAccepted": {
         "type": "object",

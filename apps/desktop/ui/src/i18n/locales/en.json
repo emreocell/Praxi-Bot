@@ -9150,6 +9150,38 @@
     "micDenied": "Allow microphone access for Praxi-Bot. In Windows Settings → Privacy & security → Microphone, enable Microphone access and Let desktop apps access your microphone. Then restart Praxi-Bot and retry.",
     "micMissing": "No microphone was found. Connect one and try again.",
     "notConfigured": "Dictation is not set up yet. Add a transcription service in Settings → General → Voice dictation.",
+    "offlineDiagnostics": {
+      "both": "Dictation and read-aloud model files are present.",
+      "dictationMissing": "The selected dictation model files and the read-aloud model files are missing or incomplete.",
+      "dictationMissingWithTts": "The selected dictation model files are missing or incomplete. Read-aloud model files are present.",
+      "hint": "Download the model again in Settings → General → Voice dictation.",
+      "off": "Offline dictation is off and the read-aloud model files are missing or incomplete.",
+      "sttOnly": "Dictation model files are present. Read-aloud model files are missing or incomplete.",
+      "title": "Offline voice",
+      "ttsOnly": "Read-aloud model files are present. Offline dictation is off.",
+      "unavailable": "This build does not include offline voice."
+    },
+    "offlineModels": {
+      "baseDescription": "A balance of CPU time and accuracy for several languages, including Turkish and German.",
+      "baseLabel": "Whisper base (balanced)",
+      "downloadFailed": "Download failed. Choose Download to retry.",
+      "smallDescription": "Most accurate of these models in Turkish and German. Uses more disk space and CPU time.",
+      "smallLabel": "Whisper small (most accurate)",
+      "tinyDescription": "Smallest download and lowest CPU use. Less accurate in Turkish and German.",
+      "tinyLabel": "Whisper tiny (fastest)",
+      "vad": "Includes Silero VAD (MIT)."
+    },
+    "offlineReadAloud": {
+      "busy": "Offline voice is busy. Try again in a moment.",
+      "description": "Read chat replies on this computer using the app language. Synthesis runs on the CPU and the first audio may take a few seconds.",
+      "model": "{{name}} supports English, Turkish, German and more.",
+      "notInstalled": "Download the model in Settings → General → Voice to read replies offline.",
+      "playbackFailed": "The reply could not be read aloud offline. Check the model in Settings → General → Voice.",
+      "ready": "Ready to read replies without the internet.",
+      "title": "Offline read-aloud",
+      "unavailable": "The local background service is unavailable.",
+      "unsupported": "This build does not include offline read-aloud."
+    },
     "online": "online",
     "speak": "Read aloud",
     "speakAuto": {

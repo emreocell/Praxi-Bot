@@ -4,15 +4,16 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
+use axum::response::IntoResponse;
 use base64::Engine as _;
 
 use crate::AppState;
 use crate::error::{ApiError, ErrorBody};
 use crate::routes::ApiJson;
 use crate::voice::{
-    LocalVoiceInstallInput, LocalVoiceStatusDto, TranscribeInput, TranscribeOutput, VoiceConfigDto,
-    VoiceConfigInput, VoiceControl, VoiceControlError,
+    LocalVoiceInstallInput, LocalVoiceStatusDto, SynthesizeInput, TranscribeInput,
+    TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl, VoiceControlError,
 };
 
 /// Longest accepted API key (bytes).
@@ -32,6 +33,11 @@ impl From<VoiceControlError> for ApiError {
                 StatusCode::CONFLICT,
                 "voice_not_configured",
                 "dictation is not set up: add a transcription service in Settings",
+            ),
+            VoiceControlError::Busy => Self::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "busy",
+                "another local voice request is running",
             ),
             VoiceControlError::Upstream(m) => {
                 Self::new(StatusCode::BAD_GATEWAY, "voice_upstream_failed", m)
@@ -89,6 +95,7 @@ pub(crate) async fn update_voice(
     responses((status = 200, body = TranscribeOutput),
               (status = 400, body = ErrorBody, description = "bad or oversized audio"),
               (status = 409, body = ErrorBody, description = "dictation is not set up"),
+              (status = 429, body = ErrorBody, description = "offline voice is busy"),
               (status = 502, body = ErrorBody, description = "the transcription service failed"),
               (status = 503, body = ErrorBody, description = "voice is not available")))]
 pub(crate) async fn transcribe(
@@ -121,7 +128,10 @@ pub(crate) async fn transcribe(
 pub(crate) async fn get_local_voice(
     State(s): State<AppState>,
 ) -> Result<Json<LocalVoiceStatusDto>, ApiError> {
-    Ok(Json(voice(&s)?.local_status()))
+    let control = voice(&s)?;
+    tokio::task::spawn_blocking(move || Json(control.local_status()))
+        .await
+        .map_err(|_| ApiError::internal("local voice status task failed"))
 }
 
 /// Download one on-device speech model (owner only; checksum-verified, returns at once).
@@ -138,4 +148,52 @@ pub(crate) async fn install_local_voice(
         return Err(ApiError::bad_request("`model` is too long"));
     }
     Ok(Json(voice(&s)?.local_install(input.model).await?))
+}
+
+/// Synthesize speech on this computer (local owner only).
+#[utoipa::path(post, path = "/v1/voice/synthesize", tag = "voice", security(("bearer" = [])),
+    request_body = SynthesizeInput,
+    responses((status = 200, body = Vec<u8>, content_type = "audio/wav"),
+              (status = 400, body = ErrorBody, description = "invalid text or language"),
+              (status = 403, body = ErrorBody, description = "local owner required"),
+              (status = 409, body = ErrorBody, description = "offline read-aloud is not installed"),
+              (status = 429, body = ErrorBody, description = "offline voice is busy"),
+              (status = 502, body = ErrorBody, description = "offline synthesis failed"),
+              (status = 503, body = ErrorBody, description = "voice is not available")))]
+pub(crate) async fn synthesize(
+    State(s): State<AppState>,
+    ApiJson(mut input): ApiJson<SynthesizeInput>,
+) -> Result<impl IntoResponse, ApiError> {
+    input.text = input.text.trim().to_owned();
+    if input.text.is_empty() || input.text.contains('\0') || input.text.chars().count() > 1_000 {
+        return Err(ApiError::bad_request(
+            "text must be 1 to 1000 characters without NUL",
+        ));
+    }
+    if input.language.is_empty()
+        || input.language.len() > 35
+        || !input
+            .language
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return Err(ApiError::bad_request(
+            "language must be a BCP 47 language tag",
+        ));
+    }
+    let audio = voice(&s)?.synthesize(input).await.map_err(|e| match e {
+        VoiceControlError::NotConfigured => ApiError::new(
+            StatusCode::CONFLICT,
+            "voice_not_configured",
+            "download the offline read-aloud model in Settings",
+        ),
+        other => other.into(),
+    })?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "audio/wav"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        audio,
+    ))
 }

@@ -116,7 +116,7 @@ export function DictationCard() {
         {localAvailable || local ? <option value="local_voice">{t("voice.stt.providerLocal")}</option> : null}
       </select>
       {local ? (
-        <LocalVoicePanel model={localModel} onModel={setLocalModel} />
+        <LocalVoicePanel kind="stt" model={localModel} onModel={setLocalModel} />
       ) : (
         <>
           {providerKeyAvailable ? (

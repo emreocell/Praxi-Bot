@@ -2180,6 +2180,10 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/voice/local", get(vo::get_local_voice))
         .route("/v1/voice/local/install", post(vo::install_local_voice))
         .route(
+            "/v1/voice/synthesize",
+            post(vo::synthesize).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
             "/v1/voice/transcribe",
             post(vo::transcribe).layer(axum::extract::DefaultBodyLimit::max(vo::MAX_BODY_BYTES)),
         )

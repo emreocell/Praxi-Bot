@@ -96,6 +96,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         ),
         core::check_disk(env.data_dir),
         check_local_models(env.data_dir),
+        crate::voice_host::check_offline_voice(env.data_dir),
         check_resources(),
         check_telegram(env),
         core::check_unicode_path(env.data_dir),

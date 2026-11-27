@@ -1,26 +1,28 @@
-//! On-device speech-to-text (`stt_provider = "local_voice"`): the model catalog, the checksummed
-//! on-demand download into `<data_dir>/models/voice/`, and audio decoding. The recogniser itself
-//! (Silero VAD + Whisper through sherpa-onnx) lives in [`crate::voice_local_engine`] behind the
-//! `local-voice` cargo feature; everything here compiles and is tested without it.
+//! On-device voice: the model catalog, the checksummed
+//! resumable on-demand download into `<data_dir>/models/voice/`, and audio formats. Inference
+//! (Silero VAD, Whisper and Supertonic through sherpa-onnx) runs in the voice worker behind the
+//! `local-voice` cargo feature. The catalog, installer and PCM helpers can be tested without it.
 //!
 //! Safety properties: downloads are https-only, pinned to a revision, limited to a short host
 //! allow-list (also across redirects), capped at the size the catalog declares and accepted only
 //! when the sha256 matches. A bad download is deleted, never used.
 //!
 //! Model licences (shown to the owner before download): Whisper weights MIT (`OpenAI`), Silero VAD
-//! MIT (Silero Team). The ONNX conversions are published by the `sherpa-onnx` project (Apache-2.0).
-//! No Piper (GPL) and no Parakeet (CC-BY-4.0, would need attribution) are offered.
+//! MIT (Silero Team) and Supertonic 3 weights OpenRAIL-M (Supertone). The ONNX conversions
+//! are published by the `sherpa-onnx` project (Apache-2.0).
 
 // The audio decoding half is only reached through the recogniser (feature `local-voice`) but is
 // compiled and unit-tested in every build.
 #![cfg_attr(not(feature = "local-voice"), allow(dead_code))]
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicBool};
 
 use daemon_api::voice::{LocalVoiceModelDto, LocalVoiceStatusDto};
 use parking_lot::Mutex;
-use sha2::{Digest, Sha256};
+use provider_catalog::local_runtime::download::{
+    DownloadSpec, check_disk_space, download_verified, missing_bytes, sha256_file,
+};
 
 /// Sample rate the recogniser and the VAD expect.
 pub const SAMPLE_RATE: u32 = 16_000;
@@ -149,6 +151,59 @@ pub const MODELS: &[ModelSpec] = &[
     },
 ];
 
+/// Sherpa's int8 conversion of Supertonic 3, including its fixed speaker styles.
+pub const TTS: ModelSpec = ModelSpec {
+    id: "supertonic-3",
+    label: "Supertonic 3",
+    description: "CPU speech synthesis in English, Turkish, German and other languages.",
+    license: "OpenRAIL-M",
+    license_url: "https://huggingface.co/Supertone/supertonic-3/blob/724fb5abbf5502583fb520898d45929e62f02c0b/LICENSE",
+    files: &[
+        FileSpec {
+            name: "duration_predictor.int8.onnx",
+            url: "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/duration_predictor.int8.onnx",
+            bytes: 3_700_147,
+            sha256: "c3eb91414d5ff8a7a239b7fe9e34e7e2bf8a8140d8375ffb14718b1c639325db",
+        },
+        FileSpec {
+            name: "text_encoder.int8.onnx",
+            url: "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/text_encoder.int8.onnx",
+            bytes: 36_416_150,
+            sha256: "c7befd5ea8c3119769e8a6c1486c4edc6a3bc8365c67621c881bbb774b9902ff",
+        },
+        FileSpec {
+            name: "vector_estimator.int8.onnx",
+            url: "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/vector_estimator.int8.onnx",
+            bytes: 78_400_833,
+            sha256: "20cd86fa5c6effedfda0e7cffe5b0569ca401c440a0c3a1d72bf39286c0db3fd",
+        },
+        FileSpec {
+            name: "vocoder.int8.onnx",
+            url: "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/vocoder.int8.onnx",
+            bytes: 25_991_073,
+            sha256: "e923d60f53f95eb1ce235f1dc33ec56d9c057823c96fa6f8acf98f32b0da6152",
+        },
+        FileSpec {
+            name: "tts.json",
+            url: "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/tts.json",
+            bytes: 8_253,
+            sha256: "42078d3aef1cd43ab43021f3c54f47d2d75ceb4e75f627f118890128b06a0d09",
+        },
+        FileSpec {
+            name: "unicode_indexer.bin",
+            url: "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/unicode_indexer.bin",
+            bytes: 262_144,
+            sha256: "8402ca48e5189a8950138580b0fff64db6f072f24ac07cd54ba8b2fbb9883b30",
+        },
+        FileSpec {
+            name: "voice.bin",
+            url: "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/voice.bin",
+            bytes: 517_168,
+            sha256: "67d5209b0ee8ce6c74105ffbe12fe6a7628aea3b4ba2fcb308a4a67938a93ce8",
+        },
+    ],
+};
+
 /// Model used when the owner has not picked one.
 pub const DEFAULT_MODEL: &str = "whisper-small";
 
@@ -182,24 +237,44 @@ pub fn is_installed(data_dir: &Path, spec: &ModelSpec) -> bool {
         .all(|f| file_matches(&dir.join(f.name), f))
 }
 
+pub fn stt_ready(data_dir: &Path, model: &str) -> bool {
+    find_model(model).is_some_and(|spec| is_installed(data_dir, spec))
+        && is_installed(data_dir, &VAD)
+}
+
+/// A fast presence check for diagnostics and worker admission. The worker verifies the contents.
+pub fn model_files_present(data_dir: &Path, spec: &ModelSpec) -> bool {
+    let dir = model_dir(data_dir, spec);
+    spec.files
+        .iter()
+        .all(|file| file_has_size(&dir.join(file.name), file.bytes))
+}
+
+pub fn stt_files_present(data_dir: &Path, model: &str) -> bool {
+    find_model(model).is_some_and(|spec| model_files_present(data_dir, spec))
+        && model_files_present(data_dir, &VAD)
+}
+
+pub fn synthesis_language(tag: &str) -> &'static str {
+    const LANGUAGES: &[&str] = &[
+        "en", "ko", "ja", "ar", "bg", "cs", "da", "de", "el", "es", "et", "fi", "fr", "hi", "hr",
+        "hu", "id", "it", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk",
+        "vi",
+    ];
+    let base = tag.split('-').next().unwrap_or_default();
+    LANGUAGES
+        .iter()
+        .copied()
+        .find(|lang| lang.eq_ignore_ascii_case(base))
+        .unwrap_or("en")
+}
+
 fn file_matches(path: &Path, f: &FileSpec) -> bool {
-    use std::io::Read as _;
-    if !std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == f.bytes) {
-        return false;
-    }
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
-    loop {
-        match file.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => hasher.update(&buf[..n]),
-            Err(_) => return false,
-        }
-    }
-    hex(&hasher.finalize()) == f.sha256
+    file_has_size(path, f.bytes) && sha256_file(path).is_ok_and(|sha| sha == f.sha256)
+}
+
+fn file_has_size(path: &Path, bytes: u64) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file() && m.len() == bytes)
 }
 
 /// Where a file of an installed model lives.
@@ -212,7 +287,11 @@ pub fn file_path(data_dir: &Path, spec: &ModelSpec, name: &str) -> PathBuf {
 /// `https` and a host the catalog may point at. Applied to the first URL and to every redirect.
 #[must_use]
 pub fn is_allowed_download_url(url: &url::Url) -> bool {
-    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+    if url.scheme() != "https"
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
         return false;
     }
     let Some(host) = url.host_str() else {
@@ -234,30 +313,18 @@ struct InstallState {
 }
 
 /// Catalog, installer and (with the feature) the recogniser.
+#[derive(Clone)]
 pub struct LocalVoice {
     data_dir: PathBuf,
     state: Arc<Mutex<InstallState>>,
-    http: reqwest::Client,
 }
 
 impl LocalVoice {
     #[must_use]
     pub fn new(data_dir: &Path) -> Self {
-        let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 || !is_allowed_download_url(attempt.url()) {
-                    attempt.stop()
-                } else {
-                    attempt.follow()
-                }
-            }))
-            .connect_timeout(std::time::Duration::from_secs(20))
-            .build()
-            .unwrap_or_default();
         Self {
             data_dir: data_dir.to_path_buf(),
             state: Arc::new(Mutex::new(InstallState::default())),
-            http,
         }
     }
 
@@ -270,39 +337,41 @@ impl LocalVoice {
     /// Catalog with install state.
     #[must_use]
     pub fn status(&self) -> LocalVoiceStatusDto {
-        let st = self.state.lock();
+        let (installing, last_error) = {
+            let st = self.state.lock();
+            (st.installing.clone(), st.last_error.clone())
+        };
         LocalVoiceStatusDto {
             available: Self::compiled_in(),
             vad_installed: is_installed(&self.data_dir, &VAD),
-            models: MODELS
-                .iter()
-                .map(|m| LocalVoiceModelDto {
-                    id: m.id.to_owned(),
-                    label: m.label.to_owned(),
-                    description: m.description.to_owned(),
-                    size_mb: size_mb(m),
-                    license: m.license.to_owned(),
-                    license_url: m.license_url.to_owned(),
-                    source_host: m
-                        .files
-                        .first()
-                        .and_then(|f| url::Url::parse(f.url).ok())
-                        .and_then(|u| u.host_str().map(str::to_owned))
-                        .unwrap_or_default(),
-                    installed: is_installed(&self.data_dir, m),
-                })
-                .collect(),
-            installing: st.installing.clone(),
-            last_error: st.last_error.clone(),
+            models: MODELS.iter().map(|m| self.model_status(m)).collect(),
+            tts_model: Self::compiled_in().then(|| self.model_status(&TTS)),
+            installing,
+            last_error,
         }
     }
 
-    /// Both the VAD and `model` are on disk.
-    #[cfg(feature = "local-voice")]
-    #[must_use]
-    pub fn ready(&self, model: &str) -> bool {
-        find_model(model).is_some_and(|m| is_installed(&self.data_dir, m))
-            && is_installed(&self.data_dir, &VAD)
+    fn model_status(&self, spec: &ModelSpec) -> LocalVoiceModelDto {
+        let size_mb = if find_model(spec.id).is_some() {
+            size_mb_with_vad(spec)
+        } else {
+            size_mb(spec)
+        };
+        LocalVoiceModelDto {
+            id: spec.id.to_owned(),
+            label: spec.label.to_owned(),
+            description: spec.description.to_owned(),
+            size_mb,
+            license: spec.license.to_owned(),
+            license_url: spec.license_url.to_owned(),
+            source_host: spec
+                .files
+                .first()
+                .and_then(|f| url::Url::parse(f.url).ok())
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_default(),
+            installed: is_installed(&self.data_dir, spec),
+        }
     }
 
     /// Start downloading `model` (and the VAD if missing) in the background.
@@ -313,28 +382,23 @@ impl LocalVoice {
         if !Self::compiled_in() {
             return Err("this build of Praxi-Bot does not include on-device voice".into());
         }
-        let spec = find_model(model).ok_or_else(|| "unknown speech model".to_owned())?;
+        let models = if model == TTS.id {
+            vec![&TTS]
+        } else {
+            vec![&VAD, find_model(model).ok_or("unknown speech model")?]
+        };
         {
             let mut st = self.state.lock();
             if st.installing.is_some() {
                 return Err("another speech model is already downloading".into());
             }
-            st.installing = Some(spec.id.to_owned());
+            st.installing = Some(model.to_owned());
             st.last_error = None;
         }
         let state = Arc::clone(&self.state);
-        let http = self.http.clone();
         let dir = self.data_dir.clone();
         tokio::spawn(async move {
-            let mut result = Ok(());
-            for m in [&VAD, spec] {
-                if !is_installed(&dir, m) {
-                    result = download_model(&http, &dir, m).await;
-                    if result.is_err() {
-                        break;
-                    }
-                }
-            }
+            let result = install_models(&dir, &models).await;
             let mut st = state.lock();
             st.installing = None;
             st.last_error = result.err();
@@ -343,83 +407,73 @@ impl LocalVoice {
     }
 }
 
-async fn download_model(
-    http: &reqwest::Client,
-    data_dir: &Path,
-    spec: &ModelSpec,
-) -> Result<(), String> {
-    let dir = model_dir(data_dir, spec);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create the model folder: {e}"))?;
-    for f in spec.files {
-        if file_matches(&dir.join(f.name), f) {
-            continue;
+fn size_mb_with_vad(spec: &ModelSpec) -> u32 {
+    let bytes = spec
+        .files
+        .iter()
+        .chain(VAD.files)
+        .map(|f| f.bytes)
+        .sum::<u64>();
+    u32::try_from(bytes.div_ceil(1_000_000)).unwrap_or(u32::MAX)
+}
+
+async fn install_models(data_dir: &Path, models: &[&ModelSpec]) -> Result<(), String> {
+    let root = models_root(data_dir);
+    let files = models
+        .iter()
+        .flat_map(|model| {
+            model
+                .files
+                .iter()
+                .map(|file| (file, model_dir(data_dir, model).join(file.name)))
+        })
+        .collect::<Vec<_>>();
+    let (files, bytes) = tokio::task::spawn_blocking(move || {
+        let files = files
+            .into_iter()
+            .filter(|(file, dest)| !file_matches(dest, file))
+            .collect::<Vec<_>>();
+        let bytes = files
+            .iter()
+            .map(|(file, dest)| missing_bytes(dest, file.bytes))
+            .sum();
+        (files, bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if files.is_empty() {
+        return Ok(());
+    }
+    tokio::fs::create_dir_all(&root)
+        .await
+        .map_err(|e| e.to_string())?;
+    check_disk_space(&root, bytes).map_err(|e| e.to_string())?;
+    let cancel = AtomicBool::new(false);
+    for (file, dest) in files {
+        let url = url::Url::parse(file.url).map_err(|_| "bad download address")?;
+        if !is_allowed_download_url(&url) {
+            return Err("the download address is not allowed".into());
         }
-        let free = fs4::available_space(&dir).unwrap_or(u64::MAX);
-        if free < f.bytes.saturating_add(256 * 1024 * 1024) {
-            return Err("not enough free disk space for the speech model".into());
-        }
-        download_file(http, f, &dir.join(f.name)).await?;
+        let builder = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 || !is_allowed_download_url(attempt.url()) {
+                    attempt.stop()
+                } else {
+                    attempt.follow()
+                }
+            }));
+        let spec = DownloadSpec {
+            url: file.url,
+            dest: &dest,
+            size_bytes: file.bytes,
+            sha256: file.sha256,
+        };
+        download_verified(builder, &spec, &|_| {}, &cancel)
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-async fn download_file(http: &reqwest::Client, f: &FileSpec, dest: &Path) -> Result<(), String> {
-    use std::io::Write as _;
-    let url = url::Url::parse(f.url).map_err(|_| "bad download address".to_owned())?;
-    if !is_allowed_download_url(&url) {
-        return Err("the download address is not allowed".into());
-    }
-    let part = dest.with_extension("part");
-    let outcome = async {
-        let mut resp = http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| format!("the download failed: {}", e.without_url()))?;
-        if !resp.status().is_success() {
-            return Err(format!("the download server answered {}", resp.status()));
-        }
-        let mut out =
-            std::fs::File::create(&part).map_err(|e| format!("cannot write the model: {e}"))?;
-        let mut hasher = Sha256::new();
-        let mut total: u64 = 0;
-        while let Some(chunk) = resp
-            .chunk()
-            .await
-            .map_err(|e| format!("the download was interrupted: {}", e.without_url()))?
-        {
-            total += chunk.len() as u64;
-            if total > f.bytes {
-                return Err("the download is larger than expected and was discarded".into());
-            }
-            hasher.update(&chunk);
-            out.write_all(&chunk)
-                .map_err(|e| format!("cannot write the model (disk full?): {e}"))?;
-        }
-        out.flush()
-            .map_err(|e| format!("cannot write the model: {e}"))?;
-        drop(out);
-        if total != f.bytes || hex(&hasher.finalize()) != f.sha256 {
-            return Err(format!(
-                "{} failed its checksum and was discarded; try again later",
-                f.name
-            ));
-        }
-        std::fs::rename(&part, dest).map_err(|e| format!("cannot save the model: {e}"))
-    }
-    .await;
-    if outcome.is_err() {
-        let _ = std::fs::remove_file(&part);
-    }
-    outcome
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::with_capacity(64), |mut s, b| {
-        let _ = write!(s, "{b:02x}");
-        s
-    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -475,6 +529,34 @@ fn pcm16_to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+/// Encode a mono inference result as a 16-bit PCM WAV for desktop playback.
+#[cfg(any(feature = "local-voice", test))]
+#[allow(clippy::cast_possible_truncation)] // values are clamped to the i16 range
+pub fn encode_wav(rate: u32, samples: &[f32]) -> Result<Vec<u8>, String> {
+    if rate == 0 || rate > 192_000 || samples.is_empty() || samples.len() > 8_000_000 {
+        return Err("the voice worker generated invalid audio".into());
+    }
+    let size = u32::try_from(samples.len() * 2).map_err(|_| "the generated audio is too large")?;
+    let mut wav = Vec::with_capacity(44 + size as usize);
+    wav.extend(b"RIFF");
+    wav.extend((36 + size).to_le_bytes());
+    wav.extend(b"WAVEfmt ");
+    wav.extend(16u32.to_le_bytes());
+    wav.extend(1u16.to_le_bytes()); // PCM
+    wav.extend(1u16.to_le_bytes()); // mono
+    wav.extend(rate.to_le_bytes());
+    wav.extend((rate * 2).to_le_bytes());
+    wav.extend(2u16.to_le_bytes()); // bytes per frame
+    wav.extend(16u16.to_le_bytes());
+    wav.extend(b"data");
+    wav.extend(size.to_le_bytes());
+    for sample in samples {
+        let pcm = (sample * 32_768.0).round().clamp(-32_768.0, 32_767.0) as i16;
+        wav.extend(pcm.to_le_bytes());
+    }
+    Ok(wav)
+}
+
 fn le16(b: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes([*b.get(at)?, *b.get(at + 1)?]))
 }
@@ -515,6 +597,10 @@ fn decode_wav(b: &[u8]) -> Result<Vec<f32>, String> {
     let ((format, channels, rate, bits), data) = fmt.zip(data).ok_or_else(bad)?;
     if format != 1 || bits != 16 || !(1..=2).contains(&channels) || rate == 0 {
         return Err(bad());
+    }
+    let frames = data.len() / (2 * usize::from(channels));
+    if (frames as u64 * u64::from(SAMPLE_RATE)).div_ceil(u64::from(rate)) > MAX_SAMPLES as u64 {
+        return Err("the recording is longer than 5 minutes".into());
     }
     let raw = pcm16_to_f32(&data[..data.len() & !1]);
     let mono: Vec<f32> = if channels == 2 {
@@ -586,7 +672,7 @@ mod tests {
 
     #[test]
     fn catalog_is_pinned_and_licensed() {
-        for m in MODELS.iter().chain([&VAD]) {
+        for m in MODELS.iter().chain([&VAD, &TTS]) {
             assert!(!m.license.is_empty() && m.license_url.starts_with("https://"));
             for f in m.files {
                 let u = url::Url::parse(f.url).unwrap();
@@ -635,15 +721,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("m.bin");
         std::fs::write(&path, b"abcd").unwrap();
-        let mut h = Sha256::new();
-        h.update(b"abcd");
-        let sha = hex(&h.finalize());
-        let sha: &'static str = Box::leak(sha.into_boxed_str());
         let spec = FileSpec {
             name: "m.bin",
             url: "https://huggingface.co/x",
             bytes: 4,
-            sha256: sha,
+            sha256: "88d4266fd4e6338d13b845fcf289579d209c897823b9217da3e161936f031589",
         };
         assert!(file_matches(&path, &spec));
         std::fs::write(&path, b"abce").unwrap();
@@ -660,6 +742,7 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!((out[0] - 0.5).abs() < 1e-3 && out[1].abs() < 1e-3);
         assert!(decode_audio(b"RIFFxxxxWAVE", "audio/wav").is_err());
+        assert!(decode_audio(&wav(1, 1, &[0; 301]), "audio/wav").is_err());
     }
 
     #[test]
@@ -668,5 +751,18 @@ mod tests {
         assert!((out[0] - 0.5).abs() < 1e-3 && (out[1] + 0.5).abs() < 1e-3);
         assert!(decode_audio(&[1, 2, 3], "audio/pcm").is_err());
         assert!(decode_audio(&[0; 8], "audio/webm").is_err());
+    }
+
+    #[test]
+    fn synthesizer_output_is_playable_pcm_at_the_engine_rate() {
+        let wav = encode_wav(24_000, &[0.5, -0.5, 2.0]).unwrap();
+        assert_eq!(le32(&wav, 24), Some(24_000));
+        assert_eq!(le32(&wav, 40), Some(6));
+        assert_eq!(&wav[44..], &[0, 64, 0, 192, 255, 127]);
+        assert!(encode_wav(0, &[]).is_err());
+        assert_eq!(synthesis_language("tr-TR"), "tr");
+        assert_eq!(synthesis_language("en-US"), "en");
+        assert_eq!(synthesis_language("de"), "de");
+        assert_eq!(synthesis_language("zh-Hans"), "en");
     }
 }

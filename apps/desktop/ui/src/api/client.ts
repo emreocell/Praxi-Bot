@@ -2115,6 +2115,12 @@ export class ApiClient {
     return this.request("POST", "/voice/transcribe", { body: input });
   }
 
+  /** Generate WAV on this computer's daemon. Reply text must never follow a redirect. */
+  async synthesizeVoice(text: string, language: string, signal: AbortSignal): Promise<Blob> {
+    const res = await this.send("POST", "/voice/synthesize", { body: { text, language }, signal, localOwnerOnly: true });
+    return res.blob();
+  }
+
   listCalendarAccounts(): Promise<CalendarAccount[]> {
     return this.request("GET", "/calendar/accounts");
   }
