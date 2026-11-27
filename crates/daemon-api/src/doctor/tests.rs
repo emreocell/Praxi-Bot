@@ -663,6 +663,7 @@ fn toolchain(
         npm: Some("/opt/praxi-nodejs/bin/npm".into()),
         prefix: Some(prefix.into()),
         prefix_writable: writable,
+        registry: None,
     }
 }
 
@@ -708,6 +709,27 @@ fn node_runtime_check_catches_the_prefix_that_needs_root() {
         c.detail
     );
     assert!(c.hint.unwrap().contains("npm config set prefix"));
+}
+
+#[test]
+fn node_runtime_check_warns_when_the_registry_is_not_the_pinned_one_on_a_server() {
+    let mut tc = toolchain("v22.23.5", "/var/lib/praxi/.npm-global", Some(true));
+    // The installer's own pin, in any spelling, is fine.
+    tc.registry = Some("https://registry.npmjs.org".into());
+    assert_eq!(check_node_runtime(&tc, true).status, Status::Ok);
+    tc.registry = Some("https://registry.evil.example/".into());
+    let c = check_node_runtime(&tc, true);
+    assert_eq!(c.status, Status::Warn);
+    assert!(
+        c.detail.contains("https://registry.evil.example/")
+            && c.detail.contains("https://registry.npmjs.org/"),
+        "{}",
+        c.detail
+    );
+    let hint = c.hint.unwrap();
+    assert!(hint.contains("registry"), "{hint}");
+    // A desktop computer's own mirror is its owner's business.
+    assert_eq!(check_node_runtime(&tc, false).status, Status::Ok);
 }
 
 #[test]

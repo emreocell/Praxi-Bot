@@ -113,9 +113,16 @@ pub async fn run_install(
         }
         _ => return Err("installer_refused"),
     };
+    // On a server set up by the Linux installer the process carries `NPM_CONFIG_GLOBALCONFIG` (the
+    // root-owned npmrc that pins the registry). An install Praxi starts there names that registry on
+    // the command line too, so nothing in the service user's own npm config can redirect it.
+    let mut args = install.args.to_vec();
+    if install.program == "npm" && env.env_vars.contains_key("NPM_CONFIG_GLOBALCONFIG") {
+        args.extend(["--registry", crate::node_runtime::NPM_REGISTRY]);
+    }
     run(
         &resolved,
-        install.args,
+        &args,
         env,
         cwd,
         timeout.min(INSTALL_TIMEOUT),
@@ -145,6 +152,9 @@ async fn run(
     // npm installs go to a user-level prefix (inside the data dir for Praxi's own Node), never a system path.
     if let Some(prefix) = env.env_vars.get("NPM_CONFIG_PREFIX") {
         cmd.env("NPM_CONFIG_PREFIX", prefix);
+    }
+    if let Some(global) = env.env_vars.get("NPM_CONFIG_GLOBALCONFIG") {
+        cmd.env("NPM_CONFIG_GLOBALCONFIG", global);
     }
     #[cfg(windows)]
     let mut wrap = isolate(cmd, crate::detect::SharedJob::new());

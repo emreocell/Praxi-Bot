@@ -149,7 +149,11 @@ impl PathEnv {
                 ENGINE_ENV.contains(&key.as_str())
                     || matches!(
                         key.as_str(),
-                        "NPM_CONFIG_PREFIX" | "NVM_SYMLINK" | "PROGRAMFILES"
+                        "NPM_CONFIG_PREFIX"
+                            | "NPM_CONFIG_GLOBALCONFIG"
+                            | "NPM_CONFIG_REGISTRY"
+                            | "NVM_SYMLINK"
+                            | "PROGRAMFILES"
                     )
             })
             .collect();

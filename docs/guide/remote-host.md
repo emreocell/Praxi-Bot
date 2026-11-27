@@ -305,8 +305,17 @@ so a server must give it an `npm` that writes somewhere `praxi` owns. The instal
   `/var/lib/praxi/.npmrc` for the in-app terminal (which starts its shell with a cleaned environment).
   An existing `prefix=` line in that file is kept.
 - **`PATH`** of the daemon, the in-app terminal and the `praxi` command, in this order:
-  `~/.local/bin`, `/var/lib/praxi/.npm-global/bin`, `/opt/praxi-nodejs/bin`, then the system folders.
-  Praxi's pinned Node.js is therefore the one `praxi` gets, even when the distribution ships an older one.
+  `/usr/local/bin`, `/usr/bin`, `/bin`, `/opt/praxi-nodejs/bin`, then the two folders `praxi` can write
+  (`~/.local/bin`, `/var/lib/praxi/.npm-global/bin`). Folders only root can write come first, so
+  nothing `praxi` installs (or a model running as `praxi`) can shadow a system program. The flip side:
+  a `node` that the distribution already ships in `/usr/bin` is found before the pinned one; the
+  **node / npm** row of `sudo praxi doctor` shows which one is in use.
+- **A pinned npm registry:** `/etc/praxi/npmrc` (owned by root, read-only for `praxi`) holds
+  `registry=https://registry.npmjs.org/`, and the service unit and the `praxi` command point npm at it
+  (`NPM_CONFIG_GLOBALCONFIG`). The installs Praxi starts itself (the app's Install button,
+  `praxi cli install`) also pass `--registry` with that address, so a `registry=` line in
+  `praxi`'s own `~/.npmrc` cannot redirect them. It does not stop `praxi` from running its own
+  `npm install --registry ...` by hand: **doctor** warns when the registry in effect differs.
 
 So the following work as `praxi` without root, in the in-app terminal or with `sudo praxi cli ...`:
 
@@ -322,17 +331,21 @@ When a command in the terminal fails because it needs root (`apt`, `dnf`, `syste
 `sudo praxi ...` over SSH*. It is only a hint; it changes nothing.
 
 Keeping it current: re-running the installer with `--update` moves Node.js to the version pinned in that
-release (`/opt/praxi-nodejs` is replaced in one step; the global prefix and the CLIs in it stay). A
+release (`/opt/praxi-nodejs` is replaced with two renames, never through a link; the global prefix and
+the CLIs in it stay). The downloaded program is first run as the `praxi` user, not as root. A
 re-run with the same pin downloads nothing. The in-app *Update server* button (the managed updater) replaces the Praxi program files only;
 the installer's `--update`, which is also what the SSH upgrade runs, moves Node.js. If the server cannot reach nodejs.org, the installer
-warns, finishes the rest, and the app's Install button still fetches a Node.js of its own into the data
-folder. `--skip-packages` skips the Node.js download too (you then provide Node.js 18 or newer on the
-service's `PATH`); `--uninstall` removes `/opt/praxi-nodejs`, and `--purge` also removes
+stops with an error before it changes anything: a server without Node.js cannot install the npm-based
+CLIs, and a silent gap is worse than a failed install. `--skip-packages` is the explicit way to go on
+without it (the app's Install button then fetches a Node.js of its own into the data folder, or you
+provide Node.js 18 or newer on the service's `PATH`); it also leaves an out-of-date `/opt/praxi-nodejs`
+alone and says so. An unsupported CPU is an error too; `--uninstall` removes `/opt/praxi-nodejs`, and `--purge` also removes
 `/var/lib/praxi/.npm-global` with the data folder.
 
 `sudo praxi doctor` has a **node / npm** row: which `node` and `npm` it found, their versions, and where
-`npm install -g` writes. It warns when Node.js is missing on a server, is older than 18, or when
-npm's global folder is one `praxi` cannot write (the `EACCES` failure); the hint says how to fix it.
+`npm install -g` writes. It warns when Node.js is missing on a server, is older than 18, when
+npm's global folder is one `praxi` cannot write (the `EACCES` failure), or when the npm registry in
+effect is not the pinned one; the hint says how to fix it.
 Preview all of this with `install-linux.sh --dry-run`: it prints the Node.js version and CPU, the
 global prefix and the `PATH`, and changes nothing.
 

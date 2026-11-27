@@ -963,6 +963,8 @@ pub fn check_cli_accounts(
     Check::warn(ID, N, detail, hint)
 }
 
+const PINNED_REGISTRY: &str = cli_provider::node_runtime::NPM_REGISTRY;
+
 /// Oldest Node.js the npm-based coding CLIs (Claude Code, Codex, `OpenCode`) run on.
 const MIN_NODE_MAJOR: u32 = 18;
 
@@ -1019,6 +1021,23 @@ pub fn check_node_runtime(tc: &cli_provider::node_runtime::Toolchain, server: bo
                 npm.display()
             ),
             "give npm a folder this user owns, so no root is needed: `npm config set prefix ~/.npm-global` (the Praxi installer does this for the service user; re-run it with --update)",
+        );
+    }
+    if let Some(registry) = tc
+        .registry
+        .as_deref()
+        .filter(|r| server && !cli_provider::node_runtime::same_registry(r, PINNED_REGISTRY))
+    {
+        return Check::warn(
+            ID,
+            N,
+            format!(
+                "npm installs from {registry}, not from {PINNED_REGISTRY} that the installer pinned (node {version} at {})",
+                node.display()
+            ),
+            format!(
+                "installs started from the app name {PINNED_REGISTRY} themselves, but a `npm install -g` typed in a terminal follows this setting. If it is your own mirror, nothing to do; otherwise remove the `registry` line from the service user's ~/.npmrc (and NPM_CONFIG_REGISTRY), or re-run the Praxi installer with --update"
+            ),
         );
     }
     Check::ok(

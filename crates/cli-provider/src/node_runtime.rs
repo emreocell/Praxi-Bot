@@ -30,6 +30,9 @@ use tokio::io::AsyncWriteExt;
 pub const NODE_MAJOR: u32 = 22;
 /// Official distribution root.
 pub const DIST_BASE: &str = "https://nodejs.org/dist";
+/// The npm registry the Linux installer pins in its root-owned `npmrc` (`NPM_CONFIG_GLOBALCONFIG`) and
+/// that installs started by Praxi pass as `--registry` on such a server.
+pub const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
 /// Whole install (index, download, unpack) must finish within this.
 pub const NODE_INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_TARBALL_BYTES: u64 = 160 * 1024 * 1024;
@@ -115,6 +118,10 @@ pub struct Toolchain {
     /// The current user can write there (or into the nearest folder that exists above it);
     /// `None` when that cannot be told (no prefix, or not a Unix system).
     pub prefix_writable: Option<bool>,
+    /// The registry npm will use when something other than its default sets one: `NPM_CONFIG_REGISTRY`,
+    /// else `registry=` of `~/.npmrc`, else of the global config file `NPM_CONFIG_GLOBALCONFIG` names.
+    /// `None` when none does (npm's own default, npmjs.org).
+    pub registry: Option<String>,
 }
 
 impl Toolchain {
@@ -162,19 +169,57 @@ pub fn probe(env: &crate::PathEnv) -> Toolchain {
         npm,
         prefix,
         prefix_writable,
+        registry: configured_registry(env),
     }
+}
+
+/// The value of `key` in an `.npmrc`'s text (the last one wins, as in npm).
+fn npmrc_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines()
+        .filter_map(|line| {
+            let (k, value) = line.split_once('=')?;
+            (k.trim() == key).then(|| value.trim().trim_matches(['"', '\'']))
+        })
+        .next_back()
 }
 
 /// The absolute `prefix=` value of an `.npmrc`'s text (the last one wins, as in npm).
 fn npmrc_prefix(text: &str) -> Option<PathBuf> {
-    text.lines()
-        .filter_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            (key.trim() == "prefix").then(|| value.trim().trim_matches(['"', '\'']))
-        })
-        .next_back()
+    npmrc_value(text, "prefix")
         .filter(|v| Path::new(v).is_absolute())
         .map(PathBuf::from)
+}
+
+/// The registry some layer of npm's configuration sets, in npm's order (environment, user file, global
+/// file), read from the files and not asked of npm. A command line `--registry` is not visible here.
+fn configured_registry(env: &crate::PathEnv) -> Option<String> {
+    let read = |path: &Path| {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| npmrc_value(&t, "registry").map(str::to_owned))
+    };
+    env.env_vars
+        .get("NPM_CONFIG_REGISTRY")
+        .map(|v| v.trim().to_owned())
+        .or_else(|| {
+            env.home_dir
+                .as_deref()
+                .and_then(|h| read(&h.join(".npmrc")))
+        })
+        .or_else(|| {
+            env.env_vars
+                .get("NPM_CONFIG_GLOBALCONFIG")
+                .and_then(|p| read(Path::new(p)))
+        })
+        .filter(|v| !v.is_empty())
+}
+
+/// Whether two registry URLs are the same one (case and a trailing slash do not matter).
+#[must_use]
+pub fn same_registry(a: &str, b: &str) -> bool {
+    a.trim()
+        .trim_end_matches('/')
+        .eq_ignore_ascii_case(b.trim().trim_end_matches('/'))
 }
 
 fn node_version(node: &Path, env: &crate::PathEnv) -> Option<String> {
@@ -563,6 +608,64 @@ mod tests {
             npmrc_prefix("prefix=\"/a b\"\n"),
             Some(PathBuf::from("/a b"))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_registry_comes_from_the_layer_npm_would_read_first() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = fake_toolchain(&root.path().join("opt/node"), "v22.1.0", true);
+        let home = root.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let global = root.path().join("npmrc");
+        let env = || {
+            crate::PathEnv::for_test(bin.clone())
+                .with_home(home.clone())
+                .with_env_var("NPM_CONFIG_GLOBALCONFIG", global.to_string_lossy())
+        };
+        // Nothing sets one: npm's default, nothing to report.
+        assert_eq!(probe(&env()).registry, None);
+        // The root-owned file the installer writes (a comment mentioning the word is not a setting).
+        std::fs::write(
+            &global,
+            "# the registry for installs\n;registry=https://commented.example/\nregistry=https://registry.npmjs.org/\n",
+        )
+        .unwrap();
+        assert_eq!(
+            probe(&env()).registry.as_deref(),
+            Some("https://registry.npmjs.org/")
+        );
+        // The user's own file beats the global one, the environment beats both.
+        std::fs::write(home.join(".npmrc"), "registry=https://evil.example/\n").unwrap();
+        assert_eq!(
+            probe(&env()).registry.as_deref(),
+            Some("https://evil.example/")
+        );
+        let tc = probe(&env().with_env_var("NPM_CONFIG_REGISTRY", " https://env.example/ "));
+        assert_eq!(tc.registry.as_deref(), Some("https://env.example/"));
+        // A scoped registry is not the default one.
+        std::fs::write(
+            home.join(".npmrc"),
+            "@acme:registry=https://acme.example/\n",
+        )
+        .unwrap();
+        assert_eq!(
+            probe(&env()).registry.as_deref(),
+            Some("https://registry.npmjs.org/")
+        );
+    }
+
+    #[test]
+    fn registries_compare_without_case_or_trailing_slash() {
+        assert!(same_registry(
+            "https://Registry.npmjs.org",
+            "https://registry.npmjs.org/"
+        ));
+        assert!(!same_registry(
+            "https://registry.npmjs.org.evil.example/",
+            NPM_REGISTRY
+        ));
+        assert!(!same_registry("http://registry.npmjs.org/", NPM_REGISTRY));
     }
 
     #[cfg(unix)]

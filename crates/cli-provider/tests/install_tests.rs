@@ -54,6 +54,35 @@ async fn installer_uses_registry_argv_streams_and_drops_non_allowlisted_environm
 }
 
 #[tokio::test]
+async fn an_install_on_a_server_names_the_pinned_registry_itself() {
+    let (dir, env) = fixture("");
+    // The installer's units carry NPM_CONFIG_GLOBALCONFIG (the root-owned npmrc that pins the registry).
+    // A registry set in the environment of the process is not handed to npm.
+    let env = env
+        .with_env_var("NPM_CONFIG_GLOBALCONFIG", "/etc/praxi/npmrc")
+        .with_env_var("NPM_CONFIG_REGISTRY", "https://hijack.example/");
+    run_install("opencode", &env, dir.path(), Duration::from_secs(5), |_| {})
+        .await
+        .unwrap();
+    let args: Vec<String> =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("install-argv")).unwrap())
+            .unwrap();
+    assert_eq!(
+        args,
+        [
+            "install",
+            "-g",
+            "opencode-ai",
+            "--registry",
+            "https://registry.npmjs.org/"
+        ]
+    );
+    let child_env = std::fs::read_to_string(dir.path().join("install-env")).unwrap();
+    assert!(child_env.contains("NPM_CONFIG_GLOBALCONFIG"), "{child_env}");
+    assert!(!child_env.contains("hijack.example"), "{child_env}");
+}
+
+#[tokio::test]
 async fn installer_times_out_and_caps_output_without_shells() {
     let (dir, env) = fixture("hang");
     assert_eq!(
