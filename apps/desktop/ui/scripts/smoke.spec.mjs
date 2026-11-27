@@ -387,7 +387,7 @@ export async function flows(ctx) {
     for (const [name, preset] of [['Atlas Two', 'full'], ['Atlas Three', 'read-and-draft']]) {
       await page.getByTestId('bot-panel-edit').click();
       await page.getByTestId('bot-edit-name').fill(name);
-      await page.getByText('Permissions', { exact: true }).first().click();
+      await page.getByTestId('bot-edit-tab-permissions').click();
       await page.getByTestId(`bot-edit-preset-${preset}`).click();
       await page.getByTestId('bot-edit-save').click();
       await page.getByTestId('bot-edit-dialog').waitFor({ state: 'hidden', timeout: 15000 });
