@@ -354,6 +354,7 @@ export function SchedulesView({
               variant="primary"
               disabled={bots.length === 0}
               title={bots.length === 0 ? t("schedules.newNeedsBot") : undefined}
+              data-testid="schedules-new"
               onClick={() => setEditing("new")}
             >
               <Plus />
@@ -408,6 +409,7 @@ export function SchedulesView({
             primary={false}
             onAction={() => setEditing("new")}
             testId="schedules-empty"
+            actionTestId="schedules-empty-new"
           >
             {bots.length === 0
               ? t("schedules.empty.noBots")

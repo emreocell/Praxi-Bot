@@ -34,11 +34,14 @@ the current supported appearance values. Mock-mode setup and parameter handling 
 above) and compares the result with `scripts/a11y-allowlist.mjs`. See CONTRIBUTING.md for the rules
 of the allow-list.
 
+`pnpm --dir apps/desktop/ui check:mock-flows` walks vault, custom MCP and mission flows in mock mode
+(headless Chrome).
+
 ## Visual regression and wallpaper contrast
 
-`pnpm --dir apps/desktop/ui check:visual` opens 8 mock screens (empty chat, chat with a run, settings, add-server
-step 1, scheduled jobs, approval card, `/` and `@` popovers) in the Obsidian, Cobalt, Raven and Clay themes at
-1280x800 and 640x800 (64 screenshots, English, still sky wallpaper, glass style) and checks two things:
+`pnpm --dir apps/desktop/ui check:visual` opens redesign screens (chat, settings vault/updates/system, apps catalog
+and custom MCP, schedule editor, mission chat, bot panel, new-bot dialog, and more) in the Obsidian, Cobalt, Raven
+and Clay themes at 1280x800 and 640x800 (English, still sky wallpaper, glass style) and checks two things:
 
 - **Looks the same**: each screenshot is reduced to a 16x16 colour thumbnail and compared with
   `tests/visual/baselines.json` (thumbnail + perceptual hash per screen, about 70 KB, no PNGs in git).

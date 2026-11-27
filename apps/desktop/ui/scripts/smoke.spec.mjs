@@ -482,6 +482,58 @@ export async function flows(ctx) {
     }
   });
   if (await s.page.getByRole('dialog', { name: 'Apps' }).isVisible()) await s.page.keyboard.press('Escape');
+  await run(s, 'vault: open from Settings and save a login', async (page) => {
+    await gotoChat(page, 'Atlas');
+    const composer = page.locator('[data-composer-input]');
+    await composer.fill('/vault');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /^send$/i }).click();
+    await page.getByTestId('vault-manager').waitFor(T);
+    await page.getByTestId('vault-new-item').click();
+    await page.getByTestId('vault-new-login').click();
+    await page.locator('#vault-site').fill('smoke-vault.test');
+    await page.locator('#vault-origin').fill('https://smoke-vault.test');
+    await page.locator('#vault-login-id').fill('smoke@vault.test');
+    await page.locator('#vault-secret-val').fill('vault-smoke-secret');
+    await page.getByTestId('vault-save').click();
+    await page.locator('[data-testid^=vault-row-]').filter({ hasText: 'smoke-vault.test' }).waitFor(T);
+    await page.keyboard.press('Escape');
+  });
+  await run(s, 'apps: add a custom MCP server by HTTP URL', async (page) => {
+    await page.getByTestId('open-apps').click();
+    await page.getByRole('dialog', { name: 'Apps' }).waitFor(T);
+    await page.getByTestId('apps-advanced').click();
+    const form = page.getByTestId('mcp-custom-form');
+    await form.waitFor(T);
+    const name = `smoke-http-${Date.now()}`;
+    await form.getByLabel('Server URL (HTTP)').fill('https://example.invalid/mcp');
+    await form.getByLabel('Name', { exact: true }).fill(name);
+    await page.getByTestId('mcp-add').click();
+    // The form stays open (fresh) and the new server's row, switched off, shows in the list below it.
+    await page.getByTestId(`mcp-server-${name}`).waitFor(T);
+    await page.keyboard.press('Escape');
+  });
+  await run(s, 'mission: start from the bot panel form', async (page) => {
+    await page.locator('[class*="railItem"]', { hasText: 'Fulla' }).first().click();
+    await openFirstChat(page);
+    if (!(await page.getByTestId('bot-panel').isVisible().catch(() => false))) {
+      await page.getByTestId('bot-chip').click();
+      await page.getByTestId('bot-panel').waitFor(T);
+    }
+    const start = page.getByTestId('mission-start');
+    if (!(await start.count())) throw new Error('mission start form missing (missions disabled?)');
+    await start.locator('summary').click();
+    await start.locator('textarea').fill('Smoke mission: list workspace files');
+    await start.getByRole('button', { name: /start/i }).click();
+    await page.getByTestId('mission-card').first().waitFor(T);
+    const composer = page.locator('[data-composer-input]');
+    await composer.fill('/mission List workspace files again');
+    await page.getByTestId('composer-menu').waitFor({ timeout: 5000 }).catch(() => null);
+    if (await page.getByTestId('composer-menu').getByRole('option', { name: /mission|görev/i }).count()) {
+      await composer.press('Enter');
+      if ((await page.getByTestId('mission-card').count()) < 1) throw new Error('/mission did not start a mission card');
+    }
+  });
   await run(s, 'add-server wizard opens and validates input without SSH', async (page) => {
     await page.getByTestId('computer-picker').click();
     await page.getByTestId('computer-add').click();

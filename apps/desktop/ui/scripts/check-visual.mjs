@@ -54,10 +54,25 @@ const SCREENS = [
   { name: 'settings-models', query: 'screen=settings&section=models', ready: '[role="dialog"]' },
   { name: 'settings-where', query: 'screen=settings&section=where', ready: '[role="dialog"]' },
   { name: 'settings-safety', query: 'screen=settings&section=safety', ready: '[role="dialog"]' },
+  { name: 'settings-vault', query: 'screen=vault', ready: '[data-testid=vault-manager]' },
+  { name: 'settings-updates', query: 'screen=settings&section=updates', ready: '[data-testid=updates-page]' },
+  { name: 'settings-system', query: 'screen=settings&section=system', ready: '[data-testid=usage-totals]' },
   { name: 'settings-search', query: 'screen=settings&section=general', ready: '[role="dialog"]', act: async (page) => {
     await page.getByTestId('settings-search').fill('key');
     await page.getByTestId('settings-result-keys').waitFor({ timeout: 15000 });
   } },
+  { name: 'apps-popular', query: 'screen=apps', ready: '[data-testid=apps-grid]' },
+  { name: 'apps-custom-mcp', query: 'screen=apps', ready: '[role="dialog"]', act: async (page) => {
+    await page.getByTestId('apps-advanced').click();
+    await page.getByTestId('mcp-custom-form').waitFor({ timeout: 15000 });
+  } },
+  { name: 'schedule-editor', query: 'screen=schedules', contrast: false, act: async (page) => {
+    await page.getByTestId('schedules-new').click();
+    await page.getByTestId('schedule-sentence').waitFor({ timeout: 15000 });
+  } },
+  { name: 'chat-mission', query: 'screen=mission&panel=1', contrast: false, ready: '[data-testid=mission-chat-header]' },
+  { name: 'new-bot-dialog', query: 'screen=newbot', ready: '[role="dialog"]' },
+  { name: 'bot-panel', query: 'panel=1', ready: '[data-testid=bot-panel]' },
   { name: 'add-server', query: '', act: async (page) => {
     await page.getByTestId('computer-picker').click();
     await page.getByTestId('computer-add').click();
@@ -217,7 +232,7 @@ try {
       await page.waitForTimeout(700); // mock data settles
       const shot = (await page.screenshot({ type: 'png' })).toString('base64');
       let runs = []; let bgShot = null;
-      if (doContrast) {
+      if (doContrast && c.contrast !== false) {
         runs = await page.evaluate(collectText);
         const style = await page.addStyleTag({ content: hideText });
         await page.waitForTimeout(100);
