@@ -4653,6 +4653,66 @@
       }
     }
   },
+  "library": {
+    "add": "Ekle",
+    "cancel": "Vazgeç",
+    "chats": {
+      "line": "Bu botla yaptığın sohbetler, en yenisi üstte."
+    },
+    "documents": {
+      "count": "{{count}} belge",
+      "count_one": "{{count}} belge",
+      "count_other": "{{count}} belge",
+      "empty": "Henüz belge yok. Bir klasör ya da kayıtlı sayfa ekle; bir şey sorduğunda bot oraya bakar.",
+      "files": "{{count}} dosya",
+      "files_one": "{{count}} dosya",
+      "files_other": "{{count}} dosya",
+      "line": "Bir şey sorduğunda baktığı dosyalar, klasörler ve kayıtlı sayfalar.",
+      "title": "Belgeler"
+    },
+    "files": {
+      "line": "Kendi klasörü: çalışırken yaptığı, indirdiği ya da kaydettiği dosyalar."
+    },
+    "intro": "{{name}} neleri biliyor ve saklıyor. Her raf ne olduğunu söyler; ayrıntılar Ayarlar'da.",
+    "kind": {
+      "conversation": "Sohbet",
+      "email": "E-posta",
+      "file": "Dosya",
+      "folder": "Klasör",
+      "note": "Not",
+      "saved_web": "Kayıtlı sayfa",
+      "shared_brain": "Ortak beyin"
+    },
+    "memory": {
+      "empty": "Henüz bir şey hatırlamıyor. Sohbette “bunu hatırla” demen yeter.",
+      "line": "Sohbetlerden öğrendikleri: tercihlerin, kişiler, kararlar.",
+      "title": "Bellek",
+      "waiting": "{{count}} yeni anı onayını bekliyor",
+      "waiting_one": "{{count}} yeni anı onayını bekliyor",
+      "waiting_other": "{{count}} yeni anı onayını bekliyor"
+    },
+    "more": "ve Ayarlar'da {{count}} tane daha",
+    "more_one": "ve Ayarlar'da {{count}} tane daha",
+    "more_other": "ve Ayarlar'da {{count}} tane daha",
+    "notes": {
+      "empty": "Henüz not yok. Bir tane bırak; örneğin şirket adresini ya da yanıtların nasıl yazılmasını istediğini.",
+      "line": "Bir kez söylediğin kısa şeyler; gerektiğinde okur.",
+      "placeholder": "Örneğin: E-postaları “Ayşe, Örnek Ltd.” diye imzala. Saat 10:00'dan önce toplantı koyma.",
+      "save": "Notu kaydet",
+      "saved": "Not kaydedildi",
+      "textLabel": "Not",
+      "title": "Notlar",
+      "titleLabel": "Not başlığı",
+      "titlePlaceholder": "Başlık (isteğe bağlı)",
+      "untitled": "Başlıksız not"
+    },
+    "off": "kapalı",
+    "open": "Aç",
+    "skills": {
+      "line": "Uygun bir iş gelince kendiliğinden kullandığı adım adım bilgiler.",
+      "title": "Beceriler"
+    }
+  },
   "liveView": {
     "announce": {
       "connecting": "Ekrana bağlanılıyor.",

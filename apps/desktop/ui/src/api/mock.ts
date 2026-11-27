@@ -4,6 +4,7 @@ import { MOCK_HOST_ID, mockHostScenario } from "./mockHostScenario.ts";
 import { applyPatchOps, type PatchOp } from "../lib/botPatch.ts";
 import { ApiClient, ApiError } from "./client.ts";
 import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
+import { seedKnowledgeSources } from "./mockLibrary.ts";
 import { MockHostSetup } from "./mockHostSetup.ts";
 import { MockLiveViewService } from "./mockLiveView.ts";
 import { MockMissions } from "./mockMissions.ts";
@@ -809,7 +810,7 @@ export class MockApiClient extends ApiClient {
       }
     ]
   ]);
-  private readonly knowledgeSources = new Map<string, KnowledgeSource[]>();
+  private readonly knowledgeSources = new Map<string, KnowledgeSource[]>(seedKnowledgeSources(ATLAS, Date.now()));
   private readonly knowledgeSettings = new Map<string, KnowledgeSettings>();
   private readonly knowledgeApprovals = new Map<string, { bot: string; card: KnowledgeEmbeddingApproval; revision?: number }>();
   private readonly memories: MemoryItem[] = [

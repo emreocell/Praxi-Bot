@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { clearPendingBot, peekPendingBot } from "../../lib/settingsLink";
 import { Brain } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -24,7 +25,9 @@ const message = (error: unknown) => humanLine(error);
 export function MemoryCard() {
   const { t, i18n } = useTranslation();
   const { client, bots } = useDaemon();
-  const [bot, setBot] = useState("");
+  // Opened from a bot's Library tab: start on that bot.
+  const [bot, setBot] = useState(() => peekPendingBot("memory") ?? "");
+  useEffect(() => clearPendingBot("memory"), []);
   const activeBot = bot || bots[0]?.id || "";
   const [botOnly, setBotOnly] = useState(false);
   const [kindFilter, setKindFilter] = useState<MemoryKind | "">("");

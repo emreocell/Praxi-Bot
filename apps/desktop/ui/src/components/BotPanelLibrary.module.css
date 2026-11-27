@@ -1,0 +1,39 @@
+/* The Library tab: shelves with the same head (icon, title, count, one action) and one line each. */
+.root { display: flex; flex-direction: column; gap: var(--space-5); min-width: var(--space-0); }
+.srOnly { position: absolute; width: var(--size-border); height: var(--size-border); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.intro, .line, .empty, .error, .more { margin: var(--space-0); font-size: var(--font-size-xs); line-height: var(--line-height-normal); color: var(--color-text-muted); }
+.error { color: var(--color-danger); }
+.empty { padding: var(--space-2) var(--space-3); border: var(--size-border) dashed var(--color-border); border-radius: var(--radius-card); }
+
+.shelf { display: flex; flex-direction: column; gap: var(--space-2); min-width: var(--space-0); }
+.head { display: flex; align-items: center; gap: var(--space-2); min-width: var(--space-0); }
+.headIcon { flex: none; width: var(--size-icon-sm); height: var(--size-icon-sm); color: var(--color-text-muted); }
+.title { margin: var(--space-0); font-size: var(--font-size-ui-sm); font-weight: var(--font-weight-medium); color: var(--color-text); }
+.count { font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+.action { margin-inline-start: auto; }
+.line { margin-top: calc(var(--space-1) * -1); }
+.add { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--size-control-sm); padding: var(--space-0) var(--space-2); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-sm); background: transparent; color: var(--color-text); font: inherit; font-size: var(--font-size-xs); cursor: pointer; }
+.add:hover { border-color: var(--color-accent); }
+.add svg { width: var(--space-3); height: var(--space-3); }
+
+.rows { display: flex; flex-direction: column; gap: var(--space-half); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: var(--space-0); padding: var(--space-2) var(--space-3); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface-elevated); color: var(--color-text); font: inherit; font-size: var(--font-size-xs); text-align: start; cursor: pointer; }
+.row:hover { border-color: var(--color-border-strong); }
+.row svg { flex: none; width: var(--space-4); height: var(--space-4); color: var(--color-text-muted); }
+.rowName { flex: 1; min-width: var(--space-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowMeta { flex: none; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.more { padding-inline: var(--space-3); }
+
+.notice { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); border: none; border-radius: var(--radius-card); background: var(--color-warning-subtle); color: var(--color-text); font: inherit; font-size: var(--font-size-xs); text-align: start; cursor: pointer; }
+.notice svg { flex: none; width: var(--space-3); height: var(--space-3); }
+
+.noteForm { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: var(--size-border) solid var(--color-accent); border-radius: var(--radius-card); background: var(--color-surface-elevated); }
+.input { box-sizing: border-box; width: 100%; min-width: var(--space-0); padding: var(--space-2); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--font-size-ui-sm); line-height: var(--line-height-normal); resize: vertical; }
+.input::placeholder { color: var(--color-text-faint); }
+.formActions { display: flex; align-items: center; gap: var(--space-2); }
+.primary, .ghost { min-height: var(--size-control-sm); padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm); font: inherit; font-size: var(--font-size-xs); cursor: pointer; }
+.primary { border: none; background: var(--color-accent); color: var(--color-accent-contrast); font-weight: var(--font-weight-medium); }
+.primary:disabled { opacity: 0.5; cursor: default; }
+.ghost { border: none; background: transparent; color: var(--color-text-muted); }
+.ghost:hover { color: var(--color-text); }
+.root button:focus-visible, .input:focus-visible { outline: none; box-shadow: var(--shadow-focus); }

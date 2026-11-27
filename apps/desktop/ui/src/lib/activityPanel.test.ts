@@ -4,7 +4,6 @@ import type { Schedule } from "../api/types.ts";
 import type { EventsState, RunState, ToolItem } from "../state/timeline.ts";
 import {
   activitySections,
-  librarySections,
   subagentRows,
   upcomingRows
 } from "./activityPanel.ts";
@@ -69,8 +68,6 @@ test("sections without data are not rendered", () => {
     "upcoming",
     "quota"
   ]);
-  assert.deepEqual(librarySections({ chats: 0 }), ["skills", "workspace"]);
-  assert.deepEqual(librarySections({ chats: 2 }), ["skills", "workspace", "chats"]);
 
   const sched = (over: Partial<Schedule>): Schedule =>
     ({

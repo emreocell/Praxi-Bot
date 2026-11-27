@@ -6,6 +6,8 @@ export interface SettingsTarget {
   /** Id of the settings card (see CARD_META); a test keeps it real. */
   card: string;
   field: string;
+  /** A bot-scoped card (memory, knowledge) opens on this bot instead of the first one. */
+  bot?: string;
 }
 
 /** Where the transcription service and its API key live (Settings → General → Voice dictation). */
@@ -36,4 +38,14 @@ export function takePendingFocus(field: string): boolean {
   if (pending?.field !== field) return false;
   pending = null;
   return true;
+}
+
+/** The bot a deep link asked `card` to open on, if any. Read while the card mounts. */
+export function peekPendingBot(card: string): string | null {
+  return pending?.card === card && pending.bot ? pending.bot : null;
+}
+
+/** Once the card has taken the bot, a later visit opens on its own choice again. */
+export function clearPendingBot(card: string): void {
+  if (pending?.card === card && pending.bot) pending = { ...pending, bot: undefined };
 }

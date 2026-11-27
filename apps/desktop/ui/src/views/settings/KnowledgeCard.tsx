@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { clearPendingBot, peekPendingBot } from "../../lib/settingsLink";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { SettingsCard } from "../../components/SettingsUi";
@@ -21,7 +22,9 @@ export function KnowledgeCard() {
   const { t, i18n } = useTranslation();
   const { client, bots } = useDaemon();
   const { dto: providers } = useProviders();
-  const [bot, setBot] = useState("");
+  // Opened from a bot's Library tab: start on that bot.
+  const [bot, setBot] = useState(() => peekPendingBot("knowledge") ?? "");
+  useEffect(() => clearPendingBot("knowledge"), []);
   const activeBot = bot || bots[0]?.id || "";
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [settings, setSettings] = useState<KnowledgeSettings | null>(null);

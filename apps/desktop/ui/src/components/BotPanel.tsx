@@ -13,11 +13,11 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { type CSSProperties, Fragment, useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, type BotAvatarState, type BotIdentity } from "ui";
 import type { UpdateChatInput } from "../api/types";
-import { activitySections, librarySections, subagentRows } from "../lib/activityPanel";
+import { activitySections, subagentRows } from "../lib/activityPanel";
 import { isSlowStep } from "../lib/stepStuck";
 import { accessLevelKey } from "../lib/accessLevels";
 import { type PermissionTone, permissionTone } from "../lib/botEditor";
@@ -38,8 +38,7 @@ import styles from "./BotPanel.module.css";
 import { BotPanelMail } from "./BotPanelMail";
 import { BotBrowserProfile } from "./BotBrowserProfile";
 import { BotPanelAutomation } from "./BotPanelAutomation";
-import { BotPanelSkills } from "./BotPanelSkills";
-import { BotPanelWorkspace } from "./BotPanelWorkspace";
+import { BotPanelLibrary } from "./BotPanelLibrary";
 import { BrandMark } from "./BrandMark";
 import { ChatList } from "./ChatList";
 import { MissionBlock } from "./MissionBlock";
@@ -205,7 +204,6 @@ export function BotPanel({
   // reach this window yet shows no line rather than a wrong one.
   const busyElsewhere = chats.some((c) => chatActivity(c.id, needs, runs) !== null);
   const nowTick = useNow(now !== null);
-  const library = librarySections({ chats: chats.length });
   const stopSub = (id: string) => {
     cancelRun(id);
     void refreshRuns();
@@ -404,27 +402,22 @@ export function BotPanel({
         ) : tab === "automation" ? (
           <BotPanelAutomation key={bot.id} botId={bot.id} botName={bot.name} visible={visible} onOpenSchedules={onOpenSchedules} onOpenMissions={() => setTab("activity")} />
         ) : tab === "tools" ? (
-          <BotBrowserProfile key={bot.id} botId={bot.id} />
+          <>
+            <BotBrowserProfile key={bot.id} botId={bot.id} />
+            <BotPanelMail botId={bot.id} botName={bot.name} onOpenMail={onOpenMail} />
+          </>
         ) : (
-          library.map((id) =>
-            id === "skills" ? (
-              <Fragment key={id}>
-                <BotPanelSkills skills={skills} onManage={onManageSkills} onAdd={onAddSkill} />
-                <BotPanelMail botId={bot.id} botName={bot.name} onOpenMail={onOpenMail} />
-              </Fragment>
-            ) : id === "workspace" ? (
-              <section key={id} className={styles.section} aria-labelledby="bot-panel-workspace">
-                <h3 className={styles.label} id="bot-panel-workspace">
-                  {t("workspace.sectionTitle")}
-                </h3>
-                <BotPanelWorkspace botId={bot.id} active={visible && tab === "library"} />
-              </section>
-            ) : (
-              <div key={id}>
-        <section className={styles.section} aria-labelledby="bot-panel-chats">
-        <h3 className={styles.label} id="bot-panel-chats">
-          {t("botPanel.chats")}
-        </h3>
+            <BotPanelLibrary
+              key={bot.id}
+              botId={bot.id}
+              botName={bot.name}
+              active={visible && tab === "library"}
+              skills={skills}
+              onManageSkills={onManageSkills}
+              onAddSkill={onAddSkill}
+              chatCount={chats.length}
+              chats={
+                <>
         {chats.length >= CHAT_SEARCH_MIN_CHATS ? (
           <input
             type="search"
@@ -451,10 +444,9 @@ export function BotPanel({
             onDeleteChat={onDeleteChat}
           />
         )}
-      </section>
-              </div>
-            )
-          )
+                </>
+              }
+            />
         )}
       </div>
       <SubagentDetail

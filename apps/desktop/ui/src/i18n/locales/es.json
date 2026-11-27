@@ -4653,6 +4653,66 @@
       }
     }
   },
+  "library": {
+    "add": "Add",
+    "cancel": "Cancel",
+    "chats": {
+      "line": "Your chats with this bot, newest first."
+    },
+    "documents": {
+      "count": "{{count}} documents",
+      "count_one": "{{count}} document",
+      "count_other": "{{count}} documents",
+      "empty": "No documents yet. Add a folder or a saved page and the bot looks there when you ask.",
+      "files": "{{count}} files",
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files",
+      "line": "Files, folders and saved pages it looks things up in when you ask.",
+      "title": "Documents"
+    },
+    "files": {
+      "line": "Its own folder: what it made, downloaded or saved while working."
+    },
+    "intro": "What {{name}} knows and keeps. Each shelf says what it is; Settings has the details.",
+    "kind": {
+      "conversation": "Chat",
+      "email": "Email",
+      "file": "File",
+      "folder": "Folder",
+      "note": "Note",
+      "saved_web": "Saved page",
+      "shared_brain": "Shared brain"
+    },
+    "memory": {
+      "empty": "Nothing remembered yet. Say “remember this” in a chat and it starts here.",
+      "line": "What it picked up in chats: your preferences, people, decisions.",
+      "title": "Memory",
+      "waiting": "{{count}} new memories wait for your OK",
+      "waiting_one": "{{count}} new memory waits for your OK",
+      "waiting_other": "{{count}} new memories wait for your OK"
+    },
+    "more": "and {{count}} more in Settings",
+    "more_one": "and {{count}} more in Settings",
+    "more_other": "and {{count}} more in Settings",
+    "notes": {
+      "empty": "No notes yet. Leave one, for example your company address or how you like replies written.",
+      "line": "Short things you tell it once; it reads them when they matter.",
+      "placeholder": "For example: Sign emails as “Ann, Example Ltd.”. Never book meetings before 10:00.",
+      "save": "Save note",
+      "saved": "Note saved",
+      "textLabel": "Note",
+      "title": "Notes",
+      "titleLabel": "Note title",
+      "titlePlaceholder": "Title (optional)",
+      "untitled": "Untitled note"
+    },
+    "off": "off",
+    "open": "Open",
+    "skills": {
+      "line": "Step-by-step know-how it uses on its own when a task fits.",
+      "title": "Skills"
+    }
+  },
   "liveView": {
     "announce": {
       "connecting": "Conectando con la pantalla.",

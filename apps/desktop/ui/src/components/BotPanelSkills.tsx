@@ -10,11 +10,14 @@ const PREVIEW = 4;
 export function BotPanelSkills({
   skills,
   onManage,
-  onAdd
+  onAdd,
+  bare = false
 }: {
   skills: BotSkillsState;
   onManage: () => void;
   onAdd: () => void;
+  /** Inside a Library shelf, which already shows the title and the add button. */
+  bare?: boolean;
 }) {
   const { t } = useTranslation();
   const { data, loading, error } = skills;
@@ -22,8 +25,8 @@ export function BotPanelSkills({
   const preview = data ? skillPreview(data, PREVIEW) : null;
 
   return (
-    <section aria-labelledby="bot-panel-skills" data-testid="bot-panel-skills">
-      <div className={styles.panelHead}>
+    <section aria-labelledby={bare ? undefined : "bot-panel-skills"} data-testid="bot-panel-skills">
+      {bare ? null : <div className={styles.panelHead}>
         <h3 className={styles.panelLabel} id="bot-panel-skills">
           {t("bots.skills.heading")}
         </h3>
@@ -49,7 +52,7 @@ export function BotPanelSkills({
             <Plus aria-hidden="true" />
           </button>
         </div>
-      </div>
+      </div>}
       {error && !data ? (
         <div className={styles.panelError} role="alert">
           {error}

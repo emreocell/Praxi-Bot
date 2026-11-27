@@ -172,10 +172,3 @@ export function activitySections(have: {
   if (have.quota > 0) out.push("quota");
   return out;
 }
-
-export type LibrarySection = "skills" | "workspace" | "chats";
-
-/** Skills and the persistent workspace stay; the chat list only exists with chats. */
-export function librarySections(have: { chats: number }): LibrarySection[] {
-  return have.chats > 0 ? ["skills", "workspace", "chats"] : ["skills", "workspace"];
-}
