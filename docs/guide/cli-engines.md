@@ -155,6 +155,20 @@ Each bot has an engine mode, set by the local owner only (bot settings, "Engine"
 The default level is **Ask**. **Full access** needs its own consent per bot. Switching
 a bot to native tools needs a consent too; both are recorded in the audit log.
 
+Praxi makes the work folder for the bot, so picking a model never asks for one:
+`<Documents>/Praxi/<bot>` on a desktop and `/var/lib/praxi-work/<bot>` on an always-on
+host (outside Praxi's data folder, where the folder rule below accepts it). Choose a
+folder yourself only when you want a specific one.
+
+A bot on **Full access** asks nothing except before spending money, so a CLI that only
+works with its own tools (every one in the table except Claude Code and Codex, which
+can also run confined) is switched to native tools at the Full level without a question, when you
+pick it and again at the next message if the bot was left half set up. The audit log
+records that switch as automatic. The CLI's own tools do not go through Praxi's money
+card; Praxi's tools (browser, apps, memory) still do. If the CLI is not installed,
+signed out or out of date on that computer, the composer says so before sending and
+offers Install (Settings, AI) or another model.
+
 | CLI | Ask | Accept edits | Auto | Full access |
 | --- | --- | --- | --- | --- |
 | Claude Code | `--permission-mode default` (`manual` on newer builds) | `acceptEdits` | `auto` | `bypassPermissions` |

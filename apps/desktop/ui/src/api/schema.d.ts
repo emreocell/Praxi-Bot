@@ -6013,8 +6013,9 @@ export interface components {
             /** @description `praxi_governed` (Praxi runs files and shell) or `native_tools` (the CLI does). */
             mode: string;
             /**
-             * @description Absolute workspace folder for `native_tools`; when omitted the daemon creates
-             *     `<home>/Praxi/<bot>` for the bot.
+             * @description Absolute workspace folder for `native_tools`; when omitted the bot keeps the folder it
+             *     has, else the daemon uses the bot's own workspace folder (`<workspaces root>/<bot>`, or
+             *     `<home>/Praxi/<bot>` without a workspaces root).
              */
             workspace?: string | null;
         };

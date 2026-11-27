@@ -11,11 +11,13 @@ import {
   type EngineStatus,
   botEngineStatus,
   engineChoiceRequest,
-  engineStatus
+  engineStatus,
+  isFullBot
 } from "../lib/engineConsent";
 import { humanLine } from "../lib/humanError";
 import { useDaemon } from "./DaemonContext";
 import styles from "./EngineConsent.module.css";
+import { OPEN_AI_SETTINGS_EVENT } from "./useCliEngineRows";
 
 /** `"none"`: nothing to agree to. `null`: the owner said no (or the engine cannot start). */
 export type EngineAnswer = EngineChoice | "none" | null;
@@ -66,6 +68,16 @@ function blockedText(t: (key: string, o?: Record<string, string>) => string, rea
   }
 }
 
+/** The button of a "cannot start" notice: where the fix lives (Settings, AI), or none when there is no fix. */
+function blockedAction(t: (key: string) => string, reason: string): { label: string; onClick: () => void } | undefined {
+  const label =
+    reason === "not_installed" ? t("engineConsent.action.install")
+    : reason === "outdated" ? t("engineConsent.action.update")
+    : reason === "sign_in" ? t("engineConsent.action.signIn")
+    : null;
+  return label ? { label, onClick: () => window.dispatchEvent(new CustomEvent(OPEN_AI_SETTINGS_EVENT)) } : undefined;
+}
+
 type Pending = Extract<EngineStatus, { kind: "consent" }> & { done: (a: EngineChoice | null) => void };
 
 /**
@@ -86,8 +98,12 @@ export function EngineConsentProvider({ children }: { children: ReactNode }) {
         return "none";
       }
       if (status.kind === "blocked") {
-        toast.show(blockedText(t, status.reason, status.name), "danger");
+        toast.show(blockedText(t, status.reason, status.name), "danger", { action: blockedAction(t, status.reason), durationMs: 12000 });
         return null;
+      }
+      // Full access asks nothing but money: the engine's own tools are allowed at Full, no question.
+      if (status.kind === "auto") {
+        return { cliId: status.cliId, level: status.level };
       }
       return new Promise<EngineAnswer>((resolve) => setPending({ ...status, done: resolve }));
     },
@@ -102,7 +118,7 @@ export function EngineConsentProvider({ children }: { children: ReactNode }) {
       }
       let status: EngineStatus = { kind: "ready" };
       try {
-        status = engineStatus(executor, engineOf(config), await c.cliEngines());
+        status = engineStatus(executor, engineOf(config), await c.cliEngines(), isFullBot(config));
       } catch {
         // The engine list is unavailable: save as before, a failed turn offers the fix.
       }
@@ -117,10 +133,15 @@ export function EngineConsentProvider({ children }: { children: ReactNode }) {
       if (!c || answer === null || answer === "none") {
         return;
       }
-      await c.putBotEngine(botId, engineChoiceRequest(answer));
+      const saved = await c.putBotEngine(botId, engineChoiceRequest(answer));
+      // Say where it works, in plain words: the folder is made for the bot, never asked for.
+      const folder = engineOf(saved.config).workspace;
+      if (folder) {
+        toast.show(t("engineConsent.notice.folder", { folder }), "info");
+      }
       await refreshBots().catch(() => {});
     },
-    [refreshBots]
+    [refreshBots, t, toast]
   );
 
   const fixBotEngine = useCallback(

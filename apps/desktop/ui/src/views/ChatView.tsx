@@ -17,7 +17,7 @@ import {
   Zap
 } from "lucide-react";
 import { BotLimitCard } from "../components/BotLimitCard";
-import { engineOf, executorCli } from "../lib/botEngine";
+import { needsEngineCheck } from "../lib/engineConsent";
 import { parseLimitReached } from "../lib/botLimits";
 import {
   type CSSProperties,
@@ -107,7 +107,7 @@ import {
   showRouteChip
 } from "../lib/chatLogic";
 import { lastTurn, offersRegenerate, supersededGroups, supersededRunIds, type SupersededGroup } from "../lib/resendTurn";
-import { botWriteMessage, writeBotProfile } from "../lib/botWrite";
+import { botWriteMessage, writeBotProfile, writeThenApply } from "../lib/botWrite";
 import { splitMentions } from "../lib/mentionText";
 import { saveChatExport } from "../lib/chatHistory";
 import { dayHeader, type MessageTimes } from "../lib/messageTime";
@@ -344,12 +344,18 @@ export function ChatView({
       if (answer === null) {
         return;
       }
-      const saved = await writeBotProfile(client, bot, (current) => {
+      const setExecutor = (executor: string) => (current: Bot) => {
         const draft = draftFromBot(current);
-        draft.executor = parseModelRef(ref);
+        draft.executor = parseModelRef(executor);
         return { name: current.name, config: configFromDraft(draft, current) };
-      });
-      await applyEngine(saved.id, answer);
+      };
+      // If the engine step fails, the bot goes back to the model it had: never left on one that cannot answer.
+      const previous = view?.executor ?? "";
+      await writeThenApply(
+        () => writeBotProfile(client, bot, setExecutor(ref)),
+        (saved) => applyEngine(saved.id, answer),
+        (saved) => (previous ? writeBotProfile(client, saved, setExecutor(previous)) : Promise.resolve())
+      );
       await refreshBots();
       toast.show(t("modelPicker.switched", { model: ref }), "success");
     } catch (e) {
@@ -1021,7 +1027,8 @@ export function ChatView({
     }
     // A bot whose CLI model works with its own tools (picked in Settings, imported, or created by
     // another route) gets the one consent step now, never a failed first message.
-    if (bot && !body.startsWith("/") && executorCli(bot.config) && engineOf(bot.config).mode !== "native_tools") {
+    // Also a bot that already works with its own tools: its CLI can be missing or signed out.
+    if (bot && !body.startsWith("/") && needsEngineCheck(bot.config)) {
       if (!(await fixBotEngine(bot, true))) {
         return;
       }

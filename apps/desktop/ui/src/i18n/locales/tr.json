@@ -3433,12 +3433,17 @@
     }
   },
   "engineConsent": {
+    "action": {
+      "install": "Kur",
+      "signIn": "Oturum aç",
+      "update": "Güncelle"
+    },
     "allow": "{{cli}} için izin ver",
     "blocked": {
-      "not_installed": "{{cli}} burada kurulu değil. Ayarlar → Yapay zekâ bölümünden kur.",
-      "outdated": "Praxi'nin kullanabilmesi için {{cli}} güncellenmeli. Ayarlar → Yapay zekâ bölümünden güncelle.",
-      "sign_in": "{{cli}} oturumu kapalı. Ayarlar → Yapay zekâ bölümünden oturum aç.",
-      "unsupported": "Praxi bu bilgisayarda {{cli}} çalıştıramıyor."
+      "not_installed": "{{cli}} burada kurulu değil, bu yüzden bot henüz cevap veremiyor. Kur ya da başka bir model seç.",
+      "outdated": "Praxi'nin kullanabilmesi için {{cli}} güncellenmeli. Güncelle ya da başka bir model seç.",
+      "sign_in": "{{cli}} oturumu kapalı, bu yüzden bot henüz cevap veremiyor. Oturum aç ya da başka bir model seç.",
+      "unsupported": "Praxi bu bilgisayarda {{cli}} çalıştıramıyor. Başka bir model seç."
     },
     "fixed": "Tamam. Mesajını yeniden gönder.",
     "fullConsent": "{{cli}} aracının bu bilgisayarda dosya değiştirmeden ya da komut çalıştırmadan önce sormayacağını anlıyorum.",
@@ -3462,6 +3467,9 @@
     },
     "levelLabel": "Sormadan ne kadar yapabilir",
     "notNow": "Şimdi değil",
+    "notice": {
+      "folder": "Kendi araçları şu klasörde çalışır: {{folder}}"
+    },
     "onlyFull": "{{cli}} değişiklikten önce soramıyor; kendi araçlarıyla çalışmasının tek yolu Tam erişim.",
     "text": "{{cli}} dosyaları kendisi okur, düzenler ve komut çalıştırır; Praxi bu bot için bir klasör açar. Praxi'nin kendi araçları (tarayıcı, uygulamalar, hafıza) Praxi'nin onaylarını korur.",
     "title": "{{cli}} kendi araçlarıyla çalışacak"

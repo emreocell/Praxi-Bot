@@ -5,11 +5,29 @@ import { cliStatus } from "./cliCards.ts";
 /** Why a CLI model cannot be used for a bot right now (the picker row is disabled with this reason). */
 export type EngineBlock = "not_installed" | "outdated" | "unsupported" | "sign_in";
 
-/** What picking a CLI model for a bot requires. */
+/**
+ * What picking a CLI model for a bot requires. `auto`: the bot is on Full access (it asks nothing
+ * but money), so the engine's own tools are switched on at Full without a question.
+ */
 export type EngineStatus =
   | { kind: "ready" }
   | { kind: "blocked"; cliId: string; name: string; reason: EngineBlock }
+  | { kind: "auto"; cliId: string; name: string; level: ApprovalLevel }
   | { kind: "consent"; cliId: string; name: string; levels: ApprovalLevel[]; defaultLevel: ApprovalLevel };
+
+/** Whether the bot's permission preset is Full access (`_` and `-` are the same, as in the daemon). */
+export function isFullBot(config: unknown): boolean {
+  const preset = (config as { permissions?: { preset?: unknown } } | null | undefined)?.permissions?.preset;
+  return typeof preset === "string" && preset.replace(/_/g, "-") === "full";
+}
+
+/**
+ * Whether a message must pass the engine check first: only a bot whose executor is a coding CLI.
+ * An API model never waits for it, whatever an earlier CLI left in the bot's engine table.
+ */
+export function needsEngineCheck(config: unknown): boolean {
+  return executorCli(config) !== null;
+}
 
 /** The owner's answer to the one consent step; applied with `PUT /v1/bots/{id}/engine`. */
 export interface EngineChoice {
@@ -34,7 +52,8 @@ export function engineBlock(engine: CliEngineDto): EngineBlock | null {
 export function engineStatus(
   executor: string,
   current: EngineState,
-  engines: readonly CliEngineDto[]
+  engines: readonly CliEngineDto[],
+  fullBot = false
 ): EngineStatus {
   const cliId = executorCli({ models: { executor } });
   const engine = cliId ? engines.find((e) => e.detected.id === cliId) : undefined;
@@ -58,6 +77,9 @@ export function engineStatus(
   if (levels.length === 0) {
     return { kind: "blocked", cliId, name, reason: "unsupported" };
   }
+  if (fullBot && levels.includes("full")) {
+    return { kind: "auto", cliId, name, level: "full" };
+  }
   return { kind: "consent", cliId, name, levels, defaultLevel: defaultLevel(levels, native ? current.approvalLevel : "ask") };
 }
 
@@ -74,7 +96,7 @@ function defaultLevel(levels: readonly ApprovalLevel[], wanted: ApprovalLevel): 
 /** Same as `engineStatus` for a bot config (its stored executor and engine table). */
 export function botEngineStatus(config: unknown, engines: readonly CliEngineDto[]): EngineStatus {
   const executor = (config as { models?: { executor?: unknown } } | null | undefined)?.models?.executor;
-  return engineStatus(typeof executor === "string" ? executor : "", engineOf(config), engines);
+  return engineStatus(typeof executor === "string" ? executor : "", engineOf(config), engines, isFullBot(config));
 }
 
 /** Body of `PUT /v1/bots/{id}/engine` for the owner's choice (the daemon picks the bot's folder). */

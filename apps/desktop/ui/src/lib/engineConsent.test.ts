@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { CliEngineDto } from "../api/types.ts";
 import { DEFAULT_ENGINE, type EngineState } from "./botEngine.ts";
 import { configFromDraft, draftFromBot, parseModelRef } from "./botProfile.ts";
-import { engineChoiceRequest, engineStatus } from "./engineConsent.ts";
+import { botEngineStatus, engineChoiceRequest, engineStatus, isFullBot, needsEngineCheck } from "./engineConsent.ts";
 
 function engine(id: string, over: { runnable?: boolean; installed?: boolean; auth?: string; levels?: string[] }): CliEngineDto {
   return {
@@ -89,4 +89,46 @@ test("a freshly added engine with default settings ends up runnable: ready, or o
     const applied: EngineState = { mode: "native_tools", approvalLevel: status.defaultLevel, workspace: "" };
     assert.deepEqual(engineStatus(`cli:${id}/default`, applied, list), { kind: "ready" }, id);
   }
+});
+
+test("a Full-access bot gets its engine's own tools switched on at Full without a question", () => {
+  const engines = [engine("agy", { levels: ["ask", "accept_edits", "auto", "full"] }), engine("claude", { runnable: true, levels: ["ask", "full"] }), engine("kimi", { levels: ["auto"] })];
+  // The owner's rule: on Full a bot asks nothing except before spending money.
+  assert.deepEqual(engineStatus("cli:agy/gemini-4-hydrogen-medium", DEFAULT_ENGINE, engines, true), { kind: "auto", cliId: "agy", name: "agy", level: "full" });
+  // What the daemon is sent is the owner-consented Full request.
+  assert.deepEqual(engineChoiceRequest({ cliId: "agy", level: "full" }), { mode: "native_tools", approval_level: "full", consent_native_tools: true, consent_full_access: true });
+  // Any other bot still gets the one consent dialog.
+  assert.equal(engineStatus("cli:agy/gemini-4-hydrogen-medium", DEFAULT_ENGINE, engines, false).kind, "consent");
+  // An engine that runs confined (Claude Code) needs nothing; one without a Full level cannot be auto-enabled.
+  assert.deepEqual(engineStatus("cli:claude/sonnet", DEFAULT_ENGINE, engines, true), { kind: "ready" });
+  assert.equal(engineStatus("cli:kimi/x", DEFAULT_ENGINE, engines, true).kind, "consent");
+  // The stored permission preset decides: only `full` is Full access.
+  const bot = (preset?: string) => ({ models: { executor: "cli:agy/gemini-4-hydrogen-medium" }, permissions: preset ? { preset } : {} });
+  assert.equal(isFullBot(bot("full")), true);
+  assert.equal(isFullBot(bot("approve-destructive")), false);
+  assert.equal(isFullBot(bot()), false);
+  assert.equal(isFullBot(null), false);
+  assert.equal(botEngineStatus(bot("full"), engines).kind, "auto");
+  assert.equal(botEngineStatus(bot("read-only"), engines).kind, "consent");
+});
+
+test("a cli that is not installed blocks the first message with a reason, also for a bot that already works natively", () => {
+  const missing = [engine("agy", { installed: false })];
+  const native = { models: { executor: "cli:agy/x" }, permissions: { preset: "full" }, engine: { mode: "native_tools", approval_level: "full" } };
+  const governed = { models: { executor: "cli:agy/x" }, permissions: { preset: "full" } };
+  for (const bot of [native, governed]) {
+    assert.equal(needsEngineCheck(bot), true);
+    assert.deepEqual(botEngineStatus(bot, missing), { kind: "blocked", cliId: "agy", name: "agy", reason: "not_installed" });
+  }
+});
+
+test("an API model never waits for the engine check, whatever an earlier CLI left in the bot", () => {
+  // Switching the executor from a CLI to an API model leaves a stale native engine table behind
+  // until the daemon resets it: the composer must not stay blocked by it.
+  const stale = { models: { executor: "openai/gpt-5" }, permissions: { preset: "full" }, engine: { mode: "native_tools", approval_level: "full", workspace: "/var/lib/praxi-work/main" } };
+  assert.equal(needsEngineCheck(stale), false);
+  assert.deepEqual(botEngineStatus(stale, [engine("agy", { installed: false })]), { kind: "ready" });
+  assert.equal(needsEngineCheck({ models: { executor: "cli:agy/x" } }), true);
+  assert.equal(needsEngineCheck({}), false);
+  assert.equal(needsEngineCheck(undefined), false);
 });

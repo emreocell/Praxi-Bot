@@ -24,8 +24,9 @@ pub struct BotEngineInput {
     /// `ask` (default), `accept_edits`, `auto` or `full`.
     #[serde(default)]
     pub approval_level: Option<String>,
-    /// Absolute workspace folder for `native_tools`; when omitted the daemon creates
-    /// `<home>/Praxi/<bot>` for the bot.
+    /// Absolute workspace folder for `native_tools`; when omitted the bot keeps the folder it
+    /// has, else the daemon uses the bot's own workspace folder (`<workspaces root>/<bot>`, or
+    /// `<home>/Praxi/<bot>` without a workspaces root).
     #[serde(default)]
     pub workspace: Option<String>,
     /// The owner confirms that a CLI runs this bot's file and shell actions.
@@ -50,9 +51,24 @@ fn executor_driver(executor: &str) -> Option<Driver> {
     Driver::from_id(id)
 }
 
-/// The folder a bot works in when the owner did not choose one: `<home>/Praxi/<bot name>-<id>`,
-/// created on demand. The same refusals as for a chosen folder apply afterwards.
-fn default_workspace(bot: &storage::Bot) -> Option<String> {
+/// The folder a bot works in when the owner did not choose one. The bot's own folder under the
+/// workspaces root comes first (`/var/lib/praxi-work/<bot>` on a host, `<Documents>/Praxi/<bot>` on
+/// a desktop): it sits outside Praxi's data folder, so the folder rule accepts it. Only a daemon
+/// without a workspaces root falls back to a folder under the home folder, and on a host the
+/// service account's home IS the data folder, so that one is dropped again when the rule refuses
+/// it. Whatever comes back has passed the same refusals as a chosen folder.
+fn default_workspace(s: &AppState, bot: &storage::Bot) -> Option<String> {
+    let data_dir = s.storage().data_dir();
+    s.agent()
+        .bot_workspace_dir(bot.id)
+        .filter(|dir| builtin_tools::workspace_refusal(dir, data_dir).is_none())
+        .or_else(|| home_workspace(bot, data_dir))
+        .map(|dir| dir.display().to_string())
+}
+
+/// `<home>/Praxi/<bot name>-<id>`, created on demand and removed again when the folder rule
+/// refuses it (a home that is, or contains, the data folder).
+fn home_workspace(bot: &storage::Bot, data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(std::path::PathBuf::from)?;
@@ -66,12 +82,21 @@ fn default_workspace(bot: &storage::Bot) -> Option<String> {
         .take(40)
         .collect();
     let short = bot.id.to_string().chars().take(8).collect::<String>();
-    let dir = home.join("Praxi").join(format!(
+    let parent = home.join("Praxi");
+    let dir = parent.join(format!(
         "{}-{short}",
         if slug.is_empty() { "bot" } else { &slug }
     ));
+    let existed = parent.exists();
     std::fs::create_dir_all(&dir).ok()?;
-    Some(dir.display().to_string())
+    if builtin_tools::workspace_refusal(&dir, data_dir).is_some() {
+        let _ = std::fs::remove_dir(&dir);
+        if !existed {
+            let _ = std::fs::remove_dir(&parent);
+        }
+        return None;
+    }
+    Some(dir)
 }
 
 /// Validate a change and return the settings to store. Pure apart from the
@@ -209,15 +234,16 @@ pub(crate) async fn put_engine(
             .as_deref()
             .is_none_or(|w| w.trim().is_empty())
     {
-        // A bot that already has a folder keeps it when its engine or level changes.
-        let kept = profile
-            .engine
-            .workspace
-            .clone()
-            .filter(|w| std::path::Path::new(w).is_dir());
+        // A bot that already has a folder keeps it when its engine or level changes, unless the
+        // folder rule refuses it now (a folder saved by an older version, or one inside the data folder).
+        let data_dir = s.storage().data_dir();
+        let kept = profile.engine.workspace.clone().filter(|w| {
+            let w = std::path::Path::new(w);
+            w.is_dir() && builtin_tools::workspace_refusal(w, data_dir).is_none()
+        });
         input.workspace = Some(match kept {
             Some(kept) => kept,
-            None => default_workspace(&bot).ok_or_else(|| {
+            None => default_workspace(&s, &bot).ok_or_else(|| {
                 refuse("could not create a work folder for this bot; choose a folder in the bot's engine settings")
             })?,
         });

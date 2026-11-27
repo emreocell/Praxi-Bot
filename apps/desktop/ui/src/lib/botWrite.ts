@@ -33,6 +33,26 @@ export async function writeBotProfile(
   }
 }
 
+/**
+ * Save a profile, then run the step that has to follow it (the engine's consent). When that step
+ * fails, `undo` puts the profile back and the error still reaches the caller: a bot is never left
+ * on a model that cannot answer because its second step failed.
+ */
+export async function writeThenApply(
+  write: () => Promise<Bot>,
+  apply: (saved: Bot) => Promise<void>,
+  undo: (saved: Bot) => Promise<unknown>
+): Promise<Bot> {
+  const saved = await write();
+  try {
+    await apply(saved);
+  } catch (e) {
+    await undo(saved).catch(() => undefined);
+    throw e;
+  }
+  return saved;
+}
+
 /** Human sentence for a failed bot write: never the daemon's raw version message. */
 export function botWriteMessage(e: unknown, t: (key: string) => string): string {
   if (isVersionError(e)) return t("bots.writeConflict");

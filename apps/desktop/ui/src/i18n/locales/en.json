@@ -3433,12 +3433,17 @@
     }
   },
   "engineConsent": {
+    "action": {
+      "install": "Install",
+      "signIn": "Sign in",
+      "update": "Update"
+    },
     "allow": "Allow {{cli}}",
     "blocked": {
-      "not_installed": "{{cli}} is not installed here. Install it in Settings, AI.",
-      "outdated": "{{cli}} needs an update before Praxi can use it. Update it in Settings, AI.",
-      "sign_in": "{{cli}} is signed out. Sign in to it in Settings, AI.",
-      "unsupported": "Praxi cannot run {{cli}} on this computer."
+      "not_installed": "{{cli}} is not installed here, so this bot cannot answer yet. Install it, or pick another model.",
+      "outdated": "{{cli}} needs an update before Praxi can use it. Update it, or pick another model.",
+      "sign_in": "{{cli}} is signed out, so this bot cannot answer yet. Sign in to it, or pick another model.",
+      "unsupported": "Praxi cannot run {{cli}} on this computer. Pick another model."
     },
     "fixed": "Done. Send your message again.",
     "fullConsent": "I understand {{cli}} will not ask before changing files or running commands on this computer.",
@@ -3462,6 +3467,9 @@
     },
     "levelLabel": "How much it may do without asking",
     "notNow": "Not now",
+    "notice": {
+      "folder": "Its own tools work in this folder: {{folder}}"
+    },
     "onlyFull": "{{cli}} cannot ask before changes, so Full access is the only way it works with its own tools.",
     "text": "{{cli}} reads, edits and runs commands itself, in a folder Praxi makes for this bot. Praxi's own tools (browser, apps, memory) keep Praxi's approvals.",
     "title": "{{cli}} will work with its own tools"

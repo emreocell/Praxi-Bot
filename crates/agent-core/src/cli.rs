@@ -322,6 +322,98 @@ impl TurnHost for RecordingHost {
 }
 
 impl TurnExecutor {
+    /// A Full bot whose coding CLI only works with its own tools (Gemini CLI, Antigravity ...)
+    /// gets them switched on: Full is "no questions except before spending money", and a bot that
+    /// fails every prompt asks the owner nothing either. The change is audited as automatic, saved
+    /// to the bot (the stored engine table is the only place it is read from) and used for this
+    /// very turn. `None` when it cannot be done safely (the engine has no Full level, there is no
+    /// workspaces root, the folder is refused, the audit row cannot be written): the turn then
+    /// fails with the usual "needs its own tools" message.
+    fn auto_native_engine(
+        &self,
+        bot: protocol::BotId,
+        driver: cli_provider::Driver,
+        cached: &crate::profile::BotProfile,
+    ) -> Option<crate::profile::EngineSettings> {
+        use cli_provider::{ApprovalLevel, EngineMode};
+        if !cli_provider::level_plan(driver, ApprovalLevel::Full).offered {
+            return None;
+        }
+        let storage = &self.sh.storage;
+        let workspace = self
+            .sh
+            .bot_workspace_dir(bot)
+            .filter(|dir| builtin_tools::workspace_refusal(dir, storage.data_dir()).is_none())?;
+        let now = storage::now_ms();
+        let settings = crate::profile::EngineSettings {
+            mode: EngineMode::NativeTools,
+            approval_level: ApprovalLevel::Full,
+            workspace: Some(workspace.display().to_string()),
+            consent: crate::profile::EngineConsent {
+                native_tools_at_ms: Some(now),
+                full_access_at_ms: Some(now),
+            },
+        };
+        let owner = storage.get_bot(bot).ok().flatten()?.user_id;
+        // Fail closed, as the engine endpoint does: the audit row comes before the setting.
+        storage
+            .append_audit(
+                owner,
+                None,
+                "system",
+                "engine.updated",
+                &json!({
+                    "bot_id": bot.to_string(),
+                    "to": {
+                        "mode": settings.mode.as_str(),
+                        "approval_level": settings.approval_level.as_str(),
+                        "workspace": settings.workspace,
+                    },
+                    "reason": "full_access_bot_needs_its_own_tools",
+                    "engine": driver.id(),
+                }),
+            )
+            .ok()?;
+        let stored = settings.clone();
+        let patch = storage
+            .modify_bot(bot, move |name, config| {
+                let mut config = config.clone();
+                let obj = config
+                    .as_object_mut()
+                    .ok_or("bot config must be an object")?;
+                let current: crate::profile::EngineSettings = obj
+                    .get("engine")
+                    .and_then(|e| serde_json::from_value(e.clone()).ok())
+                    .unwrap_or_default();
+                if current.mode == EngineMode::NativeTools {
+                    return Err("the bot already works with its own tools".to_owned());
+                }
+                obj.insert(
+                    "engine".into(),
+                    serde_json::to_value(&stored).map_err(|e| e.to_string())?,
+                );
+                Ok((name.to_owned(), config))
+            })
+            .ok()?;
+        let config = match patch {
+            storage::BotPatch::Applied { bot: written, .. } => written.config,
+            // Another turn got there first: use what it saved.
+            storage::BotPatch::Rejected(_) => storage.get_bot(bot).ok().flatten()?.config,
+            _ => return None,
+        };
+        let engine: crate::profile::EngineSettings =
+            serde_json::from_value(config.get("engine")?.clone()).ok()?;
+        if engine.mode != EngineMode::NativeTools {
+            return None;
+        }
+        // The running profile is the one that is changed, so nothing else about it is re-read.
+        let mut profile = cached.clone();
+        profile.engine = engine.clone();
+        self.sh.profiles.write().insert(bot, Arc::new(profile));
+        self.sh.router.reset_bot(bot);
+        Some(engine)
+    }
+
     /// The settings of a native-tools bot, re-checked at every turn: consent on
     /// record and a workspace the protected-path rules still accept.
     fn native_turn(
@@ -410,7 +502,15 @@ impl TurnExecutor {
             .as_ref()
             .ok_or_else(|| cli_invalid("CLI provider is not configured"))?;
         let (cfg_engine, command) = cli.parts();
-        let engine_settings = ctx.profile.engine.clone();
+        let mut engine_settings = ctx.profile.engine.clone();
+        if engine_settings.mode != cli_provider::EngineMode::NativeTools
+            && !matches!(cfg_engine, ConfigEngine::Claude | ConfigEngine::Codex)
+            && ctx.profile.permissions.mode() == permission_engine::AutonomyMode::Full
+            && let Some(driver) = cli_provider::Driver::from_id(cfg_engine.as_str())
+            && let Some(auto) = self.auto_native_engine(ctx.bot_id, driver, &ctx.profile)
+        {
+            engine_settings = auto;
+        }
         let native = engine_settings.mode == cli_provider::EngineMode::NativeTools;
         let host = Arc::new(RecordingHost {
             inner: Host {

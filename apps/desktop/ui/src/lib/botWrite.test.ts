@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiError } from "../api/client.ts";
 import type { Bot } from "../api/types.ts";
-import { botWriteMessage, writeBotProfile } from "./botWrite.ts";
+import { botWriteMessage, writeBotProfile, writeThenApply } from "./botWrite.ts";
 
 const bot = (version: number) => ({ id: "b1", name: "Atlas", version, config: {} }) as unknown as Bot;
 
@@ -30,4 +30,31 @@ test("a stale bot version reloads once and retries with the fresh version; a sec
     return true;
   });
   assert.equal(sent.length, 2, "exactly one retry");
+});
+
+test("a model that cannot get its engine step is put back, and the error still reaches the owner", async () => {
+  const calls: string[] = [];
+  const saved = bot(5);
+  // The folder rule refused the engine step: the bot goes back to the model it had.
+  await assert.rejects(
+    writeThenApply(
+      async () => (calls.push("write"), saved),
+      async () => {
+        calls.push("apply");
+        throw new Error("a workspace folder is required");
+      },
+      async (b) => (calls.push(`undo:${b.version}`), b)
+    ),
+    /workspace folder/
+  );
+  assert.deepEqual(calls, ["write", "apply", "undo:5"]);
+  // A failed undo does not hide the original error; a good apply never undoes.
+  await assert.rejects(
+    writeThenApply(async () => saved, async () => { throw new Error("first"); }, async () => { throw new Error("second"); }),
+    /first/
+  );
+  calls.length = 0;
+  const ok = await writeThenApply(async () => saved, async () => void calls.push("apply"), async () => void calls.push("undo"));
+  assert.equal(ok, saved);
+  assert.deepEqual(calls, ["apply"]);
 });

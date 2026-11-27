@@ -8273,6 +8273,26 @@ mod workspace_refusal_tests {
         let root = tmp.path().ancestors().last().unwrap();
         assert!(check(root).is_some(), "drive root");
     }
+
+    /// The Linux host: the service account's home IS the data folder (`/var/lib/praxi`) and bots
+    /// work under its sibling `/var/lib/praxi-work`. A folder below the home was the default that
+    /// the rule refused ("This folder cannot be used"); a bot's folder under the workspaces root passes.
+    #[test]
+    fn host_layout_refuses_a_folder_below_the_home_and_accepts_the_bots_workspace_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("var-lib-praxi");
+        let data = home.clone();
+        let root = tmp.path().join("var-lib-praxi-work");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(home.join("Praxi").join("main-0194")).unwrap();
+        let bot = crate::workspace::ensure_bot_workspace_dir(&root, "Main", &data).unwrap();
+        let check = |p: &Path| workspace_refusal_with_home(p, &data, Some(&home));
+        assert!(
+            check(&home.join("Praxi").join("main-0194")).is_some(),
+            "a folder below the service home is inside the data folder"
+        );
+        assert_eq!(check(&bot), None, "{bot:?}");
+    }
 }
 
 #[cfg(test)]
