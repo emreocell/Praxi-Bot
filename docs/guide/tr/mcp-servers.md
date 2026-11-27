@@ -39,12 +39,20 @@ ve çalıştırma bilgilerini tekrar kontrol eder.
 Dosyadan kurmak için **.mcpb dosyası aç**’ı seç. Yayıncı dosyanın tamamı için
 bir SHA-256 değeri verdiyse **Paketi incele**’ye basmadan önce bu değeri gir.
 Kart dosyanın SHA-256 değerini, imza durumunu, çalışma ortamını, manifestteki
-araçları ve programın alacağı dosya veya klasör yollarını gösterir. Praxi,
-pakete ekli imzayı imzalayan sertifikaya göre kontrol eder. Yayıncıya güvenip
-güvenmeyeceğine sen karar verirsin. Doğrulama Windows’ta Crypt32, Linux ve
+araçları ve programın alacağı dosya veya klasör yollarını gösterir. Ayrıca
+tüm `${...}` şablonları doldurulduktan sonraki son komutu, argümanları,
+başlayacağı klasörü ve değişken adlarını gösterir (cevaplaman gereken bir ayar
+`<name>` olarak görünür). Gerçekte çalışacak komut kartta gösterilenden farklıysa
+kurulum reddedilir. Pakete ekli imza, paketin kendisinden gelen ve güvenilir
+hiçbir köke bağlanmayan sertifikasıyla kontrol edilir. Bu yüzden Praxi onu
+**yalnızca bütünlük** olarak gösterir: dosya imzalandığından beri değişmemiştir,
+başka bir şey değil. Böyle bir imzayı herkes üretebilir, paketi kimin
+yayımladığını göstermez. Doğrulama Windows’ta Crypt32, Linux ve
 macOS’ta CMS desteği olan kurulu OpenSSL ile yapılır. Praxi geçersiz imzaları,
-eşleşmeyen sağlama değerlerini, güvensiz yolları, sembolik bağlantıları ve boyut
-ya da dosya sayısı sınırını aşan paketleri reddeder. Eşleştirilmiş ana makinenin
+eşleşmeyen sağlama değerlerini, güvensiz yolları, düz dosya ya da klasör olmayan
+girdileri (sembolik bağlantı, yeniden ayrıştırma noktası, aygıt ve boru; arşiv
+bunları nasıl kodlarsa kodlasın) ve boyut ya da dosya sayısı sınırını aşan
+paketleri reddeder. Eşleştirilmiş ana makinenin
 yükleme sınırı, yerel 100 MiB sınırından daha düşük olabilir.
 
 Erişim bilgilerini inceledikten sonra **Kapalı olarak kur**’u seç. İçe aktarma

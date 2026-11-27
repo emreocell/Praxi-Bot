@@ -62,6 +62,8 @@ impl Drop for ImportValues {
 pub struct BundleApproval {
     /// SHA-256 returned by the inspection and approved by the owner.
     pub approval_sha256: String,
+    /// `launch_sha256` of the inspection: the resolved command line the owner saw.
+    pub launch_sha256: String,
     /// Owner-provided MCPB user settings.
     #[serde(default)]
     #[schema(write_only)]
@@ -308,7 +310,7 @@ pub(crate) async fn install_bundle(
                 let bytes = Zeroizing::new(read_part(field, MAX_APPROVAL_BYTES).await?);
                 let input: BundleApproval = serde_json::from_slice(&bytes)
                     .map_err(|_| ApiError::bad_request("invalid bundle approval"))?;
-                if !valid_sha256(&input.approval_sha256) {
+                if !valid_sha256(&input.approval_sha256) || !valid_sha256(&input.launch_sha256) {
                     return Err(ApiError::bad_request("invalid bundle approval digest"));
                 }
                 approval = Some(input);

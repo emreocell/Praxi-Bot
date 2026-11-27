@@ -70,7 +70,10 @@ fn eocd_comment(bytes: &[u8], trailing: usize) -> Option<&[u8]> {
 }
 
 /// Check integrity against the embedded signer certificate(s). The certificates
-/// themselves are supplied by the bundle and do not establish publisher trust.
+/// are supplied by the bundle itself and are NOT chained to any trusted root,
+/// so a success only means "unchanged since that key signed it" (anyone can
+/// produce such a signature with a self-signed certificate). Callers must
+/// report it as integrity only, never as verified or trusted.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub(super) fn verify(zip: &[u8], der: &[u8]) -> Result<()> {
@@ -119,6 +122,9 @@ pub(super) fn verify(zip: &[u8], der: &[u8]) -> Result<()> {
         process::{Command, Stdio},
     };
 
+    // `-noverify` skips the certificate chain on purpose: the signer
+    // certificate comes from the bundle and there is no trusted root to chain
+    // it to, so this is an integrity check only (see the Windows variant).
     // Use installed system tools, never an executable from the archive, the
     // current directory, or a caller-provided PATH.
     let openssl = [

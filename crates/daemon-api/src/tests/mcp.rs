@@ -391,6 +391,19 @@ async fn owner_can_inspect_an_uploaded_bundle_without_installing_it() {
     assert_eq!(card["checksum_verified"], true);
     assert_eq!(card["command"], "node");
     assert_eq!(card["env_names"], json!(["WEATHER_KEY"]));
+    // The card shows the resolved launch line, never an unexpanded template.
+    assert_eq!(card["cwd"], "<bundle folder>");
+    assert!(
+        card["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|arg| !arg.as_str().unwrap().contains("${"))
+    );
+    assert_eq!(card["launch_sha256"].as_str().unwrap().len(), 64);
+    // A signature whose certificate chains to no trusted root proves integrity only.
+    assert_eq!(card["signature"], "unsigned");
+    assert!(card.get("signature_verified").is_none());
     assert_eq!(
         call(&t, Method::GET, "/v1/mcp/servers", None).await.json(),
         json!([])

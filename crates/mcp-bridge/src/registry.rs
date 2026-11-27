@@ -19,10 +19,14 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::{
-    catalog::check_stdio_package_pin,
+    catalog::{
+        check_stdio_package_pin, exact_npm_version, exact_pypi_version, is_allowed_registry_runner,
+        plain_package_name,
+    },
     config::{McpImport, McpServerConfig, McpTransport},
     error::{McpError, Result},
     mcpb::{PendingSecrets, new_secret_namespace, save_secrets, sha256_hex, valid_env_name},
+    oauth_net::{PolicyHttpClient, address_allowed},
 };
 
 /// The only host this module talks to.
@@ -47,8 +51,12 @@ pub(crate) fn clean_text(text: &str) -> String {
 }
 
 /// `https` URL whose host is not loopback, private, link-local or similar.
+///
+/// This is only the first, offline filter: a name can still resolve to a
+/// private address, so remote sources are also resolved and vetted
+/// ([`vet_remote_sources`]) when they are listed and installed, and again,
+/// with the answers pinned, every time the daemon connects.
 fn public_https(url: &str) -> bool {
-    use std::net::Ipv4Addr;
     let Ok(u) = url::Url::parse(url) else {
         return false;
     };
@@ -62,30 +70,57 @@ fn public_https(url: &str) -> bool {
     {
         return false;
     }
-    let bad_v4 = |a: Ipv4Addr| {
-        a.is_loopback()
-            || a.is_private()
-            || a.is_link_local()
-            || a.is_unspecified()
-            || a.is_broadcast()
-            || (a.octets()[0] == 100 && (a.octets()[1] & 0xc0) == 64)
-    };
     match u.host() {
         Some(url::Host::Domain(d)) => {
             let d = d.trim_end_matches('.').to_ascii_lowercase();
             let local = |suffix: &str| d.len() > suffix.len() && d.ends_with(suffix);
-            d.contains('.') && !(local(".localhost") || local(".local"))
+            d.contains('.')
+                && !(local(".localhost")
+                    || local(".local")
+                    || local(".internal")
+                    || local(".localdomain")
+                    || local(".home.arpa"))
         }
-        Some(url::Host::Ipv4(a)) => !bad_v4(a),
-        Some(url::Host::Ipv6(a)) => {
-            let seg0 = a.segments()[0];
-            !(a.is_loopback()
-                || a.is_unspecified()
-                || a.to_ipv4_mapped().is_some_and(bad_v4)
-                || (seg0 & 0xfe00) == 0xfc00
-                || (seg0 & 0xffc0) == 0xfe80)
-        }
+        Some(url::Host::Ipv4(a)) => address_allowed(std::net::IpAddr::V4(a), false),
+        Some(url::Host::Ipv6(a)) => address_allowed(std::net::IpAddr::V6(a), false),
         None => false,
+    }
+}
+
+/// How long the owner waits for the name lookups of one listing.
+const VET_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Resolve every remote source and drop the ones that do not resolve, or that
+/// resolve to any loopback, private, link-local, metadata or reserved address
+/// (`127.0.0.1.nip.io` and an attacker's A record look like public names).
+/// Fails closed: a lookup that errors or times out removes the source.
+pub async fn vet_remote_sources(entries: &mut [RegistryEntry], client: &PolicyHttpClient) {
+    let urls: BTreeSet<String> = entries
+        .iter()
+        .flat_map(|entry| &entry.sources)
+        .filter_map(|source| match source {
+            Source::Remote { url, .. } => Some(url.clone()),
+            _ => None,
+        })
+        .collect();
+    let checks = urls.into_iter().map(|url| async move {
+        let ok = match url::Url::parse(&url) {
+            Ok(parsed) => tokio::time::timeout(VET_TIMEOUT, client.vet(&parsed))
+                .await
+                .is_ok_and(|vetted| vetted.is_ok()),
+            Err(_) => false,
+        };
+        (url, ok)
+    });
+    let verdicts: BTreeMap<String, bool> = futures::future::join_all(checks)
+        .await
+        .into_iter()
+        .collect();
+    for entry in entries {
+        entry.sources.retain(|source| match source {
+            Source::Remote { url, .. } => verdicts.get(url).copied().unwrap_or(false),
+            _ => true,
+        });
     }
 }
 
@@ -280,6 +315,9 @@ impl RegistryEntry {
         let id = id_of(&self.name)?;
         let (config, needs) = source.config(&id)?;
         if let McpTransport::Stdio { command, args, .. } = &config.transport {
+            if !is_allowed_registry_runner(command) {
+                return Err(err("registry servers may only be started with npx or uvx"));
+            }
             check_stdio_package_pin(&id, command, args)?;
         }
         config.validate()?;
@@ -477,6 +515,11 @@ fn package_source(package: &Value) -> Option<Source> {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
     };
+    let exact_version = match kind {
+        "npm" => exact_npm_version(version),
+        "pypi" => exact_pypi_version(version),
+        _ => false,
+    };
     if package.pointer("/transport/type").and_then(Value::as_str) != Some("stdio")
         || package.get("registryBaseUrl").is_some_and(|base| {
             !matches!(
@@ -491,11 +534,7 @@ fn package_source(package: &Value) -> Option<Source> {
             )
         })
         || identifier.len() > 214
-        || version.len() > 128
-        || !version.starts_with(|c: char| c.is_ascii_digit())
-        || !version
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
+        || !exact_version
     {
         return None;
     }
@@ -508,18 +547,25 @@ fn package_source(package: &Value) -> Option<Source> {
     let args = package_args(package)?;
     let (identifier, version) = (identifier.to_owned(), version.to_owned());
     match kind {
-        "npm" if valid_part(&identifier) || scoped(&identifier) => Some(Source::Npm {
-            identifier,
-            version,
-            env,
-            args,
-        }),
-        "pypi" if valid_part(&identifier) => Some(Source::Pypi {
-            identifier,
-            version,
-            env,
-            args,
-        }),
+        "npm"
+            if (valid_part(&identifier) || scoped(&identifier))
+                && plain_package_name(&identifier, true) =>
+        {
+            Some(Source::Npm {
+                identifier,
+                version,
+                env,
+                args,
+            })
+        }
+        "pypi" if valid_part(&identifier) && plain_package_name(&identifier, false) => {
+            Some(Source::Pypi {
+                identifier,
+                version,
+                env,
+                args,
+            })
+        }
         _ => None,
     }
 }
@@ -674,7 +720,9 @@ pub async fn search(query: &str, limit: u32) -> Result<Vec<RegistryEntry>> {
         .append_pair("search", query)
         .append_pair("limit", &limit.clamp(1, 50).to_string())
         .append_pair("version", "latest");
-    parse_search(&fetch(url).await?)
+    let mut entries = parse_search(&fetch(url).await?)?;
+    vet_remote_sources(&mut entries, &PolicyHttpClient::new(false)).await;
+    Ok(entries)
 }
 
 /// Re-fetch an exact version from the official registry before installing.
@@ -696,9 +744,17 @@ pub async fn lookup(name: &str, version: &str) -> Result<RegistryEntry> {
         .extend([name, "versions", version]);
     let value: Value = serde_json::from_slice(&fetch(url).await?)
         .map_err(|_| err("the registry answer is not readable"))?;
-    parse_entry(&value)
+    let mut entry = parse_entry(&value)
         .filter(|entry| entry.name == name && entry.version == version)
-        .ok_or_else(|| err("the registry did not return the requested server version"))
+        .ok_or_else(|| err("the registry did not return the requested server version"))?;
+    // A remote that resolves to a non-public address is no longer a source, so
+    // an approval for it no longer matches anything and the install is refused.
+    vet_remote_sources(
+        std::slice::from_mut(&mut entry),
+        &PolicyHttpClient::new(false),
+    )
+    .await;
+    Ok(entry)
 }
 
 #[cfg(test)]
@@ -804,6 +860,228 @@ mod tests {
                 "environmentVariables":[{{"name":"{name}","isRequired":true}}]}}]}}}}]}}"#
             );
             assert_eq!(parse_search(body.as_bytes()).unwrap()[0].sources.len(), 0);
+        }
+    }
+
+    struct Table(BTreeMap<&'static str, Vec<std::net::IpAddr>>);
+
+    #[async_trait::async_trait]
+    impl crate::oauth::EndpointResolver for Table {
+        async fn lookup(&self, host: &str, _port: u16) -> Option<Vec<std::net::IpAddr>> {
+            self.0.get(host).cloned()
+        }
+    }
+
+    fn remote(url: &str) -> Source {
+        Source::Remote {
+            url: url.into(),
+            headers: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn remotes_resolving_to_non_public_addresses_are_dropped_at_listing_and_install() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        let table = Table(BTreeMap::from([
+            ("good.example.com", vec![ip("93.184.216.34")]),
+            (
+                "two.example.com",
+                vec![ip("93.184.216.34"), ip("2606:2800:220:1::1")],
+            ),
+            // Names that look public and are not.
+            ("127.0.0.1.nip.io", vec![ip("127.0.0.1")]),
+            ("meta.example.com", vec![ip("169.254.169.254")]),
+            ("ten.example.com", vec![ip("10.1.2.3")]),
+            ("lan.example.com", vec![ip("192.168.1.5")]),
+            ("v6.example.com", vec![ip("::1")]),
+            ("mapped.example.com", vec![ip("::ffff:127.0.0.1")]),
+            ("ula.example.com", vec![ip("fd00:ec2::254")]),
+            ("cgnat.example.com", vec![ip("100.64.0.1")]),
+            // One public answer does not excuse a private one.
+            (
+                "mixed.example.com",
+                vec![ip("93.184.216.34"), ip("10.0.0.1")],
+            ),
+            ("empty.example.com", vec![]),
+        ]));
+        let client = PolicyHttpClient::with_resolver(false, std::sync::Arc::new(table));
+        let hosts = [
+            "good.example.com",
+            "two.example.com",
+            "127.0.0.1.nip.io",
+            "meta.example.com",
+            "ten.example.com",
+            "lan.example.com",
+            "v6.example.com",
+            "mapped.example.com",
+            "ula.example.com",
+            "cgnat.example.com",
+            "mixed.example.com",
+            "empty.example.com",
+            "unresolvable.example.com",
+        ];
+        let base = parse_search(BODY).unwrap().remove(0);
+        let mut entries = vec![RegistryEntry {
+            sources: hosts
+                .iter()
+                .map(|h| remote(&format!("https://{h}/mcp")))
+                .collect(),
+            ..base.clone()
+        }];
+        // The offline filter lets every one of these through: they are public-looking names.
+        assert!(
+            hosts
+                .iter()
+                .all(|h| public_https(&format!("https://{h}/mcp")))
+        );
+        vet_remote_sources(&mut entries, &client).await;
+        let kept: Vec<_> = entries[0]
+            .sources
+            .iter()
+            .map(|s| match s {
+                Source::Remote { url, .. } => {
+                    url.trim_start_matches("https://").trim_end_matches("/mcp")
+                }
+                _ => panic!(),
+            })
+            .collect();
+        assert_eq!(kept, ["good.example.com", "two.example.com"]);
+
+        // Packages are untouched, and what is left previews and installs.
+        let mut mixed = vec![RegistryEntry {
+            sources: vec![
+                base.sources[0].clone(),
+                remote("https://good.example.com/mcp"),
+                remote("https://127.0.0.1.nip.io/mcp"),
+            ],
+            ..base
+        }];
+        vet_remote_sources(&mut mixed, &client).await;
+        assert_eq!(mixed[0].sources.len(), 2);
+        assert!(mixed[0].preview(0).is_ok() && mixed[0].preview(1).is_ok());
+        assert!(mixed[0].preview(2).is_err());
+    }
+
+    #[test]
+    fn literal_addresses_use_the_same_policy_as_oauth_endpoints() {
+        for host in [
+            "0.0.0.0",
+            "0.1.2.3",
+            "127.0.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.0.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "198.18.0.1",
+            "224.0.0.1",
+            "240.0.0.1",
+            "192.0.0.1",
+            "[::1]",
+            "[::]",
+            "[fe80::1]",
+            "[fc00::1]",
+            "[fd00:ec2::254]",
+            "[::ffff:10.0.0.1]",
+            "[64:ff9b::7f00:1]",
+            "[ff02::1]",
+            "metadata.internal",
+            "box.local",
+            "host.localhost",
+            "nas.home.arpa",
+            "printer",
+        ] {
+            assert!(!public_https(&format!("https://{host}/mcp")), "{host}");
+        }
+        for host in ["93.184.216.34", "[2606:2800:220:1::1]", "example.com"] {
+            assert!(public_https(&format!("https://{host}/mcp")), "{host}");
+        }
+    }
+
+    fn npm_package(identifier: &str, version: &str) -> Value {
+        serde_json::json!({
+            "registryType": "npm", "identifier": identifier, "version": version,
+            "transport": {"type": "stdio"}
+        })
+    }
+
+    #[test]
+    fn package_versions_must_be_exact_and_names_plain() {
+        assert!(package_source(&npm_package("pkg", "1.2.3")).is_some());
+        assert!(package_source(&npm_package("@scope/pkg", "1.2.3-rc.1")).is_some());
+        for version in [
+            "1evil",
+            "1+evil",
+            "1.0.0+build",
+            "1.0",
+            "^1.0.0",
+            "latest",
+            "1.2.3 --registry=https://evil.example",
+            "1.2.3@evil",
+            "1.2.3/../x",
+        ] {
+            assert!(
+                package_source(&npm_package("pkg", version)).is_none(),
+                "{version}"
+            );
+        }
+        for identifier in [
+            "-y",
+            "--registry=x",
+            "pkg@evil",
+            "https://x.example/p.tgz",
+            "git+ssh://x",
+            "a/b",
+            "@scope",
+            "@/x",
+            "pkg name",
+            ".",
+        ] {
+            assert!(
+                package_source(&npm_package(identifier, "1.2.3")).is_none(),
+                "{identifier}"
+            );
+        }
+        let pypi = |identifier: &str, version: &str| {
+            package_source(&serde_json::json!({
+                "registryType": "pypi", "identifier": identifier, "version": version,
+                "transport": {"type": "stdio"}
+            }))
+        };
+        assert!(pypi("pkg", "1.2.3").is_some());
+        for version in [
+            "1evil",
+            "1.0.0--registry",
+            "1+evil",
+            "1.0.0+local",
+            "==1.2.3",
+            ">=1",
+            "1.2.*",
+            "1.2.3,<2",
+        ] {
+            assert!(pypi("pkg", version).is_none(), "{version}");
+        }
+        for identifier in [
+            "-r",
+            "pkg==1.0",
+            "pkg[extra]",
+            "https://x.example/p.whl",
+            "@scope/pkg",
+        ] {
+            assert!(pypi(identifier, "1.2.3").is_none(), "{identifier}");
+        }
+        // Another runner is not an option, even if the registry names one.
+        for (kind, hint) in [
+            ("npm", "bunx"),
+            ("npm", "pnpm"),
+            ("pypi", "pipx"),
+            ("pypi", "npx"),
+            ("npm", "uvx"),
+        ] {
+            let mut p = npm_package("pkg", "1.2.3");
+            p["registryType"] = kind.into();
+            p["runtimeHint"] = hint.into();
+            assert!(package_source(&p).is_none(), "{kind} {hint}");
         }
     }
 

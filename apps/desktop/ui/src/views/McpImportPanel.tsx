@@ -99,15 +99,18 @@ function ApprovalCard({ approval, busy, onCancel, onInstall }: {
         ) : null}
         {bundle ? (
           <>
+            <dt>{t("apps.imports.workingFolder")}</dt><dd><code className={styles.literal} dir="ltr">{bundle.cwd}</code></dd>
+            <dt>{t("apps.imports.launchSha256")}</dt><dd><code>{bundle.launch_sha256}</code></dd>
             <dt>{t("apps.imports.sha256")}</dt><dd><code>{bundle.sha256}</code></dd>
             <dt>{t("apps.imports.signature")}</dt>
-            <dd>{t(bundle.signature_verified ? "apps.imports.signatureChecked" : "apps.imports.unsigned")}</dd>
+            <dd>{t(bundle.signature === "integrity_only" ? "apps.imports.signatureIntegrityOnly" : "apps.imports.unsigned")}</dd>
             {bundle.checksum_verified ? <><dt>{t("apps.imports.checksum")}</dt><dd>{t("apps.imports.checksumMatched")}</dd></> : null}
             {bundle.tools.length > 0 ? <><dt>{t("apps.imports.declaredTools")}</dt><dd>{bundle.tools.join(", ")}</dd></> : null}
           </>
         ) : null}
       </dl>
       {bundle ? <p className={form.hint}>{t("apps.imports.bundleFolder")}</p> : null}
+      {bundle && launch.args.length > 0 ? <p className={form.hint}>{t("apps.imports.argumentsHint")}</p> : null}
       <p className={form.hint}>{t(remoteUrl ? "apps.imports.remoteAccess" : "apps.imports.localAccess")}</p>
       {bundle?.warnings.map((warning) => <p key={warning} className={form.hint}>{t(`apps.imports.warnings.${warning}`)}</p>)}
       {fields.map((field) => (
@@ -207,7 +210,7 @@ export function McpImportPanel({ client, onInstalled }: { client: ApiClient; onI
           onCancel={() => { setApproval(null); setError(null); }}
           onInstall={(values) => void run(
             (signal) => approval.kind === "bundle"
-              ? client.installMcpBundle(approval.file, approval.preview.sha256, values, signal)
+              ? client.installMcpBundle(approval.file, approval.preview.sha256, approval.preview.launch_sha256, values, signal)
               : client.installMcpRegistry({
                 name: approval.entry.name, version: approval.entry.version,
                 approval_sha256: approval.source.approval_sha256, values

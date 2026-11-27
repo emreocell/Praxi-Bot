@@ -1134,6 +1134,7 @@ impl McpControl for McpHost {
             mcp_bridge::mcpb::install_with(
                 &bundle,
                 &input.approval_sha256,
+                &input.launch_sha256,
                 &input.values.0,
                 &self.data_dir,
                 store,
@@ -1659,12 +1660,14 @@ mod tests {
             )
         };
         let host = start();
+        let card = mcp_bridge::mcpb::inspect(BUNDLE).unwrap();
         let installed = host
             .clone()
             .install_bundle(
                 BUNDLE.to_vec(),
                 BundleApproval {
-                    approval_sha256: mcp_bridge::mcpb::inspect(BUNDLE).unwrap().sha256,
+                    approval_sha256: card.sha256,
+                    launch_sha256: card.launch_sha256,
                     values: ImportValues(BTreeMap::from([("key".into(), "fixture-input".into())])),
                 },
             )

@@ -33,18 +33,32 @@ exact executable and separate arguments or the HTTPS endpoint, along with the
 environment variables or headers it receives. Praxi supports pinned npm and
 PyPI packages and supported streamable HTTPS endpoints. Some entries require
 other installers, custom runtime arguments, or templated values. These launch
-options are unavailable. The exact registry version and launch are checked
-again when you confirm.
+options are unavailable. Only `npx` and `uvx` are used, and the package version
+must be an exact one (semantic version for npm, an exact PEP 440 version for
+PyPI). For an HTTPS endpoint, Praxi looks the host name up and drops the option
+if any answer is a private, loopback, link-local or otherwise non-public
+address. Praxi connects only to the addresses it checked, every time the server
+starts. The exact registry version and launch are checked again when you
+confirm.
 
 For a local file, select **Open a .mcpb file**. If the publisher provides a
 SHA-256 for the whole file, enter it before selecting **Inspect bundle**. The
 review shows the SHA-256, signature status, runtime, manifest tools, and any
-configuration paths the program receives. An embedded signature is checked
-against its signer certificate. Publisher trust requires a separate decision.
+configuration paths the program receives. It also shows the final command,
+arguments, starting folder and variable names, after every `${...}` template is
+filled in (a setting you must answer shows as `<name>`). Installing is refused
+if the command that would really run differs from the one on the card. An
+embedded signature is checked against its own certificate, which comes from the
+bundle and chains to no trusted root. Praxi therefore reports it as **integrity
+only**: the file has not changed since it was signed, and nothing more. Anyone
+can make such a signature, so it does not show who published the bundle.
 Verification uses Crypt32 on Windows and an installed OpenSSL with CMS support
 on Linux or macOS. Praxi refuses invalid signatures, mismatched checksums,
-unsafe archive paths, symlinks, and archives over the size or file-count
-limits. A paired host's upload limit can be lower than the local 100 MiB limit.
+unsafe archive paths, archive entries that are not plain files or folders
+(symbolic links, reparse points, devices and pipes, however the archive encodes
+them), and archives over the size or file-count limits. Files are unpacked with
+fixed private permissions, and the result is checked again before it is used. A
+paired host's upload limit can be lower than the local 100 MiB limit.
 
 After reviewing the access, select **Install disabled**. No server process or
 remote MCP session starts during import. Environment and header values are

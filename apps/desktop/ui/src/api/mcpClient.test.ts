@@ -92,13 +92,14 @@ test("MCP imports send owner credentials, exact approvals and binary uploads", a
     assert.equal(calls[2].headers.get("content-type"), "application/octet-stream");
     assert.equal(calls[2].body, file);
 
-    await c.installMcpBundle(file, checksum, { key: "fixture-input" });
+    const launch = "b".repeat(64);
+    await c.installMcpBundle(file, checksum, launch, { key: "fixture-input" });
     assert.equal(calls[3].path, "/v1/mcp/import/bundle");
     assert.equal(calls[3].headers.get("content-type"), null);
     assert.ok(calls[3].body instanceof FormData);
     assert.equal(await (calls[3].body.get("bundle") as File).text(), "fixture");
     assert.deepEqual(JSON.parse(String(calls[3].body.get("approval"))), {
-      approval_sha256: checksum, values: { key: "fixture-input" }
+      approval_sha256: checksum, launch_sha256: launch, values: { key: "fixture-input" }
     });
     assert.ok(calls.every((call) => call.headers.get("x-praxi-owner-key") === "fixture-owner"));
   } finally {

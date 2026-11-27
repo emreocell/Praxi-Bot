@@ -1775,10 +1775,10 @@ export class ApiClient {
       signal
     });
   }
-  installMcpBundle(file: File, sha256: string, values: Record<string, string>, signal?: AbortSignal): Promise<McpServer> {
+  installMcpBundle(file: File, sha256: string, launchSha256: string, values: Record<string, string>, signal?: AbortSignal): Promise<McpServer> {
     const form = new FormData();
     form.append("bundle", file);
-    form.append("approval", JSON.stringify({ approval_sha256: sha256, values }));
+    form.append("approval", JSON.stringify({ approval_sha256: sha256, launch_sha256: launchSha256, values }));
     return this.request("POST", "/mcp/import/bundle", { raw: form, signal });
   }
   /**

@@ -32,7 +32,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    catalog::{check_stdio_package_pin, is_package_runner},
+    catalog::{
+        check_stdio_package_pin, is_allowed_registry_runner, is_package_runner, runner_packages,
+    },
     config::{McpImport, McpServerConfig, McpTransport},
     error::{McpError, Result},
 };
@@ -202,18 +204,28 @@ pub struct Inspection {
     pub runtime: Runtime,
     /// The program that will be started.
     pub command: String,
-    /// Manifest arguments, including any substitutions.
+    /// The arguments exactly as they will be passed, after every `${...}`
+    /// substitution. A setting with a default shows its default; a setting
+    /// you must fill in shows as `<name>`.
     pub args: Vec<String>,
+    /// The folder the server is started in (the bundle's own folder).
+    pub cwd: String,
     /// Names of the environment variables the server will receive (no values).
     pub env_names: Vec<String>,
+    /// SHA-256 (hex) of the resolved launch line shown here (command,
+    /// arguments, working folder and variable names). Installing needs the
+    /// same digest, and is refused if the launch line it would really run
+    /// differs from this one.
+    pub launch_sha256: String,
     /// Settings the owner must fill in.
     pub fields: Vec<ConfigField>,
     /// SHA-256 (hex) of the bundle file. The approval is for exactly these bytes.
     pub sha256: String,
     /// The file matched an independently supplied SHA-256.
     pub checksum_verified: bool,
-    /// The embedded CMS signature was verified, when present.
-    pub signature_verified: bool,
+    /// What the embedded signature, if any, proves. It never proves who
+    /// published the bundle.
+    pub signature: SignatureStatus,
     /// Names of tools declared by the bundle. Actual tools are discovered on enable.
     pub tools: Vec<String>,
     /// Number of files that will be unpacked.
@@ -222,6 +234,23 @@ pub struct Inspection {
     pub unpacked_bytes: u64,
     /// Things the owner should read before approving (suspicious text, ...).
     pub warnings: BTreeSet<Warning>,
+}
+
+/// What a bundle signature proves.
+///
+/// The signer certificate travels inside the bundle and chains to no root
+/// that Praxi trusts, so the best a signature can say is that the file has not
+/// changed since that certificate's key signed it. Anyone can make such a
+/// signature, so it must never be presented as verified or trusted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SignatureStatus {
+    /// The bundle carries no signature.
+    Unsigned,
+    /// A signature matches the file, but its certificate does not chain to a
+    /// trusted root (self-signed or unknown signer): integrity only.
+    IntegrityOnly,
 }
 
 /// Findings from the static review of untrusted manifest text.
@@ -324,6 +353,37 @@ fn portable_name(part: &str) -> bool {
         })
 }
 
+/// Only regular files and folders are accepted. Whatever the archive says
+/// about permissions is ignored when unpacking (fixed modes are used), but a
+/// claim of any other kind of entry is refused, however the creating system
+/// encoded it: Unix mode bits (symbolic link, device, FIFO, socket) in the high
+/// half of the external attributes whatever the "host system" says, and the
+/// Windows reparse-point / device attribute bits, or a folder flag that
+/// contradicts the entry name.
+fn check_entry_kind(attributes: u32, is_dir: bool) -> Result<()> {
+    const S_IFMT: u32 = 0o170_000;
+    const S_IFDIR: u32 = 0o040_000;
+    const S_IFREG: u32 = 0o100_000;
+    const S_IFLNK: u32 = 0o120_000;
+    const DOS_DIRECTORY: u32 = 0x10;
+    const DOS_DEVICE: u32 = 0x40;
+    const DOS_REPARSE_POINT: u32 = 0x400;
+    let kind = (attributes >> 16) & S_IFMT;
+    if kind == S_IFLNK || attributes & DOS_REPARSE_POINT != 0 {
+        return Err(err("the bundle contains a symbolic link and was refused"));
+    }
+    let expected = if is_dir { S_IFDIR } else { S_IFREG };
+    if (kind != 0 && kind != expected)
+        || attributes & DOS_DEVICE != 0
+        || ((attributes & DOS_DIRECTORY != 0) != is_dir && attributes & 0xFFFF != 0)
+    {
+        return Err(err(
+            "the bundle contains an entry that is not a regular file or folder and was refused",
+        ));
+    }
+    Ok(())
+}
+
 struct Archive {
     manifest: Manifest,
     paths: BTreeSet<PathBuf>,
@@ -361,12 +421,7 @@ fn open_archive(bytes: &[u8]) -> Result<(zip::ZipArchive<Cursor<&[u8]>>, Archive
         {
             return Err(err("the bundle contains a duplicate or reserved path"));
         }
-        if let Some(mode) = entry.unix_mode() {
-            // S_IFLNK: links could point outside the folder.
-            if mode & 0o170_000 == 0o120_000 {
-                return Err(err("the bundle contains a symbolic link and was refused"));
-            }
-        }
+        check_entry_kind(entry.external_attributes(), entry.is_dir())?;
         if !entry.is_dir() {
             file_paths.insert(path);
             files += 1;
@@ -589,6 +644,9 @@ struct PreparedBundle<'a> {
     manifest: Manifest,
     launch: McpLaunch,
     inspection: Inspection,
+    /// The launch line as the approval card resolved it.
+    card: Resolved,
+    file_count: usize,
 }
 
 fn check_digest(actual: &str, expected: &str, message: &str) -> Result<()> {
@@ -637,6 +695,11 @@ fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<Prepar
     if let Some(signed) = &signature {
         signature::verify(signed.signed_content, signed.der)?;
     }
+    let signature = if signature.is_some() {
+        SignatureStatus::IntegrityOnly
+    } else {
+        SignatureStatus::Unsigned
+    };
     let (zip, archive) = open_archive(zip_bytes)?;
     let m = archive.manifest;
     validate_manifest(&m)?;
@@ -672,7 +735,11 @@ fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<Prepar
     if runtime == Runtime::Binary {
         warnings.insert(Warning::BundledBinary);
     }
+    let card = resolve_card(&id, &m.user_config, &launch, &archive.paths)?;
+    McpServerConfig::stdio(&id, card.command.clone(), card.args.clone()).validate()?;
+    let env_names: Vec<String> = launch.env.keys().cloned().collect();
     let inspection = Inspection {
+        launch_sha256: launch_digest(&card, CARD_DIR, &env_names),
         id,
         display_name: crate::registry::clean_text(m.display_name.as_deref().unwrap_or(&m.name)),
         version: crate::registry::clean_text(&m.version),
@@ -682,13 +749,14 @@ fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<Prepar
             .as_ref()
             .map(|a| crate::registry::clean_text(&a.name)),
         runtime,
-        command,
-        args: args.to_vec(),
-        env_names: launch.env.keys().cloned().collect(),
+        command: card.command.clone(),
+        args: card.args.clone(),
+        cwd: CARD_DIR.to_owned(),
+        env_names,
         fields,
         sha256,
         checksum_verified: expected.is_some(),
-        signature_verified: signature.is_some(),
+        signature,
         tools: m
             .tools
             .iter()
@@ -699,40 +767,155 @@ fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<Prepar
         unpacked_bytes: archive.unpacked,
         warnings,
     };
-    // Resolve with placeholder values now so a bad template is reported on the
-    // approval card, not after the owner said yes.
-    let probe: BTreeMap<String, String> = inspection
-        .fields
-        .iter()
-        .map(|f| (f.key.clone(), "x".to_string()))
-        .collect();
-    let resolved = resolve(
-        "mcp/import-probe",
-        &launch,
-        &m.user_config,
-        &probe,
-        Path::new("/bundle"),
-    )?;
-    check_stdio_package_pin(&inspection.id, &resolved.command, &resolved.args)?;
-    if is_package_runner(&resolved.command, &resolved.args)
-        && archive.paths.iter().any(|path| runner_config_file(path))
-    {
-        return Err(err(
-            "the bundle ships package-manager settings or installed packages that would change what its package runner downloads",
-        ));
-    }
-    McpServerConfig::stdio(&inspection.id, resolved.command, resolved.args).validate()?;
     Ok(PreparedBundle {
         zip,
         manifest: m,
         launch,
         inspection,
+        card,
+        file_count: archive.file_count,
     })
+}
+
+/// Resolve the launch line the way install will: with the folder the bundle
+/// is unpacked to and with each setting's default, so a template or a default
+/// that would change the command line is reported on the card, before the
+/// owner says yes. A setting without a default shows as `<name>`.
+fn resolve_card(
+    id: &str,
+    fields: &BTreeMap<String, UserField>,
+    launch: &McpLaunch,
+    paths: &BTreeSet<PathBuf>,
+) -> Result<Resolved> {
+    let shown = card_values(fields)?;
+    let card = resolve(
+        "mcp/import-card",
+        launch,
+        fields,
+        &shown,
+        Path::new(CARD_DIR),
+    )?;
+    check_stdio_package_pin(id, &card.command, &card.args)?;
+    check_runner_allowed(&card.command, &card.args)?;
+    if is_package_runner(&card.command, &card.args)
+        && paths.iter().any(|path| runner_config_file(path))
+    {
+        return Err(err(
+            "the bundle ships package-manager settings or installed packages that would change what its package runner downloads",
+        ));
+    }
+    Ok(card)
+}
+
+/// How the approval card names the folder the bundle is unpacked into.
+const CARD_DIR: &str = "<bundle folder>";
+
+/// Values the card resolves with: the setting's default, or `<name>` for one
+/// the owner must fill in. Secrets never appear.
+fn card_values(fields: &BTreeMap<String, UserField>) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for (key, f) in fields {
+        let field = field_of(key, f)?;
+        if f.sensitive {
+            continue;
+        }
+        out.insert(
+            key.clone(),
+            field.default.unwrap_or_else(|| format!("<{key}>")),
+        );
+    }
+    Ok(out)
+}
+
+/// Package runners are only accepted as plain `npx` or `uvx`; every other form
+/// (`bunx`, `pnpm dlx`, `pipx run`, `uv tool run`, a runner reached by path, ...)
+/// is refused for a bundle.
+fn check_runner_allowed(command: &str, args: &[String]) -> Result<()> {
+    if is_package_runner(command, args) && !is_allowed_registry_runner(command) {
+        return Err(err(
+            "a bundle may only use `npx` or `uvx` as its package runner",
+        ));
+    }
+    Ok(())
+}
+
+/// Digest of the launch line as shown on the card. `dir` is the text standing
+/// for the bundle folder, so the digest does not depend on where it lives.
+fn launch_digest(launch: &Resolved, dir: &str, env_names: &[String]) -> String {
+    let mark = |text: &str| text.replace(dir, "${__dirname}");
+    let args: Vec<(String, Option<String>)> = launch
+        .args
+        .iter()
+        .zip(&launch.arg_prefix)
+        .map(|(arg, prefix)| (mark(arg), prefix.as_deref().map(mark)))
+        .collect();
+    let bytes = serde_json::to_vec(&(mark(&launch.command), args, env_names)).unwrap_or_default();
+    sha256_hex(&bytes)
+}
+
+/// The launch line install would really run must be the one the card showed:
+/// same command, same fixed arguments in the same order (apart from where the
+/// owner's own settings go), and a setting never turns into a runner option.
+fn check_final_launch(card: &Resolved, real: &Resolved, target: &Path) -> Result<()> {
+    let dir = target.to_string_lossy();
+    let shape = |launch: &Resolved, dir_text: &str| -> Vec<(String, bool)> {
+        launch
+            .args
+            .iter()
+            .zip(&launch.arg_prefix)
+            .filter_map(|(arg, prefix)| match prefix {
+                None => Some((arg.replace(dir_text, "${__dirname}"), false)),
+                // A whole-argument setting (or a multiple-path setting) may be
+                // present or absent; one with fixed text around it is pinned
+                // to that text.
+                Some(prefix) if prefix.is_empty() => None,
+                Some(prefix) => Some((prefix.replace(dir_text, "${__dirname}"), true)),
+            })
+            .collect()
+    };
+    if real.command != card.command.replace(CARD_DIR, &dir)
+        || shape(card, CARD_DIR) != shape(real, &dir)
+    {
+        return Err(err("the launch command is not the one shown for approval"));
+    }
+    // What the runner will download must be what the card showed, and no
+    // setting may stand in front of the package where the runner reads it as
+    // one of its own options.
+    let id = "bundle";
+    let shown = runner_packages(id, &card.command, &card.args)?;
+    let found = runner_packages(id, &real.command, &real.args)?;
+    if shown.map(|p| {
+        p.iter()
+            .map(|s| s.replace(CARD_DIR, &dir))
+            .collect::<Vec<_>>()
+    }) != found
+    {
+        return Err(err("the launch command is not the one shown for approval"));
+    }
+    if let Some(first) = found.and_then(|p| p.into_iter().next()) {
+        let before = real.args.iter().position(|arg| arg.contains(&first));
+        let flag = real
+            .args
+            .iter()
+            .zip(&real.arg_prefix)
+            .take(before.unwrap_or(real.args.len()))
+            .any(|(arg, prefix)| prefix.as_deref() == Some("") && arg.starts_with('-'));
+        if flag {
+            return Err(err(
+                "a setting would become an option of the package runner",
+            ));
+        }
+    }
+    Ok(())
 }
 
 struct Resolved {
     command: String,
     args: Vec<String>,
+    /// Per argument: `None` when no setting is involved, else the literal text
+    /// in front of the first `${user_config...}` (empty when the argument is
+    /// the setting itself).
+    arg_prefix: Vec<Option<String>>,
     secret_env: BTreeMap<String, String>,
     secrets: PendingSecrets,
 }
@@ -835,23 +1018,31 @@ fn resolve(
     let (command, _) = substitute(template, &dir_s, fields, values, false)?;
     no_escape(&command)?;
     let mut args = Vec::new();
+    let mut arg_prefix = Vec::new();
     for a in launch.args.iter().flatten() {
         if let Some(key) = a
             .strip_prefix("${user_config.")
             .and_then(|s| s.strip_suffix('}'))
             && fields.get(key).is_some_and(|field| field.multiple)
         {
-            args.extend(
-                values
-                    .get(key)
-                    .into_iter()
-                    .flat_map(|paths| paths.lines().map(str::to_owned)),
-            );
+            for line in values
+                .get(key)
+                .into_iter()
+                .flat_map(|paths| paths.lines().map(str::to_owned))
+            {
+                args.push(line);
+                arg_prefix.push(Some(String::new()));
+            }
             continue;
         }
         let (v, _) = substitute(a, &dir_s, fields, values, false)?;
         no_escape(&v)?;
+        let prefix = match a.find("${user_config.") {
+            Some(at) => Some(substitute(&a[..at], &dir_s, fields, values, false)?.0),
+            None => None,
+        };
         args.push(v);
+        arg_prefix.push(prefix);
     }
     let mut secret_env = BTreeMap::new();
     let mut secrets = Vec::new();
@@ -882,6 +1073,7 @@ fn resolve(
     Ok(Resolved {
         command,
         args,
+        arg_prefix,
         secret_env,
         secrets,
     })
@@ -1045,8 +1237,9 @@ fn check_values(
 
 /// Install an approved bundle.
 ///
-/// `approved_sha256` is the digest from the [`Inspection`] the owner approved;
-/// a different file is refused. `values` are the owner's answers to
+/// `approved_sha256` and `approved_launch_sha256` are the digests from the
+/// [`Inspection`] the owner approved; a different file, or a launch line that
+/// differs from the one on the card, is refused. `values` are the owner's answers to
 /// [`Inspection::fields`]. Secret values go to `secrets` and never into the
 /// returned config. Refuses to overwrite an existing install.
 ///
@@ -1057,11 +1250,20 @@ fn check_values(
 pub fn install(
     bytes: &[u8],
     approved_sha256: &str,
+    approved_launch_sha256: &str,
     values: &BTreeMap<String, String>,
     data_dir: &Path,
     secrets: &dyn SecretStore,
 ) -> Result<McpServerConfig> {
-    install_with(bytes, approved_sha256, values, data_dir, secrets, Ok)
+    install_with(
+        bytes,
+        approved_sha256,
+        approved_launch_sha256,
+        values,
+        data_dir,
+        secrets,
+        Ok,
+    )
 }
 
 /// Install and persist the result through `publish`. If saving the config
@@ -1072,6 +1274,7 @@ pub fn install(
 pub fn install_with<T, E: From<McpError>>(
     bytes: &[u8],
     approved_sha256: &str,
+    approved_launch_sha256: &str,
     values: &BTreeMap<String, String>,
     data_dir: &Path,
     secrets: &dyn SecretStore,
@@ -1082,12 +1285,19 @@ pub fn install_with<T, E: From<McpError>>(
         manifest,
         launch,
         inspection,
+        card,
+        file_count,
     } = prepare(
         bytes,
         Some((
             approved_sha256,
             "the file changed after you approved it; please open it again",
         )),
+    )?;
+    check_digest(
+        &inspection.launch_sha256,
+        approved_launch_sha256,
+        "the launch command changed after you approved it; please open the file again",
     )?;
 
     let root = data_dir.join("mcp");
@@ -1112,9 +1322,20 @@ pub fn install_with<T, E: From<McpError>>(
     );
     values.values_mut().for_each(String::zeroize);
     let resolved = resolved?;
-    // The inspection resolved placeholders; a default or the owner's answer
-    // can turn an argument into a runner flag, so check the real command line.
+    // The card resolved defaults and `<name>` placeholders; the owner's answers
+    // are now in. The real command line must still be the one the card showed,
+    // and must pass every launch check again before anything is written.
+    check_final_launch(&card, &resolved, &target)?;
     check_stdio_package_pin(&inspection.id, &resolved.command, &resolved.args)?;
+    check_runner_allowed(&resolved.command, &resolved.args)?;
+    let executable = (inspection.runtime == Runtime::Binary)
+        .then(|| {
+            Path::new(&resolved.command)
+                .strip_prefix(&target)
+                .ok()
+                .map(Path::to_path_buf)
+        })
+        .flatten();
     let mut config = McpServerConfig::stdio(inspection.id, resolved.command, resolved.args);
     let McpTransport::Stdio { cwd, .. } = &mut config.transport else {
         unreachable!()
@@ -1136,7 +1357,8 @@ pub fn install_with<T, E: From<McpError>>(
         .prefix(".bundle-")
         .tempdir_in(&root)
         .map_err(io)?;
-    unpack(&mut zip, partial.path())?;
+    unpack(&mut zip, partial.path(), executable.as_deref())?;
+    verify_tree(partial.path(), file_count)?;
     let pin = serde_json::json!({
         "sha256": inspection.sha256, "name": manifest.name, "version": manifest.version,
     });
@@ -1231,7 +1453,17 @@ pub(crate) fn save_secrets(
     Ok(saved)
 }
 
-fn unpack(zip: &mut zip::ZipArchive<Cursor<&[u8]>>, dest: &Path) -> Result<()> {
+/// Unpack only regular files and folders, with modes of our own: folders
+/// `0700`, files `0600` (`0700` for the bundle's own executable). Nothing in the
+/// archive's external attributes is used to set a mode, and no entry is created
+/// through an existing link: every folder on the way is created or checked with
+/// `symlink_metadata`, and each file is created exclusively, without following
+/// a link at the last component.
+fn unpack(
+    zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
+    dest: &Path,
+    executable: Option<&Path>,
+) -> Result<()> {
     let io = |e: std::io::Error| McpError::Store(format!("cannot unpack the bundle: {e}"));
     let mut total = 0u64;
     for i in 0..zip.len() {
@@ -1241,19 +1473,16 @@ fn unpack(zip: &mut zip::ZipArchive<Cursor<&[u8]>>, dest: &Path) -> Result<()> {
             .map(std::borrow::Cow::into_owned)
             .unwrap_or_default();
         let rel = safe_relative(&entry_name).ok_or_else(|| err("unsafe path in the bundle"))?;
-        let out = dest.join(&rel);
+        check_entry_kind(entry.external_attributes(), entry.is_dir())?;
         if entry.is_dir() {
-            fs::create_dir_all(&out).map_err(io)?;
+            make_dirs(dest, &rel)?;
             continue;
         }
-        if let Some(parent) = out.parent() {
-            fs::create_dir_all(parent).map_err(io)?;
+        if let Some(parent) = rel.parent() {
+            make_dirs(dest, parent)?;
         }
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&out)
-            .map_err(io)?;
+        let out = dest.join(&rel);
+        let mut file = create_file(&out, executable == Some(rel.as_path())).map_err(io)?;
         // Count what is really written: the header size may lie.
         let remaining = MAX_UNPACKED_BYTES.saturating_sub(total);
         let written =
@@ -1262,13 +1491,130 @@ fn unpack(zip: &mut zip::ZipArchive<Cursor<&[u8]>>, dest: &Path) -> Result<()> {
         if total > MAX_UNPACKED_BYTES {
             return Err(err("the bundle is larger than 400 MB once unpacked"));
         }
-        #[cfg(unix)]
-        if let Some(mode) = entry.unix_mode() {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&out, fs::Permissions::from_mode(mode & 0o755));
+    }
+    Ok(())
+}
+
+/// A real folder: not a link, not a Windows reparse point.
+fn plain_directory(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return false;
+        }
+    }
+    metadata.is_dir() && !metadata.file_type().is_symlink()
+}
+
+/// Create `rel` below `dest` one component at a time. A component that already
+/// exists must be a real folder.
+fn make_dirs(dest: &Path, rel: &Path) -> Result<()> {
+    let io = |e: std::io::Error| McpError::Store(format!("cannot unpack the bundle: {e}"));
+    let mut current = dest.to_path_buf();
+    for part in rel.components() {
+        current.push(part);
+        match current.symlink_metadata() {
+            Ok(metadata) if plain_directory(&metadata) => {}
+            Ok(_) => {
+                return Err(err("the bundle puts a file or link where a folder belongs"));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let mut builder = fs::DirBuilder::new();
+                #[cfg(unix)]
+                std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+                #[cfg(not(unix))]
+                let _ = &mut builder;
+                builder.create(&current).map_err(io)?;
+            }
+            Err(e) => return Err(io(e)),
         }
     }
     Ok(())
+}
+
+/// Create a new file: never over an existing entry (`create_new`), never
+/// through a link at the last component (`O_NOFOLLOW`, or the reparse point
+/// flag on Windows), with a fixed mode whatever the umask.
+fn create_file(path: &Path, executable: bool) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options
+            .mode(if executable { 0o700 } else { 0o600 })
+            .custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // FILE_FLAG_OPEN_REPARSE_POINT
+        options.custom_flags(0x0020_0000);
+        let _ = executable;
+    }
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        file.set_permissions(fs::Permissions::from_mode(if executable {
+            0o700
+        } else {
+            0o600
+        }))?;
+    }
+    Ok(file)
+}
+
+/// After unpacking, walk what is on disk: only real folders and regular files
+/// (no link, reparse point, device or FIFO, no file with a second hard link),
+/// everything inside the unpack folder, and as many files as the archive had.
+fn verify_tree(dest: &Path, expected_files: usize) -> Result<()> {
+    let io = |e: std::io::Error| McpError::Store(format!("cannot check the unpacked bundle: {e}"));
+    let root = dest.canonicalize().map_err(io)?;
+    let mut pending = vec![dest.to_path_buf()];
+    let mut files = 0usize;
+    while let Some(dir) = pending.pop() {
+        for item in fs::read_dir(&dir).map_err(io)? {
+            let path = item.map_err(io)?.path();
+            let metadata = path.symlink_metadata().map_err(io)?;
+            if !path.canonicalize().map_err(io)?.starts_with(&root) {
+                return Err(err("the unpacked bundle reaches outside its folder"));
+            }
+            if plain_directory(&metadata) {
+                pending.push(path);
+            } else if metadata.file_type().is_file() && regular_file(&metadata) {
+                files += 1;
+            } else {
+                return Err(err(
+                    "the unpacked bundle contains something that is not a regular file or folder",
+                ));
+            }
+        }
+    }
+    if files != expected_files {
+        return Err(err("the unpacked bundle does not match the archive"));
+    }
+    Ok(())
+}
+
+fn regular_file(metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if metadata.nlink() != 1 {
+            return false;
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return false;
+        }
+    }
+    let _ = metadata;
+    true
 }
 
 #[cfg(test)]
@@ -1317,6 +1663,11 @@ mod tests {
 
     use super::{test_support::FlakyStore, *};
 
+    /// The launch digest an owner would have approved for this bundle.
+    fn launch_of(bytes: &[u8]) -> String {
+        inspect(bytes).unwrap().launch_sha256
+    }
+
     fn bundle(manifest: &str, extra: &[(&str, &[u8])]) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let opts = zip::write::SimpleFileOptions::default();
@@ -1347,7 +1698,8 @@ mod tests {
         assert_eq!(card.id, "weather");
         assert_eq!(card.runtime, Runtime::Node);
         assert_eq!(card.command, "node");
-        assert_eq!(card.args[0], "${__dirname}/server/index.js");
+        assert_eq!(card.args, ["<bundle folder>/server/index.js", "metric"]);
+        assert_eq!(card.cwd, "<bundle folder>");
         assert_eq!(card.env_names, ["API_KEY", "LANG_HINT"]);
         assert_eq!(card.sha256, sha256_hex(&b));
         assert!(
@@ -1363,7 +1715,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::new();
         let values = BTreeMap::from([("api_key".to_string(), "sk-live-123".to_string())]);
-        let cfg = install(&b, &sha256_hex(&b), &values, dir.path(), &store).unwrap();
+        let cfg = install(
+            &b,
+            &sha256_hex(&b),
+            &launch_of(&b),
+            &values,
+            dir.path(),
+            &store,
+        )
+        .unwrap();
         assert!(!cfg.enabled);
         assert_eq!(
             store
@@ -1398,7 +1758,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let wrong = sha256_hex(b"other");
         let values = BTreeMap::from([("api_key".to_string(), "k".to_string())]);
-        let e = install(&b, &wrong, &values, dir.path(), &MemoryStore::new()).unwrap_err();
+        let e = install(
+            &b,
+            &wrong,
+            &"0".repeat(64),
+            &values,
+            dir.path(),
+            &MemoryStore::new(),
+        )
+        .unwrap_err();
         assert!(e.to_string().contains("changed after you approved"));
         assert!(!dir.path().join("mcp").exists());
     }
@@ -1434,6 +1802,7 @@ mod tests {
         let e = install(
             &b,
             &sha256_hex(&b),
+            &launch_of(&b),
             &BTreeMap::new(),
             dir.path(),
             &MemoryStore::new(),
@@ -1482,32 +1851,164 @@ mod tests {
     }
 
     #[test]
-    fn an_argument_that_becomes_a_runner_flag_through_a_default_is_refused_at_install() {
+    fn a_default_that_turns_an_argument_into_a_runner_flag_is_refused_before_approval() {
         let files = [("server/index.js", b"//".as_slice())];
         let m = pinned_runner_manifest();
-        // Harmless while the placeholder is a letter: the card shows `-metric`.
+        // The card resolves the default (`-metric`), which is harmless.
         let ok = bundle(&m, &files);
-        assert!(inspect(&ok).is_ok());
-        // The same manifest with a default that spells a refused flag.
+        let card = inspect(&ok).unwrap();
+        assert_eq!(card.command, "npx");
+        assert_eq!(card.args, ["-metric", "-y", "good@1.2.3"]);
+        // A default that spells a refused flag is on the card, so the card is refused.
         let hostile = m.replace(
             "\"default\": \"metric\"",
             "\"default\": \"-registry=https://evil.example/\"",
         );
-        let b = bundle(&hostile, &files);
-        assert!(inspect(&b).is_ok(), "the placeholder hides the flag");
+        let error = inspect(&bundle(&hostile, &files)).unwrap_err().to_string();
+        assert!(error.contains("runner option"), "{error}");
+    }
+
+    #[test]
+    fn an_answer_that_turns_a_setting_into_a_runner_flag_is_refused_at_install() {
+        let files = [("server/index.js", b"//".as_slice())];
+        // The setting comes first, so its value is read by the runner itself.
+        let m = pinned_runner_manifest().replace(
+            "\"-${user_config.units}\", \"-y\", \"good@1.2.3\"",
+            "\"${user_config.units}\", \"-y\", \"good@1.2.3\"",
+        );
+        let m = m.replace("\"default\": \"metric\"", "\"default\": \"-y\"");
+        let b = bundle(&m, &files);
+        let card = inspect(&b).unwrap();
+        assert_eq!(card.args, ["-y", "-y", "good@1.2.3"]);
+        for answer in ["-p=evil@1.0.0", "--call=x", "-c", ""] {
+            let dir = tempfile::tempdir().unwrap();
+            let values = BTreeMap::from([
+                ("api_key".to_string(), "k".to_string()),
+                ("units".to_string(), answer.to_string()),
+            ]);
+            let result = install(
+                &b,
+                &card.sha256,
+                &card.launch_sha256,
+                &values,
+                dir.path(),
+                &MemoryStore::new(),
+            );
+            assert!(result.is_err(), "{answer}");
+            assert!(!dir.path().join("mcp").join("weather").exists());
+        }
+    }
+
+    #[test]
+    fn a_setting_after_the_package_is_passed_to_the_package() {
+        let files = [("server/index.js", b"//".as_slice())];
+        let m = pinned_runner_manifest().replace(
+            "\"-${user_config.units}\", \"-y\", \"good@1.2.3\"",
+            "\"-y\", \"good@1.2.3\", \"${user_config.units}\"",
+        );
+        let b = bundle(&m, &files);
+        let card = inspect(&b).unwrap();
+        assert_eq!(card.args, ["-y", "good@1.2.3", "metric"]);
         let dir = tempfile::tempdir().unwrap();
-        let values = BTreeMap::from([("api_key".to_string(), "k".to_string())]);
-        let error = install(
+        let values = BTreeMap::from([
+            ("api_key".to_string(), "k".to_string()),
+            ("units".to_string(), "--imperial".to_string()),
+        ]);
+        let cfg = install(
             &b,
-            &sha256_hex(&b),
+            &card.sha256,
+            &card.launch_sha256,
             &values,
             dir.path(),
             &MemoryStore::new(),
         )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("runner option"), "{error}");
-        assert!(!dir.path().join("mcp").join("weather").exists());
+        .unwrap();
+        let McpTransport::Stdio { command, args, .. } = &cfg.transport else {
+            panic!()
+        };
+        assert_eq!(command, "npx");
+        assert_eq!(args, &["-y", "good@1.2.3", "--imperial"]);
+    }
+
+    #[test]
+    fn install_is_bound_to_the_launch_line_on_the_card() {
+        let files = [("server/index.js", b"//".as_slice())];
+        let b = bundle(MANIFEST, &files);
+        let card = inspect(&b).unwrap();
+        let values = BTreeMap::from([("api_key".to_string(), "k".to_string())]);
+        let other = bundle(&MANIFEST.replace("\"metric\"", "\"imperial\""), &files);
+        let other_card = inspect(&other).unwrap();
+        assert_ne!(card.launch_sha256, other_card.launch_sha256);
+        for wrong in [other_card.launch_sha256.as_str(), &"0".repeat(64)] {
+            let dir = tempfile::tempdir().unwrap();
+            let e = install(
+                &b,
+                &card.sha256,
+                wrong,
+                &values,
+                dir.path(),
+                &MemoryStore::new(),
+            )
+            .unwrap_err();
+            assert!(e.to_string().contains("launch command"), "{e}");
+            assert!(!dir.path().join("mcp").exists());
+        }
+        // The folder only changes where the bundle lives, not the digest.
+        let dir = tempfile::tempdir().unwrap();
+        install(
+            &b,
+            &card.sha256,
+            &card.launch_sha256,
+            &values,
+            dir.path(),
+            &MemoryStore::new(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_card_shows_the_resolved_command_folder_and_variable_names() {
+        let b = bundle(MANIFEST, &[("server/index.js", b"//")]);
+        let card = inspect(&b).unwrap();
+        assert_eq!(card.command, "node");
+        assert!(card.args.iter().all(|arg| !arg.contains("${")));
+        assert_eq!(card.cwd, CARD_DIR);
+        assert_eq!(card.env_names, ["API_KEY", "LANG_HINT"]);
+        assert_eq!(card.launch_sha256.len(), 64);
+    }
+
+    #[test]
+    fn only_npx_and_uvx_are_accepted_as_package_runners() {
+        const NODE: &str = "\"command\": \"node\"";
+        let files = [("server/index.js", b"//".as_slice())];
+        let base = MANIFEST.replace(
+            "\"${__dirname}/server/index.js\", \"${user_config.units}\"",
+            "\"good@1.2.3\"",
+        );
+        assert!(inspect(&bundle(&base.replace(NODE, "\"command\": \"npx\""), &files)).is_ok());
+        let uvx = base.replace("\"good@1.2.3\"", "\"good==1.2.3\"");
+        assert!(inspect(&bundle(&uvx.replace(NODE, "\"command\": \"uvx\""), &files)).is_ok());
+        for command in [
+            "bunx",
+            "pnpm",
+            "yarn",
+            "pipx",
+            "uv",
+            "/usr/bin/npx",
+            "npx.cmd",
+        ] {
+            let m = base.replace(NODE, &format!("\"command\": \"{command}\""));
+            let m = if command == "pnpm" || command == "yarn" {
+                m.replace("\"good@1.2.3\"", "\"dlx\", \"good@1.2.3\"")
+            } else if command == "pipx" {
+                m.replace("\"good@1.2.3\"", "\"run\", \"good==1.2.3\"")
+            } else if command == "uv" {
+                m.replace("\"good@1.2.3\"", "\"tool\", \"run\", \"good==1.2.3\"")
+            } else {
+                m
+            };
+            assert!(inspect(&bundle(&m, &files)).is_err(), "{command}");
+        }
     }
 
     #[test]
@@ -1581,7 +2082,17 @@ mod tests {
             ("api_key".to_string(), "k1".to_string()),
             ("token".to_string(), "k2".to_string()),
         ]);
-        assert!(install(&b, &sha256_hex(&b), &values, dir.path(), &store).is_err());
+        assert!(
+            install(
+                &b,
+                &sha256_hex(&b),
+                &launch_of(&b),
+                &values,
+                dir.path(),
+                &store
+            )
+            .is_err()
+        );
         assert_eq!(store.inner.list_names().unwrap(), Vec::<String>::new());
         assert!(!dir.path().join("mcp/weather").exists());
     }
@@ -1603,10 +2114,17 @@ mod tests {
         let expected = sha256_hex(signed);
         let card = inspect_with_checksum(signed, Some(&expected.to_ascii_uppercase())).unwrap();
         assert_eq!(card.sha256, expected);
-        assert!(card.signature_verified && card.checksum_verified);
-        assert!(inspect(comment_signature).unwrap().signature_verified);
+        // The signer certificate comes from the bundle: integrity only.
+        assert!(card.signature == SignatureStatus::IntegrityOnly && card.checksum_verified);
+        assert_eq!(
+            inspect(comment_signature).unwrap().signature,
+            SignatureStatus::IntegrityOnly
+        );
         assert_eq!(card.tools, ["forecast"]);
-        assert!(!inspect(unsigned).unwrap().signature_verified);
+        assert_eq!(
+            inspect(unsigned).unwrap().signature,
+            SignatureStatus::Unsigned
+        );
         assert!(inspect_with_checksum(unsigned, Some(&expected)).is_err());
 
         let mut tampered = signed.to_vec();
@@ -1623,6 +2141,178 @@ mod tests {
         let mut malformed_comment = comment_signature.to_vec();
         *malformed_comment.last_mut().unwrap() ^= 1;
         assert!(inspect(&malformed_comment).is_err());
+    }
+
+    /// Rewrite the "host system" and external attributes of one central
+    /// directory entry.
+    fn with_attributes(mut archive: Vec<u8>, name: &str, host: u8, attributes: u32) -> Vec<u8> {
+        let mut at = 0;
+        while let Some(found) = archive[at..].windows(4).position(|w| w == b"PK\x01\x02") {
+            let header = at + found;
+            let len = usize::from(u16::from_le_bytes([
+                archive[header + 28],
+                archive[header + 29],
+            ]));
+            if &archive[header + 46..header + 46 + len] == name.as_bytes() {
+                archive[header + 5] = host;
+                archive[header + 38..header + 42].copy_from_slice(&attributes.to_le_bytes());
+                return archive;
+            }
+            at = header + 4;
+        }
+        panic!("no entry {name}");
+    }
+
+    #[test]
+    fn entries_that_are_not_regular_files_are_refused_however_they_are_encoded() {
+        const UNIX: u8 = 3;
+        const DOS: u8 = 0;
+        const NTFS: u8 = 10;
+        let base = bundle(
+            MANIFEST,
+            &[("server/index.js", b"//"), ("server/data", b"x")],
+        );
+        let mode = |kind: u32, perm: u32| (kind | perm) << 16;
+        let refused: [(u8, u32, &str); 14] = [
+            // Symbolic link with no permission bits at all, and under every host.
+            (UNIX, mode(0o120_000, 0), "link, mode 0"),
+            (DOS, mode(0o120_000, 0o777), "link under a DOS host"),
+            (NTFS, mode(0o120_000, 0), "link under an NTFS host"),
+            (UNIX, mode(0o010_000, 0o644), "FIFO"),
+            (DOS, mode(0o010_000, 0o644), "FIFO under a DOS host"),
+            (UNIX, mode(0o020_000, 0o644), "character device"),
+            (UNIX, mode(0o060_000, 0o644), "block device"),
+            (UNIX, mode(0o140_000, 0o644), "socket"),
+            (UNIX, mode(0o040_000, 0o755), "folder flagged on a file"),
+            (DOS, 0x400, "Windows reparse point"),
+            (NTFS, 0x420, "Windows reparse point with archive bit"),
+            (NTFS, 0x40, "Windows device"),
+            (NTFS, 0x10, "folder attribute on a file"),
+            (UNIX, mode(0o120_000, 0o777) | 0x20, "link with DOS bits"),
+        ];
+        for (host, attributes, what) in refused {
+            let archive = with_attributes(base.clone(), "server/data", host, attributes);
+            let error = inspect(&archive).unwrap_err().to_string();
+            assert!(
+                error.contains("symbolic link") || error.contains("not a regular file"),
+                "{what}: {error}"
+            );
+            let dir = tempfile::tempdir().unwrap();
+            let values = BTreeMap::from([("api_key".to_string(), "k".to_string())]);
+            assert!(
+                install(
+                    &archive,
+                    &sha256_hex(&archive),
+                    &"0".repeat(64),
+                    &values,
+                    dir.path(),
+                    &MemoryStore::new()
+                )
+                .is_err()
+            );
+            assert!(!dir.path().join("mcp").join("weather").exists(), "{what}");
+        }
+        // Ordinary encodings of regular files stay accepted, whatever the permissions say.
+        for (host, attributes) in [
+            (UNIX, mode(0o100_000, 0o644)),
+            (UNIX, mode(0o100_000, 0o777)),
+            (UNIX, mode(0o100_000, 0o000)),
+            (DOS, 0x20),
+            (NTFS, 0x20),
+            (UNIX, 0),
+        ] {
+            let archive = with_attributes(base.clone(), "server/data", host, attributes);
+            inspect(&archive).unwrap();
+        }
+    }
+
+    #[test]
+    fn unpacking_ignores_archive_permissions_and_leaves_only_regular_files() {
+        let archive = with_attributes(
+            bundle(
+                MANIFEST,
+                &[("server/index.js", b"//"), ("server/sub/data", b"x")],
+            ),
+            "server/index.js",
+            3,
+            (0o100_000 | 0o4777) << 16,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let values = BTreeMap::from([("api_key".to_string(), "k".to_string())]);
+        let card = inspect(&archive).unwrap();
+        install(
+            &archive,
+            &card.sha256,
+            &card.launch_sha256,
+            &values,
+            dir.path(),
+            &MemoryStore::new(),
+        )
+        .unwrap();
+        let root = dir.path().join("mcp/weather");
+        verify_tree(&root, card.file_count + 1).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = |p: &str| root.join(p).metadata().unwrap().permissions().mode() & 0o7777;
+            assert_eq!(mode("server/index.js"), 0o600);
+            assert_eq!(mode("server/sub/data"), 0o600);
+            assert_eq!(mode("server"), 0o700);
+            assert_eq!(mode("server/sub"), 0o700);
+        }
+    }
+
+    #[test]
+    fn a_file_where_a_folder_belongs_fails_the_install_cleanly() {
+        let archive = bundle(
+            MANIFEST,
+            &[("server/index.js", b"//"), ("server/index.js/inner", b"x")],
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let values = BTreeMap::from([("api_key".to_string(), "k".to_string())]);
+        let card = inspect(&archive).unwrap();
+        let error = install(
+            &archive,
+            &card.sha256,
+            &card.launch_sha256,
+            &values,
+            dir.path(),
+            &MemoryStore::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("folder belongs"), "{error}");
+        assert!(!dir.path().join("mcp/weather").exists());
+        assert_eq!(fs::read_dir(dir.path().join("mcp")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn the_tree_walk_checks_what_is_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        fs::write(dir.path().join("a/b/file"), b"x").unwrap();
+        fs::write(dir.path().join("top"), b"x").unwrap();
+        verify_tree(dir.path(), 2).unwrap();
+        assert!(verify_tree(dir.path(), 3).is_err(), "a file is missing");
+        fs::write(dir.path().join("a/extra"), b"x").unwrap();
+        assert!(verify_tree(dir.path(), 2).is_err(), "an extra file");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_tree_walk_refuses_links_and_hard_links() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("file"), b"x").unwrap();
+        verify_tree(dir.path(), 1).unwrap();
+        fs::hard_link(dir.path().join("file"), dir.path().join("twin")).unwrap();
+        assert!(verify_tree(dir.path(), 2).is_err());
+        fs::remove_file(dir.path().join("twin")).unwrap();
+        std::os::unix::fs::symlink("/etc", dir.path().join("link")).unwrap();
+        assert!(verify_tree(dir.path(), 1).is_err());
+        // Files are never created through a link or over an existing entry.
+        assert!(create_file(&dir.path().join("link"), false).is_err());
+        assert!(create_file(&dir.path().join("file"), false).is_err());
+        assert!(make_dirs(dir.path(), Path::new("link/inner")).is_err());
     }
 
     #[test]
@@ -1694,6 +2384,7 @@ mod tests {
         let result = install_with(
             &archive,
             &inspection.sha256,
+            &inspection.launch_sha256,
             &values,
             dir.path(),
             &store,
