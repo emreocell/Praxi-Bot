@@ -2137,7 +2137,10 @@
       "viaLink": "Bağlantı üzerinden: {{path}}"
     },
     "composerMenu": {
-      "label": "Ekle"
+      "attachDetail": "Görsel, PDF ve belge; kutuya sürükleyip de bırakabilirsin",
+      "commandsDetail": "/ ile komut, @ ile bot",
+      "label": "Ekle",
+      "voiceDetail": "Yazmak yerine konuş"
     },
     "conversationLabel": "Bugün",
     "copyMessage": "Mesajı kopyala",
@@ -2168,6 +2171,12 @@
     "imported": "İçe aktarıldı",
     "importedNote": "İçe aktarılan not: dosyada {{steps}} araç adımı ve {{approvals}} onay listelenmişti; içe aktarılmadı ve çalıştırılmadı.",
     "jumpToLatest": "En sona git",
+    "keys": {
+      "empty": "Göndermek için bir mesaj yaz",
+      "newline": "yeni satır",
+      "queue": "sıraya ekle",
+      "send": "gönder"
+    },
     "longMessage": {
       "less": "Daha az göster",
       "more": "Devamını göster"
@@ -4219,9 +4228,11 @@
     },
     "saved": "Kaydedildi.",
     "target": {
-      "bot": "Botun bilgisayarı",
+      "botDetail": "Sunucuda çalışır; bu bilgisayar kapalıyken de sürer",
       "label": "Çalıştığı yer",
-      "mine": "Benim bilgisayarım",
+      "mine": "Bu bilgisayar",
+      "mineDetail": "Bu ekranda ve dosyalarında çalışır; bilgisayar açık kalmalı",
+      "server": "Sunucu",
       "title": "Bu bot nerede çalışsın"
     }
   },
@@ -5023,12 +5034,7 @@
     "empty": "Eşleşen model yok.",
     "engineError": "Bu CLI bağlanamadı.",
     "hint": {
-      "balanced": "dengeli",
-      "fast": "hızlı",
-      "free": "ücretsiz",
-      "new": "yeni",
-      "quota": "yüksek kota",
-      "strongest": "zor işler için en iyisi"
+      "new": "Yeni"
     },
     "howToInstall": "Nasıl kurulur",
     "install": "{{name}} kur",
@@ -5046,6 +5052,7 @@
     "notOnServer": "{{name}} · {{server}} üzerinde henüz yok",
     "noteLocalClis": "Bu bilgisayardaki abonelik CLI'ları, bot “bu bilgisayarda” çalışırken kullanılır.",
     "otherId": "“{{id}}” modelini {{provider}} ile kullan",
+    "recent": "Son kullanılanlar",
     "recommended": "Önerilen",
     "refresh": "Yenile",
     "refreshList": "Modelleri CLI'ya yeniden sor",
@@ -5056,7 +5063,16 @@
     "switched": "{{model}} modeline geçildi",
     "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı",
     "thinking": "Düşünme",
-    "title": "Model"
+    "title": "Model",
+    "use": {
+      "code": "Kod yazmak ve düzeltmek için",
+      "everyday": "Günlük işler için dengeli",
+      "free": "Ücretsiz, denemek için iyi",
+      "hard": "Zor işler ve uzun planlar için",
+      "local": "Kendi makinende çalışır",
+      "quick": "Hızlı ve ucuz, kısa işler için",
+      "quota": "Yüksek kota, sık kullanım için"
+    }
   },
   "myBots": {
     "all": "Tüm durumlar",

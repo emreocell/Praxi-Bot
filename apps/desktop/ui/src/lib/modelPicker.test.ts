@@ -239,3 +239,18 @@ test("the validation-only placeholder never reaches the picker, search or Recomm
   assert.ok(recommendedOptions(groups).every((r) => !isPlaceholderModel(r.option.ref)));
   assert.equal(hasConnectedModel(mixed), true);
 });
+
+test("modelUse gives every model a one-line 'good at' from its source, id and hint", async () => {
+  const { modelUse } = await import("./modelPicker.ts");
+  const m = (provider: string, model: string, note: string | null = null) => ({ provider, model, note });
+  assert.equal(modelUse(m("anthropic", "claude-opus-5-5")), "hard");
+  assert.equal(modelUse(m("anthropic", "claude-sonnet-5-5")), "everyday");
+  assert.equal(modelUse(m("anthropic", "claude-haiku-5")), "quick");
+  assert.equal(modelUse(m("cli:codex", "gpt-6.1-codex")), "code");
+  assert.equal(modelUse(m("openrouter", "deepseek/deepseek-v4:free")), "free");
+  assert.equal(modelUse(m("gemini", "gemini-3-flash"), "quota"), "quota");
+  assert.equal(modelUse(m("ollama", "qwen3:8b")), "local");
+  // A recommendation hint wins over the id; "new" is only a tag, the tier still comes from the id.
+  assert.equal(modelUse(m("anthropic", "claude-sonnet-5-5"), "strongest"), "hard");
+  assert.equal(modelUse(m("anthropic", "claude-opus-5-5"), "new"), "hard");
+});

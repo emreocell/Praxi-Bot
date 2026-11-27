@@ -5,6 +5,7 @@ import { isMockMode } from "../api/mockMode";
 import {
   filterModelGroups,
   isCliDefault,
+  modelUse,
   pickerSections,
   recommendedOptions,
   type ModelGroup,
@@ -15,6 +16,7 @@ import {
 import type { EngineBlock } from "../lib/engineConsent";
 import { productBrandKey, providerBrand, sourceLabel } from "../lib/modelBrand";
 import { modelDisplayName } from "../lib/modelName";
+import { loadRecentModels, recentOptions, saveRecentModels, withRecent } from "../lib/recentModels";
 import { matchesQuery } from "../lib/searchText";
 import { THINKING_LEVELS, useThinkingLevel } from "../lib/thinkingLevel";
 import type { AdminCliEngine } from "../api/types";
@@ -270,7 +272,8 @@ export function ModelPicker({
   testId = "model-picker",
   engines = false,
   cliNote,
-  changeLink
+  changeLink,
+  recents = false
 }: {
   groups: ModelGroup[];
   value: string;
@@ -289,6 +292,8 @@ export function ModelPicker({
   cliNote?: string;
   /** Render the trigger as a quiet text link with this label (first run: "Change") instead of the model chip. */
   changeLink?: string;
+  /** List the models picked last on top ("Recent") and remember each pick (the composer). */
+  recents?: boolean;
 }) {
   const { t } = useTranslation();
   // The internal validation-only model is never shown as a choice.
@@ -329,7 +334,17 @@ export function ModelPicker({
     : [];
 
   const searching = typed !== "";
-  const recommended = useMemo(() => (searching ? [] : recommendedOptions(groups)), [groups, searching]);
+  // The models picked last, newest first; read again each time the picker opens (another chat may have picked).
+  const [recentRefs, setRecentRefs] = useState<string[]>([]);
+  const recent = useMemo(
+    () => (recents && !searching ? recentOptions(groups, recentRefs) : []),
+    [recents, searching, groups, recentRefs]
+  );
+  const recommended = useMemo(() => {
+    if (searching) return [];
+    const taken = new Set(recent.map((m) => m.ref));
+    return recommendedOptions(groups).filter((r) => !taken.has(r.option.ref));
+  }, [groups, searching, recent]);
   const sections = useMemo(() => pickerSections(groups, value), [groups, value]);
 
   // Design review only (mock mode): `?scrollto=<provider>` brings that group into view.
@@ -358,10 +373,12 @@ export function ModelPicker({
     // The selected model's source starts open so the current choice is visible.
     setExpanded(new Set([valueRef.provider]));
     setFull(new Set());
+    if (recents) setRecentRefs(loadRecentModels());
     setOpen(true);
   };
 
   const pick = (ref: string) => {
+    if (recents) saveRecentModels(withRecent(loadRecentModels(), ref));
     close();
     trigger.current?.focus();
     if (autoOption?.selected || ref !== value) {
@@ -403,19 +420,20 @@ export function ModelPicker({
     }
   };
 
-  const optionRow = (m: ModelOption, opts: { hint?: RowHint; raw?: boolean }) => {
+  const optionRow = (m: ModelOption, opts: { hint?: RowHint; key?: string }) => {
     const active = !autoOption?.selected && m.ref === value;
     const primary = label(m);
     const block = blockOf(m.provider);
-    // Second line: why it is recommended, then the raw id (OpenCode / OpenRouter ids name the maker).
+    // Second line: what the model is good at, in plain words (why it cannot answer comes first). The raw
+    // id is the row's tooltip and is still found by the search.
     const secondary = [
       block ? blockReason(t, block) : null,
-      opts.hint ? t(`modelPicker.hint.${opts.hint}`) : null,
-      opts.raw && !isCliDefault(m) && primary !== m.model ? m.model : null
+      opts.hint === "new" ? t("modelPicker.hint.new") : null,
+      isCliDefault(m) ? null : t(`modelPicker.use.${modelUse(m, opts.hint)}`)
     ].filter(Boolean).join(" · ");
     return (
       <button
-        key={`${opts.hint ? "rec" : "row"}-${m.ref}`}
+        key={`${opts.key ?? (opts.hint ? "rec" : "row")}-${m.ref}`}
         type="button"
         role="option"
         aria-selected={active}
@@ -428,7 +446,7 @@ export function ModelPicker({
         <BrandMark name={productBrandKey(m.provider, m.model)} size={16} />
         <span className={styles.optionText} title={m.model}>
           {primary}
-          {secondary ? <span className={styles.rawId}>{secondary}</span> : null}
+          {secondary ? <span className={styles.useLine}>{secondary}</span> : null}
         </span>
         <span className={styles.source}>{sourceLabel(m.provider)}</span>
         {active ? <Check aria-hidden="true" /> : null}
@@ -458,11 +476,11 @@ export function ModelPicker({
         </button>
         {isOpen ? (
           <>
-            {recRows.map((r) => optionRow(r.option, { hint: r.hint, raw: true }))}
+            {recRows.map((r) => optionRow(r.option, { hint: r.hint }))}
             {recRows.length === 0 && g.rest.length === 0 ? (
               <p className={styles.noModels}>{t("modelPicker.noModels")}</p>
             ) : null}
-            {isFull ? g.rest.map((m) => optionRow(m, { raw: true })) : null}
+            {isFull ? g.rest.map((m) => optionRow(m, {})) : null}
             {g.cli ? <CliListNote provider={g.provider} testId={testId} /> : null}
             {!isFull && g.rest.length > 0 ? (
               <button
@@ -612,6 +630,14 @@ export function ModelPicker({
                   </span>
                 </button>
               ))}
+              {recent.length > 0 ? (
+                <div className={styles.group} role="group" aria-label={t("modelPicker.recent")} data-testid={`${testId}-recent`}>
+                  <div className={styles.groupLabel} aria-hidden="true">
+                    <span>{t("modelPicker.recent")}</span>
+                  </div>
+                  {recent.map((m) => optionRow(m, { key: "recent" }))}
+                </div>
+              ) : null}
               {recommended.length > 0 ? (
                 <div className={styles.group} role="group" aria-label={t("modelPicker.recommended")}>
                   <div className={styles.groupLabel} aria-hidden="true">
@@ -628,7 +654,7 @@ export function ModelPicker({
                         <span>{sourceLabel(g.provider)}</span>
                         <span className={styles.groupCount}>{g.models.length}</span>
                       </div>
-                      {g.models.filter((m) => !isCliDefault(m)).map((m) => optionRow(m, { raw: true }))}
+                      {g.models.filter((m) => !isCliDefault(m)).map((m) => optionRow(m, {}))}
                     </div>
                   ))
                 : (

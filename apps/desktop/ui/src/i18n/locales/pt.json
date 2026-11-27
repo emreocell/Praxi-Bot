@@ -3961,7 +3961,6 @@
     },
     "saved": "Saved.",
     "target": {
-      "bot": "Bot's computer",
       "label": "Runs on",
       "mine": "My computer",
       "title": "Where this bot works"
@@ -4616,12 +4615,7 @@
     "empty": "No matching models.",
     "engineError": "Could not connect this CLI.",
     "hint": {
-      "balanced": "balanced",
-      "fast": "fast",
-      "free": "free",
-      "new": "new",
-      "quota": "high quota",
-      "strongest": "best for hard tasks"
+      "new": "new"
     },
     "howToInstall": "How to install",
     "install": "Install {{name}}",

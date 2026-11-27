@@ -4047,7 +4047,6 @@
     },
     "saved": "Enregistré.",
     "target": {
-      "bot": "Ordinateur du bot",
       "label": "S'exécute sur",
       "mine": "Mon ordinateur",
       "title": "Où ce bot travaille"
@@ -4702,12 +4701,7 @@
     "empty": "Aucun modèle correspondant.",
     "engineError": "Impossible de connecter ce CLI.",
     "hint": {
-      "balanced": "équilibré",
-      "fast": "rapide",
-      "free": "gratuit",
-      "new": "nouveau",
-      "quota": "quota élevé",
-      "strongest": "idéal pour les tâches difficiles"
+      "new": "nouveau"
     },
     "howToInstall": "Comment l'installer",
     "install": "Installer {{name}}",

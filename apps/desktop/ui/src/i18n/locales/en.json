@@ -2137,7 +2137,10 @@
       "viaLink": "Via link {{path}}"
     },
     "composerMenu": {
-      "label": "Add or attach"
+      "attachDetail": "Images, PDFs and documents; you can also drop them on the box",
+      "commandsDetail": "/ for a command, @ for a bot",
+      "label": "Add or attach",
+      "voiceDetail": "Talk instead of typing"
     },
     "conversationLabel": "Today",
     "copyMessage": "Copy message",
@@ -2168,6 +2171,12 @@
     "imported": "Imported",
     "importedNote": "Imported chat note: {{steps}} tool step(s) and {{approvals}} approval(s) were listed in the file but were not imported or executed.",
     "jumpToLatest": "Jump to latest",
+    "keys": {
+      "empty": "Type a message to send",
+      "newline": "new line",
+      "queue": "add to queue",
+      "send": "send"
+    },
     "longMessage": {
       "less": "Show less",
       "more": "Show more"
@@ -4219,9 +4228,11 @@
     },
     "saved": "Saved.",
     "target": {
-      "bot": "Bot's computer",
+      "botDetail": "Works on the server, even when this computer is off",
       "label": "Runs on",
-      "mine": "My computer",
+      "mine": "This computer",
+      "mineDetail": "Works on this screen and its files; this computer must stay on",
+      "server": "Server",
       "title": "Where this bot works"
     }
   },
@@ -5023,12 +5034,7 @@
     "empty": "No matching models.",
     "engineError": "Could not connect this CLI.",
     "hint": {
-      "balanced": "balanced",
-      "fast": "fast",
-      "free": "free",
-      "new": "new",
-      "quota": "high quota",
-      "strongest": "best for hard tasks"
+      "new": "New"
     },
     "howToInstall": "How to install",
     "install": "Install {{name}}",
@@ -5046,6 +5052,7 @@
     "notOnServer": "{{name}} · not on {{server}} yet",
     "noteLocalClis": "Subscription CLIs on this computer are used when a bot runs on \"this computer\".",
     "otherId": "Use \"{{id}}\" with {{provider}}",
+    "recent": "Recent",
     "recommended": "Recommended",
     "refresh": "Refresh",
     "refreshList": "Ask the CLI for its models again",
@@ -5056,7 +5063,16 @@
     "switched": "Switched to {{model}}",
     "switchedDefault": "Default model set to {{model}}",
     "thinking": "Thinking",
-    "title": "Model"
+    "title": "Model",
+    "use": {
+      "code": "Writing and fixing code",
+      "everyday": "Balanced for everyday work",
+      "free": "Free, good for trying things",
+      "hard": "Best for hard tasks and long plans",
+      "local": "Runs on your own machine",
+      "quick": "Fast and cheap for quick tasks",
+      "quota": "High quota for frequent use"
+    }
   },
   "myBots": {
     "all": "All statuses",

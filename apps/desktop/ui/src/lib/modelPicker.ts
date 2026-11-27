@@ -437,3 +437,22 @@ export function engineRows(engines: CliEngineDto[], enabledCliIds: ReadonlySet<s
   }
   return rows.sort((a, b) => (a.action === b.action ? 0 : a.action === "connect" ? -1 : 1));
 }
+
+/** What a model is good at, in one line under its name (every row, not only the recommended ones). */
+export type ModelUse = "hard" | "everyday" | "quick" | "code" | "free" | "quota" | "local";
+
+const CODE_MODEL = /(codex|coder|codestral|devstral|(^|[-/_])code([-/_.:]|$))/i;
+
+/**
+ * The one-line "good at" of a model, from its source and id (the catalog carries no such text):
+ * free and high-quota recommendations say so, a model on this machine (Ollama, LM Studio) says it
+ * runs locally, a coding model says code, everything else follows its tier (hard / everyday / quick).
+ */
+export function modelUse(m: Pick<ModelOption, "provider" | "model" | "note">, hint?: RowHint): ModelUse {
+  if (hint === "free" || isFreeModel(m)) return "free";
+  if (hint === "quota") return "quota";
+  if (LOCAL_PROVIDERS.has(m.provider)) return "local";
+  if (CODE_MODEL.test(m.model)) return "code";
+  const tier = hint === "fast" || hint === "balanced" || hint === "strongest" ? hint : modelHint(m.model);
+  return tier === "strongest" ? "hard" : tier === "fast" ? "quick" : "everyday";
+}

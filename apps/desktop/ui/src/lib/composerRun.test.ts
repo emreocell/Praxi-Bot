@@ -41,3 +41,11 @@ test("sendButtonDisabled checks stopping in stop mode and sending in send mode",
   assert.equal(sendButtonDisabled({ mode: "stop", sending: true, stopping: false }), false);
   assert.equal(sendButtonDisabled({ mode: "stop", sending: false, stopping: true }), true);
 });
+
+test("composerKeys names the send and new-line keys for both send settings", async () => {
+  const { composerKeys } = await import("./composerRun.ts");
+  assert.deepEqual(composerKeys("enter", false), { send: "↵", sendName: "Enter", newline: "⇧ ↵" });
+  assert.deepEqual(composerKeys("enter", true), { send: "↵", sendName: "Enter", newline: "⇧ ↵" });
+  assert.deepEqual(composerKeys("ctrl-enter", false), { send: "Ctrl ↵", sendName: "Ctrl+Enter", newline: "↵" });
+  assert.deepEqual(composerKeys("ctrl-enter", true), { send: "⌘ ↵", sendName: "⌘+Enter", newline: "↵" });
+});

@@ -2137,7 +2137,10 @@
       "viaLink": "Über Link {{path}}"
     },
     "composerMenu": {
-      "label": "Hinzufügen"
+      "attachDetail": "Bilder, PDFs und Dokumente; du kannst sie auch auf das Feld ziehen",
+      "commandsDetail": "/ für Befehle, @ für Bots",
+      "label": "Hinzufügen",
+      "voiceDetail": "Sprechen statt tippen"
     },
     "conversationLabel": "Heute",
     "copyMessage": "Nachricht kopieren",
@@ -2168,6 +2171,12 @@
     "imported": "Importiert",
     "importedNote": "Importierter Hinweis: In der Datei waren {{steps}} Werkzeugschritte und {{approvals}} Genehmigungen aufgeführt; sie wurden nicht importiert oder ausgeführt.",
     "jumpToLatest": "Zum Neuesten springen",
+    "keys": {
+      "empty": "Schreib eine Nachricht zum Senden",
+      "newline": "neue Zeile",
+      "queue": "in die Warteschlange",
+      "send": "senden"
+    },
     "longMessage": {
       "less": "Weniger anzeigen",
       "more": "Mehr anzeigen"
@@ -4219,9 +4228,11 @@
     },
     "saved": "Gespeichert.",
     "target": {
-      "bot": "Computer des Bots",
+      "botDetail": "Arbeitet auf dem Server, auch wenn dieser Computer aus ist",
       "label": "Läuft auf",
-      "mine": "Mein Computer",
+      "mine": "Dieser Computer",
+      "mineDetail": "Arbeitet auf diesem Bildschirm und seinen Dateien; der Computer muss an bleiben",
+      "server": "Server",
       "title": "Wo dieser Bot arbeitet"
     }
   },
@@ -5023,12 +5034,7 @@
     "empty": "Keine passenden Modelle.",
     "engineError": "Diese CLI konnte nicht verbunden werden.",
     "hint": {
-      "balanced": "ausgewogen",
-      "fast": "schnell",
-      "free": "kostenlos",
-      "new": "neu",
-      "quota": "hohes Kontingent",
-      "strongest": "am besten für schwierige Aufgaben"
+      "new": "Neu"
     },
     "howToInstall": "So wird installiert",
     "install": "{{name}} installieren",
@@ -5046,6 +5052,7 @@
     "notOnServer": "{{name}} · noch nicht auf {{server}}",
     "noteLocalClis": "Abonnement-CLIs auf diesem Computer werden verwendet, wenn ein Bot auf „diesem Computer“ läuft.",
     "otherId": "„{{id}}“ mit {{provider}} verwenden",
+    "recent": "Zuletzt verwendet",
     "recommended": "Empfohlen",
     "refresh": "Aktualisieren",
     "refreshList": "Die CLI erneut nach ihren Modellen fragen",
@@ -5056,7 +5063,16 @@
     "switched": "Zu {{model}} gewechselt",
     "switchedDefault": "Standardmodell auf {{model}} gesetzt",
     "thinking": "Denken",
-    "title": "Modell"
+    "title": "Modell",
+    "use": {
+      "code": "Code schreiben und reparieren",
+      "everyday": "Ausgewogen für den Alltag",
+      "free": "Kostenlos, gut zum Ausprobieren",
+      "hard": "Für schwierige Aufgaben und lange Pläne",
+      "local": "Läuft auf deinem eigenen Rechner",
+      "quick": "Schnell und günstig für kurze Aufgaben",
+      "quota": "Hohes Kontingent für häufige Nutzung"
+    }
   },
   "myBots": {
     "all": "Alle Zustände",

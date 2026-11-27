@@ -693,6 +693,44 @@
   align-items: center;
   gap: var(--space-1);
   margin: var(--space-2) var(--space-0) var(--space-0) calc(-1 * var(--space-2));
+  /* Lets the pills in this row (model, where it runs) decide what to drop from the width of the row,
+     not of the window: the bot panel can narrow the chat column to a third of it. */
+  container: composer-tools / inline-size;
+}
+
+/* "↵ send · ⇧↵ new line" next to Send while there is something to send and the box has focus.
+   Dropped when the row is narrow: the pills and Send matter more than the reminder. */
+.keyHint {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.box:focus-within .keyHint {
+  display: inline-flex;
+}
+
+.keyHint kbd {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-1);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+
+.keyHint kbd:first-child {
+  margin-left: var(--space-0);
+}
+
+@container composer-tools (width < 40em) {
+  .box:focus-within .keyHint {
+    display: none;
+  }
 }
 
 .spacer {
@@ -749,6 +787,13 @@
 .send:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+/* Nothing typed yet: Send is a quiet outline of itself, not a bright button that does nothing. */
+.send[data-empty="true"] {
+  background-color: color-mix(in srgb, var(--color-text) 12%, transparent);
+  color: var(--color-text-muted);
+  opacity: 1;
 }
 
 .send:focus-visible {

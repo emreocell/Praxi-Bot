@@ -114,7 +114,7 @@ import { dayHeader, type MessageTimes } from "../lib/messageTime";
 import { hasConnectedModel, modelGroups } from "../lib/modelPicker";
 import { openSettingsTarget } from "../lib/settingsLink";
 import { type ChatRunPhase, runBarModel, runStopUi, STOP_CONFIRM_MS } from "../lib/runBar";
-import { activeRunAfterCancel, composerButton } from "../lib/composerRun";
+import { activeRunAfterCancel, composerButton, composerKeys, isMacPlatform } from "../lib/composerRun";
 import { ATTACHMENT_ACCEPT, filesOf } from "../lib/attachments";
 import { AttachmentDraft } from "../lib/attachmentDraft";
 import { ComposerFiles } from "../components/Attachments";
@@ -1350,6 +1350,9 @@ export function ChatView({
   });
   // Re-render once the daemon has had STOP_CONFIRM_MS to confirm, so "not confirmed" shows up.
   const stopWaiting = stopUi?.phase === "stopping" && stopRecord !== undefined;
+  // Something to send (text or a file): Send is pressable and the key hint shows; an empty box has a quiet Send.
+  const hasDraft = text.trim() !== "" || files.length > 0;
+  const keys = composerKeys(sendWith, isMacPlatform());
   const buttonMode = composerButton({
     runActive: running,
     hasText: files.length > 0 || (!sending && text.trim().length > 0),
@@ -2369,6 +2372,7 @@ export function ChatView({
                   engines
                   disabled={!client}
                   thinking
+                  recents
                   placement="top-start"
                   onPick={(ref) => void pickModel(ref)}
                 />
@@ -2376,18 +2380,29 @@ export function ChatView({
             ) : null}
             {bot ? <ComputerTargetChip bot={bot} /> : null}
             <span className={styles.spacer} />
+            {hasDraft && buttonMode === "send" ? (
+              <span className={styles.keyHint} aria-hidden="true" data-testid="composer-keys">
+                <kbd>{keys.send}</kbd>
+                {t(running ? "chat.keys.queue" : "chat.keys.send")}
+                <kbd>{keys.newline}</kbd>
+                {t("chat.keys.newline")}
+              </span>
+            ) : null}
             <button
               type="button"
               className={styles.send}
               data-mode={buttonMode}
               data-testid="send-button"
-              disabled={buttonMode === "send" && (sending || blockedFiles)}
+              disabled={buttonMode === "send" && (sending || blockedFiles || !hasDraft)}
+              data-empty={buttonMode === "send" && !hasDraft ? "true" : undefined}
               title={
                 buttonMode === "stopping"
                   ? t("runStatus.stopping")
                   : buttonMode === "stop"
                     ? t(stopUi ? "chat.runBar.forceStop" : "chat.stop")
-                    : t("chat.send")
+                    : hasDraft
+                      ? `${t("chat.send")} (${keys.sendName})`
+                      : t("chat.keys.empty")
               }
               aria-label={
                 buttonMode === "stopping"

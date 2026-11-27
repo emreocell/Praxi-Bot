@@ -256,9 +256,9 @@
   color: var(--color-background);
 }
 
-.rawId {
+.useLine {
   display: block;
-  color: var(--color-text-faint);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   overflow: hidden;
   text-overflow: ellipsis;

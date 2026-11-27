@@ -1,7 +1,8 @@
-/* The menu surface is the generic Popover; only the rows are styled here. */
+/* The menu surface is the generic Popover; the rows look like the "/" and "@" menu of the composer
+   (ChatView.module.css .menuItem): an icon tile, the action, one line on what it does. */
 .menu {
-  min-width: calc(var(--size-widget-width) * 0.8);
-  padding: var(--space-1);
+  min-width: calc(var(--size-widget-width) * 1.05);
+  padding: var(--space-2);
 }
 
 .item {
@@ -9,30 +10,61 @@
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  min-height: var(--size-control-md);
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-2);
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card);
   background: transparent;
   color: var(--color-text);
   font: inherit;
-  font-size: var(--font-size-ui);
+  font-size: var(--font-size-sm);
   text-align: left;
-  white-space: nowrap;
   cursor: pointer;
   transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.item > svg {
+.icon {
+  display: inline-grid;
+  place-items: center;
   flex: none;
+  width: var(--size-avatar-sm);
+  height: var(--size-avatar-sm);
+  border-radius: var(--radius-md);
+  background-color: color-mix(in srgb, var(--color-text) 6%, transparent);
+  color: var(--color-text-muted);
+}
+
+.icon > svg {
   width: var(--size-icon-sm);
   height: var(--size-icon-sm);
+}
+
+.copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.label {
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.detail {
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
   color: var(--color-text-muted);
 }
 
 .item:hover:not(:disabled),
 .item:focus-visible {
-  background-color: var(--state-hover);
+  background-color: var(--color-surface-active);
+}
+
+.item:hover:not(:disabled) .icon,
+.item:focus-visible .icon {
+  color: var(--color-accent-text);
 }
 
 .item:active:not(:disabled) {

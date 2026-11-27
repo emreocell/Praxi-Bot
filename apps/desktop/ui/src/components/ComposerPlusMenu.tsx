@@ -55,7 +55,7 @@ export function ComposerPlusMenu({
         variant="ghost"
         size="sm"
         className={className}
-        title={t("chat.composerMenu.label")}
+        title={open ? undefined : t("chat.composerMenu.label")}
         aria-label={t("chat.composerMenu.label")}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -73,8 +73,11 @@ export function ComposerPlusMenu({
         className={styles.menu}
       >
         <button type="button" role="menuitem" className={styles.item} data-testid="composer-plus-commands" onClick={() => run(onCommands)}>
-          <Command aria-hidden="true" />
-          <span>{t("chat.addCommand")}</span>
+          <span className={styles.icon} aria-hidden="true"><Command /></span>
+          <span className={styles.copy}>
+            <span className={styles.label}>{t("chat.addCommand")}</span>
+            <span className={styles.detail}>{t("chat.composerMenu.commandsDetail")}</span>
+          </span>
         </button>
         <button
           type="button"
@@ -85,8 +88,11 @@ export function ComposerPlusMenu({
           data-testid="composer-plus-attach"
           onClick={() => run(onAttach)}
         >
-          <Paperclip aria-hidden="true" />
-          <span>{t("chat.attach.add")}</span>
+          <span className={styles.icon} aria-hidden="true"><Paperclip /></span>
+          <span className={styles.copy}>
+            <span className={styles.label}>{t("chat.attach.add")}</span>
+            <span className={styles.detail}>{t("chat.composerMenu.attachDetail")}</span>
+          </span>
         </button>
         <button
           type="button"
@@ -100,8 +106,11 @@ export function ComposerPlusMenu({
           data-testid="voice-call-start"
           onClick={() => run(onVoice)}
         >
-          <Phone aria-hidden="true" />
-          <span>{t("voice.call.start")}</span>
+          <span className={styles.icon} aria-hidden="true"><Phone /></span>
+          <span className={styles.copy}>
+            <span className={styles.label}>{t("voice.call.start")}</span>
+            <span className={styles.detail}>{voiceBlocked && voiceNotice ? voiceNotice : t("chat.composerMenu.voiceDetail")}</span>
+          </span>
         </button>
       </Popover>
     </>

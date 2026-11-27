@@ -2137,7 +2137,10 @@
       "viaLink": "A través del enlace {{path}}"
     },
     "composerMenu": {
-      "label": "Añadir"
+      "attachDetail": "Imágenes, PDF y documentos; también puedes arrastrarlos al cuadro",
+      "commandsDetail": "/ para comandos, @ para bots",
+      "label": "Añadir",
+      "voiceDetail": "Habla en lugar de escribir"
     },
     "conversationLabel": "Hoy",
     "copyMessage": "Copiar mensaje",
@@ -2168,6 +2171,12 @@
     "imported": "Importado",
     "importedNote": "Nota sobre el chat importado: el archivo incluía {{steps}} pasos de herramientas y {{approvals}} aprobaciones. No se importaron ni se ejecutaron.",
     "jumpToLatest": "Ir a lo más reciente",
+    "keys": {
+      "empty": "Escribe un mensaje para enviar",
+      "newline": "nueva línea",
+      "queue": "añadir a la cola",
+      "send": "enviar"
+    },
     "longMessage": {
       "less": "Mostrar menos",
       "more": "Mostrar más"
@@ -4219,9 +4228,11 @@
     },
     "saved": "Guardado.",
     "target": {
-      "bot": "Equipo del bot",
+      "botDetail": "Trabaja en el servidor, aunque este equipo esté apagado",
       "label": "Se ejecuta en",
-      "mine": "Mi equipo",
+      "mine": "Este equipo",
+      "mineDetail": "Trabaja en esta pantalla y sus archivos; el equipo debe seguir encendido",
+      "server": "Servidor",
       "title": "Dónde trabaja este bot"
     }
   },
@@ -5023,12 +5034,7 @@
     "empty": "No hay modelos que coincidan.",
     "engineError": "No se pudo conectar esta CLI.",
     "hint": {
-      "balanced": "equilibrado",
-      "fast": "rápido",
-      "free": "gratis",
-      "new": "nuevo",
-      "quota": "cuota alta",
-      "strongest": "el mejor para tareas difíciles"
+      "new": "Nuevo"
     },
     "howToInstall": "Cómo instalar",
     "install": "Instalar {{name}}",
@@ -5046,6 +5052,7 @@
     "notOnServer": "{{name}} · aún no está en {{server}}",
     "noteLocalClis": "Las CLI de suscripción de este equipo se usan cuando un bot se ejecuta en «este equipo».",
     "otherId": "Usar «{{id}}» con {{provider}}",
+    "recent": "Recientes",
     "recommended": "Recomendado",
     "refresh": "Actualizar",
     "refreshList": "Pedir de nuevo a la CLI sus modelos",
@@ -5056,7 +5063,16 @@
     "switched": "Cambiado a {{model}}",
     "switchedDefault": "Modelo predeterminado cambiado a {{model}}",
     "thinking": "Razonamiento",
-    "title": "Modelo"
+    "title": "Modelo",
+    "use": {
+      "code": "Escribir y corregir código",
+      "everyday": "Equilibrado para el día a día",
+      "free": "Gratis, bueno para probar",
+      "hard": "Para tareas difíciles y planes largos",
+      "local": "Se ejecuta en tu propio equipo",
+      "quick": "Rápido y barato para tareas cortas",
+      "quota": "Cuota alta para uso frecuente"
+    }
   },
   "myBots": {
     "all": "Todos los estados",

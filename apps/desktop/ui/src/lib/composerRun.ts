@@ -50,3 +50,30 @@ export function composerButton(input: {
   if (input.hasText) return "send";
   return "stop";
 }
+
+/** Key caps of the composer's hint row and Send tooltip, for the "send with" setting. */
+export interface ComposerKeys {
+  /** Short cap in the hint row: "↵", "Ctrl ↵", "⌘ ↵". */
+  send: string;
+  /** Spelled out in the Send tooltip: "Enter", "Ctrl+Enter", "⌘+Enter". */
+  sendName: string;
+  /** The key that starts a new line instead. */
+  newline: string;
+}
+
+export function composerKeys(sendWith: "enter" | "ctrl-enter", mac: boolean): ComposerKeys {
+  if (sendWith === "ctrl-enter") {
+    const mod = mac ? "⌘" : "Ctrl";
+    return { send: `${mod} ↵`, sendName: `${mod}+Enter`, newline: "↵" };
+  }
+  return { send: "↵", sendName: "Enter", newline: "⇧ ↵" };
+}
+
+/** macOS (and iPadOS) name the modifier ⌘; everything else Ctrl. */
+export function isMacPlatform(): boolean {
+  try {
+    return /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || globalThis.navigator?.userAgent || "");
+  } catch {
+    return false;
+  }
+}
