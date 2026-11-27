@@ -27,7 +27,19 @@ const DIRECT_GROUP: Record<string, Group> = {
   linear: "dev",
   "notion-remote": "productivity",
   stripe: "finance",
-  atlassian: "dev"
+  atlassian: "dev",
+  supabase: "dev",
+  neon: "dev",
+  cloudflare: "dev",
+  netlify: "dev",
+  webflow: "dev",
+  square: "finance",
+  monday: "productivity",
+  dropbox: "productivity",
+  airtable: "productivity",
+  calendly: "productivity",
+  clickup: "productivity",
+  miro: "productivity"
 };
 
 /** A remote app Praxi signs in to itself: a remote server in the MCP catalog that needs no secret. */

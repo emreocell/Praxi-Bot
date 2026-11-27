@@ -118,6 +118,9 @@ visible.
 
 ### Direct OAuth and MCP servers
 
+What each app needs to connect (a plain sign-in, a client you create, or a key)
+is listed in [What you need to connect each app](app-catalog.md).
+
 Inside **Manage** you can:
 
 - **Choose which bots may use the app** under **Who can use this app** and click

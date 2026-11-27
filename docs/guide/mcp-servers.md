@@ -109,7 +109,8 @@ API_KEY = "mcp/files-key"   # name of a secret, never its value
 Server ids may use only letters, digits, `.`, `_` and `-`. `category = "meta"`
 is rejected. Catalog packages are pinned to an exact version (`name@1.2.3` or
 `name==1.2.3`); `@latest` and a bare `npx -y` / `uvx` package are not accepted
-in the curated catalog.
+in the curated catalog. Every catalog entry also notes its licence and what
+signing in needs; see [What you need to connect each app](app-catalog.md).
 
 A stdio `command` is executed. Do not point it at a shell one-liner or at a
 program you would not run yourself in a terminal as the daemon user.

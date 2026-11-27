@@ -147,9 +147,46 @@ that `last_reviewed` is stale), review the curated table in
    bot catalog check --docs docs/guide/model-catalog.md
    ```
 
-## MCP catalog check
+## MCP catalog verification
 
-The HTTP entries in `crates/mcp-bridge/catalog.json` are verified by a credential-free script.
+`scripts/verify_mcp_catalog.py` checks **every** entry of `crates/mcp-bridge/catalog.json`. It is
+offline by default, so it can run on pull requests; `--live` adds the checks that need the network.
+
+```sh
+python3 scripts/verify_mcp_catalog.py                       # offline: what CI runs
+python3 scripts/verify_mcp_catalog.py --live --timeout 5    # also registries, homepages, endpoints
+python3 scripts/verify_mcp_catalog.py --only supabase --live --json /tmp/report.json
+python3 scripts/verify_mcp_catalog.py --render-docs en      # the generated guide table (en | tr)
+```
+
+| Check | Offline | `--live` |
+| --- | --- | --- |
+| Valid shape: id, name, description, category, https homepage, https endpoint or a command, secrets declared, no token-looking literal | yes | |
+| A stdio package is pinned to an exact version (`name@1.2.3`, `name==1.2.3`) | yes | the version exists on npm / PyPI |
+| `license` is noted: an SPDX expression for software Praxi runs, or `hosted` for a vendor-run server | yes | differs from the registry's licence: attention |
+| `auth` is declared (`none`, `oauth-dcr`, `oauth-own-client`, `api-key`) and agrees with `required_secrets` / `oauth_client` / the transport | yes | a remote endpoint contradicting it: attention |
+| The logo licence is known: the `icon` is a Simple Icons slug bundled in `brandIcons.ts` (CC0), is recorded in `THIRD_PARTY_NOTICES.md`, or is `null` | yes | |
+| `docs/guide/app-catalog.md` and its Turkish twin hold the table generated from the catalog | yes | |
+| Homepage answers | | yes (a site that only turns bots away counts as answering) |
+| Remote endpoint answers, OAuth metadata is found, dynamic client registration is advertised | | yes (`check_mcp_catalog.py`, below) |
+
+An offline failure exits 2 and fails CI. A live finding is an *attention* row (dead homepage or
+endpoint, missing package, no dynamic registration, licence or sign-in that changed): it never
+fails a build, only `--strict` (by hand) exits 1. The weekly `MCP catalog check` workflow runs the
+live mode and keeps one tracking issue up to date.
+
+**Adding an entry.** Use only an official server, from the vendor or listed in the MCP registry.
+Set `license` (`hosted` for a remote server), `auth`, a pinned package for a local one, and an
+`icon` only when its licence is known (otherwise `null`; the app draws initials). Run the offline
+check, paste `--render-docs en` / `--render-docs tr` between the table markers of
+`docs/guide/app-catalog.md` and `docs/guide/tr/app-catalog.md`, add the id to `FIXTURES` and
+`CANNOT_FAKE_YET` in `crates/mcp-bridge/tests/catalog_contract.rs`, and say in the pull request
+what you connected to (and with which account) and what you could not.
+
+## MCP catalog check (remote endpoints)
+
+The HTTP entries in `crates/mcp-bridge/catalog.json` are verified by a credential-free script
+(the live mode of `verify_mcp_catalog.py` calls it for every remote entry).
 Run it by hand when editing the catalog, or read the weekly report from the
 `MCP catalog check` workflow (Mondays 05:17 UTC, main repository only):
 

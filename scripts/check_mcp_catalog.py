@@ -175,8 +175,10 @@ def _fetch(url: str, timeout: float, body, headers, allow_loopback: bool) -> Fet
             return FetchResult(response.status, dict(response.headers.items()), text, None)
     except urllib.error.HTTPError as exc:
         if 300 <= exc.code < 400:
+            # The headers (Location) are kept for a caller that validates the next hop itself.
+            redirect_headers = dict(exc.headers.items())
             exc.close()
-            return FetchResult(0, {}, "", f"unreachable: redirect refused (HTTP {exc.code})")
+            return FetchResult(0, redirect_headers, "", f"unreachable: redirect refused (HTTP {exc.code})")
         text = _read_capped(exc, deadline)
         response_headers = dict(exc.headers.items())
         exc.close()

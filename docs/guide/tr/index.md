@@ -40,6 +40,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Botlar ve profiller](bots-and-profiles.md) | Bot oluşturma, izinler, araçlar, kayıtlı tarayıcı oturumları ve profil paylaşma. |
 | [Şifreli yedekleme ve geri yükleme](backup.md) | Botlarını ve verilerini parolalı tek bir dosyaya yedekleme ve geri yükleme. |
 | [Uygulamaları bağlama](apps.md) | Uygulamalar penceresi, bağlantı türleri, durumlar, bot başına erişim ve takılan bağlantılar. |
+| [Her uygulamayı bağlamak için ne gerekir](app-catalog.md) | Her uygulama için oturum açma yolu, nerede çalıştığı ve lisansı. |
 | [Google Workspace](google-workspace.md) | Kendi Google istemcinle Gmail, Drive ve Takvim; sunucuda giriş, yalnızca okuma ve neler ters gidebilir. |
 | [Sağlayıcılar ve modeller](providers-and-models.md) | Sağlayıcılar, anahtar ekleme, model rolleri, Gemini ücretsiz katmanı ve yerel modeller. |
 | [Beceriler](skills.md) | Beceri nedir, nerede durur, nasıl yazılır, güvenle yüklenir ve bota verilir. |

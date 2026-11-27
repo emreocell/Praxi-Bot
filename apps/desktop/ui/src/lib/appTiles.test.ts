@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { McpCatalogEntry } from "../api/types.ts";
-import { filterDirect, tileAction } from "./appTiles.ts";
+import { directGroup, filterDirect, tileAction } from "./appTiles.ts";
 
 test("a direct MCP tile offers the action for its current state", () => {
   assert.equal(tileAction("idle"), "connect");
@@ -26,4 +26,23 @@ test("direct tiles are found without regard to case, accents or the Turkish i (#
   assert.deepEqual(ids("notlarini gorevlerini"), ["notion-remote"]);
   assert.deepEqual(ids(" LINEAR "), ["linear-remote"]);
   assert.deepEqual(ids("notion tracking"), []);
+});
+
+test("the second wave of direct apps is grouped, and an unknown app falls into other", () => {
+  const want: Record<string, string> = {
+    supabase: "dev",
+    neon: "dev",
+    cloudflare: "dev",
+    netlify: "dev",
+    webflow: "dev",
+    square: "finance",
+    monday: "productivity",
+    dropbox: "productivity",
+    airtable: "productivity",
+    calendly: "productivity",
+    clickup: "productivity",
+    miro: "productivity"
+  };
+  for (const [id, group] of Object.entries(want)) assert.equal(directGroup(id), group, id);
+  assert.equal(directGroup("not-in-the-catalog"), "other");
 });

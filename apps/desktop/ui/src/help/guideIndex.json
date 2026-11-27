@@ -28,6 +28,16 @@
     "summary": "Every bot has a small built-in scratchpad between runs: a plan for a long task, a checklist, facts it will need tomorrow. Tools: notes_read (list notes, read one, or search) and notes_write (replace,…"
   },
   {
+    "doc": "app-catalog.md",
+    "title": "What you need to connect each app",
+    "headings": [
+      "The four ways to sign in",
+      "The catalog",
+      "Related"
+    ],
+    "summary": "Every app in the Apps list comes from a curated catalog. This page says, for each"
+  },
+  {
     "doc": "apps.md",
     "title": "Connecting apps (the Apps dialog)",
     "headings": [

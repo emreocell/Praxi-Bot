@@ -27,6 +27,16 @@
     "summary": "Her botun, çalışmalar arasında kullandığı küçük bir yerleşik not defteri vardır: uzun bir görevin planı, bir kontrol listesi, yarın lazım olacak bilgiler. Araçlar: notes_read (notları listeler, birin…"
   },
   {
+    "doc": "tr/app-catalog.md",
+    "title": "Her uygulamayı bağlamak için ne gerekir",
+    "headings": [
+      "Oturum açmanın dört yolu",
+      "Katalog",
+      "İlgili sayfalar"
+    ],
+    "summary": "Uygulamalar listesindeki her uygulama, özenle seçilmiş bir katalogdan gelir. Bu sayfa, her biri"
+  },
+  {
     "doc": "tr/apps.md",
     "title": "Uygulamaları bağlama (Uygulamalar penceresi)",
     "headings": [

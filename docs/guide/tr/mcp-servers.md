@@ -102,7 +102,7 @@ API_KEY = "mcp/files-key"   # name of a secret, never its value
 ```
 
 Sunucu kimlikleri yalnızca harf, rakam, `.`, `_` ve `-` içerebilir. `category = "meta"`
-reddedilir. Katalogdaki paketler tam bir sürüme sabitlenir (`name@1.2.3` ya da `name==1.2.3`).
+reddedilir. Katalogdaki paketler tam bir sürüme sabitlenir (`name@1.2.3` ya da `name==1.2.3`). Her katalog girdisi ayrıca lisansını ve oturum açmak için gerekeni belirtir; bkz. [Her uygulamayı bağlamak için ne gerekir](app-catalog.md).
 Özenle seçilmiş katalogda `@latest` ve sürümsüz, yalın bir `npx -y` / `uvx` paketi kabul edilmez.
 
 Bir stdio `command` çalıştırılır. Onu bir kabuk tek satırlığına ya da daemon kullanıcısı olarak

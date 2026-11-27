@@ -105,6 +105,25 @@ pub struct CatalogInstall {
     pub tool_allow: Vec<String>,
 }
 
+/// What it takes to sign in to an entry, as the catalog declares it. The
+/// declaration has to agree with the install recipe ([`check_declared_auth`])
+/// and, for a remote app, with what the vendor's server advertises (the live
+/// mode of `scripts/verify_mcp_catalog.py`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CatalogAuth {
+    /// Nothing: no account and no secret (a local tool, an open public server).
+    None,
+    /// OAuth in the browser; the server registers Praxi as a client by itself
+    /// (dynamic client registration), so the owner only signs in.
+    OauthDcr,
+    /// OAuth with a client the owner creates with the vendor first
+    /// (`install.oauth_client`).
+    OauthOwnClient,
+    /// A key, token or connection string the owner pastes (`required_secrets`).
+    ApiKey,
+}
+
 /// A catalog entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogEntry {
@@ -120,6 +139,14 @@ pub struct CatalogEntry {
     pub homepage: String,
     /// [simple-icons](https://simpleicons.org) slug, if there is one.
     pub icon: Option<String>,
+    /// Licence of the server software Praxi runs: an SPDX expression, or
+    /// `hosted` for a server the vendor runs (nothing is installed, the
+    /// vendor's own terms apply). Required on every shipped entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// What signing in needs. Required on every shipped entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<CatalogAuth>,
     /// How to run it.
     pub install: CatalogInstall,
 }
@@ -196,6 +223,38 @@ pub fn check_oauth_client(entry: &CatalogEntry) -> Result<()> {
     Ok(())
 }
 
+/// A shipped entry notes its licence and declares its sign-in, and the
+/// declaration matches the recipe: pasted secrets are `api-key`, an owner-made
+/// client is `oauth-own-client`, `oauth-dcr` is a remote app with neither, and
+/// `none` needs nothing at all.
+///
+/// # Errors
+/// [`McpError::Config`] naming the entry.
+pub fn check_declared_auth(entry: &CatalogEntry) -> Result<()> {
+    let bad = |why: &str| Err(McpError::Config(format!("server `{}`: {why}", entry.id)));
+    match entry.license.as_deref().map(str::trim) {
+        None | Some("") => return bad("`license` is not noted (an SPDX id, or `hosted`)"),
+        Some(_) => {}
+    }
+    let Some(auth) = entry.auth else {
+        return bad("`auth` is not declared");
+    };
+    let install = &entry.install;
+    let secrets = !install.required_secrets.is_empty();
+    let own_client = install.oauth_client.is_some();
+    let remote = install.transport == "http";
+    let agrees = match auth {
+        CatalogAuth::ApiKey => secrets && !own_client,
+        CatalogAuth::OauthOwnClient => own_client && !secrets,
+        CatalogAuth::OauthDcr => remote && !secrets && !own_client,
+        CatalogAuth::None => !secrets && !own_client,
+    };
+    if !agrees {
+        return bad("`auth` does not match `required_secrets` / `oauth_client` / the transport");
+    }
+    Ok(())
+}
+
 /// The catalog shipped with the bot.
 ///
 /// # Errors
@@ -214,6 +273,7 @@ pub fn builtin_catalog() -> Result<Vec<CatalogEntry>> {
         }
         check_secret_header_templates(entry)?;
         check_oauth_client(entry)?;
+        check_declared_auth(entry)?;
     }
     Ok(entries)
 }
@@ -513,6 +573,67 @@ mod tests {
         let mut e = good;
         e.install.oauth_client.as_mut().unwrap().scopes.clear();
         assert!(check_oauth_client(&e).is_err());
+    }
+
+    /// Every shipped entry notes its licence and declares its sign-in, and the
+    /// declaration agrees with the recipe; a wrong one fails the catalog.
+    #[test]
+    fn declared_auth_and_license_match_the_recipe() {
+        let all = builtin_catalog().unwrap();
+        for e in &all {
+            check_declared_auth(e).unwrap_or_else(|er| panic!("{er}"));
+        }
+        let get = |id: &str| all.iter().find(|e| e.id == id).unwrap().clone();
+        assert_eq!(get("linear").auth, Some(CatalogAuth::OauthDcr));
+        assert_eq!(get("github").auth, Some(CatalogAuth::ApiKey));
+        assert_eq!(get("google-gmail").auth, Some(CatalogAuth::OauthOwnClient));
+        assert_eq!(get("deepwiki").auth, Some(CatalogAuth::None));
+        assert_eq!(get("linear").license.as_deref(), Some("hosted"));
+
+        let mut e = get("linear");
+        e.license = None;
+        assert!(check_declared_auth(&e).is_err(), "licence not noted");
+        let mut e = get("linear");
+        e.license = Some("  ".into());
+        assert!(check_declared_auth(&e).is_err(), "blank licence");
+        let mut e = get("linear");
+        e.auth = None;
+        assert!(check_declared_auth(&e).is_err(), "auth not declared");
+        let mut e = get("linear");
+        e.auth = Some(CatalogAuth::ApiKey);
+        assert!(check_declared_auth(&e).is_err(), "api-key without a secret");
+        let mut e = get("github");
+        e.auth = Some(CatalogAuth::OauthDcr);
+        assert!(
+            check_declared_auth(&e).is_err(),
+            "oauth-dcr with a pasted secret"
+        );
+        let mut e = get("google-gmail");
+        e.auth = Some(CatalogAuth::OauthDcr);
+        assert!(
+            check_declared_auth(&e).is_err(),
+            "oauth-dcr with an owner-made client"
+        );
+        let mut e = get("filesystem");
+        e.auth = Some(CatalogAuth::OauthDcr);
+        assert!(
+            check_declared_auth(&e).is_err(),
+            "a local entry has no dynamic registration"
+        );
+    }
+
+    #[test]
+    fn auth_values_use_the_kebab_names_the_verifier_reads() {
+        for (value, want) in [
+            ("none", CatalogAuth::None),
+            ("oauth-dcr", CatalogAuth::OauthDcr),
+            ("oauth-own-client", CatalogAuth::OauthOwnClient),
+            ("api-key", CatalogAuth::ApiKey),
+        ] {
+            let parsed: CatalogAuth = serde_json::from_value(serde_json::json!(value)).unwrap();
+            assert_eq!(parsed, want);
+        }
+        assert!(serde_json::from_value::<CatalogAuth>(serde_json::json!("magic")).is_err());
     }
 
     #[test]

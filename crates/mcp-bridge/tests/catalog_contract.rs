@@ -58,6 +58,18 @@ const FIXTURES: &[&str] = &[
     "intercom",
     "paypal",
     "mongodb",
+    "supabase",
+    "square",
+    "neon",
+    "monday",
+    "dropbox",
+    "airtable",
+    "calendly",
+    "cloudflare",
+    "netlify",
+    "clickup",
+    "webflow",
+    "miro",
 ];
 
 const HTTP_REASON: &str = "streamable-HTTP entry: a 403/429 at the HTTP transport needs a scripted HTTP MCP server, which the test seams do not have; the tool-level 403/429 path is covered through the stdio fake";
@@ -77,6 +89,18 @@ const CANNOT_FAKE_YET: &[(&str, &str, &str)] = &[
     ("google-gmail", "transport_http_status", HTTP_REASON),
     ("google-drive", "transport_http_status", HTTP_REASON),
     ("google-calendar", "transport_http_status", HTTP_REASON),
+    ("supabase", "transport_http_status", HTTP_REASON),
+    ("square", "transport_http_status", HTTP_REASON),
+    ("neon", "transport_http_status", HTTP_REASON),
+    ("monday", "transport_http_status", HTTP_REASON),
+    ("dropbox", "transport_http_status", HTTP_REASON),
+    ("airtable", "transport_http_status", HTTP_REASON),
+    ("calendly", "transport_http_status", HTTP_REASON),
+    ("cloudflare", "transport_http_status", HTTP_REASON),
+    ("netlify", "transport_http_status", HTTP_REASON),
+    ("clickup", "transport_http_status", HTTP_REASON),
+    ("webflow", "transport_http_status", HTTP_REASON),
+    ("miro", "transport_http_status", HTTP_REASON),
 ];
 
 /// Known violations of the contract: (entry id or `*`, leg, why). Each must

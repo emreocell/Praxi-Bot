@@ -6,6 +6,8 @@
     "category": "fs",
     "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
     "icon": null,
+    "license": "Apache-2.0 AND MIT",
+    "auth": "none",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -26,6 +28,8 @@
     "category": "accounts",
     "homepage": "https://github.com/github/github-mcp-server",
     "icon": "github",
+    "license": "hosted",
+    "auth": "api-key",
     "install": {
       "transport": "http",
       "url": "https://api.githubcopilot.com/mcp/",
@@ -48,6 +52,8 @@
     "category": "accounts",
     "homepage": "https://docs.gitlab.com/user/model_context_protocol/mcp_server/",
     "icon": "gitlab",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://gitlab.com/api/v4/mcp",
@@ -61,6 +67,8 @@
     "category": "messaging",
     "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/slack",
     "icon": "slack",
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -93,6 +101,8 @@
     "category": "accounts",
     "homepage": "https://github.com/makenotion/notion-mcp-server",
     "icon": "notion",
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -119,6 +129,8 @@
     "category": "accounts",
     "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
     "icon": "gmail",
+    "license": "hosted",
+    "auth": "oauth-own-client",
     "install": {
       "transport": "http",
       "url": "https://gmailmcp.googleapis.com/mcp/v1",
@@ -155,6 +167,8 @@
     "category": "accounts",
     "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
     "icon": "googledrive",
+    "license": "hosted",
+    "auth": "oauth-own-client",
     "install": {
       "transport": "http",
       "url": "https://drivemcp.googleapis.com/mcp/v1",
@@ -191,6 +205,8 @@
     "category": "accounts",
     "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
     "icon": "googlecalendar",
+    "license": "hosted",
+    "auth": "oauth-own-client",
     "install": {
       "transport": "http",
       "url": "https://calendarmcp.googleapis.com/mcp/v1",
@@ -227,6 +243,8 @@
     "category": "accounts",
     "homepage": "https://github.com/crystaldba/postgres-mcp",
     "icon": "postgresql",
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "uvx",
@@ -252,6 +270,8 @@
     "category": "fs",
     "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sqlite",
     "icon": "sqlite",
+    "license": "MIT",
+    "auth": "none",
     "install": {
       "transport": "stdio",
       "command": "uvx",
@@ -270,6 +290,8 @@
     "category": "remote",
     "homepage": "https://github.com/brave/brave-search-mcp-server",
     "icon": "brave",
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -298,6 +320,8 @@
     "category": "remote",
     "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
     "icon": null,
+    "license": "MIT",
+    "auth": "none",
     "install": {
       "transport": "stdio",
       "command": "uvx",
@@ -314,6 +338,8 @@
     "category": "browser",
     "homepage": "https://github.com/microsoft/playwright-mcp",
     "icon": null,
+    "license": "Apache-2.0",
+    "auth": "none",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -331,6 +357,8 @@
     "category": "accounts",
     "homepage": "https://github.com/getsentry/sentry-mcp",
     "icon": "sentry",
+    "license": "FSL-1.1-ALv2",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -357,6 +385,8 @@
     "category": "accounts",
     "homepage": "https://linear.app/docs/mcp",
     "icon": "linear",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.linear.app/mcp",
@@ -370,6 +400,8 @@
     "category": "accounts",
     "homepage": "https://github.com/todoist/todoist-mcp",
     "icon": "todoist",
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -398,6 +430,8 @@
     "category": "fs",
     "homepage": "https://github.com/MarkusPfundstein/mcp-obsidian",
     "icon": "obsidian",
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "uvx",
@@ -423,6 +457,8 @@
     "category": "accounts",
     "homepage": "https://github.com/voska/hass-mcp",
     "icon": "homeassistant",
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "uvx",
@@ -451,6 +487,8 @@
     "category": "remote",
     "homepage": "https://github.com/exa-labs/exa-mcp-server",
     "icon": null,
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -477,6 +515,8 @@
     "category": "remote",
     "homepage": "https://github.com/tavily-ai/tavily-mcp",
     "icon": null,
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -503,6 +543,8 @@
     "category": "remote",
     "homepage": "https://github.com/firecrawl/firecrawl-mcp-server",
     "icon": null,
+    "license": "MIT",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -529,6 +571,8 @@
     "category": "remote",
     "homepage": "https://github.com/upstash/context7",
     "icon": null,
+    "license": "MIT",
+    "auth": "none",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -546,6 +590,8 @@
     "category": "remote",
     "homepage": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
     "icon": null,
+    "license": "hosted",
+    "auth": "none",
     "install": {
       "transport": "http",
       "url": "https://mcp.deepwiki.com/mcp",
@@ -559,6 +605,8 @@
     "category": "remote",
     "homepage": "https://github.com/microsoftdocs/mcp",
     "icon": null,
+    "license": "hosted",
+    "auth": "none",
     "install": {
       "transport": "http",
       "url": "https://learn.microsoft.com/api/mcp",
@@ -572,6 +620,8 @@
     "category": "remote",
     "homepage": "https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search",
     "icon": "cloudflare",
+    "license": "hosted",
+    "auth": "none",
     "install": {
       "transport": "http",
       "url": "https://docs.mcp.cloudflare.com/mcp",
@@ -585,6 +635,8 @@
     "category": "accounts",
     "homepage": "https://developers.notion.com/docs/mcp",
     "icon": "notion",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.notion.com/mcp",
@@ -598,6 +650,8 @@
     "category": "accounts",
     "homepage": "https://docs.stripe.com/mcp",
     "icon": "stripe",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.stripe.com",
@@ -611,6 +665,8 @@
     "category": "accounts",
     "homepage": "https://www.atlassian.com/platform/remote-mcp-server",
     "icon": "atlassian",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.atlassian.com/v1/mcp",
@@ -624,6 +680,8 @@
     "category": "accounts",
     "homepage": "https://vercel.com/docs/agent-resources/vercel-mcp",
     "icon": "vercel",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.vercel.com",
@@ -637,6 +695,8 @@
     "category": "accounts",
     "homepage": "https://developers.figma.com/docs/figma-mcp-server/",
     "icon": "figma",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.figma.com/mcp",
@@ -650,6 +710,8 @@
     "category": "accounts",
     "homepage": "https://posthog.com/docs/model-context-protocol",
     "icon": "posthog",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.posthog.com/mcp",
@@ -663,6 +725,8 @@
     "category": "messaging",
     "homepage": "https://developers.intercom.com/docs/guides/mcp",
     "icon": "intercom",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.intercom.com/mcp",
@@ -676,6 +740,8 @@
     "category": "money",
     "homepage": "https://developer.paypal.com/ai-tools/mcp-server",
     "icon": "paypal",
+    "license": "hosted",
+    "auth": "oauth-dcr",
     "install": {
       "transport": "http",
       "url": "https://mcp.paypal.com/mcp",
@@ -689,6 +755,8 @@
     "category": "accounts",
     "homepage": "https://github.com/mongodb-js/mongodb-mcp-server",
     "icon": "mongodb",
+    "license": "Apache-2.0",
+    "auth": "api-key",
     "install": {
       "transport": "stdio",
       "command": "npx",
@@ -709,6 +777,186 @@
           "label": "MongoDB connection URI (mongodb://... or mongodb+srv://...)"
         }
       ]
+    }
+  },
+  {
+    "id": "supabase",
+    "name": "Supabase",
+    "description": "Look at and manage your Supabase projects, databases and logs. Sign in with your Supabase account.",
+    "category": "accounts",
+    "homepage": "https://supabase.com/docs/guides/ai-tools/mcp",
+    "icon": "supabase",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.supabase.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "square",
+    "name": "Square",
+    "description": "Payments, orders, customers and catalog in Square. Sign in with your Square account.",
+    "category": "accounts",
+    "homepage": "https://developer.squareup.com/docs/mcp",
+    "icon": "square",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.squareup.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "neon",
+    "name": "Neon",
+    "description": "Manage Neon Postgres projects and branches and run queries. Sign in with your Neon account.",
+    "category": "accounts",
+    "homepage": "https://neon.com/docs/ai/neon-mcp-server",
+    "icon": "neon",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.neon.tech/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "monday",
+    "name": "monday.com",
+    "description": "Boards, items and updates in monday.com. Sign in with your monday.com account.",
+    "category": "accounts",
+    "homepage": "https://developer.monday.com/api-reference/docs/integrate-with-monday-mcp",
+    "icon": null,
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.monday.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "dropbox",
+    "name": "Dropbox",
+    "description": "Search, read and organise files in your Dropbox. Sign in with your Dropbox account.",
+    "category": "accounts",
+    "homepage": "https://help.dropbox.com/integrations/connect-dropbox-mcp-server",
+    "icon": "dropbox",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.dropbox.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "airtable",
+    "name": "Airtable",
+    "description": "Bases, tables and records in Airtable. Sign in with your Airtable account.",
+    "category": "accounts",
+    "homepage": "https://airtable.com/developers/agents/mcp/getting-started",
+    "icon": "airtable",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.airtable.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "calendly",
+    "name": "Calendly",
+    "description": "Event types, availability and scheduled meetings in Calendly. Sign in with your Calendly account.",
+    "category": "accounts",
+    "homepage": "https://developer.calendly.com/docs/mcp/calendly-mcp-server",
+    "icon": "calendly",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.calendly.com",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "cloudflare",
+    "name": "Cloudflare",
+    "description": "Work with your Cloudflare account through its API: DNS, Workers, R2, security and more. Sign in with your Cloudflare account.",
+    "category": "accounts",
+    "homepage": "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/",
+    "icon": "cloudflare",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.cloudflare.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "netlify",
+    "name": "Netlify",
+    "description": "Sites, deploys and settings in Netlify. Sign in with your Netlify account.",
+    "category": "accounts",
+    "homepage": "https://github.com/netlify/netlify-mcp",
+    "icon": "netlify",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://netlify-mcp.netlify.app/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "clickup",
+    "name": "ClickUp",
+    "description": "Tasks, lists and docs in ClickUp. Sign in with your ClickUp account.",
+    "category": "accounts",
+    "homepage": "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server",
+    "icon": "clickup",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.clickup.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "webflow",
+    "name": "Webflow",
+    "description": "Sites, CMS collections and pages in Webflow. Sign in with your Webflow account.",
+    "category": "accounts",
+    "homepage": "https://developers.webflow.com/mcp/reference/overview",
+    "icon": "webflow",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.webflow.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "miro",
+    "name": "Miro",
+    "description": "Read and work with Miro boards. Sign in with your Miro account.",
+    "category": "accounts",
+    "homepage": "https://developers.miro.com/docs/miro-mcp",
+    "icon": "miro",
+    "license": "hosted",
+    "auth": "oauth-dcr",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.miro.com/",
+      "required_secrets": []
     }
   }
 ]

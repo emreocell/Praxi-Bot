@@ -112,6 +112,9 @@ MCP sunucularındaki durum etiketlerinin anlamı:
 
 ### Doğrudan OAuth ve MCP sunucuları
 
+Her uygulamayı bağlamak için neyin gerektiği (düz bir oturum açma, kendi oluşturacağın bir istemci
+ya da bir anahtar) [Her uygulamayı bağlamak için ne gerekir](app-catalog.md) sayfasında listelenir.
+
 **Yönet** içinde şunları yapabilirsin:
 
 - **Uygulamayı hangi botların kullanabileceğini seç:** **Bu uygulamayı kimler kullanabilir**

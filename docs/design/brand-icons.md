@@ -114,6 +114,16 @@ Obsidian, Home Assistant, Stripe, Atlassian, Vercel, Figma, PostHog, Intercom,
 PayPal and MongoDB. `notion-remote` aliases Notion. Filesystem and Fetch are
 generic capabilities and retain neutral tool glyphs.
 
+The second wave of direct connectors (checked 2026-11-27) uses Simple Icons
+16.36.0 marks only, all CC0 1.0: Supabase, Square, Dropbox, Airtable, Calendly,
+Cloudflare, Netlify, ClickUp and Miro were already bundled, and Neon
+(`neon.svg`) and Webflow (`webflow.svg`) are newly bundled. monday.com has no
+Simple Icons mark (`mondaydotcom.svg` does not exist in 16.36.0), so its
+catalog `icon` is `null` and the app draws neutral initials: no artwork is
+copied. `scripts/verify_mcp_catalog.py` fails a catalog entry whose `icon` is
+neither a bundled Simple Icons slug, nor recorded in `THIRD_PARTY_NOTICES.md`,
+nor `null`.
+
 These branded catalog entries previously had generic fallbacks. They were first
 given neutral initials; the vendors' brand pages were then read (2026-11-27, issue
 #701). Four now show the vendor's own mark; Playwright keeps its initial:

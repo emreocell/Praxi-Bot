@@ -1,6 +1,7 @@
 name: MCP catalog check
 
-# Weekly credential-free verification of the HTTP entries in the MCP catalog.
+# Weekly credential-free verification of every entry in the MCP catalog: remote endpoints and OAuth
+# metadata, pinned npm / PyPI packages, homepages and the noted licences (scripts/verify_mcp_catalog.py --live).
 # Never runs on pull requests or forks, never uses secrets, and uses least-privilege
 # permissions split across jobs (`contents: read` to check, `issues: write` to report).
 # A dead or changed endpoint is a report in one tracking issue, not a red build.
@@ -17,7 +18,7 @@ concurrency:
 
 jobs:
   check:
-    name: Check remote MCP endpoints (no credentials)
+    name: Verify the MCP catalog live (no credentials)
     # A scheduled run on a fork must never open issues or burn fork minutes.
     if: github.repository == 'emreocell/Praxi-Bot'
     runs-on: ubuntu-latest
@@ -34,12 +35,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check remote catalog entries without credentials
+      - name: Verify catalog entries without credentials
         id: check
         run: |
           set -uo pipefail
           mkdir -p out
-          python3 scripts/check_mcp_catalog.py --timeout 5 --json out/catalog-check.json | tee out/catalog-check.txt
+          python3 scripts/verify_mcp_catalog.py --live --timeout 5 --json out/catalog-check.json | tee out/catalog-check.txt
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ] && [ ! -f out/catalog-check.json ]; then
             printf '{"checked_at":"","entries":[],"attention":[],"structural_errors":["checker exited %s without a report"]}\n' "$status" > out/catalog-check.json
@@ -75,7 +76,7 @@ jobs:
           PY
           cat out/catalog-check.md >> "$GITHUB_STEP_SUMMARY"
           if [ "$status" -eq 2 ]; then
-            echo "::warning title=MCP catalog schema::check_mcp_catalog found structural errors (see summary)."
+            echo "::warning title=MCP catalog schema::verify_mcp_catalog found structural errors (see summary)."
           fi
           exit "$status"
 
@@ -166,7 +167,7 @@ jobs:
               )
               subprocess.run(
                   ["gh", "issue", "close", str(existing["number"]), "--repo", repo,
-                   "--comment", f"All remote MCP entries look healthy ({status.get('run_url', '')}); closing this tracking issue."],
+                   "--comment", f"All MCP catalog entries look healthy ({status.get('run_url', '')}); closing this tracking issue."],
                   check=True,
               )
               print(f"Closed resolved tracking issue #{existing['number']}")
