@@ -1692,9 +1692,9 @@ pub(crate) fn tools_dynamic_with_files(
             Op::Open,
             spec(
                 "desktop_open",
-                "Open a web address, or a file of yours (your workspace or a folder you may use), in the computer's default application or in a browser you name. Use it to show the user something you made: an HTML page, a PDF, a picture. Give `url` or `path`, and optionally `with`: default, chrome, chromium, firefox or edge. Only documents, pages, pictures, sound and video open (never a program or script). Files open only on the computer you run on. To work inside a page use the browser tools instead. Example: {\"path\":\"kralinho.html\",\"with\":\"chrome\"} or {\"url\":\"https://example.com\"}",
+                "Open a file of yours (your workspace or a folder you may use) in the computer's default application or in a browser you name, to show the user something you made: an HTML page, a PDF, a picture. Give `path`, and optionally `with`: default, chrome, chromium, firefox or edge. Only documents, pages, pictures, sound and video open (never a program or script), only on the computer you run on. Give `url` only when the user asked for an address in their own browser (it is where they are signed in, so it asks unless they typed that address); to look at a page yourself use browser_open. Example: {\"path\":\"kralinho.html\",\"with\":\"chrome\"}",
                 json!({"type":"object","properties":{
-                    "url":{"type":"string","description":"A http(s) address."},
+                    "url":{"type":"string","description":"A http(s) address the user asked to open in their own browser."},
                     "path":{"type":"string","description":"A file path, relative to your workspace or absolute inside a folder you may use."},
                     "with":{"type":"string","enum":["default","chrome","chromium","firefox","edge"],"description":"Which program opens it (default: the system's)."}
                 }}),

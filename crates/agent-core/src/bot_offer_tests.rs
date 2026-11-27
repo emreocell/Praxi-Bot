@@ -2,8 +2,9 @@
 //!
 //! Pinned here: the owner's Full chat is offered `bot_create` / `bot_update` / `bot_list` and a
 //! call runs without a card (the host gets a preview, then the create); a run that read outside
-//! content keeps the card; no other level, source or kind of run is offered the tools, and a
-//! direct call is denied there; the "Can create bots" switch keeps its card.
+//! content is no longer offered them (a switch keeps the tools and the card); no other level,
+//! source or kind of run is offered the tools, and a direct call is denied there; the "Can create
+//! bots" switch keeps its card.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -140,13 +141,20 @@ fn rig(preset: &str, script: Vec<crate::tests::Reply>, legacy: bool) -> Rig {
     let env = setup();
     let fake = Fake::new(script);
     let page = page();
+    let pay = Arc::new(with_class(
+        "pay",
+        Effect::Destructive,
+        PermissionCategory::Money,
+        ContentClass::none(),
+        "paid",
+    ));
     let mut config = cfg(Policy::full());
     config.legacy_tool_surface = legacy;
     let lp = make_loop(
         &env.storage,
         env.bot,
         &fake,
-        &[&page],
+        &[&page, &pay],
         profile(preset),
         config,
     );
@@ -242,24 +250,94 @@ async fn it_is_offered_on_the_deferred_tool_surface_too() {
     );
 }
 
+/// While the run is parked on a card (the money floor asks at every level), the loop is asked
+/// whether this run is the owner's own chat turn: yes at first, no once it read a page.
 #[tokio::test]
-async fn a_run_that_read_outside_content_keeps_the_card() {
+async fn a_run_that_read_outside_content_is_not_offered_the_tools_any_more() {
+    let pay = || calls(&[("p1", "pay", json!({"amount": "5"}))]);
+    // clean: offered while it waits on the money card
+    let clean = rig(FULL, vec![pay(), text("done")], true);
+    let run = clean.turn("owner");
+    let mut rx = clean.lp.subscribe();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    assert!(clean.lp.bot_tools_offered_to_run(&run.to_string()));
+    clean.lp.cancel(run).unwrap();
+
+    // after a page: the tools are gone from the list, a call is refused before the host or a card
     let rig = rig(
         FULL,
         vec![
             calls(&[("r1", "web_extract", json!({"url": "https://evil.example/"}))]),
             create_call("c1"),
+            pay(),
             text("done"),
         ],
         true,
     );
     let run = rig.turn("owner");
-    assert_eq!(rig.card(run).await.as_deref(), Some("bot_create"));
+    let mut rx = rig.lp.subscribe();
+    let card = until(&mut rx, |e| {
+        matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+    })
+    .await;
+    let Event::ApprovalNeeded(card) = card else {
+        panic!("the run ended before the money card: {card:?}");
+    };
+    assert_eq!(
+        card.tool_name, "pay",
+        "bot_create never asked: it is not there"
+    );
+    assert!(!rig.lp.bot_tools_offered_to_run(&run.to_string()));
+    rig.lp.cancel(run).unwrap();
+    assert!(tool_names(&rig.fake.request(0)).contains(&"bot_create".to_owned()));
+    for at in [1, 2] {
+        let names = tool_names(&rig.fake.request(at));
+        for name in ["bot_create", "bot_update", "bot_list"] {
+            assert!(!names.contains(&name.to_owned()), "request {at}: {names:?}");
+        }
+    }
     assert!(
-        !rig.calls().iter().any(|c| c.starts_with("create")),
-        "nothing was applied before the owner answered: {:?}",
+        rig.calls().is_empty(),
+        "nothing reached the host: {:?}",
         rig.calls()
     );
+}
+
+/// A channel, webhook or external user's message is never the owner's, whether it starts the run
+/// or joins one the owner started; the owner's own paired Telegram chat is.
+#[tokio::test]
+async fn only_the_owners_own_messages_make_it_the_owners_chat() {
+    for source in ["telegram_owner", "peer_admin"] {
+        let r = rig(
+            FULL,
+            vec![calls(&[("p1", "pay", json!({}))]), text("ok")],
+            true,
+        );
+        let run = r.turn(source);
+        let mut rx = r.lp.subscribe();
+        until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+        assert!(r.lp.bot_tools_offered_to_run(&run.to_string()), "{source}");
+        r.lp.cancel(run).unwrap();
+    }
+    for source in [
+        "telegram",
+        "channel_stranger",
+        "webhook",
+        "api",
+        "mail",
+        "peer",
+    ] {
+        let r = rig(
+            FULL,
+            vec![calls(&[("p1", "pay", json!({}))]), text("ok")],
+            true,
+        );
+        let run = r.turn(source);
+        let mut rx = r.lp.subscribe();
+        until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+        assert!(!r.lp.bot_tools_offered_to_run(&run.to_string()), "{source}");
+        r.lp.cancel(run).unwrap();
+    }
 }
 
 #[tokio::test]

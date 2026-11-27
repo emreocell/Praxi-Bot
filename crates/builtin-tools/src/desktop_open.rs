@@ -153,17 +153,59 @@ pub(crate) fn not_openable(path: &str) -> ToolError {
     ))
 }
 
+/// The system's file manager on Windows, by its full path: `explorer.exe` given an address or a
+/// file path as its one argument opens it with the default application. Never `cmd`, never the
+/// target itself as the program (the shell then parses it: verbs, options, a program name).
+fn windows_opener() -> String {
+    let root = std::env::var("SystemRoot")
+        .ok()
+        .filter(|r| r.len() > 3 && r.as_bytes()[1] == b':' && r.as_bytes()[2] == b'\\')
+        .unwrap_or_else(|| r"C:\Windows".to_owned());
+    format!(r"{}\explorer.exe", root.trim_end_matches('\\'))
+}
+
+/// Refuse a target a program could take for something other than the one thing to open: an
+/// option (a leading `-`, and on Windows `/`), a leading space, and on Windows a path that names
+/// another scheme or stream (`shell:`, `ms-settings:`, `file.html:stream`) or a network share
+/// (`\\host\share`, which sends the owner's credentials). An address is `http(s)` by
+/// [`parse`] already.
+fn check_argument(platform: &str, target: &str) -> Result<(), ToolError> {
+    let bad = |why: &str| Err(exec_err(format!("not opened: the target {why}")));
+    if target.is_empty() || target.starts_with(char::is_whitespace) {
+        return bad("is empty or starts with a space");
+    }
+    if target.starts_with('-') {
+        return bad("starts with `-`, which a program would read as an option");
+    }
+    if platform == "windows" {
+        let lower = target.to_ascii_lowercase();
+        if lower.starts_with("http://") || lower.starts_with("https://") {
+            return Ok(());
+        }
+        if target.starts_with(['/', '\\']) {
+            return bad("starts with `/` or `\\`, which is an option or a network path here");
+        }
+        let b = target.as_bytes();
+        let drive = b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\';
+        if !drive || target[2..].contains(':') {
+            return bad("is not a plain path on a drive (`C:\\folder\\file.html`)");
+        }
+    }
+    Ok(())
+}
+
 /// The programs to try, in order, to open `target` on `platform` (`windows`, `linux`, `macos`).
-/// The first one the system can start wins; all of them are fixed names, `target` is only ever an
-/// argument (an address starts with `http`, a path is absolute: never an option).
+/// The first one the system can start wins; all of them are fixed names, `target` is only ever
+/// ONE argument (never the program, never an option: [`check_argument`]).
 ///
 /// # Errors
-/// The platform has no opener.
+/// The platform has no opener, or the target could be read as an option or another scheme.
 pub(crate) fn candidates(
     platform: &str,
     target: &str,
     with: With,
 ) -> Result<Vec<AppSpec>, ToolError> {
+    check_argument(platform, target)?;
     let app = |exe: &str, args: &[&str]| AppSpec {
         executable: exe.to_owned(),
         args: args.iter().map(|a| (*a).to_owned()).collect(),
@@ -174,8 +216,8 @@ pub(crate) fn candidates(
         a
     };
     Ok(match (platform, with) {
-        // ShellExecute opens an address or a file with whatever the system associates with it.
-        ("windows", With::Default) => vec![app(target, &[])],
+        // The file manager opens an address or a file with whatever the system associates with it.
+        ("windows", With::Default) => vec![with_target(&windows_opener(), &[])],
         ("windows", With::Browser(b)) => vec![with_target(
             match b {
                 "chrome" | "chromium" => "chrome.exe",
@@ -313,11 +355,63 @@ mod tests {
         assert_eq!(chrome[1].executable, "google-chrome-stable");
         assert!(chrome.iter().all(|c| c.args == [url]));
         let win = candidates("windows", url, With::Default).unwrap();
-        assert_eq!((win[0].executable.as_str(), win[0].args.len()), (url, 0));
+        assert!(
+            win[0]
+                .executable
+                .to_ascii_lowercase()
+                .ends_with(r"\explorer.exe"),
+            "{}",
+            win[0].executable
+        );
+        assert_eq!(win[0].args, [url]);
+        let file = candidates("windows", r"C:\Users\Jo Doe\a.html", With::Default).unwrap();
+        assert_eq!(file[0].args, [r"C:\Users\Jo Doe\a.html"]);
         let edge = candidates("windows", url, With::Browser("edge")).unwrap();
         assert_eq!(edge[0].executable, "msedge.exe");
         let mac = candidates("macos", url, With::Browser("firefox")).unwrap();
         assert_eq!(mac[0].args, ["-a", "Firefox", url]);
         assert!(candidates("plan9", url, With::Default).is_err());
+    }
+
+    /// Whatever the model writes, the target is one argument and never the program: nothing that
+    /// reads as an option, a verb, another scheme or a network share is handed to an opener.
+    #[test]
+    fn a_target_that_could_be_an_option_or_another_scheme_is_never_handed_over() {
+        for bad in [
+            "-a Calculator",
+            "--new-window",
+            " https://example.com/",
+            "\tx.html",
+            "",
+        ] {
+            for platform in ["windows", "linux", "macos"] {
+                for with in [With::Default, With::Browser("chrome")] {
+                    assert!(
+                        candidates(platform, bad, with).is_err(),
+                        "{platform} {bad:?}"
+                    );
+                }
+            }
+        }
+        for bad in [
+            "/e,C:\\Windows",
+            "/select,C:\\a.exe",
+            "\\\\evil\\share\\a.html",
+            "shell:startup",
+            "ms-settings:display",
+            "file:///C:/a.html",
+            "javascript:alert(1)",
+            "C:\\a.html:stream",
+            "a.html",
+            "C:a.html",
+        ] {
+            for with in [With::Default, With::Browser("edge")] {
+                assert!(candidates("windows", bad, with).is_err(), "windows {bad:?}");
+            }
+        }
+        // an absolute path is fine on the other systems, an address on all
+        assert!(candidates("linux", "/home/a/x.html", With::Default).is_ok());
+        assert!(candidates("macos", "/Users/a/x.html", With::Default).is_ok());
+        assert!(candidates("windows", "HTTPS://example.com/", With::Default).is_ok());
     }
 }

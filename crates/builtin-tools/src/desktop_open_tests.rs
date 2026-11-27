@@ -240,10 +240,13 @@ async fn windows_and_mac_use_their_own_opener() {
     win.call(json!({"url": "https://example.com/", "with": "edge"}))
         .await
         .unwrap();
-    assert_eq!(
-        win.started()[0],
-        ("https://example.com/".to_owned(), vec![])
+    // never the address as the program: the file manager takes it as its one argument
+    let (exe, args) = &win.started()[0];
+    assert!(
+        exe.to_ascii_lowercase().ends_with(r"\explorer.exe"),
+        "{exe}"
     );
+    assert_eq!(args, &["https://example.com/".to_owned()]);
     assert_eq!(win.started()[1].0, "msedge.exe");
     let mac = Rig::new("macos", true);
     mac.call(json!({"url": "https://example.com/"}))

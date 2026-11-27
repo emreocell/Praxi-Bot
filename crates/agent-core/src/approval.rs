@@ -515,6 +515,24 @@ impl Shared {
                 grant: None,
             };
         }
+        // An address in the computer's own browser, where the owner is signed in, is opened
+        // without a card on the Full level only when the owner typed that address in this chat;
+        // the bot shows its own pages in its managed browser (`browser_open`). Below the Full
+        // level the owner's own policy decides, as for every desktop call. The lane and the
+        // Full policy below never turn this ask into an allow.
+        if self.full_access(ctx)
+            && Self::opens_in_owners_browser(name, input)
+            && !self.owner_typed_url(ctx, name, input)
+        {
+            return (
+                if decision == Decision::Allow {
+                    Decision::ask()
+                } else {
+                    decision
+                },
+                None,
+            );
+        }
         // The Full level: the one place a plain ask becomes an allow for every call except the
         // ones that spend money. It sits after every deny, floor and workflow taint above.
         if decision.is_ask() && self.full_lane_allows(ctx, name, category, input, target, &decision)
@@ -685,17 +703,14 @@ impl Shared {
     }
 
     /// A bot change (`bot_create`, `bot_update`, `bot_delete`) in the owner's own chat on a bot at
-    /// the Full level, while the run holds no untrusted content: it waives the always-ask test,
-    /// as on that level nothing asks but money. A bot is standing authority a later run holds,
-    /// so a run that read a page, a mail or another bot's answer (a text the owner did not
-    /// write could have steered the call) keeps the card. An `Ask` the owner wrote for the
-    /// category, a deny, the money floor and the host's ceiling (never broader than the caller,
-    /// never `full`, only bots it made) all still apply.
+    /// the Full level, while the run holds no untrusted content ([`Self::bot_tools_offered`]: a
+    /// run that read a page, a mail or another bot's answer is not offered the tools at all, as a
+    /// text the owner did not write could have steered a change of standing authority): it waives
+    /// the always-ask test, as on that level nothing asks but money. An `Ask` the owner wrote for
+    /// the category, a deny, the money floor and the host's ceiling (never broader than the
+    /// caller, never `full`, only bots it made) all still apply.
     fn full_bots_waive(&self, ctx: &RunCtx, name: &str, req: &ActionRequest) -> bool {
-        crate::bot_offer::is_bot_tool(name)
-            && self.bot_tools_offered(ctx)
-            && !ctx.taint.lock().exposure.untrusted
-            && !Self::bot_asks_explicitly(ctx, req)
+        self.bot_preview_waived(ctx, name) && !Self::bot_asks_explicitly(ctx, req)
     }
 
     /// The bot's own policy resolves this call, or this run's initiator, to something other
@@ -1526,9 +1541,30 @@ impl Shared {
     /// `owner` count (typed in the desktop app); a block the owner pasted from a page is still
     /// theirs by this test (the app cannot tell a paste from typing).
     fn user_typed_url(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
-        if name != "browser_open" || input.as_object().is_none_or(|o| o.len() != 1) {
-            return false;
-        }
+        name == "browser_open"
+            && input.as_object().is_some_and(|o| o.len() == 1)
+            && self.owner_wrote_url(ctx, input)
+    }
+
+    /// `desktop_open` of an address: it is shown in the computer's own browser (or one the call
+    /// names), where the owner is signed in. A file (`path`) is not an address.
+    fn opens_in_owners_browser(name: &str, input: &Value) -> bool {
+        name == FULL_OPEN_CALL && input.get("url").is_some()
+    }
+
+    /// The owner asked for this very address to be opened in their own browser: a plain
+    /// `desktop_open` (`url`, and which browser) of an address they typed in this chat
+    /// ([`Self::owner_wrote_url`]).
+    fn owner_typed_url(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
+        name == FULL_OPEN_CALL
+            && input
+                .as_object()
+                .is_some_and(|o| o.keys().all(|k| k == "url" || k == "with"))
+            && self.owner_wrote_url(ctx, input)
+    }
+
+    /// The `url` of the call is one the owner wrote in this chat (see [`Self::user_typed_url`]).
+    fn owner_wrote_url(&self, ctx: &RunCtx, input: &Value) -> bool {
         let parts = |u: &str| -> Option<UrlParts> {
             let url = url::Url::parse(u).ok()?;
             if !matches!(url.scheme(), "http" | "https") {
@@ -1828,9 +1864,16 @@ impl Shared {
         // A profile that may be signed in (a named one, or the default one after the owner
         // signed in there) keeps asking, like the Balanced lane does: signing in once is not a
         // per-call waiver. The public-web read tools never touch a browser profile.
-        // `desktop_open` shows a page in the system's own application, never in the bot's
-        // managed browser profile, so its sign-ins are not at stake.
-        if !web_read && name != FULL_OPEN_CALL && self.browser_may_hold_logins(ctx, input) {
+        // `desktop_open` is judged like `browser_open`, with no exemption. An address it opens
+        // goes to the computer's OWN browser, which holds the owner's cookies and sign-ins
+        // (the bot's managed browser is isolated): it asks, unless the owner typed that very
+        // address in this chat. The bot opens a page in its own managed browser with
+        // `browser_open`.
+        if !web_read
+            && (self.browser_may_hold_logins(ctx, input)
+                || (Self::opens_in_owners_browser(name, input)
+                    && !self.owner_typed_url(ctx, name, input)))
+        {
             return false;
         }
         if !self.full_input_is_plain(ctx, name, input) {
@@ -5010,6 +5053,9 @@ impl LoopGate {
             GateAuthorization {
                 expected_origin: origin,
                 unattended_mail: auto_reason.is_some_and(|r| r.starts_with("mode.full.")),
+                // A script's call never has the owner's-chat waiver of the bot tools: the loop's
+                // own tool call is the only place that sets it, so nothing here freezes a preview.
+                full_waived_preview: false,
                 payment: payment_page.map_or_else(
                     || {
                         if page_guard && sh.full_access(&ctx) {

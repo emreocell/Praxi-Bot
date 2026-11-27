@@ -12,12 +12,14 @@
 //!   user sees the complete resulting profile first, and no standing grant
 //!   ("always allow", "this chat") waives it. The one exception is decided by the loop, not
 //!   here: on the owner's own Full-level chat nothing asks but money, so the call arrives with
-//!   [`ToolContext::unattended_mail`] set and the tool freezes the preview itself before it
-//!   applies it (the host's rules are the same);
+//!   [`ToolContext::full_waived_preview`] set (a flag of its own, never `unattended_mail`) and
+//!   the tool freezes the preview itself before it applies it (the host's rules are the same).
+//!   Without a card and without that flag nothing froze a preview, and the host refuses;
 //! * the tools are visible only to bots whose profile enables them
 //!   (`tools.manage_bots`, the "Can create bots" switch) and to bots at the Full level, where
 //!   the loop offers them to the owner's own chat turns only (never to a schedule, a
-//!   mission, a channel, a subagent or a helper bot).
+//!   mission, a channel, a subagent or a helper bot, and not once the run read untrusted
+//!   content). Visibility is not an authorisation: the host decides again on every call.
 //!
 //! The tools use category `System` with effect `Write` (create / update) or
 //! `Destructive` (delete); never `Meta`, which the resolver always allows.
@@ -158,10 +160,16 @@ pub struct BotPreview {
 /// model.
 #[async_trait]
 pub trait BotHost: Send + Sync {
-    /// Whether `bot_id`'s profile may see the bot tools: the "Can create bots" switch or the
-    /// Full level (where the loop then offers them to the owner's own chat turns only; the
-    /// host checks the run again on every call). Fails closed.
+    /// Whether `bot_id`'s profile has the "Can create bots" switch. Fails closed.
     fn may_manage_bots(&self, bot_id: &str) -> bool;
+
+    /// Whether `bot_id`'s profile may SEE the bot tools: the switch, or the Full level (where
+    /// the loop offers them to the owner's own chat turns only). Visibility only, never an
+    /// authorisation: every call is judged again for its own run (the switch, or the owner's
+    /// own Full chat turn as the loop knows it). Fails closed.
+    fn may_see_bot_tools(&self, bot_id: &str) -> bool {
+        self.may_manage_bots(bot_id)
+    }
 
     /// The bots the caller can see.
     ///
@@ -340,7 +348,7 @@ impl Tool for BotTool {
     }
 
     fn visible_to(&self, bot_id: Option<&str>) -> bool {
-        bot_id.is_some_and(|b| self.host.may_manage_bots(b))
+        bot_id.is_some_and(|b| self.host.may_see_bot_tools(b))
     }
 
     fn always_ask(&self) -> bool {
@@ -375,15 +383,17 @@ impl Tool for BotTool {
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let who = caller(ctx)?;
-        if !self.host.may_manage_bots(&who.bot_id) {
+        if !self.host.may_see_bot_tools(&who.bot_id) {
             return Err(exec_err(
                 "bot management is not enabled for this bot; the user can turn on \"Can create bots\" in its settings",
             ));
         }
         let h = &self.host;
-        // The Full level admitted this call without a card, so nothing froze the preview the
-        // host applies: freeze it now. The host refuses what its ceiling forbids, as for a card.
-        if ctx.unattended_mail
+        // The loop admitted this call without a card because it is the owner's own Full chat
+        // turn, so nothing froze the preview the host applies: freeze it now. The host refuses
+        // what its ceiling forbids, as for a card. Only that flag does it: a call with no card
+        // and no flag has no frozen preview and the host refuses it.
+        if ctx.full_waived_preview
             && let Some(change) = self.change(&input)?
         {
             h.preview(&who, &change).await.map_err(exec_err)?;
@@ -595,7 +605,7 @@ mod tests {
     async fn a_call_admitted_without_a_card_previews_before_it_applies() {
         let host = on();
         let c = ToolContext {
-            unattended_mail: true,
+            full_waived_preview: true,
             ..ctx(Some("bot-a"))
         };
         tool(&host, "bot_create")
@@ -626,6 +636,32 @@ mod tests {
             .unwrap_err();
         assert!(e.to_string().contains("ceiling"), "{e}");
         assert!(!strict.calls.lock().iter().any(|l| l.starts_with("create")));
+    }
+
+    /// Only the loop's own flag freezes a preview. A call the Full level let through for another
+    /// reason (`unattended_mail` is on for every call of a Full run, a schedule's included) and a
+    /// call that went through a card get none from the tool: the host applies what a card froze,
+    /// and refuses a change nothing froze.
+    #[tokio::test]
+    async fn unattended_mail_alone_never_stands_in_for_a_preview() {
+        let host = on();
+        let c = ToolContext {
+            unattended_mail: true,
+            ..ctx(Some("bot-a"))
+        };
+        tool(&host, "bot_create")
+            .call(&c, json!({"name":"n","persona":"p"}))
+            .await
+            .unwrap();
+        tool(&host, "bot_delete")
+            .call(&c, json!({"id":"x"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            host.calls.lock().clone(),
+            ["create bot-a", "delete bot-a x"],
+            "no preview was frozen by the tool"
+        );
     }
 
     #[test]

@@ -10,9 +10,12 @@
 //!
 //! Never to a schedule, a mission session, a channel or webhook run, an external agent, a
 //! subagent or a helper bot: those are text no owner typed (or a run that acts for another bot).
-//! The host's ceiling (never broader than the caller, never `full`, only bots it made) is the
-//! same for both and is enforced in the daemon, which asks this module about the run again on
-//! every call.
+//! And never once the run holds untrusted content (a page, a mail, a download, another bot's
+//! answer): a text the owner did not write could steer a bot change, which is standing
+//! authority. The tools are then not in the list and a call is refused, so only the switch
+//! (with its card) is left. The host's ceiling (never broader than the caller, never `full`,
+//! only bots it made) is the same for both and is enforced in the daemon, which asks this
+//! module about the run again on every call.
 
 use builtin_tools::BOT_TOOL_NAMES;
 use protocol::InitiatorKind;
@@ -30,7 +33,9 @@ pub(crate) fn is_bot_tool(name: &str) -> bool {
 
 impl Shared {
     /// This run is the owner's own chat turn on a bot at the Full level: typed in the app (or the
-    /// owner's paired Telegram chat), every message of the run theirs, a top-level run.
+    /// owner's paired Telegram chat), every message of the run theirs, a top-level run that has
+    /// read nothing untrusted. A channel, webhook or external user's message is never the
+    /// owner's ([`Shared::full_owner_started`]).
     pub(crate) fn bot_tools_offered(&self, ctx: &RunCtx) -> bool {
         ctx.initiator == InitiatorKind::Human
             && ctx.mission.is_none()
@@ -38,6 +43,14 @@ impl Shared {
             && ctx.delegation().is_none()
             && ctx.profile.permissions.mode() == permission_engine::AutonomyMode::Full
             && self.full_owner_started(ctx)
+            && !ctx.taint.lock().exposure.untrusted
+    }
+
+    /// A bot tool call the Full level let through without a card, as the loop asks right before
+    /// it runs the call: it freezes the preview itself
+    /// ([`tool_registry::ToolContext::full_waived_preview`]). The same run test as the offer.
+    pub(crate) fn bot_preview_waived(&self, ctx: &RunCtx, name: &str) -> bool {
+        is_bot_tool(name) && self.bot_tools_offered(ctx)
     }
 
     /// Whether this run may see and call `name`: every tool but the bot tools always; those

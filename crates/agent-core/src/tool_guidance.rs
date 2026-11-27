@@ -145,9 +145,11 @@ say so.",
     }
     if f.open {
         out.push_str(
-            "\n- To show the user something you made (an HTML page, a PDF, a picture) or to open an address in this \
-computer's own browser, call desktop_open with `path` (a file in your workspace) or `url`, and `with` to pick chrome, \
-firefox or edge. Do not start a browser with shell_run or desktop_launch for that. Say it is open only when the result says it opened.",
+            "\n- To show the user something you made (an HTML page, a PDF, a picture), call desktop_open with `path` (a file \
+in your workspace), and `with` to pick chrome, firefox or edge. Do not start a browser with shell_run or desktop_launch \
+for that. Look at web pages in your own browser (browser_open); give desktop_open a `url` only when the user asked for \
+an address in their own browser (it holds their sign-ins, so it asks unless they typed that address). Say it is open \
+only when the result says it opened.",
         );
     }
     if f.bots {

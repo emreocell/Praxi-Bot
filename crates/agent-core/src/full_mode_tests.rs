@@ -605,24 +605,79 @@ async fn private_data_plus_untrusted_content_asks_for_a_url_with_a_private_token
     );
 }
 
-/// `desktop_open` follows the rule of `browser_open`: the owner's Full run opens an address or a
-/// file of its workspace after reading a page without a card, a private word in the address
-/// asks once the run holds private data and untrusted content, and no other level or initiator
-/// gets the waiver.
+/// `desktop_open` is judged like `browser_open`, with no exemption. A file of the bot's workspace
+/// opens without a card in the owner's Full run, also after reading a page. An ADDRESS lands in
+/// the computer's own browser, where the owner is signed in: it asks, in a clean run and after a
+/// read, unless the owner typed that very address; the same private-word, local-address and level
+/// rules as `browser_open` still apply, and no other level or initiator gets the waiver.
 #[tokio::test]
-async fn desktop_open_follows_the_rule_of_browser_open_in_full() {
+async fn desktop_open_is_judged_like_browser_open_in_full() {
     let page = (
         "desktop_open",
         json!({"path": "kralinho.html", "with": "chrome"}),
     );
     let site = ("desktop_open", json!({"url": "https://medium.com/"}));
-    // the run read the owner's site (untrusted) first
+    // the run read the owner's site (untrusted) first: the file opens, the address the owner
+    // never typed asks
+    assert_eq!(card(Case::full(), std::slice::from_ref(&page)).await, None);
     assert_eq!(
-        card(Case::full(), &[page.clone(), site.clone()]).await,
-        None
+        card(Case::full(), &[page.clone(), site.clone()])
+            .await
+            .as_deref(),
+        Some("desktop_open")
     );
-    // private data in the run: a new site without a private word is fine, a private word asks
-    assert_eq!(card(private(), std::slice::from_ref(&site)).await, None);
+    // the same in a clean run: Full does not let the model open a site in the owner's browser
+    let mut clean = Case::full();
+    clean.prelude = false;
+    assert_eq!(
+        card(clean, std::slice::from_ref(&site)).await.as_deref(),
+        Some("desktop_open")
+    );
+    // an address the owner typed, as typed, opens without a card (with or without a browser name)
+    for call in [
+        site.clone(),
+        (
+            "desktop_open",
+            json!({"url": "https://medium.com/", "with": "firefox"}),
+        ),
+    ] {
+        let mut typed = Case::full();
+        typed.said = "medium.com sayfasini tarayicimda ac: https://medium.com/ lutfen";
+        assert_eq!(card(typed, &[page.clone(), call]).await, None);
+    }
+    // another address than the typed one, one with a path or query added, a smuggled field
+    for url in [
+        "https://medium.com/@someone",
+        "https://medium.com/?q=x",
+        "https://evil.example/",
+    ] {
+        let mut typed = Case::full();
+        typed.said = "medium.com sayfasini tarayicimda ac: https://medium.com/ lutfen";
+        assert_eq!(
+            card(typed, &[("desktop_open", json!({ "url": url }))])
+                .await
+                .as_deref(),
+            Some("desktop_open"),
+            "{url}"
+        );
+    }
+    // the managed browser's own sign-ins are judged as for browser_open (a named profile)
+    let mut typed = Case::full();
+    typed.said = "https://medium.com/";
+    assert_eq!(
+        card(
+            typed,
+            &[(
+                "desktop_open",
+                json!({"url": "https://medium.com/", "profile": "work"})
+            )]
+        )
+        .await
+        .as_deref(),
+        Some("desktop_open"),
+        "an unknown field is no plain open"
+    );
+    // private data in the run: a private word in the address asks
     assert_eq!(
         card(
             private(),
@@ -635,7 +690,7 @@ async fn desktop_open_follows_the_rule_of_browser_open_in_full() {
         .as_deref(),
         Some("desktop_open")
     );
-    // an address on this machine's own network is not the public web: it asks, as browser_open does
+    // an address on this machine's own network is not the public web: it asks
     assert_eq!(
         card(
             Case::full(),

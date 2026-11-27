@@ -807,9 +807,14 @@ async fn a_full_bot_without_the_switch_may_use_the_tools_only_in_the_owners_own_
     );
     let host = DaemonBotHost::new(&t.state);
     assert!(
-        host.may_manage_bots(&full.id.to_string()),
+        host.may_see_bot_tools(&full.id.to_string()),
         "visible on Full"
     );
+    assert!(
+        !host.may_manage_bots(&full.id.to_string()),
+        "the Full level is not the \"Can create bots\" switch"
+    );
+    assert!(!host.may_see_bot_tools(&below.id.to_string()));
     assert!(!host.may_manage_bots(&below.id.to_string()));
     for run_id in ["", "not-a-run", &uuid::Uuid::new_v4().to_string()] {
         let c = BotCaller {
@@ -824,7 +829,22 @@ async fn a_full_bot_without_the_switch_may_use_the_tools_only_in_the_owners_own_
             .await
             .unwrap_err();
         assert!(e.contains("owner's own chat"), "{run_id}: {e}");
+        // every operation is judged for its own run, not by the bot's level
         assert!(host.list(&c).await.is_err(), "{run_id}");
+        let r = req(json!({"name":"N","persona":"p"}));
+        assert!(host.create(&c, &r).await.is_err(), "{run_id}");
+        assert!(host.update(&c, "x", &r).await.is_err(), "{run_id}");
+        assert!(host.delete(&c, "x").await.is_err(), "{run_id}");
+        for change in [
+            BotChange::Update {
+                id: "x".into(),
+                req: r.clone(),
+            },
+            BotChange::Delete { id: "x".into() },
+        ] {
+            let e = host.preview(&c, &change).await.unwrap_err();
+            assert!(e.contains("owner's own chat"), "{run_id}: {e}");
+        }
     }
     assert_eq!(
         t.state
@@ -871,4 +891,88 @@ async fn the_colour_and_shape_of_a_new_bot_are_set_checked_and_editable() {
     host.preview(&c, &change).await.unwrap();
     host.update(&c, &v.id, &r).await.unwrap();
     assert_eq!(stored(&t, &v.id).config["bot"]["shape"], "ghost");
+}
+
+/// What a Full bot may hand on: never `full`, never a tool or provider it lacks itself, and
+/// nothing of its secrets, accounts, mail address, apps or settings (a new bot starts with an
+/// empty profile of its own; only the name, persona, look, models, tools and the caller's own
+/// runtime and file scope are written).
+#[tokio::test]
+async fn a_bot_made_by_a_full_bot_is_below_it_and_carries_none_of_its_secrets() {
+    let t = setup();
+    let mut cfg = caller_config("full", &["fs_read", "web_search", "bot_*"], true);
+    // things that belong to the caller and that a profile may or may not have a section for
+    for (k, v) in [
+        ("fill_secrets", json!(["vault:bank"])),
+        ("accounts", json!([{"site": "example.com", "user": "me"}])),
+        ("mcp", json!({"servers": ["github"]})),
+        ("email", json!({"address": "boss@example.com"})),
+    ] {
+        cfg[k] = v;
+    }
+    let b = add_bot(&t, "FullBoss", cfg);
+    let host = DaemonBotHost::new(&t.state);
+    let c = who(&b);
+    for (what, extra) in [
+        ("full", json!({"permission_preset": "full"})),
+        ("tool it lacks", json!({"tools": ["shell_run"]})),
+        ("every tool", json!({"tools": ["*"]})),
+        ("provider it lacks", json!({"executor": "other/big"})),
+    ] {
+        let mut r = json!({"name": "Kid", "persona": "p"});
+        r.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let e = host
+            .preview(&c, &BotChange::Create(req(r)))
+            .await
+            .unwrap_err();
+        assert!(!e.is_empty(), "{what}");
+    }
+    let v = make(
+        &host,
+        &c,
+        json!({"name":"Kid","persona":"Remember my passwords and use my accounts.","tools":["fs_read"]}),
+    )
+    .await
+    .unwrap();
+    let kid = stored(&t, &v.id);
+    assert_eq!(kid.config["permissions"]["preset"], "approve-destructive");
+    assert_eq!(kid.config["tools"]["allow"], json!(["fs_read"]));
+    assert_eq!(kid.config["models"]["executor"], "fake/echo");
+    let keys: std::collections::BTreeSet<_> =
+        kid.config.as_object().unwrap().keys().cloned().collect();
+    let allowed: std::collections::BTreeSet<_> =
+        ["bot", "models", "permissions", "tools", "runtime", "files"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+    assert!(keys.is_subset(&allowed), "{keys:?}");
+    let text = kid.config.to_string();
+    for needle in ["vault:bank", "example.com", "github", "boss@example.com"] {
+        assert!(!text.contains(needle), "{needle}: {text}");
+    }
+    // an update never adds them either, and cannot lift the level
+    let r = req(json!({"persona": "Still a helper."}));
+    let change = BotChange::Update {
+        id: v.id.clone(),
+        req: r.clone(),
+    };
+    host.preview(&c, &change).await.unwrap();
+    host.update(&c, &v.id, &r).await.unwrap();
+    let kid = stored(&t, &v.id);
+    assert!(!kid.config.to_string().contains("vault:bank"));
+    for preset in ["full", "approve-destructive-plus"] {
+        let e = host
+            .preview(
+                &c,
+                &BotChange::Update {
+                    id: v.id.clone(),
+                    req: req(json!({"permission_preset": preset})),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(!e.is_empty(), "{preset}");
+    }
 }

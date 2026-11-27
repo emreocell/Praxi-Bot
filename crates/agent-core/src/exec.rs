@@ -2242,6 +2242,9 @@ impl TurnExecutor {
                                 expected_origin: class.page_origin.clone(),
                                 unattended_mail: auto_reason
                                     .is_some_and(|r| r.starts_with("mode.full.")),
+                                full_waived_preview: auto_reason
+                                    .is_some_and(|r| r.starts_with("mode.full."))
+                                    && self.sh.bot_preview_waived(ctx_ref, &tool.spec().name),
                                 payment,
                             },
                         )
@@ -2595,6 +2598,7 @@ impl TurnExecutor {
                     exposure_untrusted: exposure.untrusted,
                     expected_origin: authorization.expected_origin,
                     unattended_mail: authorization.unattended_mail,
+                    full_waived_preview: authorization.full_waived_preview,
                     payment: authorization.payment,
                     exposure_private: exposure.private,
                     control_guard,
