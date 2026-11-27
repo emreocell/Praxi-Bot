@@ -1066,7 +1066,6 @@
     "needsAttention": "À vérifier",
     "noProvidersBody": "Connectez un fournisseur dans Réglages → Modèles d'IA pour choisir un modèle ici.",
     "noProvidersTitle": "Aucun fournisseur d'IA n'est connecté",
-    "personaHint": "Envoyée au modèle comme instruction permanente du bot.",
     "pickModel": "Choisir un modèle",
     "problem": {
       "customInvalid": "Un identifiant de modèle personnalisé n'est pas encore valide (Avancé).",
@@ -1089,8 +1088,7 @@
       "identity": "Identité",
       "limits": "Limites",
       "models": "Modèles",
-      "permissions": "Permissions",
-      "skills": "Compétences"
+      "permissions": "Permissions"
     },
     "sectionHint": {
       "advanced": "Identifiants de modèle personnalisés, lieu d'exécution du bot et suppression.",
@@ -1098,8 +1096,7 @@
       "identity": "Nom, apparence et personnalité.",
       "limits": "Combien ce bot peut dépenser par jour, par semaine et par mois.",
       "models": "Quel modèle fait le travail, et lesquels l'aident.",
-      "permissions": "Ce que le bot peut faire sans vous demander.",
-      "skills": "Les compétences partagées proposées à ce bot."
+      "permissions": "Ce que le bot peut faire sans vous demander."
     },
     "sections": "Sections",
     "skillsFailed": "Le bot a été enregistré, mais pas ses compétences : {{detail}}",
@@ -1268,9 +1265,7 @@
       "executor": "Exécuteur",
       "fallback": "Modèles de secours",
       "planner": "Planificateur"
-    },
-    "runtime": "Ordinateur et navigateur",
-    "runtimeHint": "Seule cette machine est prise en charge pour l'instant."
+    }
   },
   "botLimits": {
     "card": {
@@ -4622,8 +4617,6 @@
       "off": "N'apprend rien, ne retient rien et n'a aucun outil de mémoire. Les souvenirs existants restent stockés mais ne sont pas utilisés.",
       "on": "Apprend de ce que vous dites. Tout ce qu'il récupère depuis des pages web, des fichiers ou des outils attend d'abord votre accord."
     },
-    "sectionHint": "Choisissez si ce bot apprend de vos conversations et utilise ce qu'il a appris.",
-    "sectionTitle": "Mémoire",
     "share": "Partager ce que j'apprends avec mes autres bots",
     "shareHint": "Activé : les faits vous concernant et les événements passés sont disponibles pour tous vos bots. Désactivé : ce bot garde pour lui tout ce qu'il apprend.",
     "title": "Mémoire"

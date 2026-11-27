@@ -112,7 +112,7 @@ export async function performEditorSave(i: EditorSaveInput): Promise<EditorSaveO
   if (i.skills.payload && exceedsSkillLimit(i.skills.payload)) {
     return {
       kind: "blocked",
-      section: "skills",
+      section: "apps",
       message: { key: "bots.skills.tooMany", params: { max: MAX_ASSIGNED_SKILLS } }
     };
   }

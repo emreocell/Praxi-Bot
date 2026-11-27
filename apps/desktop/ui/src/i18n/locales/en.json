@@ -1141,6 +1141,18 @@
   },
   "botEdit": {
     "addFallback": "Add a fallback",
+    "allSaved": "No unsaved changes",
+    "appGroup": {
+      "browser": "Use a web browser",
+      "communication": "Read and send messages and mail",
+      "data": "Query databases",
+      "developer": "Work on code and projects",
+      "files": "Open and change files",
+      "home": "Control the smart home",
+      "other": "Other apps",
+      "productivity": "Manage calendars, notes and tasks",
+      "search": "Search the web"
+    },
     "appsLoading": "Loading apps…",
     "appsNoneBody": "Connect an app from the Apps screen, then choose here which bots may use it.",
     "categories": "Per category",
@@ -1187,14 +1199,42 @@
     "fallbackCustom": "Other model id",
     "fallbackCustomHint": "Any model id as provider/model, even one that is not listed. Separate several with commas.",
     "fallbackHint": "Tried in this order when the main model is unavailable.",
+    "instructions": {
+      "addExample": "Add an example:",
+      "examples": {
+        "coding": {
+          "label": "Coding",
+          "text": "You help me with code. Read the project before changing it, keep changes small, run the tests and explain in plain words what you changed and why."
+        },
+        "inbox": {
+          "label": "Inbox",
+          "text": "You look after my inbox. Every morning sort new mail into urgent, to answer and can wait. Draft short, polite replies in my tone."
+        },
+        "research": {
+          "label": "Research",
+          "text": "You research topics for me. Look at several reliable sources, compare what they say and give me a short summary with links. Say clearly when something is uncertain."
+        },
+        "writing": {
+          "label": "Writing",
+          "text": "You help me write. Keep my voice, use short sentences and plain words, and give me two options when the tone could go either way."
+        }
+      },
+      "hint": "Write it like a note to a new teammate. The bot reads it before every task.",
+      "label": "Instructions",
+      "placeholder": "For example: You help me run my online shop. Answer customer mail in a short, friendly tone, check stock before promising a date, and ask me before giving a discount.",
+      "startFrom": "Start from an example:"
+    },
     "keepEditing": "Keep editing",
     "look": "Look",
     "mainModel": "Main model",
     "needsAttention": "Needs attention",
     "noProvidersBody": "Connect a provider in Settings → AI to choose a model here.",
     "noProvidersTitle": "No AI provider is connected",
-    "personaHint": "Sent to the model as the bot's standing instruction.",
+    "pageHint": "Everything about this bot on one page. Memory saves as you change it and spending limits have their own Save button; everything else is saved with Save below.",
     "pickModel": "Choose a model",
+    "placeBrowserHint": "Where it opens web pages.",
+    "placeComputerHint": "Where it runs commands and opens files.",
+    "placeHint": "To add a server or another computer, open Settings → Connections.",
     "problem": {
       "customInvalid": "A custom model id is not valid yet (Advanced).",
       "executorMissing": "Choose a main model to save.",
@@ -1209,27 +1249,35 @@
     },
     "sameAsMain": "Same as main model",
     "saved": "{{name}} was saved.",
+    "savedOnChange": "Saved as you change it",
+    "savedOwnButton": "Saved with its own button",
     "saving": "Saving…",
     "section": {
       "advanced": "Advanced",
-      "apps": "Apps",
+      "apps": "Tools and apps",
       "identity": "Identity",
-      "limits": "Limits",
-      "models": "Models",
-      "permissions": "Permissions",
-      "skills": "Skills"
+      "instructions": "What it should do",
+      "limits": "Spending limits",
+      "memory": "Memory",
+      "models": "Model",
+      "permissions": "Access",
+      "place": "Where it runs"
     },
     "sectionHint": {
-      "advanced": "Custom model ids, where the bot runs, and deleting it.",
-      "apps": "The connected apps this bot may use.",
-      "identity": "Name, look and personality.",
-      "limits": "How much this bot may spend per day, week and month.",
-      "models": "Which model does the work, and which ones help.",
-      "permissions": "What the bot may do without asking you.",
-      "skills": "The shared skills this bot is offered."
+      "advanced": "Sharing, custom model ids and deleting the bot.",
+      "apps": "The apps and skills it may use, grouped by what they let it do.",
+      "identity": "Name, look and voice.",
+      "instructions": "Its standing instruction: who it helps, what it does and how it answers.",
+      "limits": "How much it may spend per day, week and month.",
+      "memory": "Whether it learns from your chats and uses what it learned.",
+      "models": "Which AI does the work, and which ones step in.",
+      "permissions": "How much it may do without asking you.",
+      "place": "The computer and the browser it works on."
     },
     "sections": "Sections",
     "skillsFailed": "The bot was saved, but its skills were not: {{detail}}",
+    "skillsHint": "Shared know-how this bot is offered.",
+    "skillsTitle": "Skills",
     "target": {
       "auto": "Automatic",
       "browser": "Browser",
@@ -1238,7 +1286,8 @@
       "pc": "This computer",
       "server": "Paired server (browser only)"
     },
-    "unsaved": "Unsaved changes"
+    "unsaved": "Unsaved changes",
+    "unsavedIn": "Unsaved changes: {{sections}}"
   },
   "botEmpty": {
     "body": "Nothing here yet. Ask for something, and the conversation will open in this space.",
@@ -1395,9 +1444,7 @@
       "executor": "Executor",
       "fallback": "Fallback models",
       "planner": "Planner"
-    },
-    "runtime": "Computer & browser",
-    "runtimeHint": "Only this machine is supported for now."
+    }
   },
   "botLimits": {
     "card": {
@@ -4848,8 +4895,6 @@
       "off": "Remembers nothing new and uses nothing saved.",
       "on": "Learns from your chats; asks first about anything from outside."
     },
-    "sectionHint": "Choose whether this bot learns from your chats and uses what it learned.",
-    "sectionTitle": "Memory",
     "share": "Share what I learn with my other bots",
     "shareHint": "On: all your bots know what this bot learns about you. Off: it keeps it to itself.",
     "title": "Memory"

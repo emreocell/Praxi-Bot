@@ -1141,6 +1141,18 @@
   },
   "botEdit": {
     "addFallback": "Añadir modelo de respaldo",
+    "allSaved": "No unsaved changes",
+    "appGroup": {
+      "browser": "Use a web browser",
+      "communication": "Read and send messages and mail",
+      "data": "Query databases",
+      "developer": "Work on code and projects",
+      "files": "Open and change files",
+      "home": "Control the smart home",
+      "other": "Other apps",
+      "productivity": "Manage calendars, notes and tasks",
+      "search": "Search the web"
+    },
     "appsLoading": "Cargando aplicaciones…",
     "appsNoneBody": "Conecta una app en la pantalla Aplicaciones y elige aquí qué bots pueden usarla.",
     "categories": "Por categoría",
@@ -1187,14 +1199,42 @@
     "fallbackCustom": "Otro ID de modelo",
     "fallbackCustomHint": "Escribe cualquier ID con el formato provider/model, aunque no aparezca en la lista. Separa varios IDs con comas.",
     "fallbackHint": "Si el modelo principal no está disponible, se prueban en este orden.",
+    "instructions": {
+      "addExample": "Add an example:",
+      "examples": {
+        "coding": {
+          "label": "Coding",
+          "text": "You help me with code. Read the project before changing it, keep changes small, run the tests and explain in plain words what you changed and why."
+        },
+        "inbox": {
+          "label": "Inbox",
+          "text": "You look after my inbox. Every morning sort new mail into urgent, to answer and can wait. Draft short, polite replies in my tone."
+        },
+        "research": {
+          "label": "Research",
+          "text": "You research topics for me. Look at several reliable sources, compare what they say and give me a short summary with links. Say clearly when something is uncertain."
+        },
+        "writing": {
+          "label": "Writing",
+          "text": "You help me write. Keep my voice, use short sentences and plain words, and give me two options when the tone could go either way."
+        }
+      },
+      "hint": "Write it like a note to a new teammate. The bot reads it before every task.",
+      "label": "Instructions",
+      "placeholder": "For example: You help me run my online shop. Answer customer mail in a short, friendly tone, check stock before promising a date, and ask me before giving a discount.",
+      "startFrom": "Start from an example:"
+    },
     "keepEditing": "Seguir editando",
     "look": "Apariencia",
     "mainModel": "Modelo principal",
     "needsAttention": "Requiere atención",
     "noProvidersBody": "Conecta un proveedor en Ajustes → IA para poder elegir un modelo aquí.",
     "noProvidersTitle": "No hay ningún proveedor de IA conectado",
-    "personaHint": "El modelo recibe este texto como instrucción permanente del bot.",
+    "pageHint": "Everything about this bot on one page. Memory saves as you change it and spending limits have their own Save button; everything else is saved with Save below.",
     "pickModel": "Elegir un modelo",
+    "placeBrowserHint": "Where it opens web pages.",
+    "placeComputerHint": "Where it runs commands and opens files.",
+    "placeHint": "To add a server or another computer, open Settings → Connections.",
     "problem": {
       "customInvalid": "Hay un ID de modelo personalizado que aún no es válido (Avanzado).",
       "executorMissing": "Elige un modelo principal para guardar.",
@@ -1209,27 +1249,35 @@
     },
     "sameAsMain": "Igual que el modelo principal",
     "saved": "Se guardó el bot {{name}}.",
+    "savedOnChange": "Saved as you change it",
+    "savedOwnButton": "Saved with its own button",
     "saving": "Guardando…",
     "section": {
       "advanced": "Avanzado",
       "apps": "Aplicaciones",
       "identity": "Identidad",
+      "instructions": "What it should do",
       "limits": "Límites",
+      "memory": "Memory",
       "models": "Modelos",
       "permissions": "Permisos",
-      "skills": "Habilidades"
+      "place": "Where it runs"
     },
     "sectionHint": {
       "advanced": "IDs de modelos personalizados, dónde se ejecuta el bot y cómo eliminarlo.",
       "apps": "Las apps conectadas que puede usar este bot.",
       "identity": "Nombre, apariencia y personalidad.",
+      "instructions": "Its standing instruction: who it helps, what it does and how it answers.",
       "limits": "Cuánto puede gastar este bot por día, semana y mes.",
+      "memory": "Whether it learns from your chats and uses what it learned.",
       "models": "Qué modelo hace el trabajo y cuáles lo ayudan.",
       "permissions": "Qué puede hacer el bot sin pedirte permiso.",
-      "skills": "Qué habilidades compartidas puede usar este bot."
+      "place": "The computer and the browser it works on."
     },
     "sections": "Secciones",
     "skillsFailed": "El bot se guardó, pero sus habilidades no: {{detail}}",
+    "skillsHint": "Shared know-how this bot is offered.",
+    "skillsTitle": "Skills",
     "target": {
       "auto": "Automático",
       "browser": "Navegador",
@@ -1238,7 +1286,8 @@
       "pc": "Este equipo",
       "server": "Servidor vinculado (solo navegador)"
     },
-    "unsaved": "Cambios sin guardar"
+    "unsaved": "Cambios sin guardar",
+    "unsavedIn": "Unsaved changes: {{sections}}"
   },
   "botEmpty": {
     "body": "Aún no hay nada aquí. Pide algo y la conversación se abrirá en este espacio.",
@@ -1395,9 +1444,7 @@
       "executor": "Ejecutor",
       "fallback": "Modelos de respaldo",
       "planner": "Planificador"
-    },
-    "runtime": "Equipo y navegador",
-    "runtimeHint": "Por ahora solo se admite este equipo."
+    }
   },
   "botLimits": {
     "card": {
@@ -4848,8 +4895,6 @@
       "off": "El bot deja de aprender, recordar y usar herramientas de memoria. Los recuerdos existentes se conservan, pero el bot no los usa.",
       "on": "El bot aprende de lo que le dices. Para usar lo que encuentre en páginas web, archivos o herramientas, primero te pide permiso."
     },
-    "sectionHint": "Elige si este bot aprende de tus chats y usa lo que aprendió.",
-    "sectionTitle": "Memoria",
     "share": "Compartir lo que aprendo con mis otros bots",
     "shareHint": "Si activas esta opción, todos tus bots tendrán acceso a los datos sobre ti y sobre sucesos pasados. Si la desactivas, este bot se queda con todo lo que aprende.",
     "title": "Memoria"

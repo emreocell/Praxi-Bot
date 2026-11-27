@@ -44,7 +44,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "lib/liveViewToolbar.ts": "live view toolbar keys (F, Ctrl+Shift+D), listed in the viewer's own ? popover",
   "lib/liveViewLayers.ts": "layer routing for the live view",
   "overlay/events.ts": "stop hotkey formatting (documented as the stop entry)",
-  "views/BotEditModal.tsx": "arrow keys on editor section tabs",
+  "views/BotEditModal.tsx": "a key press inside the page hands the section highlight back to the scroll position",
   "views/NotificationHistoryView.tsx": "Up/Down (or j/k) moves between inbox entries; the buttons keep Enter and Space",
   "views/SchedulesView.tsx": "arrow, Home, and End navigation inside the schedule calendar grid",
   "views/SettingsModal.tsx": "arrow, Home, and End navigation across settings section tabs",

@@ -1141,6 +1141,18 @@
   },
   "botEdit": {
     "addFallback": "Yedek ekle",
+    "allSaved": "Kaydedilmemiş değişiklik yok",
+    "appGroup": {
+      "browser": "Web tarayıcısı kullanır",
+      "communication": "Mesaj ve e-posta okur, gönderir",
+      "data": "Veritabanlarını sorgular",
+      "developer": "Kod ve projeler üzerinde çalışır",
+      "files": "Dosya açar ve değiştirir",
+      "home": "Akıllı evi yönetir",
+      "other": "Diğer uygulamalar",
+      "productivity": "Takvim, not ve görevleri yönetir",
+      "search": "Web’de arama yapar"
+    },
     "appsLoading": "Uygulamalar yükleniyor…",
     "appsNoneBody": "Uygulamalar ekranından bir uygulama bağla, sonra hangi botların kullanacağını buradan seç.",
     "categories": "Kategoriye göre",
@@ -1187,14 +1199,42 @@
     "fallbackCustom": "Başka model kimliği",
     "fallbackCustomHint": "Listede olmasa bile provider/model biçiminde herhangi bir model kimliği. Birden fazlasını virgülle ayır.",
     "fallbackHint": "Ana model kullanılamadığında bu sırayla denenir.",
+    "instructions": {
+      "addExample": "Örnek ekle:",
+      "examples": {
+        "coding": {
+          "label": "Kodlama",
+          "text": "Kodda bana yardım ediyorsun. Değiştirmeden önce projeyi oku, değişiklikleri küçük tut, testleri çalıştır ve neyi neden değiştirdiğini sade bir dille anlat."
+        },
+        "inbox": {
+          "label": "Gelen kutusu",
+          "text": "Gelen kutuma bakıyorsun. Her sabah yeni e-postaları acil, yanıtlanacak ve bekleyebilir diye ayır. Kısa ve kibar yanıt taslaklarını benim üslubumla hazırla."
+        },
+        "research": {
+          "label": "Araştırma",
+          "text": "Benim için konuları araştırıyorsun. Birkaç güvenilir kaynağa bak, söylediklerini karşılaştır ve bağlantılarla kısa bir özet ver. Emin olmadığın bir şey varsa bunu açıkça söyle."
+        },
+        "writing": {
+          "label": "Yazı",
+          "text": "Yazmama yardım ediyorsun. Benim üslubumu koru, kısa cümleler ve sade kelimeler kullan, ton iki yöne de gidebiliyorsa bana iki seçenek sun."
+        }
+      },
+      "hint": "Yeni bir ekip arkadaşına not yazar gibi yaz. Bot her işten önce bunu okur.",
+      "label": "Talimatlar",
+      "placeholder": "Örneğin: Çevrimiçi mağazamı yönetmeme yardım ediyorsun. Müşteri e-postalarını kısa ve samimi yanıtla, tarih vermeden önce stoğu kontrol et, indirim yapmadan önce bana sor.",
+      "startFrom": "Bir örnekle başla:"
+    },
     "keepEditing": "Düzenlemeye devam et",
     "look": "Görünüm",
     "mainModel": "Ana model",
     "needsAttention": "Düzeltilmesi gerekiyor",
     "noProvidersBody": "Burada model seçebilmek için Ayarlar → Yapay zekâ bölümünden bir sağlayıcı bağla.",
     "noProvidersTitle": "Bağlı bir yapay zekâ sağlayıcısı yok",
-    "personaHint": "Modele botun kalıcı talimatı olarak gönderilir.",
+    "pageHint": "Bu botla ilgili her şey tek sayfada. Bellek değiştirince hemen kaydedilir, harcama limitlerinin kendi Kaydet düğmesi var; gerisi aşağıdaki Kaydet ile kaydedilir.",
     "pickModel": "Model seç",
+    "placeBrowserHint": "Web sayfalarını açtığı yer.",
+    "placeComputerHint": "Komut çalıştırdığı ve dosya açtığı yer.",
+    "placeHint": "Sunucu ya da başka bir bilgisayar eklemek için Ayarlar → Bağlantılar’ı aç.",
     "problem": {
       "customInvalid": "Özel bir model kimliği henüz geçerli değil (Gelişmiş).",
       "executorMissing": "Kaydetmek için bir ana model seç.",
@@ -1209,27 +1249,35 @@
     },
     "sameAsMain": "Ana modelle aynı",
     "saved": "{{name}} kaydedildi.",
+    "savedOnChange": "Değiştirince kaydedilir",
+    "savedOwnButton": "Kendi düğmesiyle kaydedilir",
     "saving": "Kaydediliyor…",
     "section": {
       "advanced": "Gelişmiş",
-      "apps": "Uygulamalar",
+      "apps": "Araçlar ve uygulamalar",
       "identity": "Kimlik",
-      "limits": "Limitler",
-      "models": "Modeller",
-      "permissions": "İzinler",
-      "skills": "Beceriler"
+      "instructions": "Ne yapmalı",
+      "limits": "Harcama limitleri",
+      "memory": "Bellek",
+      "models": "Model",
+      "permissions": "Erişim",
+      "place": "Nerede çalışır"
     },
     "sectionHint": {
-      "advanced": "Özel model kimlikleri, botun çalıştığı yer ve silme.",
-      "apps": "Bu botun kullanabileceği bağlı uygulamalar.",
-      "identity": "Ad, görünüm ve kişilik.",
-      "limits": "Bu botun günde, haftada ve ayda en fazla ne kadar harcayabileceği.",
-      "models": "İşi hangi model yapar, hangileri yardım eder.",
-      "permissions": "Bot sana sormadan neler yapabilir.",
-      "skills": "Bu bota sunulan ortak beceriler."
+      "advanced": "Paylaşma, özel model kimlikleri ve botu silme.",
+      "apps": "Kullanabileceği uygulamalar ve beceriler, ne yapmasına izin verdiklerine göre gruplu.",
+      "identity": "Ad, görünüm ve ses.",
+      "instructions": "Kalıcı talimatı: kime yardım eder, ne yapar, nasıl yanıt verir.",
+      "limits": "Günde, haftada ve ayda en fazla ne kadar harcayabileceği.",
+      "memory": "Sohbetlerinden öğrenip öğrendiklerini kullanıp kullanmayacağı.",
+      "models": "İşi hangi yapay zekâ yapar, hangileri devreye girer.",
+      "permissions": "Sana sormadan ne kadarını yapabilir.",
+      "place": "Üzerinde çalıştığı bilgisayar ve tarayıcı."
     },
     "sections": "Bölümler",
     "skillsFailed": "Bot kaydedildi ama becerileri kaydedilemedi: {{detail}}",
+    "skillsHint": "Bu bota sunulan ortak beceriler.",
+    "skillsTitle": "Beceriler",
     "target": {
       "auto": "Otomatik",
       "browser": "Tarayıcı",
@@ -1238,7 +1286,8 @@
       "pc": "Bu bilgisayar",
       "server": "Eşleşmiş sunucu (yalnızca tarayıcı)"
     },
-    "unsaved": "Kaydedilmemiş değişiklikler"
+    "unsaved": "Kaydedilmemiş değişiklikler",
+    "unsavedIn": "Kaydedilmemiş değişiklikler: {{sections}}"
   },
   "botEmpty": {
     "body": "Burada henüz bir şey yok. Bir şey iste, sohbet bu alanda açılsın.",
@@ -1395,9 +1444,7 @@
       "executor": "Yürütücü",
       "fallback": "Yedek modeller",
       "planner": "Planlayıcı"
-    },
-    "runtime": "Bilgisayar ve tarayıcı",
-    "runtimeHint": "Şimdilik yalnızca bu makine desteklenir."
+    }
   },
   "botLimits": {
     "card": {
@@ -4848,8 +4895,6 @@
       "off": "Yeni bir şey hatırlamaz, kayıtlı olanları kullanmaz.",
       "on": "Sohbetlerinden öğrenir; dışarıdan gelen bilgiler için önce sorar."
     },
-    "sectionHint": "Bu botun sohbetlerinden öğrenip öğrenmeyeceğini ve öğrendiklerini kullanıp kullanmayacağını seç.",
-    "sectionTitle": "Bellek",
     "share": "Öğrendiklerimi diğer botlarımla paylaş",
     "shareHint": "Açık: bu botun senin hakkında öğrendiklerini tüm botların bilir. Kapalı: kendine saklar.",
     "title": "Bellek"

@@ -1,16 +1,21 @@
 import {
   AppWindow,
-  Gauge,
+  BookOpenText,
   BrainCircuit,
+  CircleCheck,
+  Download,
+  Gauge,
+  MessageSquareText,
+  MonitorSmartphone,
   Plus,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   UserRound
 } from "lucide-react";
 import {
-  type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
+  type ReactNode,
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -25,8 +30,11 @@ import {
   AppFields,
   IdentityFields,
   ModelFields,
-  PermissionFields
+  PermissionFields,
+  PlaceFields
 } from "../components/BotEditorFields";
+import { BotInstructionsField } from "../components/BotInstructionsField";
+import { BotMemorySettings } from "../components/BotMemorySettings";
 import {
   Callout,
   ConfirmDialog,
@@ -49,7 +57,8 @@ import {
   deleteBlock,
   dirtySections,
   editorProblems,
-  stepSection
+  SEPARATE_SAVE,
+  sectionAtScroll
 } from "../lib/botEditor";
 import { botChats } from "../lib/botLanding";
 import { type BotDraft, draftFromBot, formatModelRef, runtimeTargetLabel } from "../lib/botProfile";
@@ -65,37 +74,27 @@ import { useServiceState } from "../state/ServiceState";
 import { saveTextFile } from "../lib/profileShare";
 import { HomeHint } from "../components/HomeHint";
 
-/** The section list turns into a horizontal strip at this width (see the stylesheet). */
-const STRIP_QUERY = "(width <= 52em)";
-
-function useHorizontalTabs(): boolean {
-  const [strip, setStrip] = useState(
-    () => typeof window !== "undefined" && window.matchMedia?.(STRIP_QUERY).matches === true
-  );
-  useEffect(() => {
-    const mq = window.matchMedia?.(STRIP_QUERY);
-    if (!mq) return undefined;
-    const on = () => setStrip(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return strip;
-}
-
 const SECTION_ICONS: Record<BotEditorSection, typeof UserRound> = {
   identity: UserRound,
+  instructions: MessageSquareText,
   models: BrainCircuit,
+  place: MonitorSmartphone,
   permissions: ShieldCheck,
-  skills: Sparkles,
   apps: AppWindow,
+  memory: BookOpenText,
   limits: Gauge,
   advanced: SlidersHorizontal
 };
 
+/** Where `el` starts inside the scrolling `body`, in the body's scroll coordinates. */
+function topIn(body: HTMLElement, el: HTMLElement): number {
+  return el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+}
+
 /**
- * "Edit bot" as a dialog (owner feedback 244, point 5): sections on the left, one scrolling
- * body, Cancel / Save always in view.  Replaces the full-page form.
+ * "Edit bot" as one page (owner feedback 244, point 5; redesign ux5): every section stacked in
+ * one scrolling body, a jump list on the left that follows the scroll, and a footer that always
+ * says whether something is unsaved.  Memory and spending limits do not wait for Save, and say so.
  */
 export function BotEditModal({
   open,
@@ -187,6 +186,7 @@ function BotEditDialog({
   }, [client, bot.id]);
   const [conflict, setConflict] = useState<{ parts: ProfilePart[]; fresh: Bot } | null>(null);
   const pendingLeave = useRef<(() => void) | null>(null);
+  // The section in view (the jump list highlights it); it follows the scroll.
   const [section, setSection] = useState<BotEditorSection>(initialSection ?? "identity");
   const [skillsDraft, setSkillsDraft] = useSkillsDraft(skills.data);
   const [saving, setSaving] = useState(false);
@@ -208,7 +208,7 @@ function BotEditDialog({
   const [exporting, setExporting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const tabRefs = useRef<Partial<Record<BotEditorSection, HTMLButtonElement | null>>>({});
+  const sectionRefs = useRef<Partial<Record<BotEditorSection, HTMLElement | null>>>({});
 
   // The file is built by the daemon from the STORED bot (an allow-list: no secrets, grants,
   // memory, chats, folders or devices), so unsaved edits are not part of it.
@@ -269,18 +269,60 @@ function BotEditDialog({
     }
   });
 
-  const goTo = (next: BotEditorSection) => {
-    setSection(next);
-    bodyRef.current?.scrollTo({ top: 0 });
-  };
+  // After a jump the chosen section stays highlighted (a short section near the end may never
+  // reach the top); the reader's own scrolling hands the highlight back to the scroll position.
+  const jumped = useRef(false);
 
-  const onTabKey = (e: ReactKeyboardEvent<HTMLElement>) => {
-    const next = stepSection(section, e.key);
-    if (!next) return;
-    e.preventDefault();
-    goTo(next);
-    tabRefs.current[next]?.focus();
-  };
+  /** Scroll the page to a section and put the keyboard focus on its title. */
+  const goTo = useCallback((next: BotEditorSection, smooth = true) => {
+    const body = bodyRef.current;
+    const el = sectionRefs.current[next];
+    setSection(next);
+    if (!body || !el) return;
+    jumped.current = true;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    body.scrollTo({ top: Math.max(0, topIn(body, el) - 8), behavior: smooth && !reduced ? "smooth" : "auto" });
+    el.querySelector<HTMLElement>("h3")?.focus({ preventScroll: true });
+  }, []);
+
+  // Opened on a section ("Raise limit" opens Limits): start there.
+  const opened = useRef(initialSection);
+  useEffect(() => {
+    if (opened.current) goTo(opened.current, false);
+  }, [goTo]);
+
+  // The jump list follows the scroll.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return undefined;
+    let frame = 0;
+    const onScroll = () => {
+      if (jumped.current) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const els = BOT_EDITOR_SECTIONS.map((s) => sectionRefs.current[s]);
+        if (els.some((el) => !el)) return;
+        const tops = els.map((el) => topIn(body, el as HTMLElement));
+        const at = sectionAtScroll(tops, {
+          top: body.scrollTop,
+          height: body.clientHeight,
+          scrollHeight: body.scrollHeight
+        });
+        setSection(BOT_EDITOR_SECTIONS[at] ?? "identity");
+      });
+    };
+    const release = () => {
+      jumped.current = false;
+    };
+    const userScroll = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    body.addEventListener("scroll", onScroll, { passive: true });
+    for (const e of userScroll) body.addEventListener(e, release, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      body.removeEventListener("scroll", onScroll);
+      for (const e of userScroll) body.removeEventListener(e, release);
+    };
+  }, []);
 
   /** All of Save lives in `performEditorSave`; this only collects state and shows the outcome. */
   const save = async (expectedVersion?: number) => {
@@ -376,15 +418,70 @@ function BotEditDialog({
     }
   };
 
-  const horizontalTabs = useHorizontalTabs();
   const chatCount = botChats(chats, bot.id).length;
   const deleteBlocked = deleteBlock(chatCount, runCount);
-  const panelId = `${uid}-panel`;
-  const tabId = (s: BotEditorSection) => `${uid}-tab-${s}`;
+  const headId = (s: BotEditorSection) => `${uid}-section-${s}`;
+
+  /** One section of the page: icon, title, one line of what it is for, then its fields. */
+  const block = (s: BotEditorSection, children: ReactNode) => {
+    const Icon = SECTION_ICONS[s];
+    return (
+      <section
+        key={s}
+        ref={(el) => {
+          sectionRefs.current[s] = el;
+        }}
+        className={styles.section}
+        aria-labelledby={headId(s)}
+        data-testid={`bot-edit-section-${s}`}
+      >
+        <div className={styles.sectionHead}>
+          <span className={styles.sectionIcon} aria-hidden="true">
+            <Icon />
+          </span>
+          <div className={styles.sectionText}>
+            <h3 id={headId(s)} className={styles.sectionTitle} tabIndex={-1}>
+              {t(`botEdit.section.${s}`)}
+            </h3>
+            <p className={styles.sectionHint}>{t(`botEdit.sectionHint.${s}`)}</p>
+          </div>
+          {SEPARATE_SAVE[s] ? (
+            <span className={styles.instant} data-testid={`bot-edit-instant-${s}`}>
+              <CircleCheck aria-hidden="true" />
+              {SEPARATE_SAVE[s] === "onChange" ? t("botEdit.savedOnChange") : t("botEdit.savedOwnButton")}
+            </span>
+          ) : dirtyIn.includes(s) ? (
+            <span className={styles.changed}>
+              <i className={dialogStyles.dirtyDot} aria-hidden="true" />
+              {t("botEdit.unsaved")}
+            </span>
+          ) : null}
+        </div>
+        {children}
+      </section>
+    );
+  };
+
+  // The footer always says where the edits stand: nothing to save, what is unsaved, what blocks Save.
+  const footerNote = saving ? (
+    t("botEdit.saving")
+  ) : problems[0] ? (
+    t(`botEdit.problem.${problems[0].problem}`)
+  ) : dirty ? (
+    <>
+      <i className={dialogStyles.dirtyDot} aria-hidden="true" />
+      {t("botEdit.unsavedIn", { sections: dirtyIn.map((s) => t(`botEdit.section.${s}`)).join(", ") })}
+    </>
+  ) : (
+    <>
+      <CircleCheck className={styles.cleanIcon} aria-hidden="true" />
+      {t("botEdit.allSaved")}
+    </>
+  );
 
   return (
     <div className={styles.shell} data-testid="bot-edit-dialog">
-      <nav className={styles.nav} aria-label={t("botForm.editTitle")}>
+      <nav className={styles.nav} aria-label={t("botEdit.sections")}>
         <div className={styles.navBot}>
           <BotAvatar
             bot={{
@@ -399,136 +496,157 @@ function BotEditDialog({
           />
           <span className={styles.navBotName}>{draft.name.trim() || bot.name}</span>
         </div>
-        <div
-          className={styles.tabs}
-          role="tablist"
-          aria-orientation={horizontalTabs ? "horizontal" : "vertical"}
-          aria-label={t("botEdit.sections")}
-          inert={saving || deleting}
-          onKeyDown={onTabKey}
-        >
+        <ul className={styles.tabs} inert={saving || deleting}>
           {BOT_EDITOR_SECTIONS.map((s) => {
             const Icon = SECTION_ICONS[s];
             const active = s === section;
             const blocked = problems.some((p) => p.section === s);
             const changed = dirtyIn.includes(s);
             return (
-              <button
-                key={s}
-                ref={(el) => {
-                  tabRefs.current[s] = el;
-                }}
-                type="button"
-                role="tab"
-                id={tabId(s)}
-                aria-selected={active}
-                aria-controls={panelId}
-                tabIndex={active ? 0 : -1}
-                data-testid={`bot-edit-tab-${s}`}
-                className={[styles.tab, active ? styles.tabActive : ""].filter(Boolean).join(" ")}
-                onClick={() => goTo(s)}
-              >
-                <Icon aria-hidden="true" />
-                <span className={styles.tabLabel}>{t(`botEdit.section.${s}`)}</span>
-                {blocked ? (
-                  <span className={`${styles.mark} ${styles.markProblem}`} title={t("botEdit.needsAttention")}>
-                    <span className={dialogStyles.visuallyHidden}>{t("botEdit.needsAttention")}</span>
-                  </span>
-                ) : changed ? (
-                  <span className={styles.mark} title={t("botEdit.unsaved")}>
-                    <span className={dialogStyles.visuallyHidden}>{t("botEdit.unsaved")}</span>
-                  </span>
-                ) : null}
-              </button>
+              <li key={s}>
+                <button
+                  type="button"
+                  aria-current={active ? "location" : undefined}
+                  data-testid={`bot-edit-tab-${s}`}
+                  className={[styles.tab, active ? styles.tabActive : ""].filter(Boolean).join(" ")}
+                  onClick={() => goTo(s)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span className={styles.tabLabel}>{t(`botEdit.section.${s}`)}</span>
+                  {blocked ? (
+                    <span className={`${styles.mark} ${styles.markProblem}`} title={t("botEdit.needsAttention")}>
+                      <span className={dialogStyles.visuallyHidden}>{t("botEdit.needsAttention")}</span>
+                    </span>
+                  ) : changed ? (
+                    <span className={styles.mark} title={t("botEdit.unsaved")}>
+                      <span className={dialogStyles.visuallyHidden}>{t("botEdit.unsaved")}</span>
+                    </span>
+                  ) : null}
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ul>
       </nav>
 
       <div className={dialogStyles.root}>
         <DialogHeader
-          title={t(`botEdit.section.${section}`)}
-          subtitle={t(`botEdit.sectionHint.${section}`)}
+          title={t("botForm.editTitle")}
+          subtitle={t("botEdit.pageHint")}
           closeDisabled={saving || deleting}
           onClose={requestClose}
-          actions={
+          actions={<HomeHint />}
+        />
+        <DialogBody scrollRef={bodyRef} inert={saving || deleting} testId="bot-edit-page">
+          {block(
+            "identity",
             <>
-              <HomeHint />
-              {section === "skills" ? (
+              <IdentityFields botId={bot.id} draft={draft} patch={patch} nameMissing={nameMissing} />
+              <BotVoiceField botId={bot.id} />
+            </>
+          )}
+          {block(
+            "instructions",
+            <BotInstructionsField value={draft.persona} onChange={(persona) => patch({ persona })} />
+          )}
+          {block(
+            "models",
+            <>
+              <ModelFields
+                draft={draft}
+                patch={patch}
+                providersDto={providersDto}
+                executorMissing={executorMissing}
+                pendingFallback={pendingFallback}
+                onPendingFallback={setPendingFallback}
+              />
+              <h4 className={styles.subTitle}>{t("botForm.engine.title")}</h4>
+              <BotEngineBlock bot={baseline} />
+            </>
+          )}
+          {block(
+            "place",
+            <PlaceFields
+              computerTarget={runtimeTargetLabel(baseline.config, "computer")}
+              browserTarget={runtimeTargetLabel(baseline.config, "browser")}
+            />
+          )}
+          {block("permissions", <PermissionFields draft={draft} patch={patch} />)}
+          {block(
+            "apps",
+            <>
+              <AppFields
+                servers={servers}
+                allowed={allowed}
+                onToggle={(name, checked) => setAllowed((a) => ({ ...a, [name]: checked }))}
+              />
+              <div className={styles.subHead}>
+                <div>
+                  <h4 className={styles.subTitle}>{t("botEdit.skillsTitle")}</h4>
+                  <p className={styles.sectionHint}>{t("botEdit.skillsHint")}</p>
+                </div>
                 <Button size="sm" variant="secondary" onClick={onAddSkill}>
                   <Plus aria-hidden="true" />
                   {t("addSkill.open")}
                 </Button>
-              ) : null}
+              </div>
+              {skills.error && !skills.data ? (
+                <Callout tone="danger" title={t("bots.skills.loadFailed")} role="alert">
+                  {skills.error}
+                </Callout>
+              ) : !skills.data || !skillsDraft ? (
+                <p className={dialogStyles.hint}>{t("bots.skills.loading")}</p>
+              ) : (
+                <SkillsEditor data={skills.data} draft={skillsDraft} onChange={setSkillsDraft} />
+              )}
             </>
-          }
-        />
-        <DialogBody
-          scrollRef={bodyRef}
-          inert={saving || deleting}
-          role="tabpanel"
-          id={panelId}
-          aria-labelledby={tabId(section)}
-          data-testid={`bot-edit-panel-${section}`}
-        >
-          {section === "identity" ? (
-            <IdentityFields botId={bot.id} draft={draft} patch={patch} nameMissing={nameMissing} />
-          ) : null}
-          {section === "identity" ? <BotVoiceField botId={bot.id} /> : null}
-          {section === "models" ? (
-            <ModelFields
-              draft={draft}
-              patch={patch}
-              providersDto={providersDto}
-              executorMissing={executorMissing}
-              pendingFallback={pendingFallback}
-              onPendingFallback={setPendingFallback}
-            />
-          ) : null}
-          {section === "permissions" ? (
+          )}
+          {block(
+            "memory",
+            <div className={styles.memory}>
+              <BotMemorySettings botId={bot.id} />
+            </div>
+          )}
+          {block("limits", <BotLimitsField botId={bot.id} />)}
+          {block(
+            "advanced",
             <>
-              <PermissionFields draft={draft} patch={patch} />
-              <h3>{t("botForm.engine.title")}</h3>
-              <BotEngineBlock bot={baseline} />
+              <div className={styles.shareRow}>
+                <div>
+                  <p className={styles.shareTitle}>{t("profileShare.export")}</p>
+                  <p className={dialogStyles.hint}>
+                    {dirty ? t("profileShare.exportSaveFirst") : t("profileShare.exportHint")}
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  disabled={saving || deleting || exporting || dirty || serviceBlocked}
+                  data-testid="bot-edit-export"
+                  onClick={() => void exportProfile()}
+                >
+                  <Download aria-hidden="true" />
+                  {t("profileShare.export")}
+                </Button>
+              </div>
+              <AdvancedFields
+                draft={draft}
+                customText={customText}
+                onCustomText={setCustom}
+                deleteBlocked={deleteBlocked}
+                chatCount={chatCount}
+                runCount={runCount ?? 0}
+                onDelete={() => {
+                  setDeleteError(null);
+                  setConfirmDelete(true);
+                }}
+              />
             </>
-          ) : null}
-          {section === "skills" ? (
-            skills.error && !skills.data ? (
-              <Callout tone="danger" title={t("bots.skills.loadFailed")} role="alert">
-                {skills.error}
-              </Callout>
-            ) : !skills.data || !skillsDraft ? (
-              <p className={dialogStyles.hint}>{t("bots.skills.loading")}</p>
-            ) : (
-              <SkillsEditor data={skills.data} draft={skillsDraft} onChange={setSkillsDraft} />
-            )
-          ) : null}
-          {section === "apps" ? (
-            <AppFields
-              servers={servers}
-              allowed={allowed}
-              onToggle={(name, checked) => setAllowed((a) => ({ ...a, [name]: checked }))}
-            />
-          ) : null}
-          {section === "limits" ? <BotLimitsField botId={bot.id} /> : null}
-          {section === "advanced" ? (
-            <AdvancedFields
-              draft={draft}
-              customText={customText}
-              onCustomText={setCustom}
-              computerTarget={runtimeTargetLabel(baseline.config, "computer")}
-              browserTarget={runtimeTargetLabel(baseline.config, "browser")}
-              deleteBlocked={deleteBlocked}
-              chatCount={chatCount}
-              runCount={runCount ?? 0}
-              memoryBotId={bot.id}
-              onDelete={() => {
-                setDeleteError(null);
-                setConfirmDelete(true);
-              }}
-            />
-          ) : null}
-          {conflict ? (
+          )}
+        </DialogBody>
+        {/* Problems with Save sit right above the footer, never at the end of a long page. */}
+        {error || conflict ? (
+          <div className={styles.footerAlert}>
+            {conflict ? (
             <Callout tone="warning" title={t("botEdit.conflict.title")} role="alert">
               <p>
                 {t("botEdit.conflict.body", {
@@ -550,35 +668,15 @@ function BotEditDialog({
                 </Button>
               </div>
             </Callout>
-          ) : null}
-          {error ? (
-            <Callout tone="danger" role="alert">
-              {error}
-            </Callout>
-          ) : null}
-        </DialogBody>
-        <DialogFooter
-          noteTone={problems.length > 0 ? "warning" : "info"}
-          note={
-            problems[0] ? (
-              t(`botEdit.problem.${problems[0].problem}`)
-            ) : dirty ? (
-              <>
-                <i className={dialogStyles.dirtyDot} aria-hidden="true" />
-                {t("botEdit.unsaved")}
-              </>
-            ) : undefined
-          }
-        >
-          <Button
-            variant="ghost"
-            disabled={saving || deleting || exporting || dirty || serviceBlocked}
-            title={dirty ? t("profileShare.exportSaveFirst") : t("profileShare.exportHint")}
-            data-testid="bot-edit-export"
-            onClick={() => void exportProfile()}
-          >
-            {t("profileShare.export")}
-          </Button>
+            ) : null}
+            {error ? (
+              <Callout tone="danger" role="alert">
+                {error}
+              </Callout>
+            ) : null}
+          </div>
+        ) : null}
+        <DialogFooter noteTone={problems.length > 0 && !saving ? "warning" : "info"} note={footerNote}>
           <Button variant="ghost" disabled={saving || deleting} onClick={requestClose}>
             {t("common.cancel")}
           </Button>

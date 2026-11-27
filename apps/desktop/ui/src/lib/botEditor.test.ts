@@ -13,7 +13,8 @@ import {
   fallbackList,
   permissionTone,
   removeFallback,
-  stepSection
+  SEPARATE_SAVE,
+  sectionAtScroll
 } from "./botEditor.ts";
 import { type BotDraft, draftFromBot } from "./botProfile.ts";
 
@@ -46,7 +47,7 @@ test("an untouched draft is clean", () => {
 });
 
 test("each kind of edit marks its own section", () => {
-  assert.deepEqual(dirtySections(snap({ ...base(), persona: "Careful." })), ["identity"]);
+  assert.deepEqual(dirtySections(snap({ ...base(), persona: "Careful." })), ["instructions"]);
   assert.deepEqual(
     dirtySections(snap({ ...base(), planner: { provider: "openai", model: "gpt-5" } })),
     ["models"]
@@ -55,7 +56,7 @@ test("each kind of edit marks its own section", () => {
   assert.deepEqual(dirtySections(snap({ ...base(), preset: "full" })), ["permissions"]);
   const cats = { ...base().categories, shell: "deny" as const };
   assert.deepEqual(dirtySections(snap({ ...base(), categories: cats })), ["permissions"]);
-  assert.deepEqual(dirtySections(snap(base(), { skillsDirty: true })), ["skills"]);
+  assert.deepEqual(dirtySections(snap(base(), { skillsDirty: true })), ["apps"]);
   assert.deepEqual(dirtySections(snap(base(), { apps: { github: false } })), ["apps"]);
   // An app that appeared unticked is not a change.
   assert.deepEqual(dirtySections(snap(base(), { apps: { github: true, slack: false } })), []);
@@ -83,14 +84,21 @@ test("closing asks first when dirty and waits while saving", () => {
   assert.equal(closeAction(false, true), "wait");
 });
 
-test("section keyboard navigation wraps and ignores other keys", () => {
-  assert.equal(stepSection("identity", "ArrowDown"), "models");
-  assert.equal(stepSection("identity", "ArrowUp"), "advanced");
-  assert.equal(stepSection("advanced", "ArrowRight"), "identity");
-  assert.equal(stepSection("skills", "Home"), "identity");
-  assert.equal(stepSection("skills", "End"), "advanced");
-  assert.equal(stepSection("skills", "Enter"), null);
+test("the page highlights the section scrolled to, and the last one at the end", () => {
+  const tops = [0, 400, 900, 1500];
+  const at = (top: number, scrollHeight = 3000) => sectionAtScroll(tops, { top, height: 600, scrollHeight });
+  assert.equal(at(0), 0);
+  assert.equal(at(380), 1); // within the margin: the next title is about to reach the top
+  assert.equal(at(1000), 2);
+  assert.equal(at(1600), 3);
+  // Scrolled to the very end: a short last section counts even though its top never got there.
+  assert.equal(at(1300, 1900), 3);
+  assert.equal(sectionAtScroll([], { top: 0, height: 600, scrollHeight: 600 }), 0);
   assert.equal(new Set(BOT_EDITOR_SECTIONS).size, BOT_EDITOR_SECTIONS.length);
+});
+
+test("sections that save on their own are real sections of the page", () => {
+  for (const s of Object.keys(SEPARATE_SAVE)) assert.ok((BOT_EDITOR_SECTIONS as readonly string[]).includes(s));
 });
 
 test("only known section names are accepted from a URL", () => {
@@ -135,7 +143,7 @@ test("permission chip tone follows what runs without asking", () => {
 // selects or a free-text model box outside the Advanced section.
 test("BotEditModal is driven by the tested rules", () => {
   const modal = read("../views/BotEditModal.tsx");
-  for (const fn of ["closeAction(", "dirtySections(", "editorProblems(", "stepSection("]) {
+  for (const fn of ["closeAction(", "dirtySections(", "editorProblems(", "sectionAtScroll("]) {
     assert.ok(modal.includes(fn), `BotEditModal uses ${fn}`);
   }
   assert.doesNotMatch(modal, /<select/);

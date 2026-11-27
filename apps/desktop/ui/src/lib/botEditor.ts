@@ -12,12 +12,18 @@ import {
  * as unsaved, what blocks saving, and what closing does.  The dialog component only renders.
  */
 
+/**
+ * The editor is one scrolling page; these are its sections, top to bottom.  Skills live in the
+ * "apps" section (what the bot may use); voice is part of "identity".
+ */
 export const BOT_EDITOR_SECTIONS = [
   "identity",
+  "instructions",
   "models",
+  "place",
   "permissions",
-  "skills",
   "apps",
+  "memory",
   "limits",
   "advanced"
 ] as const;
@@ -29,28 +35,33 @@ export function editorSection(value: string | null | undefined): BotEditorSectio
   return BOT_EDITOR_SECTIONS.find((s) => s === value);
 }
 
-/** Arrow / Home / End navigation of the section list (wraps around). */
-export function stepSection(
-  current: BotEditorSection,
-  key: string
-): BotEditorSection | null {
-  const i = BOT_EDITOR_SECTIONS.indexOf(current);
-  const n = BOT_EDITOR_SECTIONS.length;
-  const at = (j: number): BotEditorSection => BOT_EDITOR_SECTIONS[(j + n) % n] ?? current;
-  switch (key) {
-    case "ArrowDown":
-    case "ArrowRight":
-      return at(i + 1);
-    case "ArrowUp":
-    case "ArrowLeft":
-      return at(i - 1);
-    case "Home":
-      return at(0);
-    case "End":
-      return at(n - 1);
-    default:
-      return null;
-  }
+/**
+ * Sections that do not wait for the page's Save: memory saves the moment it changes, spending
+ * limits have their own Save button.  The page says so next to their title, and Cancel does not
+ * undo them.
+ */
+export const SEPARATE_SAVE: Partial<Record<BotEditorSection, "onChange" | "ownButton">> = {
+  memory: "onChange",
+  limits: "ownButton"
+};
+
+/**
+ * The section the reader is looking at while scrolling the page: the last one whose top has
+ * passed the top of the viewport (plus a small margin); the last section once the page is
+ * scrolled to the end, since a short last section can never reach the top.
+ */
+export function sectionAtScroll(
+  tops: readonly number[],
+  scroll: { top: number; height: number; scrollHeight: number },
+  margin = 32
+): number {
+  if (tops.length === 0) return 0;
+  if (scroll.top + scroll.height >= scroll.scrollHeight - 2) return tops.length - 1;
+  let at = 0;
+  tops.forEach((top, i) => {
+    if (top <= scroll.top + margin) at = i;
+  });
+  return at;
 }
 
 function sameRef(a: ModelRef, b: ModelRef): boolean {
@@ -83,13 +94,13 @@ export function dirtySections(s: EditorSnapshot): BotEditorSection[] {
   const out: BotEditorSection[] = [];
   if (
     d.name.trim() !== i.name.trim() ||
-    d.persona !== i.persona ||
     d.shape !== i.shape ||
     d.color.toLowerCase() !== i.color.toLowerCase() ||
     (d.avatar ?? null) !== (i.avatar ?? null)
   ) {
     out.push("identity");
   }
+  if (d.persona !== i.persona) out.push("instructions");
   if (
     !sameRef(d.executor, i.executor) ||
     !sameRef(d.planner, i.planner) ||
@@ -102,8 +113,7 @@ export function dirtySections(s: EditorSnapshot): BotEditorSection[] {
   if (d.preset !== i.preset || PERMISSION_CATEGORIES.some((c) => d.categories[c] !== i.categories[c])) {
     out.push("permissions");
   }
-  if (s.skillsDirty) out.push("skills");
-  if (appsChanged(s.apps, s.initialApps)) out.push("apps");
+  if (s.skillsDirty || appsChanged(s.apps, s.initialApps)) out.push("apps");
   if (invalidCustomRoles(s.customText ?? {}).length > 0) out.push("advanced");
   return out;
 }

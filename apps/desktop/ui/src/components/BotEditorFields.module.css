@@ -270,3 +270,69 @@
 .exceptions p {
   margin: var(--space-2) var(--space-0) var(--space-0);
 }
+
+/* ── what it should do (instructions + examples) ── */
+
+.instructions {
+  min-height: calc(var(--space-8) * 5);
+  line-height: var(--line-height-normal);
+}
+
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.examplesLabel {
+  margin-right: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.exampleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--size-control-sm);
+  padding: var(--space-0) var(--space-3) var(--space-0) var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background-color: color-mix(in srgb, var(--color-text) 3%, transparent);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.exampleChip svg {
+  width: var(--space-3);
+  height: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.exampleChip:hover {
+  border-color: var(--color-border-strong);
+  background-color: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.exampleChip:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/* ── apps grouped by what they let the bot do ── */
+
+.appGroups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.appGroupTitle {
+  margin: var(--space-0) var(--space-0) var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}

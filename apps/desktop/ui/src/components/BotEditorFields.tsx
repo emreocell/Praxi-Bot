@@ -34,11 +34,11 @@ import {
   PRESET_CHOICES,
   type PresetChoice
 } from "../lib/botProfile";
+import { appGroups } from "../lib/botApps";
 import { brandIcon } from "../lib/brandIcons";
 import { modelGroups } from "../lib/modelPicker";
 import { modelLine } from "../lib/modelName";
 import { BotAvatarUploadField } from "./BotAdvancedFields";
-import { BotMemorySettings } from "./BotMemorySettings";
 import styles from "./BotEditorFields.module.css";
 import { BrandMark } from "./BrandMark";
 import { CharacterColorRow, CharacterShapeGrid } from "./CharacterPicker";
@@ -59,7 +59,7 @@ const PRESET_ICONS: Record<PresetChoice, typeof Eye> = {
 };
 
 
-/** Identity: the face, the name and how the bot behaves. */
+/** Identity: the face and the name (what it should do has its own section). */
 export function IdentityFields({
   botId,
   draft,
@@ -119,21 +119,6 @@ export function IdentityFields({
         />
         <BotAvatarUploadField avatar={draft.avatar} onChange={(avatar) => patch({ avatar })} />
       </section>
-
-      <Field
-        label={t("botForm.persona")}
-        htmlFor={`${uid}-persona`}
-        hint={t("botEdit.personaHint")}
-      >
-        <textarea
-          id={`${uid}-persona`}
-          className={dialogStyles.textarea}
-          rows={5}
-          value={draft.persona}
-          placeholder={t("botForm.personaPlaceholder")}
-          onChange={(e) => patch({ persona: e.target.value })}
-        />
-      </Field>
     </>
   );
 }
@@ -403,7 +388,7 @@ export function PermissionFields({ draft, patch }: { draft: BotDraft; patch: Pat
   );
 }
 
-/** Apps: which connected apps this bot may use. */
+/** Apps: which connected apps this bot may use, grouped by what they let it do. */
 export function AppFields({
   servers,
   allowed,
@@ -423,24 +408,29 @@ export function AppFields({
   return (
     <>
       <p className={dialogStyles.hint}>{t("botForm.apps.hint")}</p>
-      <div data-testid="bot-apps">
-        <SettingGroup>
-          {servers.map((s) => {
-            const brand = brandIcon(s.name);
-            const label = brand.known ? brand.name : s.name;
-            return (
-              <div key={s.name} className={styles.appRow} data-testid={`bot-app-${s.name}`}>
-                <BrandMark name={s.name} size={20} />
-                <span className={styles.appName}>{label}</span>
-                <Switch
-                  checked={allowed[s.name] ?? false}
-                  label={label}
-                  onChange={(checked) => onToggle(s.name, checked)}
-                />
-              </div>
-            );
-          })}
-        </SettingGroup>
+      <div className={styles.appGroups} data-testid="bot-apps">
+        {appGroups(servers).map(({ group, servers: inGroup }) => (
+          <div key={group} data-testid={`bot-app-group-${group}`}>
+            <h4 className={styles.appGroupTitle}>{t(`botEdit.appGroup.${group}`)}</h4>
+            <SettingGroup>
+              {inGroup.map((s) => {
+                const brand = brandIcon(s.name);
+                const label = brand.known ? brand.name : s.name;
+                return (
+                  <div key={s.name} className={styles.appRow} data-testid={`bot-app-${s.name}`}>
+                    <BrandMark name={s.name} size={20} />
+                    <span className={styles.appName}>{label}</span>
+                    <Switch
+                      checked={allowed[s.name] ?? false}
+                      label={label}
+                      onChange={(checked) => onToggle(s.name, checked)}
+                    />
+                  </div>
+                );
+              })}
+            </SettingGroup>
+          </div>
+        ))}
       </div>
     </>
   );
@@ -556,46 +546,59 @@ function targetText(t: (key: string) => string, target: string): string {
   return KNOWN_TARGETS.has(target) ? t(`botEdit.target.${target}`) : target;
 }
 
-/** Advanced: the custom model id escape hatch, where the bot runs, and deleting it. */
+/** Where it runs: the computer and the browser the bot works on (read-only here: this form never changes them). */
+export function PlaceFields({
+  computerTarget,
+  browserTarget
+}: {
+  computerTarget: string;
+  browserTarget: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <SettingGroup>
+        <SettingRow title={t("botForm.computer")} description={t("botEdit.placeComputerHint")}>
+          <span className={dialogStyles.chip} data-testid="bot-edit-computer">
+            <MonitorSmartphone aria-hidden="true" />
+            <span>{targetText(t, computerTarget)}</span>
+          </span>
+        </SettingRow>
+        <SettingRow title={t("botForm.browser")} description={t("botEdit.placeBrowserHint")}>
+          <span className={dialogStyles.chip} data-testid="bot-edit-browser">
+            <MonitorSmartphone aria-hidden="true" />
+            <span>{targetText(t, browserTarget)}</span>
+          </span>
+        </SettingRow>
+      </SettingGroup>
+      <p className={dialogStyles.hint}>{t("botEdit.placeHint")}</p>
+    </>
+  );
+}
+
+/** Advanced: the custom model id escape hatch and deleting the bot. */
 export function AdvancedFields({
   draft,
   customText,
   onCustomText,
-  computerTarget,
-  browserTarget,
   deleteBlocked,
   chatCount,
   runCount,
-  onDelete,
-  memoryBotId
+  onDelete
 }: {
   draft: BotDraft;
   customText: CustomText;
   onCustomText: (role: CustomRole, text: string) => void;
-  /** Where the bot runs, as stored (read-only here: this form never changes it). */
-  computerTarget: string;
-  browserTarget: string;
   /** Why the daemon would refuse to delete the bot (it needs no chats and no runs), or `null`. */
   deleteBlocked: DeleteBlock;
   chatCount: number;
   runCount: number;
   /** Absent for a bot that does not exist yet. */
   onDelete?: () => void;
-  /** Existing bot: shows its memory switch (On / Ask before saving / Off). */
-  memoryBotId?: string;
 }) {
   const { t } = useTranslation();
   return (
     <>
-      {memoryBotId ? (
-        <section className={dialogStyles.block}>
-          <div className={dialogStyles.blockHead}>
-            <h3 className={dialogStyles.blockTitle}>{t("memorySettings.sectionTitle")}</h3>
-            <p className={dialogStyles.blockLead}>{t("memorySettings.sectionHint")}</p>
-          </div>
-          <BotMemorySettings botId={memoryBotId} />
-        </section>
-      ) : null}
       <section className={dialogStyles.block}>
         <div className={dialogStyles.blockHead}>
           <h3 className={dialogStyles.blockTitle}>{t("botEdit.customTitle")}</h3>
@@ -624,27 +627,6 @@ export function AdvancedFields({
             onChange={(text) => onCustomText("classifier", text)}
           />
         </div>
-      </section>
-
-      <section className={dialogStyles.block}>
-        <div className={dialogStyles.blockHead}>
-          <h3 className={dialogStyles.blockTitle}>{t("botForm.runtime")}</h3>
-          <p className={dialogStyles.blockLead}>{t("botForm.runtimeHint")}</p>
-        </div>
-        <SettingGroup>
-          <SettingRow title={t("botForm.computer")}>
-            <span className={dialogStyles.chip} data-testid="bot-edit-computer">
-              <MonitorSmartphone aria-hidden="true" />
-              <span>{targetText(t, computerTarget)}</span>
-            </span>
-          </SettingRow>
-          <SettingRow title={t("botForm.browser")}>
-            <span className={dialogStyles.chip} data-testid="bot-edit-browser">
-              <MonitorSmartphone aria-hidden="true" />
-              <span>{targetText(t, browserTarget)}</span>
-            </span>
-          </SettingRow>
-        </SettingGroup>
       </section>
 
       {onDelete ? (

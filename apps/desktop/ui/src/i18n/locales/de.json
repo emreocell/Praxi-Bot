@@ -1141,6 +1141,18 @@
   },
   "botEdit": {
     "addFallback": "Fallback hinzufügen",
+    "allSaved": "No unsaved changes",
+    "appGroup": {
+      "browser": "Use a web browser",
+      "communication": "Read and send messages and mail",
+      "data": "Query databases",
+      "developer": "Work on code and projects",
+      "files": "Open and change files",
+      "home": "Control the smart home",
+      "other": "Other apps",
+      "productivity": "Manage calendars, notes and tasks",
+      "search": "Search the web"
+    },
     "appsLoading": "Apps werden geladen …",
     "appsNoneBody": "Verbinde eine App im Apps-Bildschirm und wähle hier, welche Bots sie nutzen dürfen.",
     "categories": "Pro Kategorie",
@@ -1187,14 +1199,42 @@
     "fallbackCustom": "Andere Modell-ID",
     "fallbackCustomHint": "Jede Modell-ID als provider/model, auch eine, die nicht aufgelistet ist. Trenne mehrere mit Kommas.",
     "fallbackHint": "Werden in dieser Reihenfolge versucht, wenn das Hauptmodell nicht verfügbar ist.",
+    "instructions": {
+      "addExample": "Add an example:",
+      "examples": {
+        "coding": {
+          "label": "Coding",
+          "text": "You help me with code. Read the project before changing it, keep changes small, run the tests and explain in plain words what you changed and why."
+        },
+        "inbox": {
+          "label": "Inbox",
+          "text": "You look after my inbox. Every morning sort new mail into urgent, to answer and can wait. Draft short, polite replies in my tone."
+        },
+        "research": {
+          "label": "Research",
+          "text": "You research topics for me. Look at several reliable sources, compare what they say and give me a short summary with links. Say clearly when something is uncertain."
+        },
+        "writing": {
+          "label": "Writing",
+          "text": "You help me write. Keep my voice, use short sentences and plain words, and give me two options when the tone could go either way."
+        }
+      },
+      "hint": "Write it like a note to a new teammate. The bot reads it before every task.",
+      "label": "Instructions",
+      "placeholder": "For example: You help me run my online shop. Answer customer mail in a short, friendly tone, check stock before promising a date, and ask me before giving a discount.",
+      "startFrom": "Start from an example:"
+    },
     "keepEditing": "Weiter bearbeiten",
     "look": "Aussehen",
     "mainModel": "Hauptmodell",
     "needsAttention": "Braucht Aufmerksamkeit",
     "noProvidersBody": "Verbinde einen Anbieter unter Einstellungen → KI, um hier ein Modell zu wählen.",
     "noProvidersTitle": "Kein KI-Anbieter verbunden",
-    "personaHint": "Wird als dauerhafte Anweisung des Bots an das Modell gesendet.",
+    "pageHint": "Everything about this bot on one page. Memory saves as you change it and spending limits have their own Save button; everything else is saved with Save below.",
     "pickModel": "Modell wählen",
+    "placeBrowserHint": "Where it opens web pages.",
+    "placeComputerHint": "Where it runs commands and opens files.",
+    "placeHint": "To add a server or another computer, open Settings → Connections.",
     "problem": {
       "customInvalid": "Eine eigene Modell-ID ist noch nicht gültig (Erweitert).",
       "executorMissing": "Wähle zum Speichern ein Hauptmodell.",
@@ -1209,27 +1249,35 @@
     },
     "sameAsMain": "Wie das Hauptmodell",
     "saved": "{{name}} wurde gespeichert.",
+    "savedOnChange": "Saved as you change it",
+    "savedOwnButton": "Saved with its own button",
     "saving": "Wird gespeichert …",
     "section": {
       "advanced": "Erweitert",
       "apps": "Apps",
       "identity": "Identität",
+      "instructions": "What it should do",
       "limits": "Limits",
+      "memory": "Memory",
       "models": "Modelle",
       "permissions": "Berechtigungen",
-      "skills": "Skills"
+      "place": "Where it runs"
     },
     "sectionHint": {
       "advanced": "Eigene Modell-IDs, wo der Bot läuft, und Löschen.",
       "apps": "Die verbundenen Apps, die dieser Bot nutzen darf.",
       "identity": "Name, Aussehen und Persönlichkeit.",
+      "instructions": "Its standing instruction: who it helps, what it does and how it answers.",
       "limits": "Wie viel dieser Bot pro Tag, Woche und Monat ausgeben darf.",
+      "memory": "Whether it learns from your chats and uses what it learned.",
       "models": "Welches Modell die Arbeit erledigt und welche helfen.",
       "permissions": "Was der Bot ohne Nachfrage tun darf.",
-      "skills": "Die geteilten Skills, die diesem Bot angeboten werden."
+      "place": "The computer and the browser it works on."
     },
     "sections": "Bereiche",
     "skillsFailed": "Der Bot wurde gespeichert, seine Skills aber nicht: {{detail}}",
+    "skillsHint": "Shared know-how this bot is offered.",
+    "skillsTitle": "Skills",
     "target": {
       "auto": "Automatisch",
       "browser": "Browser",
@@ -1238,7 +1286,8 @@
       "pc": "Dieser Computer",
       "server": "Gekoppelter Server (nur Browser)"
     },
-    "unsaved": "Ungespeicherte Änderungen"
+    "unsaved": "Ungespeicherte Änderungen",
+    "unsavedIn": "Unsaved changes: {{sections}}"
   },
   "botEmpty": {
     "body": "Hier ist noch nichts. Bitte um etwas, und die Unterhaltung öffnet sich in diesem Bereich.",
@@ -1395,9 +1444,7 @@
       "executor": "Ausführung",
       "fallback": "Fallback-Modelle",
       "planner": "Planer"
-    },
-    "runtime": "Computer & Browser",
-    "runtimeHint": "Vorerst wird nur dieses Gerät unterstützt."
+    }
   },
   "botLimits": {
     "card": {
@@ -4848,8 +4895,6 @@
       "off": "Lernt nichts, merkt sich nichts und hat keine Gedächtnis-Werkzeuge. Vorhandene Erinnerungen bleiben gespeichert, werden aber nicht verwendet.",
       "on": "Lernt aus dem, was du sagst. Alles, was er aus Webseiten, Dateien oder Werkzeugen aufschnappt, wartet zuerst auf dein OK."
     },
-    "sectionHint": "Lege fest, ob dieser Bot aus deinen Chats lernt und das Gelernte nutzt.",
-    "sectionTitle": "Gedächtnis",
     "share": "Gelerntes mit meinen anderen Bots teilen",
     "shareHint": "An: Fakten über dich und vergangene Ereignisse stehen all deinen Bots zur Verfügung. Aus: Dieser Bot behält alles, was er lernt, für sich.",
     "title": "Gedächtnis"
