@@ -718,6 +718,23 @@ async fn a_mission_form_is_refused_after_the_mission_ended() {
 }
 
 #[tokio::test]
+async fn the_form_getter_hides_a_mission_form_once_the_mission_ended() {
+    let w = world(&["a.example"]);
+    let (lp, call_id, _) = parked_request(&w).await;
+    assert!(lp.secret_request(call_id).is_some());
+    w.store
+        .set_state(
+            &w.mission,
+            missions::MissionState::Cancelled,
+            Some("the owner stopped it"),
+            storage::now_ms(),
+        )
+        .unwrap();
+    // No claim in between: the getter alone must not show a stale form.
+    assert!(lp.secret_request(call_id).is_none());
+}
+
+#[tokio::test]
 async fn a_mission_form_expires_by_itself_and_leaves_the_item_parked() {
     let w = world(&["a.example"]);
     let fake = Fake::new(vec![

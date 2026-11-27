@@ -2080,12 +2080,30 @@ impl AgentLoop {
     /// `None` when no request waits under `call_id`.
     #[must_use]
     pub fn secret_request(&self, call_id: ToolCallId) -> Option<crate::SecretRequestInfo> {
-        self.sh
+        let info = self
+            .sh
             .secret_requests
             .lock()
             .get(&call_id)
             .filter(|info| tokio::time::Instant::now() < info.deadline)
-            .cloned()
+            .cloned()?;
+        // Like the claim: a mission's form is hidden once its mission is over.
+        if let Some(target) = &info.mission
+            && !self.mission_open(&target.mission_id)
+        {
+            return None;
+        }
+        Some(info)
+    }
+
+    /// Whether the mission exists and is not in a terminal state.
+    fn mission_open(&self, id: &str) -> bool {
+        self.sh
+            .mission_store
+            .read()
+            .as_ref()
+            .and_then(|store| store.get(id).ok().flatten())
+            .is_some_and(|m| !m.state.is_terminal())
     }
 
     /// Claim a waiting `secret_request` for submission: exactly one caller gets
@@ -2101,14 +2119,7 @@ impl AgentLoop {
         if let Some(target) = &info.mission {
             // No run waits on a mission's form, so there is no parked call to check: the
             // mission must still be open, or the answer would store a value for nothing.
-            let open = self
-                .sh
-                .mission_store
-                .read()
-                .as_ref()
-                .and_then(|store| store.get(&target.mission_id).ok().flatten())
-                .is_some_and(|m| !m.state.is_terminal());
-            if !open {
+            if !self.mission_open(&target.mission_id) {
                 requests.remove(&call_id);
                 return None;
             }

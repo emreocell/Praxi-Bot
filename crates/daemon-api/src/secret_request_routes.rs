@@ -81,13 +81,22 @@ pub struct SecretRequestAnswer {
 /// Parse the body without echoing any of it: serde's messages quote the
 /// offending scalar, which here could be the value itself.
 fn parse_body(body: axum::body::Bytes) -> Result<SubmitSecretRequest, ApiError> {
+    // A unique buffer is wiped in place. A shared one cannot be (another owner may still
+    // read it), so parse a private copy instead and wipe that: the copy never outlives this
+    // call. Either way the parsed values are `SecretValue`s, which wipe themselves on drop.
     let parsed = match body.try_into_mut() {
-        Ok(mut body) => {
-            let parsed = serde_json::from_slice(&body);
-            body.as_mut().zeroize();
+        Ok(mut unique) => {
+            let parsed = serde_json::from_slice(&unique);
+            unique.as_mut().zeroize();
             parsed
         }
-        Err(shared) => serde_json::from_slice(&shared),
+        Err(shared) => {
+            let mut copy = shared.to_vec();
+            drop(shared);
+            let parsed = serde_json::from_slice(&copy);
+            copy.zeroize();
+            parsed
+        }
     };
     parsed.map_err(|e| {
         ApiError::bad_request(match e.classify() {
@@ -372,4 +381,40 @@ pub(crate) fn start_channel_notifications(state: &AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Bytes;
+
+    use super::parse_body;
+
+    #[test]
+    fn parse_body_reads_a_unique_and_a_shared_buffer_and_leaves_the_shared_one_intact() {
+        let raw = br#"{"value":"canary-parse-7741"}"#;
+        let unique = parse_body(Bytes::copy_from_slice(raw)).unwrap();
+        assert_eq!(unique.value.as_ref().unwrap().expose(), "canary-parse-7741");
+        // A second owner keeps the buffer shared: the copy is wiped, not the original.
+        let shared = Bytes::copy_from_slice(raw);
+        let other = shared.clone();
+        let parsed = parse_body(shared).unwrap();
+        assert_eq!(parsed.value.as_ref().unwrap().expose(), "canary-parse-7741");
+        assert_eq!(&other[..], raw);
+    }
+
+    #[test]
+    fn parse_body_errors_never_quote_the_body() {
+        for raw in [
+            &br#"{"value":"canary-parse-7741""#[..],
+            br#"{"value":"canary-parse-7741","extra":1}"#,
+            br#"{"value":7}"#,
+        ] {
+            let shared = Bytes::copy_from_slice(raw);
+            let _other_owner = shared.clone();
+            for body in [Bytes::copy_from_slice(raw), shared] {
+                let error = parse_body(body).unwrap_err();
+                assert!(!format!("{error:?}").contains("canary-parse"));
+            }
+        }
+    }
 }

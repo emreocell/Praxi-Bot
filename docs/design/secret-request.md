@@ -77,6 +77,10 @@ claimed can end the run independently of the authorized vault write.
   dumps sit outside this boundary. Opening a channel's link requires a
   published launcher and a browser and OS that hand the custom URI to the
   installed desktop app.
+  The launcher page is served from Praxi's GitHub Pages site, which the notice
+  link trusts: a compromised page could show a false "open in Praxi" prompt,
+  but it can only open `praxi://chat/<uuid>`, so the real form is still the
+  desktop's and no value is ever entered on the page.
 
 ## Mission integration
 

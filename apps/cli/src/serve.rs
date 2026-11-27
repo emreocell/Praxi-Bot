@@ -1880,7 +1880,15 @@ secret_request=true",
 secret_request=true",
             Some("garbage")
         ));
+        // An unreadable host.toml fails closed; only an explicit environment `on` overrides it.
         assert!(!secret_requests_enabled("not toml [", None));
+        assert!(!secret_requests_enabled("not toml [", Some("garbage")));
+        assert!(!secret_requests_enabled(
+            "[experimental]
+secret_request=\"yes\"",
+            None
+        ));
+        assert!(secret_requests_enabled("not toml [", Some("on")));
     }
 
     #[test]
