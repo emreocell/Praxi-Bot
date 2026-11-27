@@ -24,7 +24,12 @@
 //! - with a [`GitPolicy`], `paths` naming a protected file are refused, `git_diff` /
 //!   `git_show` / `git_status` leave out the files it protects (including the whole-tree
 //!   diff against the empty tree), `rev` must name a commit or tree (never a bare blob),
-//!   and `git_commit` refuses `.` and anything that would record a protected file;
+//!   and `git_commit` refuses `.` and anything that would record a protected file (checked
+//!   before staging, after staging and on the recorded commit, which is taken back if needed);
+//!   a branch switch is refused when it would write or remove a protected file, never
+//!   overwrites an ignored file and never makes up a local branch from a remote one;
+//! - git is run with the output-shaping config (`diff.relative`, prefixes, submodules) pinned,
+//!   since `.git/config` is writable by the bot;
 //! - output is capped (`max_bytes`, and the caller's `ToolContext::max_inline_bytes`);
 //! - every `git` process has a timeout and is killed on drop.
 //!

@@ -118,6 +118,14 @@ pub fn derive(tool: &str, input: &Value) -> Derived {
     if !is_scoped_family(tool) {
         return Derived::NotScoped;
     }
+    // A switch rewrites the whole work tree of the repository, whatever folder `repo` names,
+    // so no folder describes what a remembered rule would allow: approved once, every time.
+    if tool == "git_branch"
+        && (input.get("action").and_then(Value::as_str) == Some("switch")
+            || input.get("switch").and_then(Value::as_bool) == Some(true))
+    {
+        return Derived::Unscopable;
+    }
     let scope = match tool {
         "browser_open" => input
             .get("url")
@@ -504,8 +512,15 @@ mod tests {
         assert_eq!(repo.pattern, "c:/work/app");
         assert!(repo.covers(&scope(
             "git_branch",
-            &json!({"repo": "C:/Work/App/sub", "action": "switch", "name": "x"})
+            &json!({"repo": "C:/Work/App/sub", "action": "create", "name": "x"})
         )));
+        // A switch rewrites the whole work tree, so it is never remembered for a folder.
+        for input in [
+            json!({"repo": "C:/Work/App", "action": "switch", "name": "x"}),
+            json!({"repo": "C:/Work/App", "action": "create", "name": "x", "switch": true}),
+        ] {
+            assert_eq!(derive("git_branch", &input), Derived::Unscopable, "{input}");
+        }
         assert!(!repo.covers(&scope(
             "git_commit",
             &json!({"repo": "C:/Work/Other", "paths": ["a"], "message": "m"})

@@ -1240,3 +1240,297 @@ async fn the_policy_vets_the_top_level_and_the_git_directory_of_every_call() {
         .unwrap_err();
     assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
 }
+
+/// Branch `name` tracks `.env` (force-added), and the repository is back on `main`.
+fn branch_tracking_env(f: &Fixture, name: &str) {
+    git(&f.repo, &["switch", "-q", "-c", name]);
+    std::fs::write(f.repo.join(".env"), "TOKEN=from-the-branch\n").unwrap();
+    git(&f.repo, &["add", "-f", ".env"]);
+    git(&f.repo, &["commit", "-q", "-m", "track the env file"]);
+    git(&f.repo, &["switch", "-q", "main"]);
+}
+
+fn head_branch(f: &Fixture) -> String {
+    let out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&f.repo)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+#[tokio::test]
+async fn a_switch_that_would_write_or_remove_a_protected_file_is_refused_before_it_runs() {
+    let f = fixture();
+    branch_tracking_env(&f, "pr-x");
+    let policy = Arc::new(TestPolicy::default());
+    let reg = guarded(&f, policy.clone());
+    let r = repo_arg(&f);
+    // main -> pr-x would write `.env`; create + switch from it would as well.
+    for input in [
+        json!({"repo": r, "action": "switch", "name": "pr-x"}),
+        json!({"repo": r, "action": "create", "name": "copy", "start_point": "pr-x", "switch": true}),
+    ] {
+        let err = run(&reg, "git_branch", input.clone()).await.unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(ref m) if m.contains(".env")),
+            "{input}: {err}"
+        );
+        assert_eq!(head_branch(&f), "main", "{input}");
+        assert!(!f.repo.join(".env").exists(), "{input}");
+    }
+    // The refused calls never reached the embedder.
+    assert!(
+        !policy
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e.starts_with("begin"))
+    );
+    // Going the other way would remove the `.env` the work tree holds.
+    git(&f.repo, &["switch", "-q", "pr-x"]);
+    let err = run(
+        &reg,
+        "git_branch",
+        json!({"repo": r, "action": "switch", "name": "main"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    assert_eq!(head_branch(&f), "pr-x");
+    assert!(f.repo.join(".env").exists());
+}
+
+#[tokio::test]
+async fn a_switch_names_an_existing_local_branch_and_reports_what_it_adds() {
+    let f = fixture();
+    git(&f.repo, &["switch", "-q", "-c", "other"]);
+    std::fs::write(f.repo.join("c.txt"), "twelve bytes\n").unwrap();
+    git(&f.repo, &["add", "c.txt"]);
+    git(&f.repo, &["commit", "-q", "-m", "add c"]);
+    git(&f.repo, &["switch", "-q", "main"]);
+    let policy = Arc::new(TestPolicy::default());
+    let reg = guarded(&f, policy.clone());
+    let r = repo_arg(&f);
+    // A remote-tracking name is not turned into a local branch behind the model's back.
+    git(
+        &f.repo,
+        &["update-ref", "refs/remotes/origin/remote-only", "other"],
+    );
+    let err = run(
+        &reg,
+        "git_branch",
+        json!({"repo": r, "action": "switch", "name": "remote-only"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ToolError::InvalidInput(_)), "{err}");
+    assert_eq!(head_branch(&f), "main");
+    // An ordinary switch works; the embedder is told the bytes it adds and which git files change.
+    run(
+        &reg,
+        "git_branch",
+        json!({"repo": r, "action": "switch", "name": "other"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(head_branch(&f), "other");
+    let events = policy.events.lock().unwrap().clone();
+    let begin = events
+        .iter()
+        .find(|e| e.starts_with("begin git_branch"))
+        .expect("begin");
+    assert!(
+        begin.contains("index") && begin.contains("HEAD") && begin.ends_with(" 13"),
+        "{begin}"
+    );
+}
+
+#[tokio::test]
+async fn a_switch_does_not_overwrite_an_ignored_file_of_the_work_tree() {
+    let f = fixture();
+    std::fs::write(f.repo.join(".gitignore"), "gen.out\n").unwrap();
+    git(&f.repo, &["add", ".gitignore"]);
+    git(&f.repo, &["commit", "-q", "-m", "ignore gen.out"]);
+    git(&f.repo, &["switch", "-q", "-c", "other"]);
+    std::fs::write(f.repo.join("gen.out"), "tracked on the branch\n").unwrap();
+    git(&f.repo, &["add", "-f", "gen.out"]);
+    git(&f.repo, &["commit", "-q", "-m", "track gen.out"]);
+    git(&f.repo, &["switch", "-q", "main"]);
+    // The owner's own, ignored, never-committed file.
+    std::fs::write(f.repo.join("gen.out"), "mine\n").unwrap();
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    let err = run(
+        &reg,
+        "git_branch",
+        json!({"repo": repo_arg(&f), "action": "switch", "name": "other"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ToolError::Execution(_)), "{err}");
+    assert_eq!(head_branch(&f), "main");
+    assert_eq!(
+        std::fs::read_to_string(f.repo.join("gen.out")).unwrap(),
+        "mine\n"
+    );
+}
+
+#[tokio::test]
+async fn repository_config_cannot_change_how_names_are_printed() {
+    let f = fixture();
+    let ssh = f.repo.join(".ssh");
+    std::fs::create_dir_all(&ssh).unwrap();
+    std::fs::write(ssh.join("key"), "KEY-ONE\n").unwrap();
+    git(&f.repo, &["add", "-f", ".ssh/key"]);
+    git(&f.repo, &["commit", "-q", "-m", "key"]);
+    std::fs::write(ssh.join("key"), "KEY-TWO\n").unwrap();
+    std::fs::write(f.repo.join("a.txt"), "plain change\n").unwrap();
+    // The bot can write `.git/config`: names relative to the folder, no prefixes, mnemonic ones.
+    for (key, value) in [
+        ("diff.relative", "true"),
+        ("diff.noprefix", "true"),
+        ("diff.mnemonicPrefix", "true"),
+        ("diff.srcPrefix", "x/"),
+    ] {
+        git(&f.repo, &["config", key, value]);
+    }
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    // Run inside the credential folder: git would print `key` instead of `.ssh/key`.
+    for repo in [ssh.display().to_string(), repo_arg(&f)] {
+        for tool in ["git_diff", "git_show"] {
+            let v = run(&reg, tool, json!({"repo": repo})).await.unwrap();
+            assert!(
+                !text(&v).contains("KEY-ONE") && !text(&v).contains("KEY-TWO"),
+                "{tool} {repo}: {v}"
+            );
+        }
+    }
+    // The ordinary change is still shown (a mnemonic or missing prefix does not hide it).
+    let v = run(&reg, "git_diff", json!({"repo": repo_arg(&f)}))
+        .await
+        .unwrap();
+    assert!(text(&v).contains("plain change"), "{v}");
+}
+
+/// Protects `a.txt` only from its `from`-th question on. A commit asks once for the paths named,
+/// once for the files it would stage, once after staging and once for what was recorded.
+#[derive(Debug)]
+struct LatePolicy {
+    from: usize,
+    asked: std::sync::atomic::AtomicUsize,
+}
+
+impl GitPolicy for LatePolicy {
+    fn check_dir(&self, _dir: &Path, _mutates: bool) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn is_protected(&self, path: &Path) -> bool {
+        let n = self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        path.file_name().is_some_and(|f| f == "a.txt") && n >= self.from
+    }
+
+    fn begin_mutation(
+        &self,
+        _op: &'static str,
+        _repo: &Path,
+        _control_files: &[PathBuf],
+        _added_bytes: u64,
+    ) -> Result<Box<dyn MutationScope>, String> {
+        Ok(Box::new(Scope))
+    }
+}
+
+fn staged_names(f: &Fixture) -> String {
+    let out = Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(&f.repo)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .replace('\r', "")
+}
+
+#[tokio::test]
+async fn a_file_that_turns_protected_after_the_scan_is_not_committed_and_the_index_is_put_back() {
+    // The 3rd question is the look after staging, the 4th the look at the recorded commit.
+    for (from, undone) in [(3, false), (4, true)] {
+        let f = fixture();
+        let head = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&f.repo)
+            .output()
+            .unwrap()
+            .stdout;
+        std::fs::write(f.repo.join("a.txt"), "changed\n").unwrap();
+        std::fs::write(f.repo.join("b.txt"), "also staged by the owner\n").unwrap();
+        git(&f.repo, &["add", "b.txt"]);
+        let reg = ToolRegistry::new();
+        let policy = Arc::new(LatePolicy {
+            from,
+            asked: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let _ = register(
+            &reg,
+            &DevToolsConfig::new(vec![f.root.clone()]).with_policy(policy),
+        );
+        let err = run(
+            &reg,
+            "git_commit",
+            json!({"repo": repo_arg(&f), "paths": ["a.txt"], "message": "m"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, ToolError::PermissionDenied(ref m) if m.contains("a.txt") && m.contains("taken back") == undone),
+            "{from}: {err}"
+        );
+        // HEAD is where it was, and the index holds what the owner staged and nothing else.
+        let now = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&f.repo)
+            .output()
+            .unwrap()
+            .stdout;
+        assert_eq!(head, now, "{from}");
+        assert_eq!(staged_names(&f), "b.txt", "{from}");
+        assert_eq!(
+            std::fs::read_to_string(f.repo.join("a.txt")).unwrap(),
+            "changed\n"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_commit_that_fails_after_staging_leaves_the_index_as_it_was() {
+    let f = fixture();
+    std::fs::write(f.repo.join("a.txt"), "changed\n").unwrap();
+    std::fs::write(f.repo.join("new.txt"), "new\n").unwrap();
+    std::fs::write(f.repo.join("b.txt"), "staged by the owner\n").unwrap();
+    git(&f.repo, &["add", "b.txt"]);
+    // git adds fine, then refuses to commit with this setting.
+    git(&f.repo, &["config", "commit.cleanup", "bogus"]);
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    let err = run(
+        &reg,
+        "git_commit",
+        json!({"repo": repo_arg(&f), "paths": ["a.txt", "new.txt"], "message": "m"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ToolError::Execution(_)), "{err}");
+    assert_eq!(staged_names(&f), "b.txt");
+}
+
+#[tokio::test]
+async fn a_log_says_whether_it_was_cut_off() {
+    let f = fixture();
+    let reg = guarded(&f, Arc::new(TestPolicy::default()));
+    let v = run(&reg, "git_log", json!({"repo": repo_arg(&f)}))
+        .await
+        .unwrap();
+    assert_eq!(v["truncated"], false, "{v}");
+    assert_eq!(v["commits"].as_array().unwrap().len(), 1);
+}

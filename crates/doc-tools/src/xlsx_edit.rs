@@ -576,7 +576,7 @@ fn resolve_sheet(
         .ok_or_else(|| invalid("not a spreadsheet: xl/workbook.xml is missing"))?;
     let rels = ooxml::read_part(zip, "xl/_rels/workbook.xml.rels")?
         .ok_or_else(|| invalid("not a spreadsheet: workbook relationships are missing"))?;
-    // Id -> (target, whether it points outside the package).
+    // Id -> (target, whether it points outside the package, whether it is a worksheet).
     let mut targets = BTreeMap::new();
     let mut reader = Reader::from_reader(rels.as_slice());
     loop {
@@ -587,7 +587,15 @@ fn resolve_sheet(
                 if let (Some(id), Some(target)) = (attr(&e, "Id"), attr(&e, "Target")) {
                     let external = attr(&e, "TargetMode")
                         .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"));
-                    if targets.insert(id, (target, external)).is_some() {
+                    // Only a worksheet is edited: a relationship of another type (styles, a
+                    // chart sheet, the shared strings) could name a part this tool also rewrites.
+                    let worksheet = attr(&e, "Type").is_some_and(|kind| {
+                        kind.trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .is_some_and(|last| last.eq_ignore_ascii_case("worksheet"))
+                    });
+                    if targets.insert(id, (target, external, worksheet)).is_some() {
                         return Err(invalid("the workbook relationships repeat an Id"));
                     }
                 }
@@ -619,9 +627,12 @@ fn resolve_sheet(
             .first()
             .ok_or_else(|| exec("workbook has no sheets"))?,
     };
-    let (target, external) = targets
+    let (target, external, worksheet) = targets
         .get(id)
         .ok_or_else(|| exec(format!("sheet '{name}' has no worksheet part")))?;
+    if !worksheet {
+        return Err(invalid(format!("sheet '{name}' is not a worksheet")));
+    }
     let part = if *external { None } else { sheet_part(target) }.ok_or_else(|| {
         invalid(format!(
             "sheet '{name}' points outside the workbook's own parts"
@@ -1222,6 +1233,19 @@ mod tests {
         ] {
             assert_eq!(sheet_part(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_sheet_that_is_not_a_worksheet_relationship_is_refused_before_anything_is_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let original = std::fs::read(&p).unwrap();
+        // The sheet points at the style table, which the date handling also rewrites.
+        let bytes = edit_part(&original, "xl/_rels/workbook.xml.rels", |t| {
+            t.replace("Target=\"worksheets/sheet1.xml\"", "Target=\"styles.xml\"")
+                .replace("relationships/worksheet\"", "relationships/styles\"")
+        });
+        assert_refused(&p, &bytes, "not a worksheet");
     }
 
     #[test]

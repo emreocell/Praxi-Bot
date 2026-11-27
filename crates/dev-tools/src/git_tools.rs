@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -305,6 +306,102 @@ fn capped_text(mut text: String, cap: usize, hit_capture_limit: bool) -> String 
     text
 }
 
+/// The trimmed message of a commit call, once its paths and message pass the plain checks.
+fn check_commit_input(i: &CommitIn) -> Result<&str, ToolError> {
+    if i.paths.is_empty() {
+        return Err(invalid("paths must list at least one path to commit"));
+    }
+    check_paths(&i.paths)?;
+    if i.paths.iter().any(|p| {
+        Path::new(p)
+            .components()
+            .all(|c| matches!(c, Component::CurDir))
+    }) {
+        return Err(invalid(
+            "name the files or folders to commit; \".\" (the whole folder) is not accepted",
+        ));
+    }
+    let message = i.message.trim();
+    if message.is_empty() {
+        return Err(invalid("message is empty"));
+    }
+    if message.len() > MAX_MESSAGE_BYTES || message.contains(' ') {
+        return Err(invalid("message is too long or contains NUL"));
+    }
+    Ok(message)
+}
+
+/// `git switch` of `name`: only an existing local branch (no tracking branch is made up from a
+/// remote), and never over an ignored file the work tree holds (a real, untracked `.env`).
+fn switch_args(name: &str) -> Vec<String> {
+    vec![
+        s("switch"),
+        s("--no-guess"),
+        s("--no-overwrite-ignore"),
+        s("--no-recurse-submodules"),
+        s(name),
+    ]
+}
+
+/// `(path, new object id)` of each entry of `git diff-tree -r -z --raw` output
+/// (`:<modes> <old> <new> <status>\0<path>\0`); `None` when it does not parse.
+fn parse_raw_z(text: &str) -> Option<Vec<(String, String)>> {
+    let mut entries = Vec::new();
+    let mut tokens = text.split('\0').filter(|t| !t.is_empty());
+    while let Some(header) = tokens.next() {
+        let fields: Vec<&str> = header.strip_prefix(':')?.split(' ').collect();
+        let new_id = *fields.get(3)?;
+        let path = tokens.next()?;
+        entries.push((path.to_owned(), new_id.to_owned()));
+    }
+    Some(entries)
+}
+
+/// The refusal for a protected file that a commit would record (or did, and was taken back).
+fn protected_in_commit(rel: &str, undone: bool) -> ToolError {
+    let after = if undone {
+        "the commit was taken back"
+    } else {
+        "nothing was committed"
+    };
+    ToolError::PermissionDenied(format!(
+        "{rel} is a protected file (credentials or tool settings) and is not committed; {after}"
+    ))
+}
+
+/// Largest index kept in memory to undo a failed commit.
+const MAX_INDEX_BACKUP_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The bytes of the index file, `None` when there is none or it is too large to keep.
+fn read_index(git_dir: &Path) -> Option<Vec<u8>> {
+    let path = git_dir.join("index");
+    let meta = std::fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_INDEX_BACKUP_BYTES {
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
+/// Put `bytes` back as the index, the way git writes it (a lock file, then a rename). Does
+/// nothing when another git process holds the lock.
+fn restore_index(git_dir: &Path, bytes: &[u8]) {
+    use std::io::Write as _;
+    let lock = git_dir.join("index.lock");
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock)
+    else {
+        return;
+    };
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if written.is_ok() && std::fs::rename(&lock, git_dir.join("index")).is_ok() {
+        return;
+    }
+    let _ = std::fs::remove_file(&lock);
+}
+
 impl GitTool {
     /// Resolve and validate the repository: inside the workspace, and so is
     /// its top level. `mutates` is set for a commit or a branch change.
@@ -485,6 +582,9 @@ impl GitTool {
                     s("status"),
                     s("--porcelain=v1"),
                     s("--branch"),
+                    // A submodule's own state needs its own git directory, which a bot can point
+                    // anywhere: not looked at.
+                    s("--ignore-submodules=all"),
                     s(untracked),
                 ],
                 None,
@@ -515,6 +615,10 @@ impl GitTool {
             s("--no-ext-diff"),
             s("--no-textconv"),
             s("--no-renames"),
+            s("--src-prefix=a/"),
+            s("--dst-prefix=b/"),
+            s("--submodule=short"),
+            s("--ignore-submodules=all"),
         ];
         if i.staged == Some(true) {
             args.push(s("--cached"));
@@ -579,9 +683,13 @@ impl GitTool {
             }
             other => other?,
         };
-        let commits: Vec<Value> = out
-            .stdout
-            .lines()
+        // A cut-off output ends in a half record: leave it out and say so.
+        let mut lines: Vec<&str> = out.stdout.lines().collect();
+        if out.truncated {
+            lines.pop();
+        }
+        let commits: Vec<Value> = lines
+            .into_iter()
             .filter_map(|l| {
                 let mut f = l.split('\u{1f}');
                 Some(json!({
@@ -590,7 +698,9 @@ impl GitTool {
                 }))
             })
             .collect();
-        Ok(json_out(json!({"commits": commits})))
+        Ok(json_out(
+            json!({"commits": commits, "truncated": out.truncated}),
+        ))
     }
 
     async fn branch(&self, i: BranchIn) -> Result<ToolOutput, ToolError> {
@@ -660,11 +770,36 @@ impl GitTool {
             )
             .await
             .map_err(|_| invalid(format!("invalid branch name: {name:?}")))?;
-        // A switch rewrites the work tree; git itself refuses to overwrite changes that are
-        // not committed, so nothing needs an undo copy: the embedder only marks the files.
+        // A switch rewrites the work tree: before anything runs, see which files it would write
+        // or remove. A protected one (a branch that tracks `.env` or `.claude/settings.json`, or
+        // lacks the `.env` the work tree has) stops it, and what it adds counts for the budget.
+        // git itself refuses to overwrite changes that are not committed.
         let switches = i.action == BranchAction::Switch || i.switch == Some(true);
+        let mut added = 0;
+        if switches {
+            let target = match (i.action, i.start_point.as_deref()) {
+                (BranchAction::Switch, _) => Some(format!("refs/heads/{name}")),
+                (_, Some(start)) => Some(start.to_owned()),
+                // A new branch at HEAD changes no file.
+                (_, None) => None,
+            };
+            if let Some(target) = target {
+                let tree = self.tree_of(dir, &target).await.map_err(|_| {
+                    invalid(format!(
+                        "{target:?} does not name a commit in this repository (a switch needs an existing local branch; create one with action=create and a start_point)"
+                    ))
+                })?;
+                added = self.check_switch(&repo, &tree).await?;
+            }
+        }
+        // A switch moves HEAD and the index; they are what an undo checkpoint can bring back.
+        let control: Vec<PathBuf> = if switches {
+            vec![repo.git_dir.join("index"), repo.git_dir.join("HEAD")]
+        } else {
+            Vec::new()
+        };
         let tree = switches.then_some(repo.top.as_path());
-        let scope = self.begin("git_branch", &repo, &[], 0)?;
+        let scope = self.begin("git_branch", &repo, &control, added)?;
         let result = async {
             if i.action == BranchAction::Create {
                 let mut args = vec![s("branch"), s(name)];
@@ -673,15 +808,11 @@ impl GitTool {
                 }
                 self.git.run(dir, &args, None, 4096).await?;
                 if i.switch == Some(true) {
-                    self.git
-                        .run(dir, &[s("switch"), s(name)], None, 4096)
-                        .await?;
+                    self.git.run(dir, &switch_args(name), None, 4096).await?;
                 }
                 Ok(json!({"created": name, "switched": i.switch == Some(true)}))
             } else {
-                self.git
-                    .run(dir, &[s("switch"), s(name)], None, 4096)
-                    .await?;
+                self.git.run(dir, &switch_args(name), None, 4096).await?;
                 Ok(json!({"switched_to": name}))
             }
         }
@@ -696,6 +827,173 @@ impl GitTool {
         };
         Self::end(scope, true, tree, &mut out)?;
         Ok(json_out(out))
+    }
+
+    /// The id of the tree `rev` names, or an error when it names no commit or tree.
+    async fn tree_of(&self, dir: &Path, rev: &str) -> Result<String, ToolError> {
+        let out = self
+            .git
+            .run(
+                dir,
+                &[
+                    s("rev-parse"),
+                    s("--verify"),
+                    s("--quiet"),
+                    format!("{rev}^{{tree}}"),
+                ],
+                None,
+                4096,
+            )
+            .await?;
+        let id = out.stdout.trim();
+        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(invalid(format!("{rev:?} names no tree")));
+        }
+        Ok(id.to_owned())
+    }
+
+    /// Refuse a switch to the tree `target` when it would write or remove a protected file;
+    /// otherwise the bytes it adds, for the write budget. Fails closed: a listing that cannot be
+    /// read in full, or is too long to size, stops the switch.
+    async fn check_switch(&self, repo: &Repo, target: &str) -> Result<u64, ToolError> {
+        let out = self
+            .git
+            .run(
+                &repo.dir,
+                &[
+                    s("diff-tree"),
+                    s("-r"),
+                    s("--no-renames"),
+                    s("--no-abbrev"),
+                    s("-z"),
+                    s("--raw"),
+                    s("HEAD^{tree}"),
+                    s(target),
+                ],
+                None,
+                MAX_LISTING_BYTES,
+            )
+            .await?;
+        if out.truncated {
+            return Err(invalid("too many files differ between the branches"));
+        }
+        let Some(changes) = parse_raw_z(&out.stdout) else {
+            return Err(ToolError::Execution(
+                "unexpected output from git diff-tree".into(),
+            ));
+        };
+        if changes.len() > MAX_SIZED_FILES {
+            return Err(invalid("too many files differ between the branches"));
+        }
+        if let Some((path, _)) = changes.iter().find(|(path, _)| self.hidden(repo, path)) {
+            return Err(ToolError::PermissionDenied(format!(
+                "switching would write or remove {path}, a protected file (credentials or tool settings); nothing was changed"
+            )));
+        }
+        let ids: Vec<&str> = changes
+            .iter()
+            .map(|(_, id)| id.as_str())
+            .filter(|id| id.bytes().any(|b| b != b'0'))
+            .collect();
+        self.blob_bytes(repo, &ids).await
+    }
+
+    /// The sizes of the objects `ids` name, added up (an object this repository does not hold
+    /// counts for nothing: a submodule's commit).
+    async fn blob_bytes(&self, repo: &Repo, ids: &[&str]) -> Result<u64, ToolError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut stdin = ids.join("\n");
+        stdin.push('\n');
+        let out = self
+            .git
+            .run(
+                &repo.dir,
+                &[s("cat-file"), s("--batch-check=%(objectsize)")],
+                Some(&stdin),
+                MAX_LISTING_BYTES,
+            )
+            .await?;
+        Ok(out
+            .stdout
+            .lines()
+            .filter_map(|l| l.trim().parse::<u64>().ok())
+            .fold(0u64, u64::saturating_add))
+    }
+
+    /// The names (relative to the top level) staged under `paths`.
+    async fn staged_names(&self, repo: &Repo, paths: &[String]) -> Result<Vec<String>, ToolError> {
+        let mut args: Vec<String> = [
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--",
+        ]
+        .iter()
+        .map(|a| s(a))
+        .collect();
+        args.extend(paths.iter().cloned());
+        self.names_of(repo, &args).await
+    }
+
+    /// The names (relative to the top level) the commit at HEAD recorded.
+    async fn recorded_names(&self, repo: &Repo) -> Result<Vec<String>, ToolError> {
+        let args: Vec<String> = [
+            "diff-tree",
+            "--no-commit-id",
+            "--root",
+            "-r",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            "HEAD",
+        ]
+        .iter()
+        .map(|a| s(a))
+        .collect();
+        self.names_of(repo, &args).await
+    }
+
+    async fn names_of(&self, repo: &Repo, args: &[String]) -> Result<Vec<String>, ToolError> {
+        let out = self
+            .git
+            .run(&repo.dir, args, None, MAX_LISTING_BYTES)
+            .await?;
+        if out.truncated {
+            return Err(invalid(
+                "too many changed files under these paths; name fewer of them",
+            ));
+        }
+        Ok(out
+            .stdout
+            .split('\0')
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned)
+            .collect())
+    }
+
+    /// Take back the commit at HEAD (its files stay staged): the one before it becomes HEAD
+    /// again, or, for a first commit, the branch is deleted. Best effort.
+    async fn undo_commit(&self, repo: &Repo) {
+        let has_parent = self
+            .git
+            .run(
+                &repo.dir,
+                &[s("rev-parse"), s("--verify"), s("--quiet"), s("HEAD~1")],
+                None,
+                4096,
+            )
+            .await
+            .is_ok();
+        let args = if has_parent {
+            vec![s("reset"), s("--soft"), s("--quiet"), s("HEAD~1")]
+        } else {
+            vec![s("update-ref"), s("-d"), s("HEAD")]
+        };
+        let _ = self.git.run(&repo.dir, &args, None, 4096).await;
     }
 
     /// The files a commit of `paths` would record: changed in the work tree, new, deleted or
@@ -761,50 +1059,48 @@ impl GitTool {
     }
 
     async fn commit(&self, i: CommitIn) -> Result<ToolOutput, ToolError> {
-        if i.paths.is_empty() {
-            return Err(invalid("paths must list at least one path to commit"));
-        }
-        check_paths(&i.paths)?;
-        if i.paths.iter().any(|p| {
-            Path::new(p)
-                .components()
-                .all(|c| matches!(c, Component::CurDir))
-        }) {
-            return Err(invalid(
-                "name the files or folders to commit; \".\" (the whole folder) is not accepted",
-            ));
-        }
-        let message = i.message.trim();
-        if message.is_empty() {
-            return Err(invalid("message is empty"));
-        }
-        if message.len() > MAX_MESSAGE_BYTES || message.contains('\0') {
-            return Err(invalid("message is too long or contains NUL"));
-        }
+        let message = check_commit_input(&i)?;
         let repo = self.repo_dir(i.repo.as_deref(), true).await?;
         self.vet_paths(&repo, &i.paths)?;
         // Look at what would be committed BEFORE anything is staged: a protected file inside a
         // folder (or already staged) stops the whole commit, nothing changes.
         let candidates = self.commit_candidates(&repo, &i.paths).await?;
+        if candidates.len() > MAX_SIZED_FILES {
+            return Err(invalid(
+                "too many changed files under these paths; name fewer of them",
+            ));
+        }
         let mut added: u64 = 0;
-        for (n, rel) in candidates.iter().enumerate() {
+        for rel in &candidates {
             if self.hidden(&repo, rel) {
                 return Err(ToolError::PermissionDenied(format!(
                     "{rel} is a protected file (credentials or tool settings) and is not committed; nothing was staged"
                 )));
             }
-            if n < MAX_SIZED_FILES
-                && let Ok(meta) = std::fs::symlink_metadata(join_rel(&repo.top, rel))
+            if let Ok(meta) = std::fs::symlink_metadata(join_rel(&repo.top, rel))
                 && meta.is_file()
             {
                 added = added.saturating_add(meta.len());
             }
         }
+        // The index as it is now, to put back when the commit does not happen.
+        let index_backup = read_index(&repo.git_dir);
         let scope = self.begin("git_commit", &repo, &Self::control_files(&repo), added)?;
+        let committed = AtomicBool::new(false);
         let run = async {
             let mut add = vec![s("add"), s("--")];
             add.extend(i.paths.iter().cloned());
             self.git.run(&repo.dir, &add, None, 64 * 1024).await?;
+            // A file that appeared under a named folder after the look above (another tool call,
+            // another process) is staged by now: look again before anything is recorded.
+            if let Some(rel) = self
+                .staged_names(&repo, &i.paths)
+                .await?
+                .iter()
+                .find(|n| self.hidden(&repo, n))
+            {
+                return Err(protected_in_commit(rel, false));
+            }
             let mut commit = vec![
                 s("commit"),
                 s("--no-verify"),
@@ -818,6 +1114,18 @@ impl GitTool {
             self.git
                 .run(&repo.dir, &commit, Some(message), 64 * 1024)
                 .await?;
+            committed.store(true, Ordering::SeqCst);
+            // What git recorded is what counts: take the commit back if a protected file is in it.
+            if let Some(rel) = self
+                .recorded_names(&repo)
+                .await?
+                .iter()
+                .find(|n| self.hidden(&repo, n))
+            {
+                self.undo_commit(&repo).await;
+                committed.store(false, Ordering::SeqCst);
+                return Err(protected_in_commit(rel, true));
+            }
             self.git
                 .run(
                     &repo.dir,
@@ -831,6 +1139,12 @@ impl GitTool {
         let head = match run {
             Ok(head) => head,
             Err(e) => {
+                if !committed.load(Ordering::SeqCst)
+                    && let Some(bytes) = &index_backup
+                {
+                    // Nothing was committed: whatever `git add` staged is unstaged again.
+                    restore_index(&repo.git_dir, bytes);
+                }
                 let _ = Self::end(scope, false, None, &mut Value::Null);
                 return Err(e);
             }
@@ -856,6 +1170,10 @@ impl GitTool {
             s("--no-ext-diff"),
             s("--no-textconv"),
             s("--no-renames"),
+            s("--src-prefix=a/"),
+            s("--dst-prefix=b/"),
+            s("--submodule=short"),
+            s("--ignore-submodules=all"),
         ];
         if stat {
             args.push(s("--stat=4096,2048"));

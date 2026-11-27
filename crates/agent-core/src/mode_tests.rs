@@ -202,6 +202,17 @@ async fn a_tainted_balanced_run_still_asks_before_sending_data_out() {
 
 /// Read an untrusted page, then make one call of `name` with `input`; report whether it asked.
 async fn asks_after_untrusted_page(extra: &str, name: &str, input: serde_json::Value) -> bool {
+    asks_after_untrusted_page_as(extra, name, input, None).await
+}
+
+/// [`asks_after_untrusted_page`] for a run `initiator` started; `None` is the owner typing in
+/// the desktop app.
+async fn asks_after_untrusted_page_as(
+    extra: &str,
+    name: &str,
+    input: serde_json::Value,
+    initiator: Option<protocol::InitiatorKind>,
+) -> bool {
     let env = setup();
     let page = Arc::new(with_class(
         "web_read",
@@ -230,7 +241,18 @@ async fn asks_after_untrusted_page(extra: &str, name: &str, input: serde_json::V
         cfg(policy),
     );
     let mut rx = lp.subscribe();
-    let run = lp.run_turn(env.chat, "go").unwrap();
+    let run = match initiator {
+        Some(kind) => lp.run_turn_as(env.chat, "go", kind).unwrap(),
+        None => {
+            let crate::Delivery::NewTurn(run) = lp
+                .send_user_message_from(env.chat, "go", crate::MessageMode::Steer, "owner")
+                .unwrap()
+            else {
+                unreachable!()
+            };
+            run
+        }
+    };
     let asked = tokio::select! {
         _ = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))) => true,
         state = lp.wait(run) => {
@@ -260,6 +282,22 @@ async fn a_git_change_after_untrusted_content_asks_below_full_and_never_prompts_
     // The owner's Full level: only money asks.
     assert!(!asks_after_untrusted_page(FULL, "git_commit", commit).await);
     assert!(!asks_after_untrusted_page(FULL, "git_branch", switch).await);
+    // A run the owner did not start (a schedule, a channel message) keeps asking at Full too.
+    for who in [
+        protocol::InitiatorKind::Schedule,
+        protocol::InitiatorKind::Channel,
+    ] {
+        assert!(
+            asks_after_untrusted_page_as(
+                FULL,
+                "git_commit",
+                json!({"paths": ["a.txt"], "message": "m"}),
+                Some(who)
+            )
+            .await,
+            "{who:?}"
+        );
+    }
     // Without untrusted content in the run, Balanced commits as freely as it edits files.
     let commit = tool("git_commit", Effect::Write, PermissionCategory::Fs);
     assert!(!asks(BALANCED, &commit).await);

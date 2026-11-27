@@ -33,8 +33,8 @@ use tool_registry::{ContentPart, Tool, ToolContext, ToolError, ToolOutput, ToolS
 
 use super::{
     Follow, ROOT_UNRESOLVED_MSG, Shared, blocking, check_daemon_write, check_write_budget,
-    credential_blocked, denied, file_mutations, validate_mutation, validate_path, with_base_dir,
-    workspace_blocked, workspace_refusal,
+    credential_blocked, denied, file_mutations, validate_mutation, validate_path,
+    widen_for_compare, with_base_dir, workspace_blocked, workspace_refusal,
 };
 
 /// How a tool uses a path field of its input.
@@ -52,16 +52,25 @@ enum Access {
 
 type Field = (&'static str, Access);
 
-fn fields_of(tool: &str) -> &'static [Field] {
+/// The path fields of a document tool. Every tool is named here: one that is not (a new writer
+/// added to `doc-tools` and forgotten) is refused instead of being treated as a reader.
+fn fields_of(tool: &str) -> Option<&'static [Field]> {
     use Access::{Create, Edit, Folder, Read};
-    match tool {
+    Some(match tool {
         "docx_write" | "xlsx_write" => &[("path", Create)],
         "xlsx_append_rows" | "xlsx_update_cells" | "docx_append" => &[("path", Edit)],
         "csv_transform" | "doc_convert" => &[("path", Read), ("output_path", Create)],
         "doc_preview" => &[("path", Read), ("output_dir", Folder)],
-        // pdf_extract, docx_read, xlsx_read, pptx_read, csv_read, json_query
-        _ => &[("path", Read)],
-    }
+        "pdf_extract" | "docx_read" | "xlsx_read" | "pptx_read" | "csv_read" | "json_query" => {
+            &[("path", Read)]
+        }
+        _ => return None,
+    })
+}
+
+/// Does the document tool create or change a file?
+fn writes_files(tool: &str) -> bool {
+    fields_of(tool).is_some_and(|fields| fields.iter().any(|(_, access)| *access != Access::Read))
 }
 
 /// The output the tool picks itself when the input names none, as the inner tool would: next
@@ -182,6 +191,11 @@ fn prepare(sh: &Shared, run: &str, tool: &str, mut input: Value) -> Result<Prepa
         outputs: Vec::new(),
         inputs: Vec::new(),
     };
+    let Some(fields) = fields_of(tool) else {
+        return Err(ToolError::Execution(format!(
+            "{tool} has no path rules here and was not run"
+        )));
+    };
     // A malformed input is the inner tool's to report; nothing was validated or changed.
     let Some(object) = input.as_object_mut() else {
         prepared.input = input;
@@ -189,7 +203,7 @@ fn prepare(sh: &Shared, run: &str, tool: &str, mut input: Value) -> Result<Prepa
     };
     let mut resolved = Vec::new();
     let mut source: Option<PathBuf> = None;
-    for (key, access) in fields_of(tool) {
+    for (key, access) in fields {
         let raw = match object.get(*key).and_then(Value::as_str) {
             Some(raw) => raw.to_owned(),
             // Left out: the tool writes to its default place, which is judged like any other.
@@ -247,6 +261,39 @@ fn prepare(sh: &Shared, run: &str, tool: &str, mut input: Value) -> Result<Prepa
     Ok(prepared)
 }
 
+/// Mark what a run that holds untrusted content wrote, or what was made from an untrusted file,
+/// in the provenance ledger. Done before anything that can fail: a file that changed is marked
+/// even when the after-state capture of its checkpoint does not work. A failed call changed
+/// nothing but the folder a preview was putting its pictures in, so only folders are marked then.
+fn mark_untrusted(sh: &Shared, ctx: &ToolContext, prepared: &Prepared, succeeded: bool) {
+    let Some(ledger) = sh.provenance.as_deref() else {
+        return;
+    };
+    let ledger_ref: Option<&dyn crate::provenance::Provenance> = Some(ledger);
+    let marked = if ctx.exposure_untrusted {
+        &prepared.changed
+    } else if prepared
+        .inputs
+        .iter()
+        .any(|p| crate::provenance::is_untrusted(ledger_ref, p))
+    {
+        &prepared.outputs
+    } else {
+        &prepared.changed[..0]
+    };
+    for path in marked {
+        let is_dir = path.is_dir();
+        if succeeded || is_dir {
+            crate::provenance::mark_path(
+                ledger,
+                path,
+                is_dir,
+                "written by a tool in an untrusted run",
+            );
+        }
+    }
+}
+
 /// Seal the undo checkpoints of a finished call and mark what an untrusted run wrote, or what
 /// was made from an untrusted file.
 fn finish(
@@ -255,6 +302,7 @@ fn finish(
     prepared: &Prepared,
     result: Result<ToolOutput, ToolError>,
 ) -> Result<ToolOutput, ToolError> {
+    mark_untrusted(sh, ctx, prepared, result.is_ok());
     let mut out = match result {
         Ok(out) => out,
         Err(e) => {
@@ -269,34 +317,14 @@ fn finish(
     for id in &prepared.checkpoints {
         sh.record_checkpoint_after(id)?;
     }
-    if let Some(ledger) = sh.provenance.as_deref() {
-        let ledger_ref: Option<&dyn crate::provenance::Provenance> = Some(ledger);
-        // A run that holds untrusted content marks everything it wrote; a clean run marks what
-        // it made from an untrusted file (a converted download is still the download).
-        let marked = if ctx.exposure_untrusted {
-            &prepared.changed
-        } else if prepared
-            .inputs
-            .iter()
-            .any(|p| crate::provenance::is_untrusted(ledger_ref, p))
-        {
-            &prepared.outputs
-        } else {
-            &prepared.changed[..0]
-        };
-        for path in marked {
-            crate::provenance::mark_path(
-                ledger,
-                path,
-                path.is_dir(),
-                "written by a tool in an untrusted run",
-            );
-        }
-    }
     if let Some(id) = prepared.checkpoints.first()
         && let Some(ContentPart::Text { text }) = out.content.first_mut()
     {
-        let _ = write!(text, "\n(checkpoint {id})");
+        let _ = write!(
+            text,
+            "
+(checkpoint {id})"
+        );
     }
     Ok(out)
 }
@@ -406,7 +434,12 @@ impl dev_tools::GitPolicy for RepoPolicy {
     }
 
     fn is_protected(&self, path: &Path) -> bool {
-        credential_blocked(&self.sh, path, path) || workspace_blocked(&self.sh, path)
+        // The long name too: a tracked entry called `ENV~1` is the `.env` of the work tree on
+        // a volume with 8.3 names.
+        let widened = widen_for_compare(path);
+        credential_blocked(&self.sh, path, &widened)
+            || workspace_blocked(&self.sh, path)
+            || workspace_blocked(&self.sh, &widened)
     }
 
     fn begin_mutation(
@@ -506,9 +539,10 @@ impl Tool for GuardedTool {
                 let mut cfg = (**base_cfg).clone();
                 blocking(move || {
                     // Held from the checkpoint to the sealed result, like the file tools do,
-                    // so a host restore never sees a half-finished change.
+                    // so a host restore never sees a half-finished change. A reader changes
+                    // nothing and must not hold a restore off (a conversion can run for minutes).
                     let lock = file_mutations(&sh.data_dir);
-                    let _mutation = lock.read();
+                    let _mutation = writes_files(&name).then(|| lock.read());
                     with_base_dir(base, || {
                         let prepared = prepare(&sh, &ctx.run_id, &name, input)?;
                         cfg.write_guard = Some(write_guard(&sh));
@@ -1496,6 +1530,69 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ledger.0.lock().len(), marks);
+    }
+
+    #[test]
+    fn every_document_tool_has_path_rules_and_only_the_writers_hold_the_restore_lock() {
+        // A tool without a rule is refused, so a writer added to `doc-tools` and forgotten here
+        // fails this test instead of running unvetted.
+        let cfg = doc_tools::DocToolsConfig::default();
+        for tool in doc_tools::tools(&cfg) {
+            let name = tool.spec().name.clone();
+            assert!(fields_of(&name).is_some(), "{name} has no path rules");
+            assert_eq!(
+                writes_files(&name),
+                tool.spec().effect == tool_registry::Effect::Write,
+                "{name}"
+            );
+        }
+        assert!(fields_of("a_new_writer").is_none());
+        assert!(!writes_files("csv_read") && !writes_files("a_new_writer"));
+        assert!(writes_files("doc_convert") && writes_files("doc_preview"));
+    }
+
+    #[tokio::test]
+    async fn a_branch_switch_that_would_write_a_credential_file_is_refused() {
+        if !has_git() {
+            return;
+        }
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        init_repo(work.path());
+        fs::write(work.path().join("a.txt"), "one\n").unwrap();
+        git(work.path(), &["add", "a.txt"]);
+        git(work.path(), &["commit", "-q", "-m", "first"]);
+        git(work.path(), &["switch", "-q", "-c", "pr-x"]);
+        fs::write(work.path().join(".env"), "TOKEN=from-the-branch\n").unwrap();
+        git(work.path(), &["add", "-f", ".env"]);
+        git(work.path(), &["commit", "-q", "-m", "env"]);
+        git(work.path(), &["switch", "-q", "main"]);
+        let tools = tools_for(
+            data.path(),
+            FsScope::Folders(vec![work.path().to_path_buf()]),
+            work.path(),
+            None,
+        );
+        for input in [
+            json!({"action": "switch", "name": "pr-x"}),
+            json!({"action": "create", "name": "copy", "start_point": "pr-x", "switch": true}),
+        ] {
+            let err = tool(&tools, "git_branch")
+                .call(&ctx(), input.clone())
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, ToolError::PermissionDenied(_)),
+                "{input}: {err}"
+            );
+            assert!(!work.path().join(".env").exists(), "{input}");
+        }
+        let head = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(work.path())
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
     }
 
     fn json_part_at(out: &ToolOutput, i: usize) -> Value {

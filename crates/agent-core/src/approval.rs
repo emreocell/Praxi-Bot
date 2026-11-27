@@ -563,11 +563,14 @@ impl Shared {
         // A commit (under the owner's identity) or a branch switch (it rewrites work tree files)
         // after the run read untrusted content asks on every level but the owner's Full, where
         // only money asks: the lane, a plain policy allow and a remembered grant sit below this.
-        // Like the egress gate, a standing "always" does not waive it.
-        if taint::git_mutation(name, input)
-            && ctx.profile.permissions.mode() != AutonomyMode::Full
-            && ctx.taint.lock().exposure.untrusted
-        {
+        // Like the egress gate, a standing "always" does not waive it. "The owner's Full" is
+        // the Full level's usual waiver rule: a run the owner started, not a webhook, a schedule,
+        // a channel message, a mission session, a subagent or a helper bot.
+        let owner_full = ctx.profile.permissions.mode() == AutonomyMode::Full
+            && ctx.parent_run_id.is_none()
+            && ctx.delegation().is_none()
+            && self.full_owner_started(ctx);
+        if taint::git_mutation(name, input) && !owner_full && ctx.taint.lock().exposure.untrusted {
             if d == Decision::Allow {
                 d = Decision::ask();
             }

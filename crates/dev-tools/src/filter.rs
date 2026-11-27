@@ -49,6 +49,16 @@ pub(crate) fn filter_diff(text: &str, stat: bool, protected: &dyn Fn(&str) -> bo
             if !visible {
                 hidden += 1;
             }
+        } else if let Some(name) = body.strip_prefix("* Unmerged path ") {
+            // `git diff` of a conflicted file prints this line instead of a header: only the
+            // name, but the name of a protected file is hidden too.
+            if unquote_or_plain(name.trim())
+                .as_deref()
+                .is_none_or(protected)
+            {
+                hidden += 1;
+                continue;
+            }
         } else if stat
             && let Some((name, _)) = body.rsplit_once(" | ")
             && stat_line(body)
@@ -78,7 +88,11 @@ pub(crate) fn filter_status(text: &str, protected: &dyn Fn(&str) -> bool) -> Fil
             out.push_str(line);
             continue;
         }
-        let entry = &body[3..];
+        let Some(entry) = body.get(3..) else {
+            // A multi-byte character sits where the name should start: not an entry we can read.
+            hidden += 1;
+            continue;
+        };
         // `R  old -> new`; a quoted name may itself hold the arrow, so split only unquoted.
         let names: Vec<&str> = if entry.starts_with('"') {
             vec![entry]
@@ -281,6 +295,22 @@ mod tests {
         assert!(f.text.contains("2 files changed"));
         // Without `stat` a line that merely looks like one is left alone.
         assert_eq!(filter_diff(stat, false, &env_only).hidden, 0);
+    }
+
+    #[test]
+    fn an_unmerged_path_line_for_a_protected_file_is_dropped() {
+        let text = "* Unmerged path .env\n* Unmerged path src/a.txt\n";
+        let f = filter_diff(text, false, &env_only);
+        assert_eq!(f.hidden, 1);
+        assert!(!f.text.contains(".env") && f.text.contains("src/a.txt"));
+    }
+
+    #[test]
+    fn a_status_line_with_a_multibyte_character_at_the_name_offset_does_not_panic() {
+        // byte 3 falls inside the two-byte character
+        let f = filter_status("##\nAA\u{e9}x\n M ok.txt\n", &|_| false);
+        assert_eq!(f.hidden, 1);
+        assert!(f.text.contains("ok.txt"));
     }
 
     #[test]

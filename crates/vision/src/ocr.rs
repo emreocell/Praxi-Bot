@@ -441,7 +441,11 @@ pub fn download_models_to(dir: impl AsRef<Path>) -> Result<OcrModelPaths, Vision
 }
 
 /// Opt-in helper that downloads the default `ocrs` models into [`OcrModelPaths::default_data_dir`]
-/// on first use and returns their paths.
+/// on first use and returns their paths. Each download is installed only if it passes the same
+/// checks as loading (size cap, pinned SHA-256).
+///
+/// The daemon does not read this per-user folder: it reads `models/ocrs` inside its own data
+/// directory (see [`OcrModelPaths::model_dir_in`]), so copy the two files there to turn OCR on.
 ///
 /// # Errors
 ///
@@ -465,7 +469,9 @@ fn download_file(url: &str, destination: &Path, accepted: &[String]) -> Result<(
         Err(e) => return Err(e.into()),
     }
     let status = Command::new("curl")
-        .args(["-fSL", "--retry", "2", "--max-filesize"])
+        // HTTPS only, also across redirects; the size cap is checked again on what arrives.
+        .args(["-fSL", "--proto", "=https", "--proto-redir", "=https"])
+        .args(["--retry", "2", "--max-filesize"])
         .arg(MAX_MODEL_BYTES.to_string())
         .arg("-o")
         .arg(&tmp_path)

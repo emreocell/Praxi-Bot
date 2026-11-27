@@ -79,26 +79,42 @@ fn has_macro_marker(text: &str) -> bool {
     MACRO_MARKERS.iter().any(|m| text.contains(m))
 }
 
-/// Whether the content types part declares macros. The raw text is searched first (with NUL
-/// bytes dropped, so UTF-16 is read too), then every attribute value after unescaping, so a
-/// character reference such as `macro&#69;nabled` cannot hide the word.
-fn declares_macros(types: &[u8]) -> Result<bool, ToolError> {
-    let flat: Vec<u8> = types.iter().copied().filter(|b| *b != 0).collect();
+/// The part as UTF-8 text for the scan: UTF-16 (marked by its byte order mark) is decoded, so
+/// character references in it are read like any others.
+fn as_utf8(part: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let decode = |rest: &[u8], unit: fn([u8; 2]) -> u16| -> Vec<u8> {
+        let units: Vec<u16> = rest.as_chunks::<2>().0.iter().map(|c| unit(*c)).collect();
+        String::from_utf16_lossy(&units).into_bytes()
+    };
+    match part {
+        [0xFF, 0xFE, rest @ ..] => decode(rest, u16::from_le_bytes).into(),
+        [0xFE, 0xFF, rest @ ..] => decode(rest, u16::from_be_bytes).into(),
+        _ => part.into(),
+    }
+}
+
+/// Whether an XML part of the package (the content types, a relationships part) names a macro
+/// project. The raw text is searched first (with NUL bytes dropped, so UTF-16 without a mark is
+/// read too), then every attribute value after unescaping, so a character reference such as
+/// `macro&#69;nabled` cannot hide the word.
+fn declares_macros(part: &[u8], what: &str) -> Result<bool, ToolError> {
+    let flat: Vec<u8> = part.iter().copied().filter(|b| *b != 0).collect();
     if has_macro_marker(&String::from_utf8_lossy(&flat)) {
         return Ok(true);
     }
-    let mut reader = Reader::from_reader(types);
+    let text = as_utf8(part);
+    let mut reader = Reader::from_reader(&*text);
     loop {
         match reader
             .read_event()
-            .map_err(|e| invalid(format!("invalid [Content_Types].xml: {e}")))?
+            .map_err(|e| invalid(format!("invalid {what}: {e}")))?
         {
             Event::Eof => return Ok(false),
             Event::DocType(_) => return Err(doctype_refused()),
             Event::Start(e) | Event::Empty(e) => {
                 for a in e.attributes().flatten() {
                     let value = quick_xml::escape::unescape(&a.value)
-                        .map_err(|e| invalid(format!("invalid [Content_Types].xml: {e}")))?;
+                        .map_err(|e| invalid(format!("invalid {what}: {e}")))?;
                     if has_macro_marker(&value) {
                         return Ok(true);
                     }
@@ -109,14 +125,21 @@ fn declares_macros(types: &[u8]) -> Result<bool, ToolError> {
     }
 }
 
+/// Relationship parts looked through for a macro project (the content types are always read).
+const MAX_RELS_SCANNED: usize = 256;
+/// A relationships part larger than this is not read for the scan (no Office file has one).
+const MAX_RELS_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Refuse a package that carries a macro project, whatever its entry is called or how its
-/// content type is spelled. `what` names the kind of file (`documents`, `workbooks`).
+/// content type or relationship is spelled. `what` names the kind of file (`documents`,
+/// `workbooks`).
 pub(crate) fn refuse_macros(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     what: &str,
 ) -> Result<(), ToolError> {
     let refused = || invalid(format!("{what} with macros are never edited"));
     let mut types = None;
+    let mut rels = Vec::new();
     for name in zip.file_names() {
         let name = name.map_err(|e| invalid(format!("not an Office file: {e}")))?;
         if has_macro_marker(&name.replace('\\', "/")) {
@@ -124,13 +147,28 @@ pub(crate) fn refuse_macros(
         }
         if name.eq_ignore_ascii_case("[Content_Types].xml") {
             types = Some(name.into_owned());
+        } else if name.to_ascii_lowercase().ends_with(".rels") && rels.len() < MAX_RELS_SCANNED {
+            rels.push(name.into_owned());
         }
     }
     if let Some(types) = types
         && let Some(part) = read_part(zip, &types)?
-        && declares_macros(&part)?
+        && declares_macros(&part, "[Content_Types].xml")?
     {
         return Err(refused());
+    }
+    for name in rels {
+        if zip
+            .by_name(&name)
+            .is_ok_and(|entry| entry.size() > MAX_RELS_BYTES)
+        {
+            continue;
+        }
+        if let Some(part) = read_part(zip, &name)?
+            && declares_macros(&part, &name)?
+        {
+            return Err(refused());
+        }
     }
     Ok(())
 }
@@ -462,6 +500,32 @@ mod tests {
             .flat_map(u16::to_le_bytes)
             .collect();
         assert!(macros_refused(&with_types(&utf16)));
+        // UTF-16 with a byte order mark and a character reference inside the word.
+        for (mark, big) in [([0xFF, 0xFE], false), ([0xFE, 0xFF], true)] {
+            let mut marked = mark.to_vec();
+            marked.extend(
+                "<Types><O ContentType=\"x.macro&#69;nabled\"/></Types>"
+                    .encode_utf16()
+                    .flat_map(|u| {
+                        if big {
+                            u.to_be_bytes()
+                        } else {
+                            u.to_le_bytes()
+                        }
+                    }),
+            );
+            assert!(macros_refused(&with_types(&marked)), "big={big}");
+        }
+        // A relationship names the project, though no entry or content type does.
+        let rels = zip_of(&[
+            ("[Content_Types].xml", TYPES),
+            ("word/document.xml", b"<d/>"),
+            (
+                "word/_rels/document.xml.rels",
+                b"<Relationships><Relationship Id=\"r\" Type=\"http://schemas.microsoft.com/office/2006/relationships/vba&#80;roject\" Target=\"x.dat\"/></Relationships>",
+            ),
+        ]);
+        assert!(macros_refused(&rels));
         let doctype = b"<!DOCTYPE Types [<!ENTITY a \"b\">]><Types/>";
         assert!(
             macros_refused(&with_types(doctype)),
