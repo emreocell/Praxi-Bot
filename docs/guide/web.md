@@ -90,17 +90,17 @@ Pick one search provider, once. Any of these makes `web_search` work on a server
 You need Docker on the server. On the server, from a checkout of this repository:
 
 ```sh
-sudo bash scripts/install-searxng.sh
+sudo bash scripts/install-searxng.sh --allow-latest
 ```
 
-It writes `/opt/praxi/searxng/settings.yml` (JSON answers on, a random secret key), starts a container named `praxi-searxng` that listens on `127.0.0.1:8080` only and restarts with the server, asks it one real search and prints the address to give to Praxi: `http://127.0.0.1:8080`. Paste that into **Settings → Web search → SearXNG**, or put it in `web.toml` (`searxng_url`) and restart Praxi.
+Without `--allow-latest` (or a pinned `--image`, below) the script stops before it downloads anything: the container starts as root, so it will not run an image that can change under you unless you say so. It writes `/opt/praxi/searxng/settings.yml` (JSON answers on, a random secret key), starts a container named `praxi-searxng` that listens on `127.0.0.1:8080` only and restarts with the server, asks it one real search and prints the address to give to Praxi: `http://127.0.0.1:8080`. Paste that into **Settings → Web search → SearXNG**, or put it in `web.toml` (`searxng_url`) and restart Praxi.
 
-- `--port <n>` picks another port, `--dir <path>` another settings folder, `--image <ref>` another image (the default is `docker.io/searxng/searxng:latest`; pin a version or digest there if you want updates only when you decide).
+- `--port <n>` picks another port, `--dir <path>` another settings folder, `--image <ref>` the image to run. Only the official `docker.io/searxng/searxng` is accepted, pinned by digest (`--image docker.io/searxng/searxng@sha256:<64 hex digits>`; pick one you trust on the image's Docker Hub tags page). `--allow-latest` is the alternative: it accepts a moving tag (`latest`, or one you name with `--image docker.io/searxng/searxng:<tag>`), pulls it once, prints the digest it got and runs that exact digest, with the command to pin it next time.
 - Run it again at any time: it replaces the container and keeps your `settings.yml`.
 - `sudo bash scripts/install-searxng.sh --uninstall` removes the container and keeps the settings folder.
 - It does not install Docker. If `docker` is missing the script stops and says so.
 - SearXNG forwards your queries to the engines it uses, from the server's address. If those engines also refuse your server, edit the list of engines in `settings.yml` (see the [SearXNG documentation](https://docs.searxng.org/)).
-- Praxi may only reach a private address for the one SearXNG address you configure yourself; its own API port is always refused.
+- Praxi may only reach a private address (loopback or your LAN) for the one SearXNG address you configure yourself, over `http` or `https` with no user name or password in it. Every redirect that server answers with is checked again as if it were any other address: a redirect to another private address, to a different port, to cloud metadata or link-local space, or to Praxi's own API port is refused.
 
 ## Privacy
 
@@ -113,7 +113,8 @@ Search queries go to the configured backend that handles them (your SearXNG inst
   addresses (`169.254.169.254`), and the daemon's own API are refused. The check
   is repeated on every redirect and on the addresses a hostname resolves to, so a
   public page cannot bounce the bot into your network. Only the SearXNG address
-  you configure yourself is allowed to be private.
+  you configure yourself (that host and port, never link-local or metadata
+  space) is allowed to be private; its redirects get the same checks.
 - **Untrusted content.** Everything a page says is data. Each result starts with
   an "untrusted external content" notice, and a bot must not treat instructions
   inside a page as coming from you.

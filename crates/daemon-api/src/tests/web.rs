@@ -7,7 +7,7 @@ use axum::http::{Method, StatusCode};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-use super::{T, TOKEN, call, send, setup};
+use super::{T, TOKEN, call, call_token_only, send, setup};
 use crate::web::{
     WebControl, WebControlError, WebSearchConfigDto, WebSearchConfigInput, WebSearchTestInput,
     WebSearchTestReport,
@@ -20,6 +20,8 @@ struct FakeWeb {
     cfg: Mutex<WebSearchConfigDto>,
     brave_secret: Mutex<Option<String>>,
     tavily_secret: Mutex<Option<String>>,
+    /// How many live probes reached the control.
+    probes: Mutex<usize>,
 }
 
 impl FakeWeb {
@@ -46,6 +48,7 @@ impl FakeWeb {
             }),
             brave_secret: Mutex::new(None),
             tavily_secret: Mutex::new(None),
+            probes: Mutex::new(0),
         })
     }
 }
@@ -120,6 +123,7 @@ impl WebControl for FakeWeb {
         &self,
         input: WebSearchTestInput,
     ) -> Result<WebSearchTestReport, WebControlError> {
+        *self.probes.lock() += 1;
         if input.backend.as_deref() == Some("unknown") {
             return Err(WebControlError::Invalid("unknown backend".into()));
         }
@@ -266,4 +270,63 @@ async fn update_and_test_validate_keys_query_length_and_invalid_config() {
     let body: Value = r.json();
     assert_eq!(body["ok"], json!(true));
     assert_eq!(body["elapsed_ms"], json!(42));
+}
+
+/// Writing the search settings (keys, the `SearXNG` address) and probing them spend keys and make
+/// the daemon contact an address the caller chose: both are owner-only. A holder of only the
+/// general API token is refused before the handler runs, and nothing changes.
+#[tokio::test]
+async fn changing_and_probing_web_search_needs_the_owner_key() {
+    let (t, web) = with_web();
+    let before = web.get();
+
+    let put = json!({
+        "searxng_url": "http://169.254.169.254/",
+        "brave_key": SECRET_BRAVE,
+        "bing": false
+    });
+    let r = call_token_only(&t, Method::PUT, "/v1/web/search", Some(put.clone())).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["error"]["code"], "owner_key_required");
+    // the trailing-slash and double-slash spellings reach the same route and the same guard
+    for p in ["/v1/web/search/", "//v1//web//search"] {
+        let r = call_token_only(&t, Method::PUT, p, Some(put.clone())).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{p}");
+    }
+    let r = call_token_only(
+        &t,
+        Method::POST,
+        "/v1/web/search/test",
+        Some(json!({"query": "rust"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["error"]["code"], "owner_key_required");
+    assert_eq!(*web.probes.lock(), 0, "no probe may run for a token holder");
+    assert_eq!(web.get().searxng_url, before.searxng_url);
+    assert_eq!(web.get().bing, before.bing);
+    assert!(web.brave_secret.lock().is_none(), "no key may be stored");
+
+    // reading the (secret-free) settings stays open to the token: the UI and doctor show them
+    let r = call_token_only(&t, Method::GET, "/v1/web/search", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // the owner can do both
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/web/search",
+        Some(json!({"bing": false})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/web/search/test",
+        Some(json!({"query": "rust"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(*web.probes.lock(), 1);
 }

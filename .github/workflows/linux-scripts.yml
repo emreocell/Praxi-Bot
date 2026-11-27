@@ -68,7 +68,14 @@ jobs:
           ulimit -u "$PRAXI_NPROC_LIMIT"
           timeout -k 10s 420s bash scripts/linux/tests/test-packaging.sh
 
+      # Hermetic: fake docker/curl shims; checks which image the SearXNG installer will run.
+      - name: scripts/linux/tests/test-install-searxng.sh
+        run: |
+          set -euo pipefail
+          ulimit -u "$PRAXI_NPROC_LIMIT"
+          timeout -k 10s 120s bash scripts/linux/tests/test-install-searxng.sh
+
       - name: Skipped tests
         if: success() || failure()
         run: |
-          echo "No tracked shell test is skipped: scripts/linux/tests/test-packaging.sh is the only one and needs no root, systemd, network or built binary."
+          echo "No tracked shell test is skipped: scripts/linux/tests/test-packaging.sh and scripts/linux/tests/test-install-searxng.sh need no root, systemd, Docker, network or built binary."

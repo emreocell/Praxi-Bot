@@ -110,26 +110,34 @@ sayıp reddetti" derler.
 Sunucuda Docker olmalı. Sunucuda, bu deponun bir kopyasından:
 
 ```sh
-sudo bash scripts/install-searxng.sh
+sudo bash scripts/install-searxng.sh --allow-latest
 ```
 
-Komut `/opt/praxi/searxng/settings.yml` dosyasını yazar (JSON cevabı açık, rastgele bir gizli
+`--allow-latest` olmadan (ya da aşağıdaki gibi özetle sabitlenmiş bir `--image` olmadan) betik hiçbir
+şey indirmeden durur: kapsayıcı root olarak başlar, bu yüzden sen açıkça söylemedikçe altından
+değişebilecek bir imajı çalıştırmaz. Komut `/opt/praxi/searxng/settings.yml` dosyasını yazar (JSON cevabı açık, rastgele bir gizli
 anahtar), yalnızca `127.0.0.1:8080` üzerinde dinleyen ve sunucuyla birlikte yeniden başlayan
 `praxi-searxng` adlı bir kapsayıcı başlatır, ona gerçek bir arama sorar ve Praxi'ye verilecek adresi
 yazar: `http://127.0.0.1:8080`. Bunu **Ayarlar → Web araması → SearXNG** alanına yapıştır ya da
 `web.toml` içine (`searxng_url`) yazıp Praxi'yi yeniden başlat.
 
-- `--port <n>` başka bir port, `--dir <yol>` başka bir ayar klasörü, `--image <ref>` başka bir imaj
-  seçer (varsayılan `docker.io/searxng/searxng:latest`; güncellemelerin yalnızca senin kararınla
-  gelmesini istiyorsan oraya bir sürüm ya da özet yaz).
+- `--port <n>` başka bir port, `--dir <yol>` başka bir ayar klasörü, `--image <ref>` çalışacak
+  imajı seçer. Yalnızca resmi `docker.io/searxng/searxng` kabul edilir ve özetle sabitlenmelidir
+  (`--image docker.io/searxng/searxng@sha256:<64 onaltılık hane>`; güvendiğin bir özeti imajın Docker
+  Hub etiket sayfasından seç). Alternatifi `--allow-latest`: değişebilen bir etiketi (`latest` ya da
+  `--image docker.io/searxng/searxng:<etiket>` ile verdiğin) kabul eder, bir kez indirir, aldığı özeti
+  yazar ve tam o özeti çalıştırır; bir dahaki sefere sabitlemek için komutu da gösterir.
 - İstediğin zaman yeniden çalıştırabilirsin: kapsayıcıyı değiştirir, `settings.yml` dosyanı korur.
 - `sudo bash scripts/install-searxng.sh --uninstall` kapsayıcıyı kaldırır, ayar klasörünü korur.
 - Docker kurmaz. `docker` yoksa betik durur ve bunu söyler.
 - SearXNG, sorgularını kullandığı motorlara sunucunun adresinden iletir. O motorlar da sunucunu
   reddederse `settings.yml` içindeki motor listesini düzenle (bkz.
   [SearXNG belgeleri](https://docs.searxng.org/)).
-- Praxi yalnızca senin kendi ayarladığın tek SearXNG adresi için özel bir adrese erişebilir;
-  kendi API portu her zaman reddedilir.
+- Praxi yalnızca senin kendi ayarladığın tek SearXNG adresi için özel bir adrese (kendi bilgisayarın
+  ya da yerel ağın) erişebilir; adres `http` ya da `https` olmalı ve içinde kullanıcı adı veya parola
+  bulunmamalı. O sunucunun verdiği her yönlendirme, başka herhangi bir adres gibi yeniden denetlenir:
+  başka bir özel adrese, başka bir porta, bulut meta verisine ya da link-local adrese ya da Praxi'nin
+  kendi API portuna yönlendirme reddedilir.
 
 ## Gizlilik
 
@@ -148,7 +156,8 @@ kullanır. Sorgu gizliliği senin için önemliyse `searxng_url` adresini kendi 
   (`169.254.169.254`) ile daemonun kendi API'si reddedilir. Bu denetim her yönlendirmede ve bir
   ana makine adının çözüldüğü adreslerde yinelenir. Böylece herkese açık bir sayfa botu senin
   ağına yönlendiremez. Özel olmasına izin verilen tek adres, senin kendi ayarladığın SearXNG
-  adresidir.
+  adresidir (o makine ve port; link-local ve meta veri adresleri hiçbir zaman); onun
+  yönlendirmeleri de aynı denetimlerden geçer.
 - **Güvenilmeyen içerik.** Bir sayfanın söylediği her şey veridir. Her sonuç “güvenilmeyen dış
   içerik” uyarısıyla başlar ve bir bot, sayfanın içindeki yönergeleri senden geliyormuş gibi
   ele almamalıdır.

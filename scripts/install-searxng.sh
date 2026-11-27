@@ -16,16 +16,28 @@
 #
 # Run it again at any time: it replaces the container and keeps your settings.yml and its key.
 #
+# Which image runs (it is downloaded and started as root by Docker, so the script is strict):
+#   - only the official image docker.io/searxng/searxng, nothing else;
+#   - pinned by digest:  --image docker.io/searxng/searxng@sha256:<64 hex digits>
+#     (find a digest you trust on https://hub.docker.com/r/searxng/searxng/tags);
+#   - or, if you accept that a tag moves, --allow-latest: the tag (default latest) is pulled
+#     once, its digest is printed, and the container runs that exact digest.
+# With neither, the script stops before it downloads anything.
+#
 # Options (or the environment variables in brackets):
 #   --dir <path>     where settings live            [SEARXNG_DIR,   default /opt/praxi/searxng]
 #   --port <number>  local port                     [SEARXNG_PORT,  default 8080]
-#   --image <ref>    container image to run         [SEARXNG_IMAGE, default docker.io/searxng/searxng:latest]
+#   --image <ref>    the official image, pinned by digest (see above)   [SEARXNG_IMAGE]
+#   --allow-latest   run a moving tag of the official image             [SEARXNG_ALLOW_LATEST=1]
 #   --uninstall      stop and remove the container (keeps <dir>)
 set -euo pipefail
 
+OFFICIAL_IMAGE="docker.io/searxng/searxng"
 DIR="${SEARXNG_DIR:-/opt/praxi/searxng}"
 PORT="${SEARXNG_PORT:-8080}"
-IMAGE="${SEARXNG_IMAGE:-docker.io/searxng/searxng:latest}"
+IMAGE="${SEARXNG_IMAGE:-}"
+ALLOW_LATEST=0
+[ "${SEARXNG_ALLOW_LATEST:-0}" = "1" ] && ALLOW_LATEST=1
 NAME="praxi-searxng"
 UNINSTALL=0
 
@@ -39,8 +51,9 @@ while [ $# -gt 0 ]; do
     --dir) DIR="${2:?--dir needs a path}"; shift 2 ;;
     --port) PORT="${2:?--port needs a number}"; shift 2 ;;
     --image) IMAGE="${2:?--image needs an image}"; shift 2 ;;
+    --allow-latest) ALLOW_LATEST=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h | --help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,/^set -euo/{/^set -euo/!p}' "$0"; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -50,6 +63,62 @@ case "$PORT" in
 esac
 if [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
   die "--port must be between 1024 and 65535"
+fi
+
+# Whether $1 is a sha256 digest: `sha256:` and 64 lowercase hex digits.
+digest_ok() {
+  case "${1#sha256:}" in
+    *[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#1}" -eq 71 ] && [ "${1#sha256:}" != "$1" ]
+}
+
+# Decide which image runs, before anything is downloaded. Sets RUN_IMAGE (what `docker pull` is
+# given) and DIGEST (the pinned digest, or empty while a moving tag still has to be resolved).
+resolve_image() {
+  local ref="${IMAGE:-$OFFICIAL_IMAGE}" digest="" tag=""
+  case "$ref" in
+    *@*)
+      digest="${ref#*@}"
+      ref="${ref%%@*}"
+      ;;
+  esac
+  case "${ref##*/}" in
+    *:*)
+      tag="${ref##*:}"
+      ref="${ref%:*}"
+      ;;
+  esac
+  if [ "$ref" = "searxng/searxng" ]; then
+    ref="$OFFICIAL_IMAGE"
+  fi
+  if [ "$ref" != "$OFFICIAL_IMAGE" ]; then
+    die "--image must be the official image $OFFICIAL_IMAGE (pinned by digest); this script does not run other images."
+  fi
+  if [ -n "$digest" ]; then
+    digest_ok "$digest" || die "the digest must look like sha256:<64 lowercase hex digits>"
+    DIGEST="$digest"
+    RUN_IMAGE="$OFFICIAL_IMAGE@$digest"
+    return 0
+  fi
+  if [ "$ALLOW_LATEST" -ne 1 ]; then
+    die "refusing to run an unpinned image: a tag can change under you, and this container starts as root. Pin one:
+  sudo bash $0 --image $OFFICIAL_IMAGE@sha256:<digest from https://hub.docker.com/r/searxng/searxng/tags>
+or accept a moving tag on purpose (the digest that was pulled is printed and used):
+  sudo bash $0 --allow-latest"
+  fi
+  tag="${tag:-latest}"
+  case "$tag" in
+    *[!A-Za-z0-9._-]*) die "the image tag may only use letters, digits, dot, dash and underscore" ;;
+  esac
+  DIGEST=""
+  RUN_IMAGE="$OFFICIAL_IMAGE:$tag"
+}
+
+RUN_IMAGE=""
+DIGEST=""
+if [ "$UNINSTALL" -ne 1 ]; then
+  resolve_image
 fi
 
 command -v docker >/dev/null 2>&1 || die "Docker is not installed. Install it first (https://docs.docker.com/engine/install/), then run this again."
@@ -102,7 +171,30 @@ EOF
   echo "Wrote $SETTINGS"
 fi
 
-docker pull "$IMAGE" >/dev/null || die "could not download $IMAGE (is this server online?)"
+docker pull "$RUN_IMAGE" >/dev/null || die "could not download $RUN_IMAGE (is this server online?)"
+# What was downloaded, by digest. A pinned digest must be the one Docker holds now; a moving tag
+# is resolved to the digest it pointed at, and the container runs that, not the tag.
+KNOWN="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$RUN_IMAGE" 2>/dev/null || true)"
+if [ -n "$DIGEST" ]; then
+  case "$KNOWN" in
+    *"@$DIGEST"*) ;;
+    *) die "Docker does not report the digest $DIGEST for $RUN_IMAGE; not starting it." ;;
+  esac
+else
+  while IFS= read -r line; do
+    case "$line" in
+      searxng/searxng@sha256:* | "$OFFICIAL_IMAGE"@sha256:*)
+        DIGEST="sha256:${line##*@sha256:}"
+        break
+        ;;
+    esac
+  done <<<"$KNOWN"
+  if ! digest_ok "$DIGEST"; then
+    die "Docker reports no usable digest for $RUN_IMAGE; not starting it."
+  fi
+  RUN_IMAGE="$OFFICIAL_IMAGE@$DIGEST"
+fi
+echo "Image: $RUN_IMAGE"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d \
   --name "$NAME" \
@@ -110,7 +202,7 @@ docker run -d \
   -p "127.0.0.1:$PORT:8080" \
   -v "$DIR:/etc/searxng" \
   -e "SEARXNG_BASE_URL=http://127.0.0.1:$PORT/" \
-  "$IMAGE" >/dev/null || die "could not start the container (see: docker logs $NAME)"
+  "$RUN_IMAGE" >/dev/null || die "could not start the container (see: docker logs $NAME)"
 
 URL="http://127.0.0.1:$PORT"
 echo "Waiting for SearXNG to answer a real search..."
@@ -140,6 +232,9 @@ Tell Praxi about it, either way:
         [search]
         searxng_url = "$URL"
     then restart Praxi.
+
+It runs the image $RUN_IMAGE
+To reinstall exactly this image later:  sudo bash $0 --image $RUN_IMAGE
 
 Remove it later with:  sudo bash $0 --uninstall
 EOF
