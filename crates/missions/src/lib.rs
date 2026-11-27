@@ -13,6 +13,7 @@
 //! * [`digest`]: the owner digest built from the ledger.
 //! * [`supervisor`]: starts the next session until the mission is done.
 //! * [`tools`]: the `mission_*` tools the bot uses to keep the ledger.
+//! * [`wake`]: waits (timer, mail, webhook) that park an item, and the wakes that end them.
 
 pub mod brief;
 pub mod digest;
@@ -21,6 +22,7 @@ pub mod model;
 pub mod store;
 pub mod supervisor;
 pub mod tools;
+pub mod wake;
 
 pub use error::{MissionError, Result};
 pub use model::{
@@ -30,6 +32,7 @@ pub use model::{
 pub use store::{
     Event, ItemUpdate, MissionStore, NewItem, NewMission, SessionEndRecord, UpsertReport,
 };
+pub use wake::{MailFilter, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason};
 
 /// File name of the mission database inside the data directory.
 pub const DB_FILE: &str = "missions.db";

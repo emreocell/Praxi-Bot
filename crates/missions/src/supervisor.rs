@@ -25,6 +25,7 @@ use crate::error::{MissionError, Result};
 pub use crate::model::MAX_ITEM_ATTEMPTS;
 use crate::model::{ItemStatus, Mission, MissionState};
 use crate::store::{MissionStore, SESSION_LEASE_PREFIX, SessionEndRecord};
+use crate::wake::MailProbe;
 
 /// How long the loop waits for the drivers of running sessions after `shutdown` before it
 /// aborts them (their runs are cancelled the moment `shutdown` fires, so this is a backstop).
@@ -147,6 +148,8 @@ pub struct SupervisorConfig {
     pub session_gap: Duration,
     /// How often the loop looks for runnable missions when nobody wakes it.
     pub poll: Duration,
+    /// How often the wake loop looks at timers, timeouts and mailboxes.
+    pub wake_poll: Duration,
 }
 
 impl Default for SupervisorConfig {
@@ -154,6 +157,7 @@ impl Default for SupervisorConfig {
         Self {
             session_gap: Duration::from_secs(2),
             poll: Duration::from_secs(15),
+            wake_poll: Duration::from_secs(10),
         }
     }
 }
@@ -191,6 +195,8 @@ pub struct Supervisor {
     active: Mutex<HashMap<String, CancellationToken>>,
     wake: Notify,
     on_change: Mutex<Option<ChangeHook>>,
+    /// Looks into the bot's own mailbox for the wake loop (none: mail waits only time out).
+    mail: Mutex<Option<Arc<dyn MailProbe>>>,
 }
 
 impl std::fmt::Debug for Supervisor {
@@ -219,7 +225,13 @@ impl Supervisor {
             active: Mutex::new(HashMap::new()),
             wake: Notify::new(),
             on_change: Mutex::new(None),
+            mail: Mutex::new(None),
         }
+    }
+
+    /// Let the wake loop look into mailboxes for `mail` waits.
+    pub fn set_mail_probe(&self, probe: Arc<dyn MailProbe>) {
+        *self.mail.lock() = Some(probe);
     }
 
     /// Be told when a mission changes.
@@ -351,6 +363,12 @@ impl Supervisor {
                 }
                 Err(e) => tracing::warn!("missions: recovery failed: {e}"),
             }
+            // Timers, timeouts and mailboxes of waiting items, on their own task: a slow mailbox
+            // never delays the start of a session.
+            let wakes = {
+                let wake_loop = Arc::clone(&this);
+                tokio::spawn(async move { wake_loop.wake_loop().await })
+            };
             let mut drivers: JoinSet<()> = JoinSet::new();
             while !this.shutdown.is_cancelled() {
                 match this.store.list_by_state(MissionState::Running) {
@@ -390,6 +408,7 @@ impl Supervisor {
                 while drivers.join_next().await.is_some() {}
                 this.active.lock().clear();
             }
+            let _ = wakes.await;
         })
     }
 
@@ -420,6 +439,7 @@ impl Supervisor {
     /// Storage failures.
     pub async fn step(&self, id: &str) -> Result<Step> {
         let m = self.get(id)?;
+        // A waiting mission starts no session: the wake loop releases it when a wake fires.
         if m.state != MissionState::Running {
             return Ok(Step::Stopped(m.state));
         }
@@ -622,6 +642,8 @@ impl Supervisor {
             .into_iter()
             .filter(|n| n.pinned || n.kind == "decision" || n.kind == "warning")
             .collect();
+        let waits = self.store.active_waits(id)?;
+        let wakes = self.store.pending_wakes(id, 20)?;
         Ok(build_brief(&BriefInput {
             mission: m,
             progress,
@@ -630,6 +652,9 @@ impl Supervisor {
             blocked_items: &blocked,
             notes: &pinned,
             session_steps: self.runner.session_steps(),
+            wakes: &wakes,
+            waits: &waits,
+            now_ms: self.clock.now_ms(),
         }))
     }
 
@@ -650,6 +675,15 @@ impl Supervisor {
             )?;
             self.conclude(&m.id).await?;
             return Ok(Some(Step::Stopped(MissionState::Done)));
+        }
+        if p.waiting > 0 {
+            // Nothing to do until a wake fires: the mission waits instead of holding a session.
+            // Checked and changed in one transaction, so a wake that fires now is not missed.
+            if self.store.park_if_idle(&m.id, self.clock.now_ms())? {
+                self.changed(&m.id);
+                return Ok(Some(Step::Stopped(MissionState::Waiting)));
+            }
+            return Ok(None);
         }
         if p.blocked > 0 {
             let reason = format!(
@@ -724,6 +758,9 @@ pub fn budget_block(m: &Mission, now_ms: i64) -> Option<String> {
     }
     None
 }
+
+mod wakes;
+pub use wakes::WakePass;
 
 #[cfg(test)]
 mod tests;

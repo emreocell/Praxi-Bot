@@ -121,7 +121,7 @@ fn lp_with(
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     assert_eq!(
-        lp.enable_missions(&w.store, &clock),
+        lp.enable_missions(&w.store, &clock, None),
         missions::tools::MISSION_TOOL_NAMES.len()
     );
     lp
@@ -249,7 +249,7 @@ async fn run_session_until_card(
         config,
     );
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    lp.enable_missions(&w.store, &clock);
+    lp.enable_missions(&w.store, &clock, None);
     let mut rx = lp.subscribe();
     let run = lp
         .run_mission_session(w.env.chat, &w.mission, brief)
@@ -544,7 +544,7 @@ async fn a_two_factor_code_item_is_parked_for_a_live_owner_and_never_asks_for_th
         lp.sh.tools.register(tool);
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    lp.enable_missions(&w.store, &clock);
+    lp.enable_missions(&w.store, &clock, None);
     let run = lp
         .run_mission_session(w.env.chat, &w.mission, "brief")
         .unwrap();
@@ -608,7 +608,7 @@ async fn parked_handovers_count_against_the_per_run_limit() {
         lp.sh.tools.register(tool);
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    lp.enable_missions(&w.store, &clock);
+    lp.enable_missions(&w.store, &clock, None);
     let run = lp
         .run_mission_session(w.env.chat, &w.mission, "brief")
         .unwrap();

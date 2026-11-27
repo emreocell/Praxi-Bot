@@ -999,11 +999,13 @@ impl AgentLoop {
 
     /// Wire missions into this loop: the ledger store (for parking CAPTCHA / 2FA items
     /// and the one-batch question rule) and the `mission_*` tools, whose mission is found
-    /// from the calling run's kind. Returns how many tools were registered.
+    /// from the calling run's kind. `checks` tells `mission_wait` which mail identity and
+    /// webhooks the bot has (`None`: timers only). Returns how many tools were registered.
     pub fn enable_missions(
         &self,
         store: &Arc<missions::MissionStore>,
         clock: &Arc<dyn missions::supervisor::Clock>,
+        checks: Option<&Arc<dyn missions::wake::WakeChecks>>,
     ) -> usize {
         self.set_mission_store(Arc::clone(store));
         let storage = Arc::clone(&self.sh.storage);
@@ -1013,7 +1015,7 @@ impl AgentLoop {
             missions::mission_of_kind(&run.kind).map(str::to_owned)
         });
         let registry = self.sh.tools.clone();
-        missions::tools::tools(store, &resolve, clock)
+        missions::tools::tools(store, &resolve, clock, checks)
             .into_iter()
             .filter(|t| registry.register(Arc::clone(t)))
             .count()

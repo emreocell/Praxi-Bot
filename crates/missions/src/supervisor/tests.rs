@@ -134,6 +134,7 @@ fn harness(items: Vec<NewItem>, budgets: Budgets, script: Box<Script>) -> Harnes
         SupervisorConfig {
             session_gap: Duration::ZERO,
             poll: Duration::from_millis(10),
+            wake_poll: Duration::from_millis(10),
         },
         shutdown.clone(),
     ));
@@ -733,6 +734,7 @@ fn waiting(with_run: bool) -> Waiting {
         SupervisorConfig {
             session_gap: Duration::ZERO,
             poll: Duration::from_millis(10),
+            wake_poll: Duration::from_millis(10),
         },
         shutdown.clone(),
     ));
@@ -1072,3 +1074,5 @@ async fn restart_requeues_an_item_the_crash_left_doing() {
     );
     assert_eq!(p.doing, 0);
 }
+
+mod wake;

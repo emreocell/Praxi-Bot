@@ -25,10 +25,15 @@ use crate::model::{
 /// exists (the run id replaces it): the mission is taken while the session waits for the chat.
 pub const SESSION_LEASE_PREFIX: &str = "session:";
 
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_missions",
-    include_str!("../migrations/0001_missions.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_missions",
+        include_str!("../migrations/0001_missions.sql"),
+    ),
+    ("0002_wakes", include_str!("../migrations/0002_wakes.sql")),
+];
+
+mod waits;
 
 /// A mission to create.
 #[derive(Debug, Clone)]
@@ -213,7 +218,7 @@ fn item_of(row: &Row<'_>) -> rusqlite::Result<Item> {
 /// Whether the bot (not the owner) may move an item from `from` to `to`.
 /// Finished items stay finished; only the owner reopens them.
 fn model_item_transition_ok(from: ItemStatus, to: ItemStatus) -> bool {
-    use ItemStatus::{Blocked, Doing, Done, Failed, Skipped, Todo};
+    use ItemStatus::{Blocked, Doing, Done, Failed, Skipped, Todo, Waiting};
     if from == to {
         return true;
     }
@@ -222,6 +227,8 @@ fn model_item_transition_ok(from: ItemStatus, to: ItemStatus) -> bool {
         Todo => matches!(to, Doing | Done | Blocked | Failed | Skipped),
         Doing => matches!(to, Todo | Done | Blocked | Failed | Skipped),
         Blocked => matches!(to, Doing | Done | Failed | Skipped),
+        // `mission_wait` parks an item; the bot may take it up again by itself (its wait ends).
+        Waiting => matches!(to, Todo | Doing | Done | Blocked | Failed | Skipped),
     }
 }
 
@@ -518,6 +525,11 @@ impl MissionStore {
         let tx = conn.transaction()?;
         let cur = item_in(&tx, id, key)?;
         let to = upd.status.unwrap_or(cur.status);
+        if to == ItemStatus::Waiting && cur.status != ItemStatus::Waiting {
+            return Err(MissionError::Invalid(
+                "an item is parked for a wake only through mission_wait (a timer, a mail or a webhook)".into(),
+            ));
+        }
         if !by_owner && !model_item_transition_ok(cur.status, to) {
             return Err(MissionError::Invalid(format!(
                 "item {key:?} is {} and cannot become {to}; finished items stay finished",
@@ -579,6 +591,14 @@ impl MissionStore {
             ],
         )?;
         if to != cur.status {
+            // The item left its wait: nobody watches it any more. A wake that was meant to
+            // continue the item is delivered until it is settled or parked again.
+            if cur.status == ItemStatus::Waiting {
+                waits::cancel_item_waits(&tx, id, key, now)?;
+            }
+            if !matches!(to, ItemStatus::Todo | ItemStatus::Doing) {
+                waits::consume_item_wakes(&tx, id, key, now)?;
+            }
             // Only a move that settles an item counts as progress. Flipping an item between
             // `todo` and `doing` must not reset the stalled-session count.
             if by_owner
@@ -638,6 +658,7 @@ impl MissionStore {
                 Some(ItemStatus::Doing) => p.doing = n,
                 Some(ItemStatus::Done) => p.done = n,
                 Some(ItemStatus::Blocked) => p.blocked = n,
+                Some(ItemStatus::Waiting) => p.waiting = n,
                 Some(ItemStatus::Failed) => p.failed = n,
                 Some(ItemStatus::Skipped) => p.skipped = n,
                 None => {}
@@ -705,7 +726,10 @@ impl MissionStore {
                 tx.query_row("SELECT state FROM missions WHERE id = ?1", [id], |r| {
                     r.get(0)
                 })?;
-            if MissionState::parse(&state) == Some(MissionState::Blocked) {
+            if matches!(
+                MissionState::parse(&state),
+                Some(MissionState::Blocked | MissionState::Waiting)
+            ) {
                 transition_in(
                     &tx,
                     id,
@@ -1099,6 +1123,9 @@ fn requeue_in(tx: &Transaction<'_>, id: &str, max_attempts: u32, now: i64) -> Re
              WHERE mission_id = ?1 AND key = ?2",
             params![id, key, to, err, now],
         )?;
+        if to == "failed" {
+            waits::consume_item_wakes(tx, id, &key, now)?;
+        }
         event(
             tx,
             id,
@@ -1171,6 +1198,9 @@ fn transition_in(
         None,
         &json!({"from": from.as_str(), "to": to.as_str(), "reason": reason}),
     )?;
+    if to.is_terminal() {
+        waits::cancel_all_waits(tx, id, now)?;
+    }
     Ok(())
 }
 
