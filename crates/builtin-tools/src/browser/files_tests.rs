@@ -640,7 +640,7 @@ async fn a_link_put_in_place_of_the_file_after_the_check_is_not_followed() {
         matches!(err, ToolError::PermissionDenied(_)) || err.to_string().contains("plain file"),
         "{err}"
     );
-    assert!(rig.uploads().is_empty());
+    assert_eq!(rig.uploads(), Vec::<String>::new());
 }
 
 #[tokio::test]
