@@ -2583,6 +2583,21 @@
       "summarize": "Summarize"
     },
     "step": {
+      "account_discard": {
+        "done": "Removed a site account entry",
+        "failed": "Didn't remove an account entry",
+        "running": "Removing a site account entry"
+      },
+      "account_list": {
+        "done": "Checked its site accounts",
+        "failed": "Couldn't check its site accounts",
+        "running": "Checking its site accounts"
+      },
+      "account_register": {
+        "done": "Created an account on a site",
+        "failed": "Couldn't create an account",
+        "running": "Creating an account on a site"
+      },
       "agent": {
         "done": "Handed off to a helper",
         "failed": "Didn't hand off to a helper",
@@ -2622,6 +2637,11 @@
         "done": "Chose which browser to use",
         "failed": "Couldn't choose which browser to use",
         "running": "Choosing which browser to use"
+      },
+      "browser_capture_secret": {
+        "done": "Kept a value from the page in the vault",
+        "failed": "Couldn't keep a value from the page",
+        "running": "Keeping a value from the page in the vault"
       },
       "browser_click": {
         "done": "Clicked on a page",
@@ -2912,6 +2932,11 @@
         "done": "Ran a command",
         "failed": "Didn't run a command",
         "running": "Running a command"
+      },
+      "site_ledger": {
+        "done": "Used its list of sites",
+        "failed": "Couldn't use its list of sites",
+        "running": "Using its list of sites"
       },
       "skill_look": {
         "done": "Looked up a skill",

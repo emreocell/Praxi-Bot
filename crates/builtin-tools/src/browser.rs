@@ -33,6 +33,7 @@ mod act;
 mod attach;
 #[cfg(test)]
 mod attach_tests;
+mod capture;
 pub mod files;
 #[cfg(test)]
 mod files_tests;
@@ -48,6 +49,7 @@ mod sideband;
 mod tabs;
 mod totp;
 pub use act::{can_egress as act_can_egress, summary as act_summary};
+pub use capture::BROWSER_CAPTURE_SECRET;
 pub use profiles::{BrowserProfiles, ProfileStatus};
 pub use recover::{RECOVERY_CLOSE, RECOVERY_OPEN, split_recovery};
 pub use sideband::{Sideband, UploadRecord, UploadedFile, note_screenshot, take as take_sideband};
@@ -251,10 +253,11 @@ pub trait BrowserDriver: Send + Sync {
         let _ = (r, text, accept);
         Err(NO_SECRET_FILL.into())
     }
-    /// Read the value of an element for a host-side capture (a two-factor setup key), but only
-    /// while the origins of the frame that holds it and of the top-level page (read from the
-    /// browser, twice) satisfy `accept`. The element stays masked in later snapshots. Backends
-    /// that cannot do this refuse, so no value is ever read through them.
+    /// Read the value of an element for a host-side capture (a two-factor setup key, or what
+    /// `browser_capture_secret` keeps), but only while the origins of the frame that holds it and
+    /// of the top-level page (read from the browser, twice) satisfy `accept`. The element stays
+    /// masked in later snapshots. Backends that cannot do this refuse, so no value is ever read
+    /// through them.
     async fn read_value(
         &self,
         target: browser_cdp::ReadTarget<'_>,
@@ -2097,6 +2100,7 @@ enum Op {
     Eval,
     Act,
     Handover,
+    Capture,
     Pointer,
     Attach,
     Upload,
@@ -2641,6 +2645,21 @@ fn tools_with_pool(
                 },"required":["kind"]}),
                 Effect::Read,
                 PermissionCategory::Meta,
+            ),
+        ),
+        (
+            Op::Capture,
+            spec(
+                BROWSER_CAPTURE_SECRET,
+                "Keep a value the page shows (an API key, token or app password) WITHOUT seeing it: Praxi reads the element and stores the value in the vault for this site and you. You get only a secret name, to type later with browser_fill `secret` on that site. Give `name` and exactly one of `ref` (from browser_snapshot, frames included) or `selector` (CSS, top page only); `label` ties it to one of your accounts there. One https site only; the page then hides the value until you leave it. The owner is asked unless your access level lets you act alone. Example: {\"ref\":\"e14\",\"name\":\"api-key\"}",
+                json!({"type":"object","properties":{
+                    "ref":ref_prop,
+                    "selector":{"type":"string","description":"CSS selector of the element, in the top page (use ref for anything inside a frame)."},
+                    "name":{"type":"string","description":"What the value is: 1 to 16 letters, digits or '-' (api-key, token)."},
+                    "label":{"type":"string","description":"Tag of the account on this site it belongs to (1 to 16 letters, digits or '-')."}
+                },"required":["name"]}),
+                Effect::Write,
+                b,
             ),
         ),
         (
@@ -3804,6 +3823,11 @@ impl BrowserTool {
             Op::Handover => {
                 return Err(exec_err("browser_handover runs through the handover path"));
             }
+            Op::Capture => {
+                return Err(exec_err(
+                    "browser_capture_secret runs through the capture path",
+                ));
+            }
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
@@ -4059,6 +4083,7 @@ impl BrowserTool {
                 | Op::Wait
                 | Op::Tabs
                 | Op::Handover
+                | Op::Capture
                 | Op::Eval
         ) {
             let shared = self.select_shared(ctx).ok()?;
@@ -4159,6 +4184,9 @@ impl BrowserTool {
         if self.op == Op::TotpSave {
             return self.totp_save_details(ctx, input).await.map(Some);
         }
+        if self.op == Op::Capture {
+            return self.capture_details(ctx, input).await.map(Some);
+        }
         let Some((name, target, grant)) = self.secret_fill_facts(ctx, input).await? else {
             return Ok(None);
         };
@@ -4235,6 +4263,9 @@ impl BrowserTool {
         crate::handover::handover_hub().remember_browser(&ctx.run_id, &shared.driver);
         if self.op == Op::Handover {
             return self.handover(ctx, &shared, &input).await;
+        }
+        if self.op == Op::Capture {
+            return self.capture(ctx, &shared, &input).await;
         }
         let selected = BrowserTool {
             spec: self.spec.clone(),
@@ -4347,6 +4378,9 @@ impl Tool for BrowserTool {
         (self.op == Op::Fill && names_a_secret(input))
             // Keeping a two-factor key is confirmed too, except where the Full level waives it.
             || self.op == Op::TotpSave
+            // Keeping a page's value in the vault is the owner's decision (the Full level
+            // waives it in the approval gate, never here).
+            || self.op == Op::Capture
             // The owner's own browser holds their signed-in sessions: every attach is confirmed.
             || (self.op == Op::Attach && attach::attaches(input))
     }
@@ -4441,6 +4475,10 @@ pub(crate) mod fake {
         #[allow(clippy::option_option)]
         // outer: "override set", inner: the reported origin
         pub origin_at_insert: PMutex<Option<Option<String>>>,
+        /// What `read_value` finds: `ref:<ref>` or `sel:<css>` to (value, frame origin, top origin).
+        #[allow(clippy::type_complexity)] // a test table, flat on purpose
+        pub reads:
+            PMutex<std::collections::HashMap<String, (String, Option<String>, Option<String>)>>,
         /// What actually reached the page through `fill_secret`.
         pub typed_secrets: PMutex<Vec<String>>,
         /// The raw (pre-scrub) text `fill_secret` produced.
@@ -4467,10 +4505,6 @@ pub(crate) mod fake {
         pub report: PMutex<Option<browser_cdp::DownloadReport>>,
         /// Why `set_payment_block(true)` fails, when a test wants it to.
         pub block_error: PMutex<Option<String>>,
-        /// What `read_value` finds: `ref:<ref>` or `sel:<css>` to (value, frame origin, top origin).
-        #[allow(clippy::type_complexity)]
-        pub reads:
-            PMutex<std::collections::HashMap<String, (String, Option<String>, Option<String>)>>,
     }
 
     impl FakeBrowser {

@@ -748,6 +748,16 @@ impl HandoverHub {
             .is_ok_and(|snap| matches!(detect(&snap), Some(Challenge::Captcha { .. })))
     }
 
+    /// Treat the page `driver` shows as holding a secret in the clear (a value captured from
+    /// it): visual observations are withheld until the page navigates.
+    pub(crate) async fn latch_visible_secret(&self, driver: &Arc<dyn BrowserDriver>) {
+        let epoch = driver.capture_epoch().await.unwrap_or_default();
+        self.captures
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((Arc::downgrade(driver), epoch));
+    }
+
     /// Whether any browser holds a freshly typed code on its page right now.
     pub async fn typed_secret_visible(&self) -> bool {
         let drivers: Vec<Arc<dyn BrowserDriver>> = {

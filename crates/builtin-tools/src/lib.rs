@@ -43,6 +43,7 @@ pub mod script;
 pub mod secret_request;
 pub mod selfcheck;
 pub mod shell;
+pub mod site_ledger;
 #[cfg(test)]
 mod totp_save_tests;
 mod util;
@@ -77,7 +78,8 @@ pub use bots::{
     FieldChange,
 };
 pub use browser::{
-    ACCOUNT_TOTP_SAVE, BrowserDriver, BrowserSettings, CdpDriver, Wait, act_can_egress, act_summary,
+    ACCOUNT_TOTP_SAVE, BROWSER_CAPTURE_SECRET, BrowserDriver, BrowserSettings, CdpDriver, Wait,
+    act_can_egress, act_summary,
 };
 pub use checkpoint::{
     ChangeKind, Checkpoint, CheckpointEntry, CheckpointStore, DiffOmittedReason, FileChange,
@@ -111,6 +113,7 @@ pub use script::{
 pub use secret_request::{
     Fields as SecretFields, SECRET_REQUEST, SECRET_REQUEST_CARD_KIND, SecretCard, entry_names,
 };
+pub use site_ledger::{SITE_LEDGER, SiteLedger, SiteState, site_ledger_tool};
 
 pub use connector_email;
 pub use web_tools;
@@ -352,13 +355,19 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     }
     if let Some(secrets) = &cfg.fill_secrets {
         all.push(fill_secret::secrets_list_tool(Arc::clone(secrets)));
-        all.push(account_register::account_register_tool_with_mail(
+        let ledger = Arc::new(site_ledger::SiteLedger::new(&cfg.data_dir));
+        all.push(account_register::account_register_tool_with_ledger(
             Arc::clone(secrets),
             cfg.account_register,
             Arc::clone(&mail),
+            Some(Arc::clone(&ledger)),
         ));
         all.push(account_register::account_list_tool(Arc::clone(secrets)));
         all.push(account_register::account_discard_tool(Arc::clone(secrets)));
+        all.push(site_ledger::site_ledger_tool(
+            ledger,
+            Some(Arc::clone(secrets)),
+        ));
         if cfg.secret_requests {
             all.push(secret_request::secret_request_tool(Arc::clone(secrets)));
         }
@@ -550,10 +559,11 @@ mod tests {
         // to 28 000 when `browser_upload`, `browser_downloads`, `browser_reload` and
         // `browser_forward` (together about 2 KB, with the longer `browser_tabs`) joined, and
         // to 30 000 because that left no room at all: the next tool must not trip it.
-        assert!(total < 30_000, "tool list grew to {total} bytes");
+        // and to 31 000 when `browser_capture_secret` (about 1 KB) joined.
+        assert!(total < 31_000, "tool list grew to {total} bytes");
         assert!(
-            total + 1_000 < 30_000,
-            "tool list is {total} bytes: no room left below the 30 000 ceiling, raise it with the next tool"
+            total + 1_000 < 31_000,
+            "tool list is {total} bytes: no room left below the 31 000 ceiling, raise it with the next tool"
         );
     }
 
@@ -701,6 +711,7 @@ mod tests {
             ("browser_downloads", R, B),
             ("browser_screenshot", R, B),
             ("browser_handover", R, Me),
+            ("browser_capture_secret", W, B),
             ("browser_pointer", W, B),
             ("browser_attach", W, B),
             ("browser_eval", W, Sc),
@@ -1352,7 +1363,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 48 + 8 + 2 + 2 + 1 + 1 + 1);
+        assert_eq!(added, 48 + 8 + 2 + 2 + 1 + 1 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg

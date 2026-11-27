@@ -34,8 +34,8 @@ zamanlamaz. Web sayfalarını, postaları ve belgeleri yönerge olarak değil, v
 
 Beş yerleşik **rehber**, Praxi'nin mevcut araçlarını ve onay kapılarını kullanan çok adımlı iş
 akışlarını anlatır: `signup-to-site` (botun kendi posta kimliği, daemonun ürettiği parola,
-doğrulama postasını `email_wait_for` ile beklemek, CAPTCHA ya da 2FA için işi sahibine
-devretmek), `lead-research` (doğrulanmış adayları bir çalışma alanındaki `leads/<campaign>.csv`
+doğrulama postasını `email_wait_for` ile beklemek, uzun kayıt görevleri için `site_ledger`
+site listesi, CAPTCHA ya da 2FA için işi sahibine devretmek), `lead-research` (doğrulanmış adayları bir çalışma alanındaki `leads/<campaign>.csv`
 dosyasına kaydetmek), `outreach-drafts` (her aday için yalnızca taslak e-postalar, sahibi toplu
 olarak inceler, asla göndermez), `office-doc-prep` (desteklenmeyen dönüşümlerin yapılabildiğini
 söylemeden `docx`, `xlsx` ve `csv` dosyaları oluşturmak ve incelemek) ve `install-capability`

@@ -22,6 +22,8 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // bots this bot made brings no content in; `browser_handover` only checks that a
         // CAPTCHA or code prompt is really there and returns fixed text). A write does not bring content in:
         // the model already had the bytes, and the result is not a private read.
+        // `browser_capture_secret` reads a page element INTO the vault and returns a name only
+        // (no page text comes in, nothing leaves; it always asks outside the Full level).
         // `secrets_list` / `account_list` show names, sites and logins the owner
         // chose or the bot made: no value and no text a page wrote, so they neither
         // taint nor leave the machine (tainting would also stop an owner's standing
@@ -30,7 +32,9 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
         | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list"
         | "secrets_list" | "secret_request" | "bot_delete" | "account_list" | "account_discard"
-        | "account_totp_save" | "browser_handover" => ContentClass::none(),
+        | "account_totp_save" | "browser_handover" | "browser_capture_secret" => {
+            ContentClass::none()
+        }
         // Pure helpers: only the clock and the model's own short text go in.
         // Writing or deleting a note only changes the bot's own notes file on this machine:
         // not egress. What a tainted run stores is marked and read back fenced (see `notes`),
@@ -109,8 +113,11 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         | "account_register" | "tool_self_check" => ContentClass::egress(),
         // A bot's name and persona are text any bot with `manage_bots` can write, so a
         // listing brings possibly untrusted text in. The download list shows file names a web
-        // page chose; it sends nothing and reads no private data.
-        "bot_list" | "browser_downloads" => ContentClass::untrusted(),
+        // page chose; it sends nothing and reads no private data. The site ledger is the bot's
+        // own record in the data directory (nothing leaves), but its notes and evidence addresses
+        // were written after reading pages and mails: a listing brings possibly untrusted text
+        // in, like `bot_list`.
+        "bot_list" | "browser_downloads" | "site_ledger" => ContentClass::untrusted(),
         _ => return None,
     })
 }

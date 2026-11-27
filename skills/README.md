@@ -14,7 +14,7 @@ Each directory under `skills/` contains a `SKILL.md` playbook embedded into the 
 - `outreach-drafts` — Draft personalized outreach emails per lead for owner review; never sends.
 - `shadow-dom-and-iframes` — Reach elements hidden inside shadow DOM or iframes when browser_snapshot does not list them.
 - `sign-in-forms` — Handle multi-step sign-in flows, SSO redirects, and 2FA prompts safely using stored fill secrets.
-- `signup-to-site` — Sign up on a website with the bot's own mail identity and a daemon-made password, wait for the verification mail, confirm, and hand over CAPTCHA or 2FA.
+- `signup-to-site` — Sign up on a website with the bot's own mail identity and a daemon-made password, confirm by mail, keep any key the site shows, record the site in the ledger, and hand over CAPTCHA or 2FA.
 - `web-tables-and-spreadsheets` — Navigate, read, and edit grid cells, paginated tables, and spreadsheet web apps reliably.
 - `windows-file-upload-dialog` — Handle the native Windows "Open" file picker that appears after clicking an upload button.
 - `windows-save-as-dialog` — Save to a requested path through the native Windows Save As dialog and handle overwrite prompts.

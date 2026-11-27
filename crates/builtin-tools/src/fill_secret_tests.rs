@@ -691,6 +691,7 @@ async fn another_bots_account_is_not_typed_into_a_desktop_program() {
             email_account: None,
             bot_id: "bot-a",
             note: None,
+            label: None,
             password_len: 20,
             symbols: true,
         })
@@ -814,6 +815,7 @@ async fn another_bots_account_is_not_typed() {
             email_account: None,
             bot_id: "bot-a",
             note: None,
+            label: None,
             password_len: 20,
             symbols: true,
         })
@@ -853,6 +855,7 @@ fn rig_with_totp_account() -> Rig {
             note: None,
             password_len: 20,
             symbols: true,
+            label: None,
         })
         .unwrap();
     r.secrets
@@ -959,6 +962,7 @@ async fn a_totp_fill_is_refused_for_other_bots_owner_secrets_and_missing_keys() 
             note: None,
             password_len: 20,
             symbols: true,
+            label: None,
         })
         .unwrap();
     let nokey = json!({"ref": "e5", "secret": "totp:login/acct-nokey"});

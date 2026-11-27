@@ -30,6 +30,7 @@ fn account(name: &str) -> NewAccount<'_> {
         note: None,
         password_len: 20,
         symbols: true,
+        label: None,
     }
 }
 

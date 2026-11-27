@@ -587,6 +587,172 @@ fn secret_tool() -> Arc<SecretTool> {
     }))
 }
 
+/// A tool that always asks outside the Full level's sign-up waiver (the real
+/// `account_register`, a secret `browser_fill`, `browser_capture_secret`).
+struct AsksUnlessSignup {
+    spec: ToolSpec,
+    count: std::sync::atomic::AtomicUsize,
+}
+
+impl AsksUnlessSignup {
+    fn new(name: &str, category: PermissionCategory) -> Arc<Self> {
+        Arc::new(Self {
+            spec: ToolSpec {
+                name: name.into(),
+                description: "asks".into(),
+                input_schema: json!({"type": "object"}),
+                effect: Effect::Write,
+                category,
+                platforms: vec![Platform::All],
+                content: builtin_tools::classify(name).unwrap_or_else(ContentClass::none),
+            },
+            count: std::sync::atomic::AtomicUsize::new(0),
+        })
+    }
+}
+
+#[async_trait]
+impl Tool for AsksUnlessSignup {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+    fn always_ask(&self) -> bool {
+        true
+    }
+    fn always_ask_for(&self, _: &Value) -> bool {
+        true
+    }
+    async fn approval_details(
+        &self,
+        _: &ToolContext,
+        _: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        Ok(Some(json!({"kind": "test"})))
+    }
+    async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(ToolOutput::text("done"))
+    }
+}
+
+/// The unattended backlink run: a mission session of a Full bot reads a page and the owner's
+/// private mail, then signs up (register, type the bot's own password, keep an API key) without
+/// anyone at the keyboard. Money and an owner-stored secret still ask.
+#[allow(clippy::too_many_lines)] // one scripted scenario run three ways
+#[tokio::test]
+async fn a_mission_signs_up_unattended_but_money_and_owner_secrets_still_ask() {
+    let secrets = Arc::new(secret_store::FillSecrets::in_memory(Arc::new(
+        secret_store::MemoryStore::new(),
+    )));
+    let make = |w: &World| {
+        secrets
+            .register_account(&secret_store::NewAccount {
+                name: "login/example.com-own",
+                site: "https://example.com",
+                login_id: "bot@agentmail.example",
+                email_account: None,
+                bot_id: &w.env.bot.to_string(),
+                note: None,
+                label: None,
+                password_len: 16,
+                symbols: false,
+            })
+            .unwrap();
+        secrets
+            .upsert("login/shop", Some("owner-secret"), None, None)
+            .unwrap();
+    };
+    let script = |later: Vec<(&str, Value)>| {
+        let mut v = vec![calls(&[("m", "mail_read", json!({"path": "inbox"}))])];
+        for (i, (name, input)) in later.into_iter().enumerate() {
+            v.push(calls(&[(format!("c{i}").as_str(), name, input)]));
+        }
+        v.push(text("done"));
+        v
+    };
+    let run_with = |w: World, later: Vec<(&'static str, Value)>| {
+        let secrets = Arc::clone(&secrets);
+        async move {
+            let fake = Fake::new(script(later));
+            let mail = private_mail();
+            let register = AsksUnlessSignup::new("account_register", PermissionCategory::Meta);
+            let fill = AsksUnlessSignup::new("browser_fill", PermissionCategory::Browser);
+            let capture =
+                AsksUnlessSignup::new("browser_capture_secret", PermissionCategory::Browser);
+            let pay = Arc::new(with_class(
+                "pay",
+                tool_registry::Effect::Destructive,
+                PermissionCategory::Money,
+                tool_registry::ContentClass::none(),
+                "paid",
+            ));
+            let lp = make_loop(
+                &w.env.storage,
+                w.env.bot,
+                &fake,
+                &[t(&mail), t(&pay)],
+                profile(FULL),
+                cfg(Policy::full()),
+            );
+            for tool in [&register, &fill, &capture] {
+                lp.sh.tools.register(Arc::clone(tool) as Arc<dyn Tool>);
+            }
+            assert!(lp.sh.fill_secrets.set(secrets).is_ok());
+            let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+            lp.enable_missions(&w.store, &clock, None);
+            let mut rx = lp.subscribe();
+            let run = lp
+                .run_mission_session(w.env.chat, &w.mission, "brief")
+                .unwrap();
+            let event = until(&mut rx, |e| {
+                matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+            })
+            .await;
+            let card = if let Event::ApprovalNeeded(card) = event {
+                lp.cancel(run).unwrap();
+                Some(card.tool_name)
+            } else {
+                None
+            };
+            let ran = |t: &Arc<AsksUnlessSignup>| t.count.load(std::sync::atomic::Ordering::SeqCst);
+            (card, [ran(&register), ran(&fill), ran(&capture)])
+        }
+    };
+
+    let w = world(&["a.example"]);
+    make(&w);
+    let (card, ran) = run_with(
+        w,
+        vec![
+            ("account_register", json!({"site": "https://example.com"})),
+            (
+                "browser_fill",
+                json!({"ref": "e5", "secret": "login/example.com-own"}),
+            ),
+            (
+                "browser_capture_secret",
+                json!({"ref": "e9", "name": "api-key"}),
+            ),
+        ],
+    )
+    .await;
+    assert_eq!(card, None, "no card for the bot's own sign-up");
+    assert_eq!(ran, [1, 1, 1]);
+
+    // The owner's own secret and money keep asking, in the very same run.
+    let w = world(&["a.example"]);
+    let (card, ran) = run_with(
+        w,
+        vec![("browser_fill", json!({"ref": "e5", "secret": "login/shop"}))],
+    )
+    .await;
+    assert_eq!(card.as_deref(), Some("browser_fill"));
+    assert_eq!(ran, [0, 0, 0]);
+    let w = world(&["a.example"]);
+    let (card, _) = run_with(w, vec![("pay", json!({"amount": 5}))]).await;
+    assert_eq!(card.as_deref(), Some("pay"));
+}
+
 #[tokio::test]
 async fn a_credential_the_mission_needs_parks_the_item_instead_of_stalling_the_session() {
     let w = world(&["a.example", "b.example"]);

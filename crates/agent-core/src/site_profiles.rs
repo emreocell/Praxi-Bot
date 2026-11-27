@@ -68,6 +68,8 @@ pub(crate) const BROWSER_CLASSES: &[(&str, Capability)] = &[
     ("browser_wait", Capability::Read),
     ("browser_tabs", Capability::Read),
     ("browser_handover", Capability::Read),
+    // Reads one element's value into the vault: a read of the page, judged like one.
+    ("browser_capture_secret", Capability::Read),
     ("browser_click", Capability::Interact),
     ("browser_fill", Capability::Interact),
     ("browser_select", Capability::Interact),

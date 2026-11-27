@@ -2519,6 +2519,21 @@
       "summarize": "Resumir"
     },
     "step": {
+      "account_discard": {
+        "done": "Quitó el registro de una cuenta",
+        "failed": "No quitó el registro de la cuenta",
+        "running": "Quitando el registro de una cuenta"
+      },
+      "account_list": {
+        "done": "Revisó sus cuentas de sitios",
+        "failed": "No pudo revisar sus cuentas de sitios",
+        "running": "Revisando sus cuentas de sitios"
+      },
+      "account_register": {
+        "done": "Creó una cuenta en un sitio",
+        "failed": "No pudo crear la cuenta",
+        "running": "Creando una cuenta en un sitio"
+      },
       "agent": {
         "done": "Delegó la tarea a un asistente",
         "failed": "No pudo delegar la tarea",
@@ -2558,6 +2573,11 @@
         "done": "Chose which browser to use",
         "failed": "Couldn't choose which browser to use",
         "running": "Choosing which browser to use"
+      },
+      "browser_capture_secret": {
+        "done": "Guardó un valor de la página en la bóveda",
+        "failed": "No pudo guardar el valor de la página",
+        "running": "Guardando un valor de la página en la bóveda"
       },
       "browser_click": {
         "done": "Hizo clic en una página",
@@ -2848,6 +2868,11 @@
         "done": "Ejecutó un comando",
         "failed": "No pudo ejecutar el comando",
         "running": "Ejecutando un comando"
+      },
+      "site_ledger": {
+        "done": "Usó su lista de sitios",
+        "failed": "No pudo usar su lista de sitios",
+        "running": "Usando su lista de sitios"
       },
       "skill_look": {
         "done": "Buscó una habilidad",

@@ -433,6 +433,8 @@ the search provider, so a paraphrase of private data in it is not recognised eit
 (the volume is capped by the budget above). Every call this rule
 lets through is written to the audit log as `mode.full.owner_browse` (the web read tools too).
 
+One more thing the Full level does without a card, for a run you started or a mission of yours: a bot's **own sign-ups** (see [Sign-ups: a bot with its own address](email.md#sign-ups-a-bot-with-its-own-address)). `account_register`, typing the password of an account the bot made itself with `browser_fill` `secret`, and `browser_capture_secret` run without asking, also after the run read pages or your mail, because the password is made by the app, never seen by the bot, and typed only into the exact site it was registered for. Secrets you stored yourself and money still ask. These calls are written to the audit log as `mode.full.own_signup`.
+
 **What the bot is told.** On the Full level the bot's base instructions say: carry
 the task through to the end without asking "shall I start?" or for a go-ahead;
 choose sensible defaults itself (which sites, names, wording) and say what it chose;

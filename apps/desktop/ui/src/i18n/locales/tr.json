@@ -2583,6 +2583,21 @@
       "summarize": "Özetle"
     },
     "step": {
+      "account_discard": {
+        "done": "Bir hesap kaydını sildi",
+        "failed": "Hesap kaydı silinemedi",
+        "running": "Bir hesap kaydını siliyor"
+      },
+      "account_list": {
+        "done": "Site hesaplarına baktı",
+        "failed": "Site hesaplarına bakılamadı",
+        "running": "Site hesaplarına bakıyor"
+      },
+      "account_register": {
+        "done": "Bir sitede hesap açtı",
+        "failed": "Hesap açılamadı",
+        "running": "Bir sitede hesap açıyor"
+      },
       "agent": {
         "done": "Yardımcıya devredildi",
         "failed": "Yardımcıya devredilmedi",
@@ -2622,6 +2637,11 @@
         "done": "Kullanılacak tarayıcı seçildi",
         "failed": "Kullanılacak tarayıcı seçilemedi",
         "running": "Kullanılacak tarayıcı seçiliyor"
+      },
+      "browser_capture_secret": {
+        "done": "Sayfadaki bir değeri kasaya kaydetti",
+        "failed": "Sayfadaki değer kaydedilemedi",
+        "running": "Sayfadaki bir değeri kasaya kaydediyor"
       },
       "browser_click": {
         "done": "Sayfada tıklandı",
@@ -2912,6 +2932,11 @@
         "done": "Komut çalıştırıldı",
         "failed": "Komut çalıştırılmadı",
         "running": "Komut çalıştırılıyor"
+      },
+      "site_ledger": {
+        "done": "Site listesini kullandı",
+        "failed": "Site listesi kullanılamadı",
+        "running": "Site listesini kullanıyor"
       },
       "skill_look": {
         "done": "Beceriye bakıldı",

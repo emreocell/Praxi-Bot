@@ -70,6 +70,8 @@ static FULL_POLICY: OnceLock<Policy> = OnceLock::new();
 
 /// Stable audit code for the existing Full browser and public web waiver.
 const FULL_BROWSE_REASON: &str = "mode.full.owner_browse";
+/// Audit reason when the Full level let a bot's own sign-up through without a card.
+const FULL_SIGNUP_REASON: &str = "mode.full.own_signup";
 
 /// Audit reason code of a `browser_upload` the Full level let through.
 const FULL_UPLOAD_REASON: &str = "mode.full.owner_upload";
@@ -843,6 +845,22 @@ impl Shared {
         // ([`Tool::always_ask_for`]): the policy level, the Full preset, read
         // shortcuts, "this chat" / "always" grants and any run-scoped control
         // grant sit BELOW this early return, so none of them can waive it.
+        // The Full level's unattended sign-up: a bot registering on sites for the owner (or for
+        // their mission) with its own address and a password only the daemon knows. It sits
+        // before the always-ask test because that test is exactly what it waives, for these
+        // three calls only; see [`Self::full_signup_waives`]. A run the Full lane covers is
+        // judged by the lane (audited as `mode.full.policy`); this waiver is for what the lane
+        // does not reach, an unattended mission session.
+        if d == Decision::Allow
+            && !self.full_lane_run(ctx)
+            && !matches!(
+                ctx.initiator,
+                InitiatorKind::ExternalAgent | InitiatorKind::ExternalSchedule
+            )
+            && self.full_signup_waives(ctx, name, input)
+        {
+            return (Decision::Allow, Some(FULL_SIGNUP_REASON));
+        }
         if (self.must_ask(name, input) && !own_totp_on_full)
             || matches!(
                 ctx.initiator,
@@ -1708,6 +1726,52 @@ impl Shared {
         };
         let named = self.owner_named_hosts(ctx);
         self.trusted_host(ctx, &host, &named)
+    }
+
+    /// The owner's Full level for a bot's OWN sign-ups (backlink-style tasks: "register on
+    /// these sites with your own address"), without a card per site. Three calls, nothing else:
+    ///
+    /// * `account_register`: the daemon makes the password and stores it limited to that site
+    ///   and to this bot; the login is the bot's own bound mail address (the tool refuses any
+    ///   identity that is not the bot's own); a second account with the same login on a site is
+    ///   refused by the tool;
+    /// * `browser_fill` with `secret`, only for an account entry THIS bot made itself
+    ///   (`created_by == "bot"`, never an owner-stored secret, which keeps asking), and only
+    ///   while the tool's own checks pass at insertion: the live frame AND the top page must
+    ///   both be on the site the entry is limited to, re-read from the browser right before
+    ///   the text goes in;
+    /// * `browser_capture_secret`: the daemon reads a value the page shows into the vault,
+    ///   limited to that page's verified origin and to this bot; the model never sees it.
+    ///
+    /// Only for the Full level, on a run that is the owner's own ([`Self::full_waivers_apply`]:
+    /// owner-started, or an unattended session of their mission), never a subagent or helper
+    /// bot. Money, the never-list, every other always-ask and the egress gate of everything
+    /// else are decided elsewhere and untouched. The calls are audited with
+    /// `mode.full.own_signup`.
+    fn full_signup_waives(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
+        if ctx.parent_run_id.is_some()
+            || ctx.delegation().is_some()
+            || ctx.profile.permissions.mode() != AutonomyMode::Full
+            || !self.full_waivers_apply(ctx)
+        {
+            return false;
+        }
+        match name {
+            "account_register" | "browser_capture_secret" => true,
+            "browser_fill" => {
+                let Some(secret) = input.get("secret").and_then(Value::as_str) else {
+                    return false;
+                };
+                self.fill_secrets.get().is_some_and(|secrets| {
+                    secrets
+                        .accounts(Some(&ctx.bot_id.to_string()))
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|a| a.name == secret && a.created_by == "bot")
+                })
+            }
+            _ => false,
+        }
     }
 
     /// The owner's Full level for `shell_run` (the bot's OWN host shell) after the run read

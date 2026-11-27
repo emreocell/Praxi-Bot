@@ -320,6 +320,7 @@ async fn a_form_cannot_replace_another_bots_account_that_appeared_while_it_was_o
             email_account: None,
             bot_id: "another-bot",
             note: None,
+            label: None,
             password_len: 20,
             symbols: true,
         })

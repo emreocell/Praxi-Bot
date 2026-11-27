@@ -2519,6 +2519,21 @@
       "summarize": "Zusammenfassen"
     },
     "step": {
+      "account_discard": {
+        "done": "Konto-Eintrag entfernt",
+        "failed": "Konto-Eintrag nicht entfernt",
+        "running": "Entfernt einen Konto-Eintrag"
+      },
+      "account_list": {
+        "done": "Website-Konten geprüft",
+        "failed": "Website-Konten konnten nicht geprüft werden",
+        "running": "Prüft die Website-Konten"
+      },
+      "account_register": {
+        "done": "Ein Konto auf einer Website angelegt",
+        "failed": "Konto konnte nicht angelegt werden",
+        "running": "Legt ein Konto auf einer Website an"
+      },
       "agent": {
         "done": "An einen Helfer übergeben",
         "failed": "Nicht an einen Helfer übergeben",
@@ -2558,6 +2573,11 @@
         "done": "Chose which browser to use",
         "failed": "Couldn't choose which browser to use",
         "running": "Choosing which browser to use"
+      },
+      "browser_capture_secret": {
+        "done": "Einen Wert der Seite im Tresor gespeichert",
+        "failed": "Wert der Seite konnte nicht gespeichert werden",
+        "running": "Speichert einen Wert der Seite im Tresor"
       },
       "browser_click": {
         "done": "Auf einer Seite geklickt",
@@ -2848,6 +2868,11 @@
         "done": "Einen Befehl ausgeführt",
         "failed": "Ein Befehl wurde nicht ausgeführt",
         "running": "Führt einen Befehl aus"
+      },
+      "site_ledger": {
+        "done": "Website-Liste genutzt",
+        "failed": "Website-Liste konnte nicht genutzt werden",
+        "running": "Nutzt die Website-Liste"
       },
       "skill_look": {
         "done": "Einen Skill nachgeschlagen",

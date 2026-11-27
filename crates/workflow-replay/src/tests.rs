@@ -1492,6 +1492,7 @@ mod secret_steps {
                 email_account: None,
                 bot_id: "bot-a",
                 note: None,
+                label: None,
                 password_len: 20,
                 symbols: true,
             })

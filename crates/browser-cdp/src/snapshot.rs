@@ -1075,13 +1075,11 @@ impl Builder<'_, '_> {
         // While a typed secret is on the page, no text-entry value is shown: the page may
         // have copied it into sibling boxes (one digit per box) or re-created the field.
         let free_text_during_secret = self.refs.secret_on_page() && FREE_TEXT_ROLES.contains(&role);
-        let latched = node.backend.is_some_and(|b| {
-            let session = self.ctx.frames[f].session_id.as_ref();
-            self.refs
-                .masked
-                .iter()
-                .any(|(s, id)| *id == b && s.as_ref() == session)
-        });
+        // By backend id alone: a field found by selector has no session of its own, and a
+        // collision with a node of another frame only hides more (fail closed).
+        let latched = node
+            .backend
+            .is_some_and(|b| self.refs.masked.iter().any(|(_, id)| *id == b));
         let is_secret = latched || extra.is_some_and(DomExtra::is_sensitive);
         if (is_secret || unknown_sensitivity || free_text_during_secret) && value.is_some() {
             value = Some(MASK.to_string());
@@ -1548,6 +1546,46 @@ mod tests {
         ] {
             assert!(!name_hint_is_secret(no), "{no}");
         }
+    }
+
+    #[test]
+    fn a_captured_field_is_masked_by_backend_id_whatever_session_the_latch_names() {
+        // A field read by selector is latched as `(None, id)`; the snapshot frame may carry a
+        // session of its own. The value (and the text the browser shows under it) stays out.
+        let key = "sk-live-Zx81QpLm0AbCdEf";
+        let ax = json!([
+            {"nodeId":"1","role":{"value":"RootWebArea"},"childIds":["2"],"backendDOMNodeId":1},
+            {"nodeId":"2","parentId":"1","role":{"value":"textbox"},"name":{"value":"API key"},
+             "value":{"value":key},"childIds":["3"],"backendDOMNodeId":2},
+            {"nodeId":"3","parentId":"2","role":{"value":"StaticText"},"name":{"value":key},
+             "childIds":[],"backendDOMNodeId":3}
+        ]);
+        let frame = || FrameInput {
+            frame_id: "main".into(),
+            loader_id: Some("L1".into()),
+            session_id: Some("S".into()),
+            ax_nodes: ax.as_array().unwrap().clone(),
+            extras: vec![DomExtra {
+                backend_id: 2,
+                tag: "input".into(),
+                input_type: Some("text".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let plain = text(&[frame()], &SnapshotOptions::default(), &mut RefMap::new());
+        assert!(
+            plain.contains(key),
+            "the page shows it in the clear: {plain}"
+        );
+        let mut refs = RefMap::new();
+        refs.set_masked(Some(vec![(None, 2)]));
+        let masked = text(&[frame()], &SnapshotOptions::default(), &mut refs);
+        assert!(
+            !masked.contains(key) && !masked.contains("Zx81"),
+            "{masked}"
+        );
+        assert!(masked.contains(MASK), "{masked}");
     }
 
     #[test]

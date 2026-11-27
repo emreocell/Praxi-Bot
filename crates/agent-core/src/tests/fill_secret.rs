@@ -734,12 +734,10 @@ async fn a_generated_password_typed_through_browser_fill_is_in_no_sink() {
     ));
     let r = rig(Policy::full(), true, vec![]);
     let bot = r.env.bot.to_string();
-    let bot8: String = bot
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .take(8)
-        .collect();
-    let name = format!("login/example.com-{bot8}");
+    let name = format!(
+        "login/example.com-{}",
+        builtin_tools::account_register::bot_tag(&bot).unwrap()
+    );
     r.lp.sh.tools.register(builtin_tools::account_register_tool(
         Arc::clone(&r.secrets),
         builtin_tools::AccountRegisterConfig::default(),
@@ -866,12 +864,10 @@ async fn an_account_password_typed_through_browser_fill_reaches_no_sink() {
         builtin_tools::AccountRegisterConfig::default(),
     ));
     let bot = r.env.bot.to_string();
-    let short: String = bot
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .take(8)
-        .collect();
-    let name = format!("login/example.com-{short}");
+    let name = format!(
+        "login/example.com-{}",
+        builtin_tools::account_register::bot_tag(&bot).unwrap()
+    );
     r.page
         .targets
         .lock()

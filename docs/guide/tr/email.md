@@ -278,6 +278,10 @@ devam eder. Her botun kullanabildiği bir gelen kutusu (bağlanmamış bir hesap
 asla “botun kendisininki” sayılmaz. Gönderme: `email_send` sorar (kendi adresine, geldiği konuşmanın içinde verilen yanıt hariç, bkz. araç tablosu) ve yalnızca taslak
 olan bir adres sadece taslak kaydeder.
 
+**Birden çok hesap, işin kaydı ve sayfanın gösterdiği anahtarlar.** `account_register`, site ve giriş adı başına bir hesap tutar. Aynı sitede ikinci bir hesap için farklı bir giriş adı ve kısa bir `label` (etiket) gerekir; `account_list {"domain": "example.com"}` botun orada zaten neyi olduğunu gösterir (bot kaydolmadan önce buna bakar, böylece uzun bir site listesinde aynı site iki kez gelmez). `account_discard` bir kaydı siler. `site_ledger`, botun kendi site listesidir: her site için bir durum (aday, hesap açıldı, doğrulama bekleniyor, bitti, takıldı, atlandı), sonucu gösteren sayfa ve kısa bir not. Çalışmalar arasında saklanır; bir sonraki oturum önceki oturumun bıraktığı yerden devam eder. Botun yazdığı düz bir metindir, asla bir talimat sayılmaz. Kayıttan sonra bir sayfa API anahtarı ya da jeton gösterirse `browser_capture_secret` onu sayfadan kasaya okur; yalnızca o siteye ve o bota bağlı kalır. Bot yalnızca bir gizli ad alır, değeri görmez ve sonra `browser_fill` ile yazar. Sayfa, bot ayrılana kadar değeri anlık görüntülerden ve resimlerden gizler.
+
+**Tam** düzeyinde, senin başlattığın bir çalışma ya da bir görevin kendi başına kaydolur: `account_register`, **botun kendi açtığı** bir hesabın parolasını yazmak (`secret` ile `browser_fill`) ve `browser_capture_secret`, çalışma sayfaları ya da postanı okumuş olsa bile **kartsız** çalışır. Parola yine yalnızca kaydedildiği tam siteye yazılır (yazma anında hem çerçeve hem sayfa denetlenir), kendi sakladığın gizli bilgiler her kullanımda sormaya devam eder ve para her zaman sorar. Diğer düzeyler ile posta, webhook, zamanlama ya da kanalla başlayan çalışmalar eskisi gibi her biri için sorar.
+
 ## Onaylar ve güvenlik
 
 - **Göndermek onay ister**: `email_send`, `Effect::Destructive` olarak işaretlenmiş dış bir etkidir.

@@ -34,7 +34,15 @@ pub const MAX_FILL_VALUE_BYTES: usize = 64 * 1024;
 pub const GRANT_KIND_BROWSER_FILL: &str = "browser_fill";
 
 const MAX_NAME_BYTES: usize = 64;
-const MAX_SECRETS: usize = 256;
+// A bot signing up on many sites keeps one entry per account; 1024 leaves room for a long
+// registration task while the file and keychain stay small.
+const MAX_SECRETS: usize = 1024;
+/// Most entries one bot may make for itself (its own accounts and captured values). A bot
+/// that loops on sign-ups cannot fill the shared store for the others; `account_discard`
+/// frees room.
+pub const MAX_BOT_OWN_SECRETS: usize = 256;
+/// Longest value `capture_secret` stores (an API key or token, not a document).
+pub const MAX_CAPTURED_BYTES: usize = 4096;
 const MAX_ORIGINS: usize = 32;
 const MAX_PROGRAMS: usize = 32;
 const MAX_BOTS: usize = 64;
@@ -167,6 +175,9 @@ struct AccountMeta {
     email_account: Option<String>,
     #[serde(default)]
     note: Option<String>,
+    /// Owner/bot-chosen tag that tells several accounts on one site apart.
+    #[serde(default)]
+    label: Option<String>,
     #[serde(default)]
     created_at_ms: u64,
     /// When the password was first typed anywhere (`None` = never: a sign-up
@@ -284,6 +295,8 @@ pub struct AccountInfo {
     pub bot_ids: Vec<String>,
     /// Short note the bot left.
     pub note: Option<String>,
+    /// Tag that tells several accounts on one site apart (`None`: the site's first one).
+    pub label: Option<String>,
     /// Whether the store holds the password.
     pub has_value: bool,
     /// Whether a two-factor key is stored too (`totp:<name>` types its code).
@@ -310,10 +323,30 @@ pub struct NewAccount<'a> {
     pub bot_id: &'a str,
     /// Short note.
     pub note: Option<&'a str>,
+    /// Tag for a further account on the same site (`None`: the first one).
+    pub label: Option<&'a str>,
     /// Password length (clamped to [`PASSWORD_MIN_LEN`]..=[`PASSWORD_MAX_LEN`]).
     pub password_len: usize,
     /// Allow symbols in the password (some sites refuse them).
     pub symbols: bool,
+}
+
+/// A value read from a page by the daemon (an API key or token shown after a
+/// sign-up), for [`FillSecrets::capture_secret`].
+#[derive(Debug, Clone)]
+pub struct NewCapture<'a> {
+    /// Secret name to store under.
+    pub name: &'a str,
+    /// Origin of the page the value came from: the only place it may be typed.
+    pub site: &'a str,
+    /// What the value is, for the owner and the bot (`api key`).
+    pub what: &'a str,
+    /// The bot that captured it and the only one that may use it.
+    pub bot_id: &'a str,
+    /// Short note.
+    pub note: Option<&'a str>,
+    /// Tag that ties it to one of several accounts on the site.
+    pub label: Option<&'a str>,
 }
 
 /// Shortest generated password.
@@ -1232,6 +1265,7 @@ impl FillSecrets {
         if meta.secrets.len() >= MAX_SECRETS {
             return Err(FillError::Invalid("too many fill secrets".into()));
         }
+        Self::check_bot_quota(&meta, new.bot_id)?;
         let before = meta.clone();
         self.store
             .set(&store_key(new.name), password.expose())
@@ -1247,6 +1281,10 @@ impl FillSecrets {
                 created_by: "bot".into(),
                 email_account: new.email_account.map(|e| sanitize_label(e, 120)),
                 note: new.note.map(|n| sanitize_label(n, 200)),
+                label: new
+                    .label
+                    .map(|l| sanitize_label(l, 40))
+                    .filter(|l| !l.is_empty()),
                 created_at_ms: now,
                 first_used_at_ms: None,
             }),
@@ -1267,6 +1305,127 @@ impl FillSecrets {
             .ok_or_else(|| unavailable("the account was not recorded"))
     }
 
+    /// Keep a value the daemon read from a page (see `browser_capture_secret`): stored
+    /// under `new.name`, limited to the origin it was read on and to `new.bot_id`, listed
+    /// with the bot's accounts as a `token`. The value goes only into the store and the
+    /// redaction hook; it is not returned. Capturing again under the name of the bot's own
+    /// earlier capture replaces the value (a rotated key); any other existing name is refused.
+    ///
+    /// # Errors
+    /// Invalid name / site / value, the name belongs to something else
+    /// ([`FillError::Exists`]), a limit, or a backend failure. Nothing is left behind on failure.
+    pub fn capture_secret(
+        &self,
+        new: &NewCapture<'_>,
+        value: &SecretValue,
+    ) -> Result<AccountInfo, FillError> {
+        validate_fill_name(new.name)?;
+        let site = canonical_origin(new.site)?;
+        let what = sanitize_label(new.what, 60);
+        if what.is_empty() {
+            return Err(FillError::Invalid("say what the value is".into()));
+        }
+        if new.bot_id.is_empty() {
+            return Err(FillError::Invalid(
+                "a captured value belongs to a bot; there is no bot in this call".into(),
+            ));
+        }
+        let v = value.expose();
+        if v.is_empty()
+            || v.len() > MAX_CAPTURED_BYTES
+            || v.chars().any(|c| c.is_control() && c != '\n')
+        {
+            return Err(FillError::Invalid(
+                "the element holds no usable value (empty, over 4 KiB or with control characters)"
+                    .into(),
+            ));
+        }
+        let mut meta = self.meta.lock();
+        let replacing = match meta.secrets.get(new.name) {
+            None => false,
+            Some(e)
+                if Self::bot_may_use(e, Some(new.bot_id))
+                    && e.account
+                        .as_ref()
+                        .is_some_and(|a| a.created_by == "bot" && a.kind == "token") =>
+            {
+                true
+            }
+            Some(_) => return Err(FillError::Exists(new.name.to_owned())),
+        };
+        if !replacing && meta.secrets.len() >= MAX_SECRETS {
+            return Err(FillError::Invalid("too many fill secrets".into()));
+        }
+        if !replacing {
+            Self::check_bot_quota(&meta, new.bot_id)?;
+        }
+        let before = meta.clone();
+        let previous = self.store.get(&store_key(new.name)).ok().flatten();
+        self.store
+            .set(&store_key(new.name), v)
+            .map_err(|_| unavailable("the secret store rejected the write"))?;
+        self.registered(v);
+        let now = now_ms();
+        let entry = Entry {
+            account: Some(AccountMeta {
+                site: site.clone(),
+                login_id: what,
+                kind: "token".into(),
+                bot_ids: vec![new.bot_id.to_owned()],
+                created_by: "bot".into(),
+                email_account: None,
+                note: new.note.map(|n| sanitize_label(n, 200)),
+                label: new
+                    .label
+                    .map(|l| sanitize_label(l, 40))
+                    .filter(|l| !l.is_empty()),
+                created_at_ms: now,
+                first_used_at_ms: None,
+            }),
+            origins: vec![site],
+            programs: Vec::new(),
+            bot_ids: vec![new.bot_id.to_owned()],
+            kind: Some(VaultKind::Other),
+            updated_at_ms: now,
+            ..Entry::default()
+        };
+        meta.secrets.insert(new.name.to_owned(), entry.clone());
+        // A rotated value starts without the old value's standing grants.
+        meta.grants.retain(|g| g.secret != new.name);
+        if let Err(e) = self.persist(&meta) {
+            *meta = before;
+            let _ = match previous {
+                Some(p) => self.store.set(&store_key(new.name), p.expose()),
+                None => self.store.delete(&store_key(new.name)).map(|_| ()),
+            };
+            return Err(e);
+        }
+        let present = self.present_in_store()?;
+        Self::account_info(new.name, &entry, &present)
+            .ok_or_else(|| unavailable("the value was not recorded"))
+    }
+
+    /// How many accounts and captured values `bot` made for itself.
+    fn bot_own_count(meta: &Meta, bot: &str) -> usize {
+        meta.secrets
+            .values()
+            .filter(|e| {
+                e.account
+                    .as_ref()
+                    .is_some_and(|a| a.created_by == "bot" && a.bot_ids.iter().any(|b| b == bot))
+            })
+            .count()
+    }
+
+    fn check_bot_quota(meta: &Meta, bot: &str) -> Result<(), FillError> {
+        if Self::bot_own_count(meta, bot) >= MAX_BOT_OWN_SECRETS {
+            return Err(FillError::Invalid(format!(
+                "this bot already holds {MAX_BOT_OWN_SECRETS} accounts and captured values of its own; account_discard removes ones it no longer needs"
+            )));
+        }
+        Ok(())
+    }
+
     fn account_info(name: &str, e: &Entry, present: &BTreeSet<String>) -> Option<AccountInfo> {
         let a = e.account.as_ref()?;
         Some(AccountInfo {
@@ -1278,6 +1437,7 @@ impl FillSecrets {
             email_account: a.email_account.clone(),
             bot_ids: a.bot_ids.clone(),
             note: a.note.clone(),
+            label: a.label.clone(),
             has_value: present.contains(&store_key(name)),
             has_totp: e.totp && present.contains(&totp_key(name)),
             created_at_ms: a.created_at_ms,
@@ -2508,11 +2668,183 @@ mod tests {
             email_account: None,
             bot_id: "bot-a",
             note: None,
+            label: None,
             password_len: 20,
             symbols: true,
         })
         .unwrap();
         name
+    }
+
+    fn capture<'a>(name: &'a str, site: &'a str, bot: &'a str) -> NewCapture<'a> {
+        NewCapture {
+            name,
+            site,
+            what: "api key",
+            bot_id: bot,
+            note: None,
+            label: None,
+        }
+    }
+
+    #[test]
+    fn a_captured_value_is_bound_to_the_bot_and_the_origin_and_never_returned() {
+        let (_, s) = svc();
+        let name = "token/example.com-aaaa1111-key";
+        let info = s
+            .capture_secret(
+                &capture(name, "https://example.com", "bot-a"),
+                &SecretValue::new("sk-live-0123456789abcdef"),
+            )
+            .unwrap();
+        assert_eq!(info.kind, "token");
+        assert_eq!(info.login_id, "api key");
+        assert_eq!(info.created_by, "bot");
+        assert!(info.has_value && info.unused);
+        assert!(!format!("{info:?}").contains("sk-live"));
+        // Only the capturing bot, only on the origin the value was read on.
+        let site = Some("https://example.com");
+        assert!(s.check_browser(name, site, Some("bot-a")).is_ok());
+        assert!(s.check_browser(name, site, Some("bot-b")).is_err());
+        assert!(s.check_browser(name, site, None).is_err());
+        assert!(
+            s.check_browser(name, Some("https://evil.example"), Some("bot-a"))
+                .is_err()
+        );
+        assert!(s.resolve_value_for(name, Some("bot-b")).is_err());
+        assert_eq!(
+            s.resolve_value_for(name, Some("bot-a")).unwrap().expose(),
+            "sk-live-0123456789abcdef"
+        );
+        // It lists with the bot's accounts, not another bot's, and the bot may discard it.
+        assert_eq!(s.accounts(Some("bot-a")).unwrap().len(), 1);
+        assert!(s.accounts(Some("bot-b")).unwrap().is_empty());
+        assert!(s.discard_account(name, Some("bot-b")).is_err());
+        s.discard_account(name, Some("bot-a")).unwrap();
+        assert!(!s.exists(name));
+    }
+
+    #[test]
+    fn capturing_again_replaces_only_the_bots_own_capture() {
+        let (store, s) = svc();
+        let name = "token/example.com-aaaa1111-key";
+        let cap = capture(name, "https://example.com", "bot-a");
+        s.capture_secret(&cap, &SecretValue::new("first-value-123"))
+            .unwrap();
+        s.capture_secret(&cap, &SecretValue::new("rotated-value-456"))
+            .unwrap();
+        assert_eq!(
+            s.resolve_value_for(name, Some("bot-a")).unwrap().expose(),
+            "rotated-value-456"
+        );
+        // Another bot, an owner-made secret and a registered password are never overwritten.
+        assert!(matches!(
+            s.capture_secret(
+                &capture(name, "https://example.com", "bot-b"),
+                &SecretValue::new("x-value-789")
+            ),
+            Err(FillError::Exists(_))
+        ));
+        s.upsert("login/owner-made", Some("owner"), None, None)
+            .unwrap();
+        assert!(matches!(
+            s.capture_secret(
+                &capture("login/owner-made", "https://example.com", "bot-a"),
+                &SecretValue::new("x-value-789")
+            ),
+            Err(FillError::Exists(_))
+        ));
+        let pw = registered_account(&s);
+        assert!(matches!(
+            s.capture_secret(
+                &capture(pw, "https://example.com", "bot-a"),
+                &SecretValue::new("x-value-789")
+            ),
+            Err(FillError::Exists(_))
+        ));
+        assert_ne!(
+            store.get(&store_key(pw)).unwrap().unwrap().expose(),
+            "x-value-789"
+        );
+    }
+
+    #[test]
+    fn one_bot_cannot_fill_the_store_with_its_own_entries() {
+        let (_, s) = svc();
+        let site = "https://example.com";
+        for i in 0..MAX_BOT_OWN_SECRETS {
+            let name = format!("token/example.com-aaaa1111-k{i}");
+            s.capture_secret(
+                &capture(&name, site, "bot-a"),
+                &SecretValue::new(format!("value-{i:04}-xyz")),
+            )
+            .unwrap();
+        }
+        // The next one, a capture or a registered account, is refused; nothing is stored.
+        let over = capture("token/example.com-aaaa1111-over", site, "bot-a");
+        let r = s.capture_secret(&over, &SecretValue::new("over-value-123"));
+        assert!(matches!(&r, Err(FillError::Invalid(m)) if m.contains("account_discard")));
+        assert!(!s.exists("token/example.com-aaaa1111-over"));
+        let r = s.register_account(&NewAccount {
+            name: "login/example.com-aaaa1111",
+            site,
+            login_id: "me",
+            email_account: None,
+            bot_id: "bot-a",
+            note: None,
+            label: None,
+            password_len: 20,
+            symbols: true,
+        });
+        assert!(matches!(r, Err(FillError::Invalid(_))));
+        // Rotating a value it already holds is not a new entry.
+        s.capture_secret(
+            &capture("token/example.com-aaaa1111-k0", site, "bot-a"),
+            &SecretValue::new("rotated-value-1"),
+        )
+        .unwrap();
+        // Another bot has its own allowance; discarding frees room for the first.
+        s.capture_secret(
+            &capture("token/example.com-bbbb2222-k0", site, "bot-b"),
+            &SecretValue::new("b-value-123456"),
+        )
+        .unwrap();
+        s.discard_account("token/example.com-aaaa1111-k1", Some("bot-a"))
+            .unwrap();
+        s.capture_secret(&over, &SecretValue::new("over-value-123"))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_capture_refuses_empty_oversized_and_unlabelled_values_and_feeds_the_redactor() {
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = Arc::clone(&seen);
+        let s = FillSecrets::in_memory(Arc::new(MemoryStore::new()))
+            .with_value_hook(Arc::new(move |v| sink.lock().push(v.to_owned())));
+        let ok = capture("token/a.example-1-k", "https://a.example", "bot-a");
+        for bad in ["", "   ", &"x".repeat(MAX_CAPTURED_BYTES + 1), "a\u{7}b"] {
+            let v = SecretValue::new(bad.trim());
+            let r = s.capture_secret(&ok, &v);
+            assert!(matches!(r, Err(FillError::Invalid(_))), "{bad:?}");
+        }
+        let mut no_what = ok.clone();
+        no_what.what = "  ";
+        assert!(
+            s.capture_secret(&no_what, &SecretValue::new("value-123456"))
+                .is_err()
+        );
+        assert!(
+            s.capture_secret(
+                &capture("token/a.example-1-k", "https://a.example", ""),
+                &SecretValue::new("value-123456")
+            )
+            .is_err()
+        );
+        assert!(!s.exists("token/a.example-1-k"));
+        assert!(seen.lock().is_empty());
+        s.capture_secret(&ok, &SecretValue::new("value-123456"))
+            .unwrap();
+        assert_eq!(seen.lock().as_slice(), ["value-123456"]);
     }
 
     #[test]
@@ -2803,6 +3135,7 @@ mod tests {
             email_account: None,
             bot_id: "bot-a",
             note: None,
+            label: None,
             password_len: 20,
             symbols: true,
         }

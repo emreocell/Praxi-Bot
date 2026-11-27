@@ -65,6 +65,12 @@ struct Case {
     saved_sign_in: bool,
     /// The daemon is host-homed and the bot runs on that host (its `shell_run` is its own).
     host: bool,
+    /// The vault holds an account this bot registered itself (`login/example.com-own`), one of
+    /// another bot (`login/example.com-bbbbbbbb`) and a secret the owner stored (`login/shop`).
+    own_account: bool,
+    /// Open the owner's site and read it first (the run is then tainted). A test of what a
+    /// call does on its own switches it off, so that call is the first card there can be.
+    prelude: bool,
 }
 
 /// What an earlier turn of the chat did.
@@ -96,6 +102,8 @@ impl Case {
             signed_in: false,
             saved_sign_in: false,
             host: false,
+            own_account: false,
+            prelude: true,
         }
     }
 
@@ -290,14 +298,16 @@ async fn run(
             text("I looked at the site."),
         ],
     };
-    script.extend([
-        calls(&[(
-            "o",
-            "browser_open",
-            json!({"url": "https://webioo.com.tr/"}),
-        )]),
-        calls(&[("s", "browser_snapshot", json!({}))]),
-    ]);
+    if case.prelude {
+        script.extend([
+            calls(&[(
+                "o",
+                "browser_open",
+                json!({"url": "https://webioo.com.tr/"}),
+            )]),
+            calls(&[("s", "browser_snapshot", json!({}))]),
+        ]);
+    }
     if case.private_first {
         script.push(calls(&[("m", "mail_read", json!({"path": "inbox"}))]));
     }
@@ -323,6 +333,42 @@ async fn run(
     for tool in extra {
         lp.tool_registry()
             .register(Arc::clone(tool) as Arc<dyn tool_registry::Tool>);
+    }
+    if case.own_account {
+        let secrets = Arc::new(secret_store::FillSecrets::in_memory(Arc::new(
+            secret_store::MemoryStore::new(),
+        )));
+        secrets
+            .register_account(&secret_store::NewAccount {
+                name: "login/example.com-own",
+                site: "https://example.com",
+                login_id: "bot@agentmail.example",
+                email_account: None,
+                bot_id: &env.bot.to_string(),
+                note: None,
+                label: None,
+                password_len: 16,
+                symbols: false,
+            })
+            .unwrap();
+        // Another bot's account on the same site.
+        secrets
+            .register_account(&secret_store::NewAccount {
+                name: "login/example.com-bbbbbbbb",
+                site: "https://example.com",
+                login_id: "other@agentmail.example",
+                email_account: None,
+                bot_id: "bot-other",
+                note: None,
+                label: None,
+                password_len: 16,
+                symbols: false,
+            })
+            .unwrap();
+        secrets
+            .upsert("login/shop", Some("owner-secret"), None, None)
+            .unwrap();
+        assert!(lp.sh.fill_secrets.set(secrets).is_ok());
     }
     if case.saved_sign_in {
         let profiles = Arc::new(builtin_tools::browser::BrowserProfiles::default());
@@ -750,6 +796,150 @@ async fn the_hard_stops_still_ask_in_full_after_a_page_was_read() {
             Some("shell_run"),
             "{cmd}"
         );
+    }
+}
+
+/// The three calls of an unattended sign-up, as a Full bot makes them.
+fn signup_calls() -> Vec<(&'static str, Value)> {
+    vec![
+        ("account_register", json!({"site": "https://example.com"})),
+        (
+            "browser_fill",
+            json!({"ref": "e5", "secret": "login/example.com-own"}),
+        ),
+        (
+            "browser_capture_secret",
+            json!({"ref": "e9", "name": "api-key"}),
+        ),
+    ]
+}
+
+fn signup_tools() -> [Arc<AlwaysAsks>; 3] {
+    [
+        AlwaysAsks::new("account_register", PermissionCategory::Meta),
+        AlwaysAsks::new("browser_fill", PermissionCategory::Browser),
+        AlwaysAsks::new("browser_capture_secret", PermissionCategory::Browser),
+    ]
+}
+
+#[tokio::test]
+async fn a_full_bot_signs_up_on_its_own_even_after_reading_untrusted_pages_and_private_mail() {
+    // Clean run, a run that read a page (the helper always does), and one that also holds the
+    // owner's private mail: none of the three sign-up calls shows a card, and each one ran.
+    for private_first in [false, true] {
+        let tools = signup_tools();
+        let mut case = Case::full();
+        case.own_account = true;
+        case.private_first = private_first;
+        let (_, card) = run(case, &tools, &signup_calls()).await;
+        assert_eq!(card, None, "private_first={private_first}");
+        for tool in &tools {
+            assert_eq!(
+                tool.count.load(Ordering::SeqCst),
+                1,
+                "{} private_first={private_first}",
+                tool.spec.name
+            );
+        }
+    }
+    // The same on a host-homed bot, and in a later turn after private data in an earlier one.
+    for case in [Case::full_on_host(), {
+        let mut c = Case::full();
+        c.prior = Prior::Mail;
+        c
+    }] {
+        let tools = signup_tools();
+        let mut case = case;
+        case.own_account = true;
+        let (_, card) = run(case, &tools, &signup_calls()).await;
+        assert_eq!(card, None);
+    }
+}
+
+#[tokio::test]
+async fn the_unattended_sign_up_waives_nothing_else() {
+    // An owner-stored secret is never typed silently, nor a secret that does not exist, nor
+    // another bot's account entry.
+    for secret in ["login/shop", "login/nowhere", "login/example.com-bbbbbbbb"] {
+        let fill = AlwaysAsks::new("browser_fill", PermissionCategory::Browser);
+        let mut case = Case::full();
+        case.own_account = true;
+        let (_, card) = run(
+            case,
+            &[Arc::clone(&fill)],
+            &[("browser_fill", json!({"ref": "e5", "secret": secret}))],
+        )
+        .await;
+        assert_eq!(card.as_deref(), Some("browser_fill"), "{secret}");
+        assert_eq!(fill.count.load(Ordering::SeqCst), 0);
+    }
+    // Every other always-ask tool still asks (a send).
+    let mail = AlwaysAsks::new("email_send", PermissionCategory::Messaging);
+    let mut case = Case::full();
+    case.own_account = true;
+    let (_, asked) = run(
+        case,
+        &[mail],
+        &[("email_send", json!({"to": "a@example.com", "body": "hi"}))],
+    )
+    .await;
+    assert_eq!(asked.as_deref(), Some("email_send"));
+    // Money is a floor, signed up or not.
+    let mut case = Case::full();
+    case.own_account = true;
+    assert_eq!(
+        card(case, &[("pay", json!({"amount": 5}))])
+            .await
+            .as_deref(),
+        Some("pay")
+    );
+}
+
+/// A run that is NOT the owner's own Full run, in one of the ways a run can differ.
+fn not_the_owners_full_run(label: &str) -> Case {
+    let mut case = Case::full();
+    case.own_account = true;
+    // The first call of the run is the sign-up call: nothing before it can ask instead.
+    case.prelude = false;
+    match label {
+        "normal level" => {
+            case.preset = BALANCED;
+            case.policy = Policy::approve_destructive();
+        }
+        "custom level" => case.preset = "",
+        "telegram" | "webhook" => {
+            case.source = if label == "telegram" {
+                "telegram"
+            } else {
+                "webhook"
+            };
+        }
+        "schedule" => case.initiator = Some(InitiatorKind::Schedule),
+        "external agent" => case.initiator = Some(InitiatorKind::ExternalAgent),
+        "external schedule" => case.initiator = Some(InitiatorKind::ExternalSchedule),
+        "channel" => case.initiator = Some(InitiatorKind::Channel),
+        other => panic!("{other}"),
+    }
+    case
+}
+
+#[tokio::test]
+async fn the_sign_up_waiver_is_for_the_owners_full_runs_only() {
+    for label in [
+        "normal level",
+        "custom level",
+        "telegram",
+        "webhook",
+        "schedule",
+        "external agent",
+        "external schedule",
+        "channel",
+    ] {
+        for (name, input) in signup_calls() {
+            let tools = signup_tools();
+            let (_, card) = run(not_the_owners_full_run(label), &tools, &[(name, input)]).await;
+            assert_eq!(card.as_deref(), Some(name), "{label}: {name}");
+        }
     }
 }
 

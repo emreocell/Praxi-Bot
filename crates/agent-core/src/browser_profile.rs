@@ -84,6 +84,7 @@ mod tests {
                 email_account: None,
                 bot_id: "bot-1",
                 note: None,
+                label: None,
                 password_len: 16,
                 symbols: false,
             })
