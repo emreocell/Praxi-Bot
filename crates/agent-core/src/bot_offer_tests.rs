@@ -418,6 +418,36 @@ async fn a_full_bot_with_the_switch_still_asks_when_it_is_not_the_owners_own_cha
     assert_eq!(r.card(run).await.as_deref(), Some("bot_create"));
 }
 
+/// What the loop hands the tool as "no card, freeze your own preview" is true for the owner's own
+/// Full chat turn and for nothing else: not a schedule run of a Full bot with the switch (which
+/// has the tools and gets a card), not a tool that is not a bot tool.
+#[tokio::test]
+async fn the_preview_waiver_belongs_to_the_owners_own_chat_alone() {
+    let r = rig(FULL_SWITCH, vec![create_call("c1"), text("ok")], true);
+    let run =
+        r.lp.run_turn_as(r.env.chat, SAYS, InitiatorKind::Schedule)
+            .unwrap();
+    let mut rx = r.lp.subscribe();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    let ctx = r.lp.sh.runs.lock().get(&run).cloned().unwrap();
+    assert!(!r.lp.sh.bot_preview_waived(&ctx, "bot_create"));
+    r.lp.cancel(run).unwrap();
+
+    let r = rig(
+        FULL,
+        vec![calls(&[("p1", "pay", json!({}))]), text("ok")],
+        true,
+    );
+    let run = r.turn("owner");
+    let mut rx = r.lp.subscribe();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    let ctx = r.lp.sh.runs.lock().get(&run).cloned().unwrap();
+    assert!(r.lp.sh.bot_preview_waived(&ctx, "bot_create"));
+    assert!(r.lp.sh.bot_preview_waived(&ctx, "bot_update"));
+    assert!(!r.lp.sh.bot_preview_waived(&ctx, "pay"));
+    r.lp.cancel(run).unwrap();
+}
+
 #[tokio::test]
 async fn the_ceiling_refusal_of_the_host_comes_back_as_a_plain_error() {
     // The preview the host refuses ends the call before anything is applied.
