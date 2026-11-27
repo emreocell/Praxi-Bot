@@ -27,6 +27,13 @@ pub const MAX_PROBES_PER_PASS: usize = 8;
 /// Wakes that may take a waiting mission back to `running` per hour (a wake storm stops here;
 /// the wakes stay recorded and are delivered when the window reopens).
 pub const WAKE_RELEASES_PER_HOUR: u32 = 6;
+/// How long an ended wait (fired, timed out, cancelled) and a consumed wake stay in the database
+/// before the supervisor deletes them, in milliseconds (30 days: long enough to read a timeline).
+pub const WAKE_RETENTION_MS: i64 = 30 * 24 * 3_600_000;
+/// How often the wake loop prunes old waits and wakes, in milliseconds.
+pub const PRUNE_EVERY_MS: i64 = 3_600_000;
+/// Most unconsumed wakes one mission keeps; a newer wake pushes the oldest out.
+pub const MAX_PENDING_WAKES: usize = 50;
 /// Longest filter text of a mail wait, in characters.
 pub const MAX_FILTER_CHARS: usize = 100;
 /// Longest reason the bot gives a wait, in characters.

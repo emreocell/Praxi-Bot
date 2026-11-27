@@ -7,6 +7,7 @@
 //! starts its next session. All of it reads the injected clock, so tests run it on a virtual one.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -15,8 +16,8 @@ use super::{Supervisor, budget_block};
 use crate::error::Result;
 use crate::model::{MAX_WAKE_PAYLOAD_CHARS, MissionState};
 use crate::wake::{
-    MAIL_POLL_BACKOFF_MAX_SECS, MAIL_POLL_SECS, MAX_PROBES_PER_PASS, MailCheck,
-    WAKE_RELEASES_PER_HOUR, Wait, WaitSpec, WakeReason, clean_external,
+    MAIL_POLL_BACKOFF_MAX_SECS, MAIL_POLL_SECS, MAX_PROBES_PER_PASS, MailCheck, PRUNE_EVERY_MS,
+    WAKE_RELEASES_PER_HOUR, WAKE_RETENTION_MS, Wait, WaitSpec, WakeReason, clean_external,
 };
 
 /// One look into a mailbox may take this long before it counts as a failure.
@@ -73,6 +74,7 @@ impl Supervisor {
 
         // An item that waits for nothing would wait for ever.
         self.store.requeue_orphan_waiting(now)?;
+        self.prune_old(now);
 
         for w in self.store.due_timers(now)? {
             if self
@@ -159,6 +161,19 @@ impl Supervisor {
         Ok(pass)
     }
 
+    /// Delete what ended long ago (at most once an hour): waits that fired, timed out or were
+    /// cancelled and wakes that were delivered stay readable for [`WAKE_RETENTION_MS`], then go.
+    fn prune_old(&self, now: i64) {
+        let last = self.last_prune_ms.load(Ordering::Relaxed);
+        if now.saturating_sub(last) < PRUNE_EVERY_MS {
+            return;
+        }
+        self.last_prune_ms.store(now, Ordering::Relaxed);
+        if let Err(e) = self.store.prune_wakes(now, WAKE_RETENTION_MS) {
+            tracing::warn!("missions: pruning old waits failed: {e}");
+        }
+    }
+
     /// A webhook the owner created was called (the daemon verified its signature): every wait on
     /// it fires with `body`, which is untrusted text. Returns how many missions were woken.
     ///
@@ -213,11 +228,15 @@ impl Supervisor {
     /// The expected mail came: record the wake with its (capped) summary.
     fn fire_mail(&self, w: &Wait, summary: &Value, now: i64) -> Result<bool> {
         let text = summary.to_string();
-        let payload = if text.chars().count() > MAX_WAKE_PAYLOAD_CHARS {
+        let mut payload = if text.chars().count() > MAX_WAKE_PAYLOAD_CHARS {
             json!({"summary": clean_external(&text, MAX_WAKE_PAYLOAD_CHARS)})
         } else {
             summary.clone()
         };
+        // The mailbox does not tell whether SPF/DKIM passed: arrival is not authenticity.
+        if let Some(o) = payload.as_object_mut() {
+            o.insert("sender_verified".into(), json!(false));
+        }
         Ok(self
             .store
             .fire_wait(w.id, WakeReason::Mail, Some(&payload), now)?

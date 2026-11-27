@@ -13,7 +13,8 @@ use crate::model::{
     ItemStatus, MAX_ACTIVE_WAITS, MAX_TEXT_CHARS, MAX_WAITS_PER_ITEM, MissionState, clip,
 };
 use crate::wake::{
-    MAX_REASON_CHARS, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason, clean_external,
+    MAX_PENDING_WAKES, MAX_REASON_CHARS, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason,
+    clean_external,
 };
 
 const WAIT_COLS: &str = "id, mission_id, item_key, spec_json, reason, state, created_at_ms, \
@@ -374,6 +375,19 @@ impl MissionStore {
             )?;
         }
         let payload_json = payload.map(Value::to_string);
+        // One pending wake per item: a newer one replaces the older (coalesced), and a mission
+        // keeps a bounded number, so no storm of waits can pile up wakes without end.
+        consume_item_wakes(&tx, &w.mission_id, &w.item_key, now)?;
+        tx.execute(
+            "UPDATE mission_wakes SET consumed_at_ms = ?2 WHERE mission_id = ?1 AND consumed_at_ms IS NULL \
+            AND id NOT IN (SELECT id FROM mission_wakes WHERE mission_id = ?1 AND consumed_at_ms IS NULL \
+            ORDER BY id DESC LIMIT ?3)",
+            params![
+                w.mission_id,
+                now,
+                i64::try_from(MAX_PENDING_WAKES.saturating_sub(1)).unwrap_or(i64::MAX)
+            ],
+        )?;
         tx.execute(
             "INSERT INTO mission_wakes (mission_id, wait_id, item_key, reason, payload_json, dedupe_key, created_at_ms) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -463,6 +477,64 @@ impl MissionStore {
         }
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Whether a watched mission of `bot_id` has a wait registered on webhook `trigger_id`. The
+    /// daemon asks before it decides between handing a call to a mission and starting a run.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn has_webhook_wait(&self, bot_id: &str, trigger_id: &str) -> Result<bool> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT w.spec_json FROM mission_waits w JOIN missions m ON m.id = w.mission_id \
+            WHERE w.state = 'waiting' AND w.kind = 'webhook' AND m.bot_id = ?1 AND {WATCHED}"
+        ))?;
+        let specs: Vec<String> = stmt
+            .query_map([bot_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(specs.iter().any(|s| {
+            matches!(serde_json::from_str::<WaitSpec>(s),
+                Ok(WaitSpec::Webhook { trigger_id: t, .. }) if t == trigger_id)
+        }))
+    }
+
+    /// Every wait row of a mission, ended ones too, and every wake row (tests only).
+    #[cfg(test)]
+    pub(crate) fn row_counts(&self, id: &str) -> (i64, i64) {
+        let conn = self.conn();
+        let count = |table: &str| -> i64 {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE mission_id = ?1"),
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        (count("mission_waits"), count("mission_wakes"))
+    }
+
+    /// Delete the waits that ended, and the wakes that were consumed, more than `max_age_ms`
+    /// ago. Waits that still wait and wakes that are still pending are never touched. Returns
+    /// how many waits and wakes went.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn prune_wakes(&self, now: i64, max_age_ms: i64) -> Result<(u32, u32)> {
+        let cutoff = now.saturating_sub(max_age_ms);
+        let conn = self.conn();
+        let waits = conn.execute(
+            "DELETE FROM mission_waits WHERE state != 'waiting' AND ended_at_ms IS NOT NULL AND ended_at_ms < ?1",
+            [cutoff],
+        )?;
+        let wakes = conn.execute(
+            "DELETE FROM mission_wakes WHERE consumed_at_ms IS NOT NULL AND consumed_at_ms < ?1",
+            [cutoff],
+        )?;
+        Ok((
+            u32::try_from(waits).unwrap_or(u32::MAX),
+            u32::try_from(wakes).unwrap_or(u32::MAX),
+        ))
     }
 
     /// A webhook the owner created was called: every wait on it, in a watched mission of `bot_id`,
@@ -1005,5 +1077,132 @@ mod tests {
         s.set_state(&id, MissionState::Running, None, 9_500)
             .unwrap();
         assert_eq!(s.due_timers(9_500).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn ended_waits_and_consumed_wakes_go_after_the_retention_time_but_live_ones_stay() {
+        let (s, id) = store_with(&["a.com", "b.com", "c.com"]);
+        // a.com: fired, its wake delivered (consumed), long ago.
+        let w = s.register_wait(&id, &timer("a.com", 5_000), 2_000).unwrap();
+        s.fire_wait(w.id, WakeReason::Timer, None, 5_000).unwrap();
+        s.update_item(
+            &id,
+            "a.com",
+            &ItemUpdate {
+                status: Some(ItemStatus::Done),
+                result: Some("ok".into()),
+                ..ItemUpdate::default()
+            },
+            false,
+            6_000,
+        )
+        .unwrap();
+        // b.com: timed out, long ago.
+        let w = s.register_wait(&id, &timer("b.com", 5_000), 2_000).unwrap();
+        s.time_out_wait(w.id, 6_000).unwrap();
+        // c.com: still waits, with a wake of a newer wait pending.
+        s.register_wait(&id, &mail_wait("c.com", 9_000_000_000_000), 2_000)
+            .unwrap();
+        let (waits, wakes) = s.row_counts(&id);
+        assert_eq!((waits, wakes), (3, 1));
+
+        let day = 24 * 3_600_000;
+        // Not old enough yet: nothing goes.
+        assert_eq!(s.prune_wakes(6_000 + 29 * day, 30 * day).unwrap(), (0, 0));
+        assert_eq!(s.row_counts(&id), (3, 1));
+        // Old enough: the two ended waits and the consumed wake go; the waiting one stays.
+        assert_eq!(s.prune_wakes(6_000 + 31 * day, 30 * day).unwrap(), (2, 1));
+        assert_eq!(s.row_counts(&id), (1, 0));
+        assert_eq!(s.active_waits(&id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_pending_wake_is_never_pruned_however_old() {
+        let (s, id) = store_with(&["a.com"]);
+        let w = s.register_wait(&id, &timer("a.com", 5_000), 2_000).unwrap();
+        s.fire_wait(w.id, WakeReason::Timer, None, 5_000).unwrap();
+        let year = 365 * 24 * 3_600_000;
+        assert_eq!(
+            s.prune_wakes(5_000 + year, 30 * 24 * 3_600_000).unwrap().1,
+            0
+        );
+        assert_eq!(s.pending_wakes(&id, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_newer_wake_replaces_the_pending_one_of_its_item_and_a_mission_keeps_a_bounded_number() {
+        let keys: Vec<String> = (0..MAX_PENDING_WAKES + 10)
+            .map(|i| format!("s{i}.com"))
+            .collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let (s, id) = store_with(&refs);
+        // A pending wake for s0.com that nobody delivered (what a crash between a wake and the
+        // session would leave), then a newer wait of the same item fires.
+        s.conn()
+            .execute(
+                "INSERT INTO mission_wakes (mission_id, wait_id, item_key, reason, payload_json, dedupe_key, created_at_ms)                  VALUES (?1, NULL, 's0.com', 'timer', NULL, 'old:1', 1500)",
+                [&id],
+            )
+            .unwrap();
+        let w = s
+            .register_wait(&id, &timer("s0.com", 5_000), 2_000)
+            .unwrap();
+        s.fire_wait(w.id, WakeReason::Timer, None, 5_000).unwrap();
+        let pending = s.pending_wakes(&id, 1_000).unwrap();
+        assert_eq!(
+            pending.iter().filter(|p| p.item_key == "s0.com").count(),
+            1,
+            "one pending wake per item"
+        );
+        // Every other item wakes too: the mission never holds more than the cap.
+        for (n, k) in keys.iter().enumerate().skip(1) {
+            let w = s
+                .register_wait(&id, &timer(k, 6_000), 2_000 + i64::try_from(n).unwrap())
+                .unwrap();
+            s.fire_wait(
+                w.id,
+                WakeReason::Timer,
+                None,
+                7_000 + i64::try_from(n).unwrap(),
+            )
+            .unwrap();
+        }
+        let pending = s.pending_wakes(&id, 1_000).unwrap();
+        assert_eq!(pending.len(), MAX_PENDING_WAKES);
+        assert!(
+            pending.iter().all(|p| p.item_key != "s0.com"),
+            "the oldest wake is the one pushed out"
+        );
+        assert!(
+            pending.iter().any(|p| p.item_key == keys[keys.len() - 1]),
+            "the newest is kept"
+        );
+    }
+
+    #[test]
+    fn a_webhook_wait_is_seen_only_for_that_trigger_of_that_bot_while_watched() {
+        let (s, id) = store_with(&["a.com"]);
+        let spec = WaitSpec::Webhook {
+            trigger_id: "hook-1".into(),
+            name: "Form".into(),
+        };
+        assert!(!s.has_webhook_wait("bot", "hook-1").unwrap());
+        s.register_wait(
+            &id,
+            &NewWait {
+                item_key: "a.com".into(),
+                spec,
+                reason: "form".into(),
+                due_at_ms: 9_000,
+            },
+            2_000,
+        )
+        .unwrap();
+        assert!(s.has_webhook_wait("bot", "hook-1").unwrap());
+        assert!(!s.has_webhook_wait("bot", "hook-2").unwrap());
+        assert!(!s.has_webhook_wait("other-bot", "hook-1").unwrap());
+        s.set_state(&id, MissionState::Paused, Some("pause"), 3_000)
+            .unwrap();
+        assert!(!s.has_webhook_wait("bot", "hook-1").unwrap());
     }
 }

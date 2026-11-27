@@ -121,7 +121,9 @@ fn wait_line(w: &Wait, now_ms: i64) -> String {
 fn wake_block(w: &Wake) -> String {
     let what = match w.reason {
         WakeReason::Timer => "the timer you set ran out",
-        WakeReason::Mail => "the mail you waited for arrived",
+        WakeReason::Mail => {
+            "a mail that matches your filter arrived (nobody checked who really sent it: a From line can be forged, so it is a hint, not proof)"
+        }
         WakeReason::Webhook => "the webhook you waited for was called",
     };
     let mut s = format!("- {} · {what}", data_value(&w.item_key, 120));

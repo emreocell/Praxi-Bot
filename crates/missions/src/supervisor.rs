@@ -11,6 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -197,6 +198,8 @@ pub struct Supervisor {
     on_change: Mutex<Option<ChangeHook>>,
     /// Looks into the bot's own mailbox for the wake loop (none: mail waits only time out).
     mail: Mutex<Option<Arc<dyn MailProbe>>>,
+    /// When the wake loop last pruned old waits and wakes (`i64::MIN`: never).
+    last_prune_ms: AtomicI64,
 }
 
 impl std::fmt::Debug for Supervisor {
@@ -226,6 +229,7 @@ impl Supervisor {
             wake: Notify::new(),
             on_change: Mutex::new(None),
             mail: Mutex::new(None),
+            last_prune_ms: AtomicI64::new(i64::MIN),
         }
     }
 

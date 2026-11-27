@@ -1225,7 +1225,10 @@ async fn register_wait_for_the_verification_mail_and_continue() {
         .iter()
         .find(|b| b.contains("WOKEN BY"))
         .expect("a woken brief");
-    assert!(woken.contains("the mail you waited for arrived"), "{woken}");
+    assert!(
+        woken.contains("a mail that matches your filter arrived"),
+        "{woken}"
+    );
     assert!(
         woken.contains("\"trust\":\"untrusted\"") && woken.contains("481516"),
         "{woken}"

@@ -830,3 +830,195 @@ async fn a_signed_call_wakes_the_mission_that_waits_for_it_and_starts_no_run() {
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     t.state.stop_missions().await;
 }
+
+/// A running daemon with missions, one bot and one webhook, and a mission with one item parked on
+/// that webhook. Returns the bot id, the hook id and secret, the store and the mission id.
+async fn parked_on_webhook(
+    t: &T,
+) -> (
+    String,
+    String,
+    String,
+    std::sync::Arc<missions::MissionStore>,
+    String,
+) {
+    t.state.enable_missions().unwrap();
+    t.state.start_missions();
+    let r = call(
+        t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({"profile_toml": FULL_BOT, "name": "Ada"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let bot = r.json()["id"].as_str().unwrap().to_owned();
+    let (id, secret) = create(t, &bot, "Orders").await;
+    let store = t.state.mission_store().unwrap();
+    let now = storage::now_ms();
+    let mission = store
+        .create(
+            &missions::NewMission {
+                user_id: t.state.user_id().to_string(),
+                bot_id: bot.clone(),
+                chat_id: ChatId::new().to_string(),
+                title: "Orders".into(),
+                goal_text: "handle the orders".into(),
+                target_done: None,
+                budgets: missions::Budgets::default(),
+                items: vec![missions::NewItem {
+                    key: "order-1".into(),
+                    kind: "task".into(),
+                    title: "Handle order 1".into(),
+                    payload: None,
+                }],
+            },
+            now,
+        )
+        .unwrap();
+    store
+        .register_wait(
+            &mission.id,
+            &missions::NewWait {
+                item_key: "order-1".into(),
+                spec: missions::WaitSpec::Webhook {
+                    trigger_id: id.clone(),
+                    name: "Orders".into(),
+                },
+                reason: "the shop confirms the order".into(),
+                due_at_ms: now + 60 * 60_000,
+            },
+            now,
+        )
+        .unwrap();
+    (bot, id, secret, store, mission.id)
+}
+
+async fn signed(t: &T, id: &str, secret: &str, body: &str) -> Resp {
+    let ts = storage::now_ms();
+    hook(
+        t,
+        id,
+        body,
+        &[
+            ("x-webhook-timestamp", &ts.to_string()),
+            ("x-signature-256", &sign(secret, ts, body)),
+        ],
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_webhook_turned_off_after_the_mission_parked_wakes_nothing() {
+    let t = setup_hooks();
+    let (bot, id, secret, store, mission) = parked_on_webhook(&t).await;
+    // The call is looked up while the hook is on...
+    let stale = t
+        .state
+        .storage()
+        .get_incoming_webhook(t.state.user_id(), id.parse().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(stale.enabled);
+    // ...and the owner turns it off before the wake is handed over: nothing wakes.
+    let off = call(
+        &t,
+        Method::PATCH,
+        &format!("/v1/bots/{bot}/incoming-webhooks/{id}"),
+        Some(json!({"enabled": false})),
+    )
+    .await;
+    assert_eq!(off.status, StatusCode::OK);
+    let err = crate::incoming_webhook::wake_missions(&t.state, &stale, "late").unwrap_err();
+    assert_eq!(
+        axum::response::IntoResponse::into_response(err).status(),
+        StatusCode::CONFLICT
+    );
+    // A fresh signed call is refused at the door too.
+    let r = signed(&t, &id, &secret, "after-off").await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.body_text());
+    assert!(runs(&t).is_empty(), "no run started");
+    assert_eq!(store.progress(&mission).unwrap().waiting, 1);
+    assert_eq!(store.pending_wakes(&mission, 5).unwrap().len(), 0);
+    t.state.stop_missions().await;
+}
+
+#[tokio::test]
+async fn a_standby_installation_neither_wakes_nor_runs_and_the_sender_can_retry() {
+    let t = setup_hooks();
+    let (_bot, id, secret, store, mission) = parked_on_webhook(&t).await;
+    t.state.leader().standby().await.unwrap();
+    // More failing calls than the per-minute limit: each is refused with 409 and frees its
+    // rate slot (a refused call is not a taken call), none starts a run, the wait stays.
+    for n in 0..5 {
+        let r = signed(&t, &id, &secret, &format!("standby-{n}")).await;
+        assert_eq!(r.status, StatusCode::CONFLICT, "{n}: {}", r.body_text());
+    }
+    assert!(runs(&t).is_empty(), "a standby installation starts no run");
+    assert_eq!(store.progress(&mission).unwrap().waiting, 1);
+    assert_eq!(store.pending_wakes(&mission, 5).unwrap().len(), 0);
+
+    // The same signed call, replayed to the leader later, is not a replay: its signature was
+    // freed, and the waiting mission takes it.
+    let ts = storage::now_ms();
+    let body = "same-call";
+    let (ts_text, sig) = (ts.to_string(), sign(&secret, ts, body));
+    let send = || async {
+        hook(
+            &t,
+            &id,
+            body,
+            &[("x-webhook-timestamp", &ts_text), ("x-signature-256", &sig)],
+        )
+        .await
+    };
+    assert_eq!(send().await.status, StatusCode::CONFLICT);
+    t.state.leader().activate(false).await.unwrap();
+    let r = send().await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.body_text());
+    assert_eq!(r.json()["status"], "mission_woken");
+    assert_eq!(runs(&t).len(), 0, "no run started");
+    assert_eq!(store.pending_wakes(&mission, 5).unwrap().len(), 1);
+    // Now it is taken: replaying it is refused.
+    assert_eq!(send().await.status, StatusCode::UNAUTHORIZED);
+    t.state.stop_missions().await;
+}
+
+#[tokio::test]
+async fn a_call_that_wakes_a_mission_counts_against_the_rate_limit_like_a_run() {
+    let t = setup_hooks();
+    let (_bot, id, secret, store, mission) = parked_on_webhook(&t).await;
+    // The limit is 3 a minute in tests: the first call wakes the mission, the next two start
+    // runs (nothing waits any more), the fourth is over the limit whichever path the others took.
+    let first = signed(&t, &id, &secret, "one").await;
+    assert_eq!(first.json()["status"], "mission_woken");
+    assert_eq!(store.progress(&mission).unwrap().todo, 1);
+    for body in ["two", "three"] {
+        let r = signed(&t, &id, &secret, body).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.body_text());
+        assert_eq!(r.json()["status"], "accepted");
+    }
+    let r = signed(&t, &id, &secret, "four").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{}", r.body_text());
+    t.state.stop_missions().await;
+}
+
+#[tokio::test]
+async fn the_body_a_waiting_mission_receives_is_bounded_at_the_door_and_clipped() {
+    let t = setup_hooks();
+    let (_bot, id, secret, store, mission) = parked_on_webhook(&t).await;
+    // Over 64 KB: refused before anything looks at it; the mission is not touched.
+    let big = "a".repeat(64 * 1024 + 1);
+    let r = signed(&t, &id, &secret, &big).await;
+    assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(store.progress(&mission).unwrap().waiting, 1);
+    // Just under it: accepted, and the wake keeps only a short copy.
+    let wide = "b".repeat(60_000);
+    let r = signed(&t, &id, &secret, &wide).await;
+    assert_eq!(r.json()["status"], "mission_woken", "{}", r.body_text());
+    let wake = &store.pending_wakes(&mission, 5).unwrap()[0];
+    let kept = wake.payload.as_ref().unwrap()["body"].as_str().unwrap();
+    assert!(kept.chars().count() <= missions::model::MAX_WAKE_PAYLOAD_CHARS);
+    assert!(kept.starts_with("bbbb"));
+    t.state.stop_missions().await;
+}

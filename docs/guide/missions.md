@@ -76,10 +76,19 @@ one; when nothing else is open, the session ends and the mission shows
 * **A mail in the bot's own inbox** (a sender domain, a word in the subject or a
   keyword). The daemon looks into the inbox and junk folder of the bot's **own**
   mail identity about once a minute; the owner's mailbox is never read for this.
-  The bot gives a timeout (60 minutes by default, 3 days at most).
+  The bot gives a timeout (60 minutes by default, 3 days at most). A mail that
+  arrives is a **hint, not proof of who sent it**: anyone can forge a From line and
+  the mailbox does not say whether the sender passed SPF or DKIM, so the wake
+  says "not verified". Next to a sender domain the bot should give a keyword or
+  subject word it expects (a token from the sign-up); the keyword is checked on
+  the mail itself.
 * **A webhook you created** for that bot (Settings, incoming webhooks). The bot
   names its id. A signed call that a mission waits for wakes the mission and does
-  **not** start a separate run.
+  **not** start a separate run. The webhook is checked again when the call comes
+  in: one you turned off since, or that belongs to another bot, wakes nothing. A
+  computer in standby answers "standby" and never starts a run for it; the sender
+  retries at the active one. Bodies over 64 KB are refused before anything reads
+  them, and the mission keeps a 4,096-character copy.
 
 The Activity tab lists each parked item: *waiting for a mail from example.com*,
 *waiting until 14:00*. If nothing happens in time, the item is **parked for you**
@@ -87,7 +96,9 @@ The Activity tab lists each parked item: *waiting for a mail from example.com*,
 fails the mission. Waits are stored in the daemon's database, so a restart keeps
 them (a wait that ran out while the daemon was off times out at the next start).
 Only the leader of a host runs the wake loop. A mission is woken at most six times
-an hour: a flood of calls stays recorded and is delivered in the next window.
+an hour: a flood of calls stays recorded and is delivered in the next window. A
+mission keeps at most one undelivered wake per item (a newer one replaces it) and
+50 in all; finished waits and delivered wakes are deleted after 30 days.
 
 **What a wake brings is untrusted data.** A mail summary or a webhook body is
 capped, cleaned and shown to the next session only inside a fenced data block,

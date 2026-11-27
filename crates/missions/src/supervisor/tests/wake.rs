@@ -8,7 +8,8 @@ use crate::model::Item;
 
 use super::*;
 use crate::wake::{
-    MailCheck, MailFilter, MailHit, MailProbe, NewWait, WAKE_RELEASES_PER_HOUR, WaitSpec,
+    MailCheck, MailFilter, MailHit, MailProbe, NewWait, WAKE_RELEASES_PER_HOUR, WAKE_RETENTION_MS,
+    WaitSpec,
 };
 
 const MIN: i64 = 60_000;
@@ -243,7 +244,7 @@ async fn register_wait_for_the_verification_mail_and_continue() {
     );
     let brief = w.runner.briefs.lock()[1].clone();
     assert!(
-        brief.contains("WOKEN BY") && brief.contains("the mail you waited for arrived"),
+        brief.contains("WOKEN BY") && brief.contains("a mail that matches your filter arrived"),
         "{brief}"
     );
     assert!(
@@ -254,6 +255,11 @@ async fn register_wait_for_the_verification_mail_and_continue() {
         brief.contains("NOT checked against a page") && brief.contains("https://site-0.example")
     );
     assert!(brief.contains("you parked it because: \"verification mail\""));
+    // Arrival is not authenticity: the wake says so, in words and as a field.
+    assert!(
+        brief.contains("a From line can be forged") && brief.contains("sender_verified"),
+        "{brief}"
+    );
     assert_eq!(
         brief
             .lines()
@@ -612,6 +618,23 @@ async fn a_wake_storm_is_rate_limited_and_nothing_is_lost() {
     w.advance(61 * MIN);
     assert_eq!(w.sup.wake_pass().await.unwrap().released, 1);
     assert_eq!(w.state(), MissionState::Running);
+
+    // Every timer of the storm left an ended wait behind. They are kept for a while (the
+    // timeline reads them) and deleted once they are old, whatever else is going on.
+    let (waits, wakes) = w.store.row_counts(&w.mission);
+    assert!(
+        waits > i64::from(WAKE_RELEASES_PER_HOUR),
+        "{waits} waits kept"
+    );
+    assert!(wakes >= 1);
+    w.advance(WAKE_RETENTION_MS / 2);
+    w.sup.wake_pass().await.unwrap();
+    assert_eq!(w.store.row_counts(&w.mission).0, waits, "not old enough");
+    w.advance(WAKE_RETENTION_MS);
+    w.sup.wake_pass().await.unwrap();
+    let (waits, wakes) = w.store.row_counts(&w.mission);
+    assert_eq!(waits, 0, "ended waits are pruned");
+    assert_eq!(wakes, 1, "the pending wake of the todo item is not");
 }
 
 #[tokio::test]
