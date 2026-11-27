@@ -518,7 +518,7 @@ impl Server {
         arguments: Option<JsonObject>,
         handler: Option<ElicitationHandler>,
     ) -> std::result::Result<ToolOutput, ToolError> {
-        let call = Arc::new(Call::new(handler));
+        let call = Arc::new(Call::new(self.id(), handler));
         let result = self.call(remote_name, arguments, &call).await;
         // An untrusted server can echo the answer in any content part, tool
         // error or spill. The model receives only the host's decision summary.
@@ -561,9 +561,13 @@ impl Server {
     {
         self.until_retired(self.request_inner(
             |session| async move {
-                // A concurrent resource or prompt request makes a legacy
-                // server-initiated form ambiguous too.
-                let _lease = session.client.calls.enter(Arc::new(Call::new(None)));
+                // A concurrent resource or prompt request makes a server-initiated
+                // form ambiguous too.
+                let server = session.client.server.clone();
+                let _lease = session
+                    .client
+                    .calls
+                    .enter(Arc::new(Call::new(&server, None)));
                 run(session.peer().clone()).await
             },
             None,
@@ -964,7 +968,7 @@ impl McpServerHandle {
         arguments: Option<serde_json::Map<String, serde_json::Value>>,
         max_bytes: usize,
     ) -> Result<String> {
-        let call = Arc::new(Call::new(None));
+        let call = Arc::new(Call::new(self.0.id(), None));
         let result = self.0.call(tool, arguments, &call).await?;
         let output = crate::tool::into_output(result).map_err(|e| McpError::Transport {
             server: self.0.id().to_owned(),

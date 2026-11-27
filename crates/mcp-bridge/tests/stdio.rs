@@ -1256,11 +1256,14 @@ async fn elicitation_answers_only_the_server_and_suppresses_its_echo() {
                 };
                 let result = tool.call(&ctx, json!({"expect": action})).await.unwrap();
                 let text = text_of(&result.content);
-                assert!(text.contains(match action {
-                    "accept" => "answered",
-                    "decline" => "declined",
-                    _ => "cancelled",
-                }));
+                assert!(
+                    text.contains(match action {
+                        "accept" => "answered",
+                        "decline" => "declined",
+                        _ => "cancelled",
+                    }),
+                    "{mode} {action}: {text}"
+                );
                 assert!(
                     !serde_json::to_string(&result)
                         .unwrap()
@@ -1285,4 +1288,41 @@ async fn elicitation_answers_only_the_server_and_suppresses_its_echo() {
                 .contains("elicitation-canary-9413")
         );
     }
+}
+
+/// A server-initiated form names no tool call. With two calls running on the
+/// server's session it could belong to either, so it is declined and the owner
+/// is never asked.
+#[tokio::test]
+async fn a_form_during_two_overlapping_calls_is_declined_without_asking() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tool_registry::elicitation::{Decision, ElicitationHandler};
+
+    let reg = ToolRegistry::new();
+    let manager = McpManager::with_policy(reg.clone(), fast_policy(3));
+    let mut cfg = config("forms");
+    if let McpTransport::Stdio { env, .. } = &mut cfg.transport {
+        env.insert("MCP_TEST_MODE".into(), "elicitation-legacy".into());
+    }
+    manager.add_server(cfg).await.unwrap();
+    let tool = reg.get("mcp:forms/elicit").unwrap();
+    let asked = std::sync::Arc::new(AtomicUsize::new(0));
+    let ctx = |asked: &std::sync::Arc<AtomicUsize>| {
+        let counter = std::sync::Arc::clone(asked);
+        ToolContext {
+            elicitation: Some(ElicitationHandler::new(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async { Decision::Cancel }
+            })),
+            ..ToolContext::default()
+        }
+    };
+    let (first, second) = (ctx(&asked), ctx(&asked));
+    let args = json!({"expect": "decline"});
+    let (a, b) = tokio::join!(tool.call(&first, args.clone()), tool.call(&second, args));
+    for result in [a, b] {
+        assert!(text_of(&result.unwrap().content).contains("decline"));
+    }
+    assert_eq!(asked.load(Ordering::SeqCst), 0);
+    manager.remove_server("forms").await.unwrap();
 }

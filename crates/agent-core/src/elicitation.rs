@@ -1,7 +1,13 @@
 //! One-shot owner decisions for MCP forms. Submitted content only travels on
 //! the private verdict channel, then back to the server.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use protocol::{
     Event, InitiatorKind, RunId, ToolCallId,
@@ -33,17 +39,22 @@ pub enum ElicitationAnswerError {
 }
 
 impl Shared {
+    /// The owner-input callback of one MCP tool call. It is bound to the run and
+    /// to the server named by the tool (`mcp:<server>/<tool>`, ids never contain
+    /// `/`), and shows one form: a form that names another server, or a second
+    /// form, is declined without a card.
     pub(crate) fn elicitation_handler(
         self: &Arc<Self>,
         run_id: RunId,
         tool_name: &str,
     ) -> Option<ElicitationHandler> {
-        if !tool_name.starts_with("mcp:") {
-            return None;
-        }
+        let (server, _) = tool_name.strip_prefix("mcp:")?.split_once('/')?;
+        let server = server.to_owned();
+        let asked = Arc::new(AtomicBool::new(false));
         let sh = Arc::downgrade(self);
         Some(ElicitationHandler::new(move |form| {
             let sh = sh.upgrade();
+            let (server, asked) = (server.clone(), Arc::clone(&asked));
             async move {
                 let Some(sh) = sh else {
                     return Decision::Cancel;
@@ -52,6 +63,15 @@ impl Shared {
                 let Some(ctx) = ctx else {
                     return Decision::Cancel;
                 };
+                if form.server != server || asked.swap(true, Ordering::AcqRel) {
+                    sh.audit(
+                        &ctx,
+                        "system",
+                        "elicitation.refused",
+                        &json!({"server": server}),
+                    );
+                    return Decision::Decline;
+                }
                 sh.elicit(&ctx, form).await
             }
         }))

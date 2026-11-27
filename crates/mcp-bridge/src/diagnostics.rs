@@ -4,8 +4,9 @@ use std::{
     collections::VecDeque,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use parking_lot::Mutex;
@@ -33,7 +34,32 @@ pub type ExternalRedactor = Arc<dyn Fn(&str) -> String + Send + Sync>;
 pub(crate) struct Redactor {
     local: Arc<Local>,
     external: Option<ExternalRedactor>,
-    muted: Arc<AtomicBool>,
+    /// Open owner forms (plus their grace period) on this connection.
+    muted: Arc<AtomicUsize>,
+}
+
+/// How long diagnostics stay withheld after the call that asked the owner: the
+/// server's stderr reader can lag behind the tool result by a few lines.
+const LATE_ECHO_GRACE: Duration = Duration::from_secs(2);
+
+/// One open [`Redactor::mute`].
+pub(crate) struct Mute(Arc<AtomicUsize>);
+
+impl Drop for Mute {
+    fn drop(&mut self) {
+        let muted = Arc::clone(&self.0);
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => {
+                runtime.spawn(async move {
+                    tokio::time::sleep(LATE_ECHO_GRACE).await;
+                    muted.fetch_sub(1, Ordering::AcqRel);
+                });
+            }
+            Err(_) => {
+                muted.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -99,17 +125,21 @@ impl Redactor {
         }
     }
 
-    pub(crate) fn mute(&self) {
-        self.muted.store(true, Ordering::Release);
+    /// Withhold this connection's diagnostics until the returned guard is
+    /// dropped (and a short grace period passed). Scoped to one tool call:
+    /// other connections and later calls log normally again.
+    pub(crate) fn mute(&self) -> Mute {
+        self.muted.fetch_add(1, Ordering::AcqRel);
+        Mute(Arc::clone(&self.muted))
     }
 
     pub(crate) fn muted(&self) -> bool {
-        self.muted.load(Ordering::Acquire)
+        self.muted.load(Ordering::Acquire) > 0
     }
 
     fn redact(&self, text: &str) -> String {
         if self.muted() {
-            return "[MCP diagnostic withheld after owner input]".into();
+            return "[MCP diagnostic withheld while the owner answers a form]".into();
         }
         let masked = self.local.inner.redact(text);
         match &self.external {
@@ -312,6 +342,31 @@ mod tests {
 
     fn plain<'a>(values: impl IntoIterator<Item = &'a str>) -> Redactor {
         Redactor::new(values, None)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_mute_covers_one_call_and_its_late_echo_then_ends() {
+        let redactor = plain([]);
+        let other = plain([]);
+        assert_eq!(redactor.scrub("plain line"), "plain line");
+        let first = redactor.mute();
+        let second = redactor.mute();
+        assert!(redactor.muted());
+        assert!(!other.muted(), "another connection is not affected");
+        assert!(!redactor.scrub("echoed answer").contains("echoed"));
+        // The releasing task sleeps on the paused clock; sleeping past its
+        // deadline lets it run before the next check.
+        drop(first);
+        tokio::time::sleep(LATE_ECHO_GRACE + Duration::from_millis(1)).await;
+        assert!(redactor.muted(), "an overlapping call still holds its mute");
+        drop(second);
+        assert!(
+            redactor.muted(),
+            "late stderr lines stay withheld for a moment"
+        );
+        tokio::time::sleep(LATE_ECHO_GRACE + Duration::from_millis(1)).await;
+        assert!(!redactor.muted());
+        assert_eq!(redactor.scrub("plain line"), "plain line");
     }
 
     /// A rendered header value (`Bearer <token>`) must mask the bare token too:

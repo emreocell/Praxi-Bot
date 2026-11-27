@@ -277,9 +277,11 @@ impl Tool for McpToolAdapter {
                 )));
             }
         };
-        self.server
-            .call_for_bot(&self.remote_name, arguments, ctx.elicitation.clone())
-            .await
+        Box::pin(
+            self.server
+                .call_for_bot(&self.remote_name, arguments, ctx.elicitation.clone()),
+        )
+        .await
     }
 }
 

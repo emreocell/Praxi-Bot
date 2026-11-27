@@ -1,4 +1,4 @@
-//! MCP form limits, schema projection, and per-connection tool attribution.
+//! MCP form limits, schema projection, and the binding of a form to one server's tool call.
 
 use std::{
     collections::VecDeque,
@@ -18,6 +18,8 @@ use rmcp::model::{ElicitRequestParams, ElicitationSchema};
 use serde_json::Value;
 use tokio::{sync::watch, time::Instant};
 use tool_registry::elicitation::{Decision, ElicitationHandler, Form};
+
+use crate::diagnostics::{Mute, Redactor};
 
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 const MAX_REQUESTS_PER_WINDOW: usize = 4;
@@ -48,12 +50,17 @@ impl Rate {
     }
 }
 
+/// One tool call of one server. A form is only asked for a call that was bound
+/// to the server whose session received the request, and only once.
 pub(crate) struct Call {
+    /// The server id from the owner's config. A form never names its own server.
+    pub(crate) server: String,
     pub(crate) handler: Option<ElicitationHandler>,
     pub(crate) requested: AtomicBool,
     ambiguous: AtomicBool,
     asking: watch::Sender<bool>,
     pub(crate) done: watch::Sender<bool>,
+    mute: Mutex<Option<Mute>>,
     pub(crate) outcome: Mutex<Option<Outcome>>,
 }
 
@@ -76,15 +83,33 @@ impl Outcome {
 }
 
 impl Call {
-    pub(crate) fn new(handler: Option<ElicitationHandler>) -> Self {
+    pub(crate) fn new(server: &str, handler: Option<ElicitationHandler>) -> Self {
         Self {
+            server: server.to_owned(),
             handler,
             requested: AtomicBool::new(false),
             ambiguous: AtomicBool::new(false),
             asking: watch::Sender::new(false),
             done: watch::Sender::new(false),
+            mute: Mutex::new(None),
             outcome: Mutex::new(None),
         }
+    }
+
+    /// The one form this call may show for `requestor`, the server whose
+    /// session received the request. `None` when the call has no owner handler,
+    /// belongs to another server, or already showed a form.
+    pub(crate) fn claim(&self, requestor: &str) -> Option<&ElicitationHandler> {
+        let handler = self.handler.as_ref()?;
+        (self.server == requestor && !self.requested.swap(true, Ordering::AcqRel))
+            .then_some(handler)
+    }
+
+    /// Silence the session's transport diagnostics from now until shortly after
+    /// this call ends, so that neither the card text nor the answer can reach
+    /// a log line.
+    pub(crate) fn mute(&self, redactor: &Redactor) {
+        self.mute.lock().get_or_insert_with(|| redactor.mute());
     }
 
     pub(crate) async fn ask(&self, handler: &ElicitationHandler, form: Form) -> Decision {
@@ -134,6 +159,8 @@ impl Drop for Waiting<'_> {
     }
 }
 
+/// The calls running on one server's session. A request that names no call
+/// (an `elicitation/create` of the 2025 revisions) is tied to the only one.
 #[derive(Default)]
 pub(crate) struct InFlight(Mutex<Vec<Arc<Call>>>);
 
@@ -151,19 +178,15 @@ impl InFlight {
         Lease { calls: self, call }
     }
 
-    pub(crate) fn take(&self, expected: Option<&Arc<Call>>) -> Option<Arc<Call>> {
+    /// The call a request without a call reference belongs to. `None` when none
+    /// runs, several run, or several ran at once while this one did: then a form
+    /// could belong to either, and the answer is a decline.
+    pub(crate) fn sole(&self) -> Option<Arc<Call>> {
         let calls = self.0.lock();
         let [only] = calls.as_slice() else {
             return None;
         };
-        if only.handler.is_none()
-            || only.ambiguous.load(Ordering::Acquire)
-            || expected.is_some_and(|call| !Arc::ptr_eq(call, only))
-            || only.requested.swap(true, Ordering::AcqRel)
-        {
-            return None;
-        }
-        Some(Arc::clone(only))
+        (!only.ambiguous.load(Ordering::Acquire)).then(|| Arc::clone(only))
     }
 }
 
@@ -400,31 +423,58 @@ fn options(field: &Value) -> Option<Vec<ElicitationOption>> {
 mod tests {
     use super::*;
 
+    fn handler() -> ElicitationHandler {
+        ElicitationHandler::new(|_| async { Decision::Decline })
+    }
+
+    fn call(server: &str) -> Arc<Call> {
+        Arc::new(Call::new(server, Some(handler())))
+    }
+
     #[test]
-    fn unsolicited_and_overlapping_calls_cannot_take_a_form() {
+    fn a_form_belongs_to_one_server_and_one_call() {
+        let silent = Call::new("calendar", None);
+        assert!(silent.claim("calendar").is_none(), "no owner handler");
+
+        let call = Call::new("calendar", Some(handler()));
+        assert!(
+            call.claim("mallory").is_none(),
+            "another server's session cannot use this call"
+        );
+        assert!(!call.requested.load(Ordering::Acquire));
+        assert!(call.claim("calendar").is_some());
+        assert!(call.claim("calendar").is_none(), "one form per tool call");
+    }
+
+    #[test]
+    fn a_request_without_a_call_reference_needs_exactly_one_unambiguous_call() {
         let calls = InFlight::default();
-        let call = || {
-            Arc::new(Call::new(Some(ElicitationHandler::new(|_| async {
-                Decision::Decline
-            }))))
-        };
-        assert!(calls.take(None).is_none());
-        let a = call();
-        let first = calls.enter(Arc::clone(&a));
-        let b = call();
-        let second = calls.enter(b);
-        assert!(calls.take(None).is_none());
+        assert!(calls.sole().is_none(), "nothing runs: unsolicited");
+        let first = calls.enter(call("calendar"));
+        assert!(calls.sole().is_some());
+        let second = calls.enter(call("calendar"));
+        assert!(calls.sole().is_none(), "two calls: ambiguous");
         drop(second);
         assert!(
-            calls.take(None).is_none(),
+            calls.sole().is_none(),
             "a late request may belong to either call"
         );
         drop(first);
-        let c = call();
-        let _fresh = calls.enter(Arc::clone(&c));
-        assert!(calls.take(Some(&a)).is_none());
-        assert!(calls.take(Some(&c)).is_some());
-        assert!(calls.take(None).is_none(), "one form per tool call");
+        let _fresh = calls.enter(call("calendar"));
+        assert!(
+            calls.sole().is_some(),
+            "a call that ran alone is clear again"
+        );
+    }
+
+    #[test]
+    fn a_sole_call_still_refuses_a_session_of_another_server() {
+        let calls = InFlight::default();
+        let _lease = calls.enter(call("calendar"));
+        let only = calls.sole().unwrap();
+        assert!(only.claim("mallory").is_none());
+        assert!(only.claim("calendar").is_some());
+        assert!(calls.sole().unwrap().claim("calendar").is_none());
     }
 
     #[tokio::test(start_paused = true)]
