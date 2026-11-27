@@ -11,7 +11,7 @@ use secret_store::{MemoryStore, SecretStore};
 use serde_json::json;
 use tower::ServiceExt;
 
-use super::{call, send, setup};
+use super::{call, call_token_only, send, setup};
 use crate::composio::{
     ComposioActionDto, ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
     ComposioConnectDto, ComposioControl, ComposioControlError, ComposioDisconnectDto,
@@ -278,6 +278,26 @@ async fn every_route_needs_the_token_and_works_for_the_local_owner() {
     for (m, p, body) in routes() {
         let r = call(&t, m.clone(), p, body).await;
         assert!(r.status.is_success(), "{m} {p} -> {}", r.status);
+    }
+}
+
+#[tokio::test]
+async fn identities_action_previews_and_login_poll_require_owner_proof_even_for_head() {
+    let t = setup();
+    t.state.set_composio(Arc::new(Fake::default()));
+    for path in [
+        "/v1/composio",
+        "/v1/composio/apps",
+        "/v1/composio/apps/github",
+        "/v1/composio/toolkits/github/actions",
+        "/v1/composio/login",
+    ] {
+        for method in [Method::GET, Method::HEAD] {
+            let denied = call_token_only(&t, method.clone(), path, None).await;
+            assert_eq!(denied.status, StatusCode::FORBIDDEN, "{method} {path}");
+            let allowed = call(&t, method.clone(), path, None).await;
+            assert_eq!(allowed.status, StatusCode::OK, "{method} {path}");
+        }
     }
 }
 

@@ -2,8 +2,9 @@
 //! [`ComposioControl`] trait the embedder implements (see
 //! `apps/cli/src/composio_host.rs`).  The daemon holds no Composio state.
 //!
-//! Every route is owner-only: the local bearer token, or a paired Desktop
-//! peer.  Phone, node and host peers are refused for every method.
+//! Catalog and logo reads require authentication. Account identities, action
+//! previews and credential installation also require owner proof. Phone,
+//! node and host peers are refused for every method.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
