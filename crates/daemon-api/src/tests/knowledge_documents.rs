@@ -16,6 +16,26 @@ async fn get_file(t: &T, bot: &str, source: &str, locator: &str) -> Resp {
     .await
 }
 
+/// The file route sends a file as an attachment with the hardening headers, never inline.
+fn assert_attachment(response: &Resp, name: &str) {
+    for (header, value) in [
+        ("content-type", "application/octet-stream"),
+        ("x-frame-options", "DENY"),
+        ("content-security-policy", "sandbox"),
+        ("cache-control", "no-store"),
+    ] {
+        assert_eq!(response.headers.get(header).unwrap(), value, "{header}");
+    }
+    let disposition = response.headers.get("content-disposition").unwrap();
+    assert!(
+        disposition
+            .to_str()
+            .unwrap()
+            .starts_with(&format!("attachment; filename=\"{name}\"")),
+        "{disposition:?}"
+    );
+}
+
 fn folder_with_files() -> tempfile::TempDir {
     let folder = tempfile::tempdir().unwrap();
     std::fs::create_dir(folder.path().join("housing")).unwrap();
@@ -200,6 +220,79 @@ async fn adding_a_folder_skips_secrets_visibly_and_refuses_a_private_key_file() 
     }
 }
 
+/// A folder the picker greys out is not enumerated either: no sub-folder names of
+/// credential, browser-profile or daemon-state folders.
+#[tokio::test]
+async fn folder_browser_does_not_list_inside_protected_folders() {
+    let _serial = crate::knowledge_runtime::test_guard().await;
+    let t = setup();
+    let root = tempfile::tempdir().unwrap();
+    let data = t.state.data_dir();
+    std::fs::create_dir_all(data.join("sub-state")).unwrap();
+    for name in [
+        ".ssh/keys-backup",
+        "vault/inner",
+        "Documents/Taxes",
+        ".aws/profiles",
+    ] {
+        std::fs::create_dir_all(root.path().join(name)).unwrap();
+    }
+    let browse = |path: std::path::PathBuf| {
+        let query: String = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("path", &path.display().to_string())
+            .finish();
+        let t = &t;
+        async move {
+            request(
+                t,
+                Method::GET,
+                &format!("/v1/knowledge/folders?{query}"),
+                None,
+            )
+            .await
+        }
+    };
+    // The ordinary folder lists, and shows `vault` as not selectable.
+    let listing = browse(root.path().to_path_buf()).await;
+    assert_eq!(listing.status, StatusCode::OK);
+    let entries = listing.json()["entries"].clone();
+    let vault = entries
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == "vault")
+        .expect("vault is listed");
+    assert_eq!(vault["selectable"], false);
+    assert_eq!(
+        browse(root.path().join("Documents")).await.status,
+        StatusCode::OK
+    );
+    // But nothing inside a protected folder is enumerated, however deep, and the
+    // refusal is the same as for a folder that cannot be opened.
+    let missing = browse(root.path().join("nowhere")).await;
+    for blocked in [
+        root.path().join(".ssh"),
+        root.path().join(".ssh/keys-backup"),
+        root.path().join(".aws"),
+        root.path().join("vault"),
+        root.path().join("vault/inner"),
+        data.clone(),
+        data.join("sub-state"),
+    ] {
+        let response = browse(blocked.clone()).await;
+        assert_eq!(response.status, StatusCode::BAD_REQUEST, "{blocked:?}");
+        assert_eq!(response.json(), missing.json(), "{blocked:?}");
+        assert!(response.json().get("entries").is_none(), "{blocked:?}");
+    }
+    // A link to a protected folder is judged by where it leads.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.path().join(".ssh"), root.path().join("innocent")).unwrap();
+        let through_link = browse(root.path().join("innocent")).await;
+        assert_eq!(through_link.status, StatusCode::BAD_REQUEST);
+    }
+}
+
 #[tokio::test]
 async fn documents_search_cites_the_file_and_the_open_route_serves_only_indexed_files() {
     let _serial = crate::knowledge_runtime::test_guard().await;
@@ -262,15 +355,9 @@ async fn documents_search_cites_the_file_and_the_open_route_serves_only_indexed_
         opened.headers.get("x-content-type-options").unwrap(),
         "nosniff"
     );
-    for refused in [
-        ".env",
-        "passwords.txt",
-        "photo.png",
-        "../outside.txt",
-        "housing/../.env",
-        "/etc/passwd",
-        "missing.md",
-    ] {
+    assert_attachment(&opened, "lease.md");
+    // Not indexed (secret names, unsupported types, missing files): not found.
+    for refused in [".env", "passwords.txt", "photo.png", "missing.md"] {
         let r = get_file(&t, &bot, &source, refused).await;
         assert_eq!(r.status, StatusCode::NOT_FOUND, "{refused}");
     }
@@ -306,6 +393,55 @@ async fn documents_search_cites_the_file_and_the_open_route_serves_only_indexed_
         StatusCode::NOT_FOUND
     );
     assert!(!tool.visible_to(Some(&bot)));
+}
+
+/// The locator of the file route is a plain relative path and an exact indexed
+/// name; anything else is refused before the index or the disk is consulted.
+#[tokio::test]
+async fn the_file_route_refuses_malformed_and_inexact_locators() {
+    let _serial = crate::knowledge_runtime::test_guard().await;
+    let t = setup();
+    let (bot, _) = make_chat(&t).await;
+    let folder = folder_with_files();
+    let added = add(
+        &t,
+        &bot,
+        json!({"kind":"folder","label":"Home papers","path":folder.path()}),
+    )
+    .await;
+    let source = added["source"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        get_file(&t, &bot, &source, "housing/lease.md").await.status,
+        StatusCode::OK
+    );
+    // Not a plain relative path, or not the exact indexed name: refused before
+    // anything is looked up.
+    for malformed in [
+        "../outside.txt",
+        "housing/../.env",
+        "housing/./lease.md",
+        "/etc/passwd",
+        "//server/share/lease.md",
+        "housing//lease.md",
+        "C:/Windows/win.ini",
+        "C:lease.md",
+        "\\\\?\\C:\\lease.md",
+        "housing\\lease.md",
+        "housing/lease.md.",
+        "housing/lease.md ",
+        "housing/lease.md\u{0}",
+        "housing/lease\n.md",
+        "",
+    ] {
+        let r = get_file(&t, &bot, &source, malformed).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{malformed:?}");
+    }
+    let wrong_case = get_file(&t, &bot, &source, "HOUSING/Lease.md").await;
+    assert_eq!(
+        wrong_case.status,
+        StatusCode::NOT_FOUND,
+        "letter case is exact"
+    );
 }
 
 #[tokio::test]

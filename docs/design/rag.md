@@ -497,14 +497,19 @@ runs on (this computer, or the server for a bot that lives there; the daemon is
 the same code either way). `GET /v1/knowledge/folders` lists sub-folder *names
 only*: no file is listed or read, dot-folders and symlinks are not shown, and
 credential/browser-profile folders and the daemon's data directory (or a folder
-around it) are listed as not selectable. `POST /v1/bots/{bot}/knowledge/folder-preview`
+around it) are listed as not selectable, and the daemon does not list *inside* a
+credential, browser-profile or daemon-state folder at all (the request is refused
+with the same `400` as a folder that cannot be opened). `POST /v1/bots/{bot}/knowledge/folder-preview`
 then walks the chosen folder through the same `SelectedSource` the indexer uses
 and returns, before anything is read or stored: the files that would be indexed
 (first 200 named, totals for all), their size and kind, a deliberately rough time
 estimate, and what is left out. Only then does the owner confirm, which is the
 existing `create_source` call. Both routes and the file route below are
 owner-only (`OWNER_ROUTES`); a bearer token alone, a bot or a paired peer
-without the owner key cannot reach them.
+without the owner key cannot reach them. The peer guard also refuses all three
+(`host_local_denial`) for every method and every paired role, `Host` included,
+so a paired device never browses, previews or reads the host's files; the host's
+administrator desktop is the one documented exception, as for every owner setting.
 
 **What is read.** PDF, DOCX, XLSX, CSV/TSV, HTML, Markdown, plain text and code,
 at most 4 MiB per file and 1 MiB of extracted text. A spreadsheet becomes one
@@ -520,10 +525,21 @@ any name with a whole word such as *password*, *secret*, *credentials*, *api key
 is read). Credential directories are skipped the same way. These, files over the
 size limit and (by count) hidden, linked and unsupported entries are reported in
 the preview and in every indexing page (`indexing.skipped`). Content is checked as
-well: line-by-line redaction only recognizes the *header* line of a private key,
-so a file that contains a `-----BEGIN ... PRIVATE KEY-----` block is refused whole
-(failure code `secret_content`). This is a heuristic on top of the owner's choice
-of folder, not a guarantee that no secret is indexed.
+well, in layers: (1) the file *name* and folder, above; (2) *key material* is
+refused whole, because line-by-line redaction only sees a key's header line and
+would index its body: a PEM, OpenSSH or PGP `PRIVATE KEY` header anywhere in a
+line, a PuTTY `.ppk` header, an age secret key, an `openssh-key-v1` blob, and a
+run of four or more base64 lines that starts like a DER sequence (`MII...`, a
+PKCS#1/PKCS#8 body whose header was cut off; this also refuses certificates, the
+cheaper mistake); (3) a file with 20 or more credential-shaped values (provider
+tokens, AWS key ids and `aws_secret_access_key =` lines, `password: ...` lines,
+credentials inside URLs) is a credentials dump and is refused whole; card-like
+digit runs and long opaque strings do not count towards the 20, because
+spreadsheets are full of them; (4) whatever remains is redacted line by line, with
+line numbers kept. Refusals (2) and (3) are reported as failure code
+`secret_content`. All of this is a heuristic on top of the owner's choice of
+folder, not a guarantee that no secret is indexed: an encrypted or oddly wrapped
+key, or a lone secret in prose that matches no pattern, can still get through.
 
 **Citations.** Every hit from a file source carries `path` (absolute, on the
 machine that holds the index), `page` (PDFs: the `Page N` heading the chunk sits
@@ -538,10 +554,20 @@ assistant message into a button (`lib/documentCitation.ts`; malformed targets,
 `..` segments and images stay plain text). Clicking calls
 `GET /v1/bots/{bot}/knowledge/sources/{source}/file?locator=...`, which serves a
 file only if it is currently *indexed* from an *enabled* file/folder source of
-that bot, read through the same no-follow capability, with `nosniff` and a
-`sandbox` CSP. A PDF opens in a window on its page when the shell allows it;
-anything else is saved as a copy. Opening is a plain read of a file the owner
-already chose; it grants nothing.
+that bot. The locator must be a plain relative path (no drive, UNC or `\\?\`
+form, no `\\` or `:`, no `.`/`..`/empty segments, no control characters, no
+trailing dot or space), must equal an indexed document's path exactly (letter
+case included), and is then opened through the same no-follow capability under
+the source's root and checked to resolve to exactly that path. The bytes are sent
+as an `attachment` (`application/octet-stream`) with `nosniff`, a `sandbox` CSP,
+`X-Frame-Options: DENY` and `no-store`; the only inline response is a `.pdf` whose
+bytes start like a PDF, for the viewer, unless a download is asked for. A PDF opens
+in a window on its page when the shell allows it; anything else is saved as a copy.
+In the chat a click first asks, naming the folder (by its label) and the file, because any
+message or document can contain a `praxi-doc://` link; a link into a folder the
+bot does not have cannot be confirmed. The page and line numbers of a link are
+clamped and the saved copy's name is reduced to a clean single segment. Opening
+is a plain read of a file the owner already chose; it grants nothing.
 
 **`documents_search`.** The same backend (so the same embedding, quota, consent,
 egress and taint behaviour) as `knowledge_search`, restricted by the host to file

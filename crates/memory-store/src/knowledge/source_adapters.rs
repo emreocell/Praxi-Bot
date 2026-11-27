@@ -11,6 +11,7 @@ use cap_std::fs::{Dir, OpenOptions};
 use serde::{Deserialize, Serialize};
 
 use super::{DocumentFormat, DocumentInput};
+use crate::secrets::credential_hits;
 use crate::{MemoryError, Result};
 
 /// Input bytes per document. Parsing runs on a bounded blocking worker.
@@ -173,6 +174,35 @@ fn path_within(path: &Path, parent: &Path) -> bool {
     }
     #[cfg(not(windows))]
     path.starts_with(parent)
+}
+
+/// Whether `locator` is a well-formed path inside a selected source: relative,
+/// `/`-separated, and made only of ordinary names. Refuses an absolute path, a
+/// Windows drive, UNC or `\\?\` form (`\\` and `:`), empty, `.` and `..`
+/// segments, control characters and NUL, and names that end in a dot or a space
+/// (Windows resolves those to a different file than the one that was matched).
+#[must_use]
+pub fn valid_locator(locator: &str) -> bool {
+    !locator.is_empty()
+        && locator.len() <= 4096
+        && !locator.contains(['\\', ':', '\0'])
+        && !locator.chars().any(char::is_control)
+        && locator.split('/').all(|part| {
+            !part.is_empty() && part != "." && part != ".." && !part.ends_with(['.', ' '])
+        })
+}
+
+/// The file at `relative` under `root` really is where its name says: resolving
+/// every link and alias lands on exactly `root/relative`, with the same letter
+/// case. A defence in depth on top of the no-follow open, which is what binds
+/// the bytes read to the file that was opened.
+fn ensure_canonical_within(root: &Path, relative: &Path) -> Result<()> {
+    let expected = root.join(relative);
+    let real = normal_local_prefix(&std::fs::canonicalize(&expected)?)?;
+    if real != expected || !path_within(&real, root) {
+        return Err(invalid("file is not inside the selected source"));
+    }
+    Ok(())
 }
 
 fn safe_name(name: &str) -> bool {
@@ -492,6 +522,23 @@ impl SelectedSource {
             && !path_within(&state, &canonical)
     }
 
+    /// Whether the sub-folder names of a folder may be listed on this host: the
+    /// folder is not a credential or browser-profile folder and not the daemon's
+    /// data directory or anything inside it. Unlike
+    /// [`SelectedSource::folder_allowed_on_host`], a folder *around* the data
+    /// directory (the home folder, say) may be listed, so the picker can walk
+    /// down to a documents folder.
+    #[must_use]
+    pub fn folder_browsable_on_host(path: &Path, data_dir: &Path) -> bool {
+        let Ok(canonical) = canonical_source_path(path) else {
+            return false;
+        };
+        let Ok(state) = normal_local_prefix(data_dir) else {
+            return false;
+        };
+        !protected_path(&canonical) && !path_within(&canonical, &state)
+    }
+
     /// Stable, relative locators for paging and removal detection.
     #[must_use]
     pub fn files(&self) -> &[String] {
@@ -569,13 +616,17 @@ impl SelectedSource {
     /// # Errors
     /// Unselected locator, symlink, special or oversized file.
     pub fn read_bytes(&self, locator: &str) -> Result<(Vec<u8>, Option<i64>)> {
-        if self
-            .files
-            .binary_search_by(|s| s.as_str().cmp(locator))
-            .is_err()
+        // The locator must be well formed and equal, byte for byte (so with the
+        // same letter case), to a name this scan found: nothing else is opened.
+        if !valid_locator(locator)
+            || self
+                .files
+                .binary_search_by(|s| s.as_str().cmp(locator))
+                .is_err()
         {
             return Err(invalid("file is not in this selected source"));
         }
+        ensure_canonical_within(&self.display, Path::new(locator))?;
         let mut parent = self.root.try_clone()?;
         let relative = Path::new(locator);
         if let Some(ancestors) = relative.parent() {
@@ -790,10 +841,18 @@ fn extract(extension: &str, title: &str, bytes: &[u8]) -> Result<(String, Docume
     if content.len() > MAX_TEXT_BYTES {
         return Err(invalid("extracted text exceeds index byte limit"));
     }
-    // Redaction works line by line and only recognizes the header line of a
-    // private key, so the key body would be indexed. Refuse the whole file.
+    // Secret defence, in layers (a heuristic, never a guarantee; see
+    // docs/design/rag.md): 1. the file *name* (`secret_name`) and folder
+    // (`protected_path`); 2. here, the *content*: key material is refused whole,
+    // because line-by-line redaction only sees a key's header line and would
+    // index its body; 3. a file with a pile of credential-shaped values is a
+    // credentials dump and is refused whole; 4. whatever is left is redacted
+    // line by line with the line numbers kept.
     if has_private_key(&content) {
         return Err(invalid(PRIVATE_KEY_REFUSAL));
+    }
+    if credential_hits(&content) >= MAX_CREDENTIAL_HITS {
+        return Err(invalid(CREDENTIAL_DUMP_REFUSAL));
     }
     Ok((redact_source(&content), format))
 }
@@ -801,17 +860,67 @@ fn extract(extension: &str, title: &str, bytes: &[u8]) -> Result<(String, Docume
 /// Message of the refusal for a file that contains a private key.
 pub const PRIVATE_KEY_REFUSAL: &str = "file contains a private key";
 
+/// Message of the refusal for a file that is full of credential-shaped values.
+pub const CREDENTIAL_DUMP_REFUSAL: &str = "file contains many credentials";
+
+/// A file with this many credential-shaped spans (tokens, `password: ...`
+/// lines, URL credentials) is refused whole rather than redacted.
+pub const MAX_CREDENTIAL_HITS: usize = 20;
+
 /// Whether this error is the refusal of a file that contains a private key.
 #[must_use]
 pub fn is_private_key_refusal(error: &MemoryError) -> bool {
     matches!(error, MemoryError::Invalid(message) if message == PRIVATE_KEY_REFUSAL)
 }
 
+/// Whether this error is a content-based secret refusal (a private key, or a
+/// file full of credentials), as opposed to an unreadable file.
+#[must_use]
+pub fn is_secret_content_refusal(error: &MemoryError) -> bool {
+    matches!(
+        error,
+        MemoryError::Invalid(message)
+            if message == PRIVATE_KEY_REFUSAL || message == CREDENTIAL_DUMP_REFUSAL
+    )
+}
+
+/// Whether the text holds private-key material: a PEM / OpenSSH / PGP header
+/// anywhere in a line, a `PuTTY` `.ppk` header, an age secret key, or a key body
+/// whose header was cut off (an OpenSSH `openssh-key-v1` blob, or a run of
+/// base64 lines that starts like a DER sequence, which is how PKCS#1 and PKCS#8
+/// bodies begin). Headerless detection also catches certificates; refusing one
+/// is the cheaper mistake. Not exhaustive: an encrypted or oddly wrapped key
+/// can still get through.
 fn has_private_key(text: &str) -> bool {
-    text.lines().any(|line| {
-        let line = line.trim_start();
-        line.starts_with("-----BEGIN") && line.contains("PRIVATE KEY")
-    })
+    let mut run = 0_usize;
+    let mut der_start = false;
+    for line in text.lines() {
+        let line = line.trim();
+        let upper = line.to_ascii_uppercase();
+        if (upper.contains("-----BEGIN") && upper.contains("PRIVATE KEY"))
+            || upper.starts_with("PUTTY-USER-KEY-FILE-")
+            || upper.contains("AGE-SECRET-KEY-1")
+            || line.starts_with("b3BlbnNzaC1rZXktdjE")
+        {
+            return true;
+        }
+        let body_line = (40..=100).contains(&line.len())
+            && line
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='));
+        if body_line {
+            if run == 0 {
+                der_start = line.starts_with("MII");
+            }
+            run += 1;
+            if der_start && run >= 4 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
 }
 
 /// Redact known credential patterns while preserving extracted line numbers.
@@ -1271,5 +1380,206 @@ mod tests {
         assert!(selected.read("file.txt").is_err());
         symlink(outside.path(), dir.path().join("escape")).unwrap();
         assert!(SelectedSource::open(&dir.path().join("escape"), true).is_err());
+    }
+
+    #[test]
+    fn locators_that_are_not_plain_relative_names_are_refused() {
+        for good in ["a.txt", "dir/a.txt", "dir/sub dir/a b.md"] {
+            assert!(valid_locator(good), "{good}");
+        }
+        for bad in [
+            "",
+            "/etc/passwd",
+            "//server/share/a.txt",
+            "dir//a.txt",
+            "dir/",
+            "../a.txt",
+            "dir/../a.txt",
+            "./a.txt",
+            "dir/./a.txt",
+            "C:/a.txt",
+            "C:a.txt",
+            "dir\\a.txt",
+            "\\\\?\\C:\\a.txt",
+            "a.txt.",
+            "a.txt ",
+            "dir./a.txt",
+            "dir /a.txt",
+            "a\0.txt",
+            "a\n.txt",
+            "a\u{7f}.txt",
+            "a.txt:stream",
+        ] {
+            assert!(!valid_locator(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn read_bytes_opens_only_an_exact_indexed_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("Note.txt"), "hello").unwrap();
+        std::fs::write(dir.path().join("other.txt"), "x").unwrap();
+        let source = SelectedSource::open(dir.path(), true).unwrap();
+        assert_eq!(source.read_bytes("sub/Note.txt").unwrap().0, b"hello");
+        for bad in [
+            "sub/note.txt",
+            "SUB/Note.txt",
+            "sub/Note.txt.",
+            "sub/Note.txt ",
+            "sub/../other.txt",
+            "./other.txt",
+            "/other.txt",
+            "sub\\Note.txt",
+            "missing.txt",
+        ] {
+            assert!(source.read_bytes(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn canonical_check_rejects_a_path_that_resolves_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+        assert!(ensure_canonical_within(&root, Path::new("a.txt")).is_ok());
+        assert!(ensure_canonical_within(&root, Path::new("missing.txt")).is_err());
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("b.txt"), "b").unwrap();
+            std::os::unix::fs::symlink(outside.path(), root.join("link")).unwrap();
+            std::os::unix::fs::symlink(root.join("a.txt"), root.join("alias.txt")).unwrap();
+            assert!(ensure_canonical_within(&root, Path::new("link/b.txt")).is_err());
+            assert!(ensure_canonical_within(&root, Path::new("alias.txt")).is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_swapped_for_a_link_or_a_directory_is_not_served() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("a.txt"), "indexed").unwrap();
+        std::fs::write(outside.path().join("private.txt"), "private").unwrap();
+        let source = SelectedSource::open(dir.path(), true).unwrap();
+        assert_eq!(source.read_bytes("sub/a.txt").unwrap().0, b"indexed");
+        // The file is replaced by a link to an outside file after the scan.
+        std::fs::remove_file(dir.path().join("sub").join("a.txt")).unwrap();
+        symlink(
+            outside.path().join("private.txt"),
+            dir.path().join("sub").join("a.txt"),
+        )
+        .unwrap();
+        assert!(source.read_bytes("sub/a.txt").is_err());
+        // The folder is replaced by a link to an outside folder.
+        std::fs::remove_file(dir.path().join("sub").join("a.txt")).unwrap();
+        std::fs::remove_dir(dir.path().join("sub")).unwrap();
+        symlink(outside.path(), dir.path().join("sub")).unwrap();
+        std::fs::write(outside.path().join("a.txt"), "outside").unwrap();
+        assert!(source.read_bytes("sub/a.txt").is_err());
+    }
+
+    #[test]
+    fn browsing_is_refused_inside_credential_and_daemon_folders_only() {
+        let root = tempfile::tempdir().unwrap();
+        let home = std::fs::canonicalize(root.path()).unwrap();
+        let data = home.join("praxi-data");
+        std::fs::create_dir_all(data.join("sub")).unwrap();
+        std::fs::create_dir_all(home.join(".ssh").join("keys")).unwrap();
+        std::fs::create_dir_all(home.join("vault").join("inner")).unwrap();
+        std::fs::create_dir_all(home.join("Documents")).unwrap();
+        assert!(SelectedSource::folder_browsable_on_host(&home, &data));
+        assert!(SelectedSource::folder_browsable_on_host(
+            &home.join("Documents"),
+            &data
+        ));
+        for blocked in [
+            data.clone(),
+            data.join("sub"),
+            home.join(".ssh"),
+            home.join(".ssh").join("keys"),
+            home.join("vault").join("inner"),
+        ] {
+            assert!(
+                !SelectedSource::folder_browsable_on_host(&blocked, &data),
+                "{blocked:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn key_material_is_refused_in_more_shapes() {
+        let body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj\n".to_owned()
+            + &"MBRNcAHuFkVxKZlWbKr9yVQCjWqbF1Y8LAmzmGy0vJ8dQp3Ogd9z3Uq3m1fZk2vH\n".repeat(3);
+        for (name, text) in [
+            (
+                "inline header",
+                "key: -----BEGIN EC PRIVATE KEY----- MHcCAQ".to_owned(),
+            ),
+            (
+                "pgp",
+                "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOY".to_owned(),
+            ),
+            (
+                "putty",
+                "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none".to_owned(),
+            ),
+            (
+                "age",
+                "AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+                    .to_owned(),
+            ),
+            (
+                "openssh body",
+                "notes\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ".to_owned(),
+            ),
+            ("pkcs8 without header", format!("my key\n{body}")),
+        ] {
+            assert!(has_private_key(&text), "{name}");
+        }
+        for (name, text) in [
+            (
+                "prose",
+                "Notes about private keys and how to rotate them.".to_owned(),
+            ),
+            (
+                "one base64 line",
+                "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj".to_owned(),
+            ),
+            (
+                "long base64 not DER",
+                "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9w\n".repeat(6),
+            ),
+        ] {
+            assert!(!has_private_key(&text), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_credentials_dump_is_refused_whole_but_a_mention_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let dump = "service: password: hunter22\n".repeat(MAX_CREDENTIAL_HITS);
+        std::fs::write(dir.path().join("accounts.md"), dump).unwrap();
+        std::fs::write(
+            dir.path().join("howto.md"),
+            "Reset it. The default password: changeme1 must be changed.\n",
+        )
+        .unwrap();
+        // Many ordinary long numbers (millisecond timestamps) are not credentials.
+        std::fs::write(
+            dir.path().join("events.csv"),
+            "1700000000000,a\n".repeat(200),
+        )
+        .unwrap();
+        let source = SelectedSource::open(dir.path(), true).unwrap();
+        let error = source.read("accounts.md").unwrap_err();
+        assert!(is_secret_content_refusal(&error));
+        assert!(!is_private_key_refusal(&error));
+        let kept = source.read("howto.md").unwrap();
+        assert!(kept.content.contains("[REDACTED]") && !kept.content.contains("changeme1"));
+        assert!(source.read("events.csv").is_ok());
     }
 }

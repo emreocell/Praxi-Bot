@@ -780,6 +780,10 @@ export interface paths {
         /**
          * Open the file behind a citation: its bytes, for a document that is indexed
          *     from an enabled file or folder source of this bot. Owner only.
+         * @description The file is always sent as an attachment (`application/octet-stream`), so a
+         *     browser that navigates here saves it instead of rendering it. The one
+         *     exception is the PDF viewer path: a `.pdf` whose bytes start like a PDF and
+         *     that was not asked for as a download is sent inline as `application/pdf`.
          */
         get: operations["get_source_file"];
         put?: never;
@@ -3332,7 +3336,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the sub-folders of a folder on the machine the daemon runs on. Owner only. */
+        /**
+         * List the sub-folders of a folder on the machine the daemon runs on. Owner only.
+         *     Credential, browser-profile and daemon-state folders are refused (400).
+         */
         get: operations["browse_folders"];
         put?: never;
         post?: never;
@@ -14533,7 +14540,7 @@ export interface operations {
             query: {
                 /** @description Path of the file inside the source */
                 locator: string;
-                /** @description Send as a download */
+                /** @description Force a download even for a PDF */
                 download?: boolean;
             };
             header?: never;
@@ -14545,13 +14552,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description File bytes with nosniff and sandbox headers */
+            /** @description File bytes with attachment, nosniff, sandbox, frame-deny and no-store headers */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/octet-stream": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             404: {

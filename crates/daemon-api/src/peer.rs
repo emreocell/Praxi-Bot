@@ -254,6 +254,15 @@ fn is_knowledge_file_path(check_path: &str) -> bool {
     )
 }
 
+/// `/v1/bots/{bot}/knowledge/folder-preview`: what choosing a folder would index.
+fn is_knowledge_folder_preview_path(check_path: &str) -> bool {
+    let parts: Vec<&str> = check_path.trim_start_matches('/').split('/').collect();
+    matches!(
+        parts.as_slice(),
+        ["v1", "bots", bot, "knowledge", "folder-preview"] if !bot.is_empty()
+    )
+}
+
 /// The name an audit row gives the kind of owner action: the first path segment
 /// after `/v1` (and the sub-resource of a bot), never an id, a name or a body.
 fn audit_class(check_path: &str) -> String {
@@ -521,9 +530,13 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
         return Some("knowledge sources and embedding authority are managed by the local owner");
     }
     // Choosing a folder is the local owner's act, so a peer may not browse the host's
-    // folders either (the listing would only be the first step of choosing one).
-    if check_path == "/v1/knowledge/folders" {
-        return Some("knowledge sources and embedding authority are managed by the local owner");
+    // folders (the listing would only be the first step of choosing one), preview one,
+    // or read an indexed file's bytes: whatever the method and whatever the peer's role.
+    if check_path == "/v1/knowledge/folders"
+        || is_knowledge_folder_preview_path(check_path)
+        || is_knowledge_file_path(check_path)
+    {
+        return Some("the host's folders and files are browsed and opened by the local owner");
     }
     if is_site_rules_write(method, check_path) {
         return Some("per-site and per-app permission rules are managed by the local owner");
@@ -1286,6 +1299,38 @@ mod tests {
         }
         assert!(host_local_denial(&Method::GET, path).is_none());
         assert!(host_local_denial(&Method::PUT, "/v1/bots/abc").is_none());
+    }
+
+    #[test]
+    fn peers_never_browse_preview_or_open_the_hosts_folders_and_files() {
+        let paths = [
+            "/v1/knowledge/folders",
+            "/v1/bots/abc/knowledge/folder-preview",
+            "/v1/bots/abc/knowledge/sources/s1/file",
+        ];
+        for path in paths {
+            for method in [
+                Method::GET,
+                Method::HEAD,
+                Method::POST,
+                Method::PUT,
+                Method::DELETE,
+            ] {
+                assert!(
+                    host_local_denial(&method, path).is_some(),
+                    "{method} {path}"
+                );
+                // Doubled slashes are collapsed before the check.
+                let doubled = normalize_deny_path(&path.replace("/knowledge", "//knowledge"));
+                assert!(
+                    host_local_denial(&method, &doubled).is_some(),
+                    "{method} {doubled}"
+                );
+            }
+        }
+        // Reading the list of sources stays an ordinary peer read.
+        assert!(host_local_denial(&Method::GET, "/v1/bots/abc/knowledge/sources").is_none());
+        assert!(host_local_denial(&Method::GET, "/v1/bots/abc/knowledge/sources/s1").is_none());
     }
 
     #[test]

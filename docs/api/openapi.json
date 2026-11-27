@@ -3236,6 +3236,7 @@
           "knowledge"
         ],
         "summary": "Open the file behind a citation: its bytes, for a document that is indexed\nfrom an enabled file or folder source of this bot. Owner only.",
+        "description": "The file is always sent as an attachment (`application/octet-stream`), so a\nbrowser that navigates here saves it instead of rendering it. The one\nexception is the PDF viewer path: a `.pdf` whose bytes start like a PDF and\nthat was not asked for as a download is sent inline as `application/pdf`.",
         "operationId": "get_source_file",
         "parameters": [
           {
@@ -3268,7 +3269,7 @@
           {
             "name": "download",
             "in": "query",
-            "description": "Send as a download",
+            "description": "Force a download even for a PDF",
             "required": false,
             "schema": {
               "type": "boolean"
@@ -3277,11 +3278,21 @@
         ],
         "responses": {
           "200": {
-            "description": "File bytes with nosniff and sandbox headers",
+            "description": "File bytes with attachment, nosniff, sandbox, frame-deny and no-store headers",
             "content": {
               "application/octet-stream": {
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -12582,7 +12593,7 @@
         "tags": [
           "knowledge"
         ],
-        "summary": "List the sub-folders of a folder on the machine the daemon runs on. Owner only.",
+        "summary": "List the sub-folders of a folder on the machine the daemon runs on. Owner only.\nCredential, browser-profile and daemon-state folders are refused (400).",
         "operationId": "browse_folders",
         "parameters": [
           {

@@ -3269,9 +3269,17 @@
     "alreadyAdded": "This folder is already added as “{{label}}”, or overlaps it.",
     "bot": "Bot",
     "citation": {
+      "confirm": "Open file",
+      "confirmBody": "This link comes from a chat message, and a message can point at any file. Open it only if you expect this one.",
+      "confirmTitle": "Open this file?",
       "failed": "Could not open {{file}}. It may have been moved, or its folder was removed.",
+      "file": "File: {{file}}",
       "open": "Open {{file}}",
+      "page": "Page {{page}}",
       "saved": "Saved a copy of {{file}}. Open it from your downloads.",
+      "source": "Folder: {{label}}",
+      "sourceLoading": "Folder: looking it up…",
+      "sourceUnknown": "This folder is not one of this bot’s folders, so the file cannot be opened.",
       "viewed": "Opened {{file}}."
     },
     "consent": "{{bot}} may read these files and use them in its answers. I can stop at any time, and everything learned from the folder is deleted.",

@@ -587,7 +587,7 @@ pub(crate) fn reindex_limited(
                     Err(error) if source.kind == SourceKind::File => return Err(err(error)),
                     Err(error) => {
                         status.failures.push(failed(
-                            if memory_store::knowledge::source_adapters::is_private_key_refusal(
+                            if memory_store::knowledge::source_adapters::is_secret_content_refusal(
                                 &error,
                             ) {
                                 "secret_content"

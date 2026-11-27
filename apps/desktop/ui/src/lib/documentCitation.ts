@@ -3,8 +3,10 @@
  *
  * `documents_search` gives every passage a markdown link such as
  * `[lease.pdf, p. 3](praxi-doc://<source id>/housing/lease.pdf?lines=12-19&page=3)`. The model copies
- * it into its answer; the chat shows it as a button that opens that file at that page. The target is
- * only a pointer: the daemon opens a file only if it is indexed from an enabled folder of this bot.
+ * it into its answer; the chat shows it as a button that, after the owner confirms which folder and file it
+ * names, opens that file at that page. The target is only a pointer, and a message (or a document the
+ * model read) can write any such link: the daemon opens a file only if it is indexed from an enabled
+ * folder of this bot, and the name and numbers in the link are cleaned before they are used.
  */
 import type { ApiClient } from "../api/client";
 
@@ -24,6 +26,11 @@ export interface DocCitation {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
+// eslint-disable-next-line no-control-regex
+const UNSAFE_FILE_NAME_CHARS = /[\u0000-\u001f\u007f/\\:*?"<>|]/g;
+/** Largest page and line numbers a citation can name; bigger numbers are cut down to these. */
+export const MAX_CITED_PAGE = 10_000;
+export const MAX_CITED_LINE = 1_000_000;
 
 /** Read a `praxi-doc://` link; `null` for anything else or anything malformed. */
 export function parseCitationHref(href: string): DocCitation | null {
@@ -45,14 +52,25 @@ export function parseCitationHref(href: string): DocCitation | null {
     } catch {
       return null;
     }
-    if (!part || part === "." || part === ".." || part.includes("\\") || CONTROL.test(part)) return null;
+    // A decoded segment is one name: `%2F` must not smuggle a path (`a/b`, `../x`) into it.
+    if (
+      !part ||
+      part === "." ||
+      part === ".." ||
+      part.includes("/") ||
+      part.includes("\\") ||
+      part.includes(":") ||
+      /[. ]$/.test(part) ||
+      CONTROL.test(part)
+    )
+      return null;
     segments.push(part);
   }
   if (segments.length === 0) return null;
-  const number = (value: string | null): number | null => {
+  const number = (value: string | null, max: number): number | null => {
     if (value === null || !/^\d{1,9}$/.test(value)) return null;
     const n = Number(value);
-    return n >= 1 ? n : null;
+    return n >= 1 ? Math.min(n, max) : null;
   };
   const range = /^(\d{1,9})-(\d{1,9})$/.exec(url.searchParams.get("lines") ?? "");
   const from = range ? Number(range[1]) : 0;
@@ -60,10 +78,17 @@ export function parseCitationHref(href: string): DocCitation | null {
   return {
     sourceId: url.hostname.toLowerCase(),
     locator: segments.join("/"),
-    fileName: segments[segments.length - 1],
-    page: number(url.searchParams.get("page")),
-    lines: range && from >= 1 && to >= from ? { from, to } : null
+    fileName: safeFileName(segments[segments.length - 1]),
+    page: number(url.searchParams.get("page"), MAX_CITED_PAGE),
+    lines: range && from >= 1 && to >= from ? { from: Math.min(from, MAX_CITED_LINE), to: Math.min(to, MAX_CITED_LINE) } : null
   };
+}
+
+/** A name that is safe to give a saved copy: its last path segment only, no control or path characters, no leading dots. */
+export function safeFileName(name: string): string {
+  const last = name.split(/[/\\]/).pop() ?? "";
+  const cleaned = last.replace(UNSAFE_FILE_NAME_CHARS, "_").replace(/^[. ]+/, "").replace(/[. ]+$/, "");
+  return cleaned.slice(0, 120) || "document";
 }
 
 /** Whether a browser window can show this file itself (everything else is saved as a copy). */
@@ -73,7 +98,7 @@ export function canViewInWindow(fileName: string): boolean {
 
 /** Link target for a PDF blob that opens on the cited page. */
 export function viewerUrl(blobUrl: string, page: number | null): string {
-  return page ? `${blobUrl}#page=${page}` : blobUrl;
+  return page !== null && Number.isInteger(page) && page >= 1 ? `${blobUrl}#page=${Math.min(page, MAX_CITED_PAGE)}` : blobUrl;
 }
 
 export type OpenResult = "viewed" | "saved";
@@ -93,7 +118,7 @@ export async function openCitation(
   const url = URL.createObjectURL(viewable ? new Blob([blob], { type: "application/pdf" }) : blob);
   try {
     if (viewable && env.open(viewerUrl(url, citation.page))) return "viewed";
-    env.save(url, citation.fileName);
+    env.save(url, safeFileName(citation.fileName));
     return "saved";
   } finally {
     // The viewer window keeps reading the blob for a while.

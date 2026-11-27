@@ -145,26 +145,60 @@ async fn peer_knowledge_host_cannot_change_profile_authority() {
 }
 
 /// Choosing a folder is the local owner's act: a paired device may neither browse the
-/// host's folders nor preview one, whatever its role.
+/// host's folders, preview one, nor read an indexed file, whatever its role (the host
+/// itself included).
 #[tokio::test]
-async fn peers_cannot_browse_or_preview_the_hosts_folders() {
+async fn peers_cannot_browse_preview_or_open_the_hosts_folders_and_files() {
     let t = setup();
     let (id, _) = make_chat(&t).await;
+    let source = uuid::Uuid::new_v4();
     for role in [
         crate::PeerRole::Phone,
         crate::PeerRole::Desktop,
         crate::PeerRole::Node,
+        crate::PeerRole::Host,
     ] {
-        let browse = peer_request(&t, role, Method::GET, "/v1/knowledge/folders", json!({})).await;
-        assert_eq!(browse.status, StatusCode::FORBIDDEN, "{role:?} browse");
-        let preview = peer_request(
-            &t,
-            role,
-            Method::POST,
-            &format!("/v1/bots/{id}/knowledge/folder-preview"),
-            json!({"path": "/"}),
-        )
-        .await;
-        assert_eq!(preview.status, StatusCode::FORBIDDEN, "{role:?} preview");
+        for (method, path, body) in [
+            (Method::GET, "/v1/knowledge/folders".to_owned(), json!({})),
+            (
+                Method::GET,
+                "/v1/knowledge/folders?path=/".to_owned(),
+                json!({}),
+            ),
+            (
+                Method::POST,
+                format!("/v1/bots/{id}/knowledge/folder-preview"),
+                json!({"path": "/"}),
+            ),
+            (
+                Method::GET,
+                format!("/v1/bots/{id}/knowledge/folder-preview"),
+                json!({}),
+            ),
+            (
+                Method::GET,
+                format!("/v1/bots/{id}/knowledge/sources/{source}/file?locator=a.pdf"),
+                json!({}),
+            ),
+            (
+                Method::GET,
+                format!(
+                    "/v1/bots/{id}//knowledge/sources/{source}/file?locator=a.pdf&download=true"
+                ),
+                json!({}),
+            ),
+            (
+                Method::HEAD,
+                format!("/v1/bots/{id}/knowledge/sources/{source}/file?locator=a.pdf"),
+                json!({}),
+            ),
+        ] {
+            let response = peer_request(&t, role, method.clone(), &path, body).await;
+            assert_eq!(
+                response.status,
+                StatusCode::FORBIDDEN,
+                "{role:?} {method} {path}"
+            );
+        }
     }
 }

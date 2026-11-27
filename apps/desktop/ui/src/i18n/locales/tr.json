@@ -3329,9 +3329,17 @@
     "alreadyAdded": "Bu klasör zaten “{{label}}” olarak ekli ya da onunla çakışıyor.",
     "bot": "Bot",
     "citation": {
+      "confirm": "Dosyayı aç",
+      "confirmBody": "Bu bağlantı bir sohbet mesajından geliyor ve bir mesaj herhangi bir dosyayı gösterebilir. Yalnızca beklediğiniz dosyaysa açın.",
+      "confirmTitle": "Bu dosya açılsın mı?",
       "failed": "{{file}} açılamadı. Taşınmış olabilir ya da klasörü kaldırılmış olabilir.",
+      "file": "Dosya: {{file}}",
       "open": "{{file}} dosyasını aç",
+      "page": "Sayfa {{page}}",
       "saved": "{{file}} dosyasının bir kopyası kaydedildi. İndirilenler klasöründen açabilirsiniz.",
+      "source": "Klasör: {{label}}",
+      "sourceLoading": "Klasör: aranıyor…",
+      "sourceUnknown": "Bu klasör botun klasörlerinden biri değil, bu yüzden dosya açılamaz.",
       "viewed": "{{file}} açıldı."
     },
     "consent": "{{bot}} bu dosyaları okuyabilir ve yanıtlarında kullanabilir. İstediğim zaman durdurabilirim; klasörden öğrenilen her şey silinir.",
