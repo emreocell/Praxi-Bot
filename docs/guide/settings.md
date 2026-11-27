@@ -3,6 +3,8 @@
 Open **Settings** from the account menu. Everything is on ten pages with plain names.
 Changes save by themselves: the pill at the top right says **Saved** after each change.
 
+![Settings, General page: your name, language, notifications and the page list on the left](images/en/settings-general.webp)
+
 On the Safety & permissions page you will see the left page list, the Simple / Advanced switch, "Reset to recommended" and the three safety levels.
 
 ## The pages

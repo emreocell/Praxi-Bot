@@ -19,6 +19,16 @@ bot bots list
 `bot bots add` sends the file to the running daemon (`bot serve` must be up).
 The desktop app has a bot form that writes the same structure.
 
+![The New bot window](images/en/new-bot.webp)
+
+Edit a bot from its panel with the pencil button. Everything is on one page; the section list on the left jumps to each part:
+
+![The bot editor: identity, instructions, model, where it runs, access, tools and apps, memory, spending limits and advanced options on one page](images/en/bot-editor.webp)
+
+The bot panel shows what the bot is doing now and keeps its Activity, Automation, Library and Tools in tabs:
+
+![A bot's panel: its status, New chat, and the Activity, Automation, Library and Tools tabs](images/en/bot-panel-activity.webp)
+
 ## Saved browser sessions
 
 Open a bot's **Tools** tab and choose **Sign in manually**. A separate managed

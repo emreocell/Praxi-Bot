@@ -4,6 +4,8 @@ Sohbet **Bu bilgisayar**'ı kullanıyorsa ve sahip anahtarı *Botlarım bu bilgi
 botlar Windows bilgisayarındaki uygulamalarda çalışabilir. Kapalıysa sohbette tek düğmeli bir
 **Bilgisayar kullanımını aç** kartı görünür.
 
+![Canlı görünüm: botun çalıştığı ekranı izle, kontrolü devral ya da tüm botları durdur](../images/tr/live-view.webp)
+
 ## Bir bot neler yapabilir
 
 | Araç | Amacı |

@@ -4,6 +4,8 @@ Open **Apps** from the left rail or the command palette (`Ctrl/Cmd+K`).
 The main view connects apps through Composio. **MCP servers** opens the
 settings for direct, local and custom MCP connections.
 
+![The Apps window: search, Composio, Home Assistant and the app catalog](images/en/apps/apps-main.webp)
+
 ## Connect Composio once
 
 At the top of **Apps**, choose **Connect Composio** to sign in in your system
@@ -99,7 +101,7 @@ Choose **MCP servers** in the top bar for direct and self-managed connections:
   **Connect** opens password fields under the row with a **Get API key** link
   where available. Secrets are saved in your OS keychain and never shown again.
 
-![The Advanced view, starting with the form for a custom MCP server](images/apps/apps-advanced.png)
+![The MCP servers view, starting with the form for a custom MCP server](images/en/apps/apps-advanced.webp)
 
 ## MCP server status
 
@@ -154,7 +156,7 @@ Inside **Manage** you can:
 - **Test connection**: starts the server and lists its tools, without running
   any of them (see [Test connection](connection-test.md)).
 
-![The Manage panel of a connected app: bot access, the trust question, tools, and Test connection](images/apps/apps-manage.png)
+![The Manage panel of a connected app: bot access, the trust question, tools, and Test connection](images/en/apps/apps-manage.webp)
 
 ## Per-bot access
 
@@ -235,7 +237,7 @@ Failed MCP servers display a specific hint directly under the row together with
 a **Show details** toggle containing the **Error** message and **What the server
 printed** (`stderr`):
 
-![A local server that cannot start: the inline Install uv prompt and the expanded details](images/apps/apps-error.png)
+![A local server that cannot start: the Install uv prompt and the expanded details](images/en/apps/apps-error.webp)
 
 - **Missing runtime (`Node.js`, `uv`, `pipx`, `docker`):** for **Node.js** and
   **uv**, Praxi shows an inline **Install** prompt (or you can install them from

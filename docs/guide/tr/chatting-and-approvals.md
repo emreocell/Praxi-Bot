@@ -4,6 +4,8 @@
 
 Her konuşma, tek bir botla yapılan bir **sohbettir**. Sohbetler saklanır, yani sonra geri dönebilirsin. Bir mesaj bir **çalışma** başlatır (buna tur da denir): bot düşünür, araçları çağırır ve yanıtını akıtarak getirir. Bunu masaüstü uygulamasında, bir terminalde ya da Telegram'da izleyebilirsin.
 
+![Bir botla sohbet: botlarının olduğu sol çubuk, konuşma ve mesaj kutusu](../images/tr/chat.webp)
+
 Terminalden:
 
 ```sh
@@ -39,6 +41,8 @@ Eller serbest konuşmak için masaüstü yazı alanındaki telefon düğmesine (
 Yönlendirici açıkken `/stop` (geçerli çalışmayı durdur), `/new` (yeni sohbet başlat) ve `/workflow <name> key=value ...` (kayıtlı bir iş akışını doğrudan çalıştır, bkz. [İş akışları](workflows.md)) modele ulaşmadan doğrudan işlenir.
 
 Masaüstü yazı alanında bir mesajın başına `/` yazmak, uygulamanın kendi işlediği (bota hiç gönderilmeyen) yerel komutları da içeren bir komut menüsü açar: `/export` (açık sohbeti Markdown olarak indir) ve uygulama kısayolları `/help`, `/settings`, `/models`, `/apps` ile `/schedules`. Telegram'da ek komutlar var, bkz. [Telegram](telegram.md).
+
+![Mesaj kutusuna / yazınca komut menüsü açılır](../images/tr/composer-commands.webp)
 
 ### Sohbetleri yönetmek (masaüstü uygulaması)
 
@@ -267,6 +271,8 @@ Kontrolden çıkan çalışmaları durdurmak için her tur varsayılan olarak 40
 ## Bildirimler ve onaylar
 
 Pencere odakta değilken ve bir çalışma onayına ihtiyaç duyduğunda masaüstü uygulaması, sade sözlerle kısa bir bildirim gösterir (“Praxi, Playwright'ı kullanmak istiyor (tarayıcıda değerlendirme)”). Ham çağrıyı, argümanlarını ya da bilgisayar kimliklerini asla göstermez. “Özel bildirimler” açıkken yalnızca genel bir metin gösterilir.
+
+![Bota göre gruplanmış Bildirimler listesi: seni bekleyenler, başarısız olanlar ve biten işler](../images/tr/notifications.webp)
 
 **Windows.** Bildirimin düğmeleri vardır: **İzin ver** (yalnızca bu çağrı), **Her zaman izin ver** ve **Reddet**. Bir düğme, sohbetteki kartla aynı onay yolunu çalıştırır: o anda bekleyen onaya karşı denetlenir, “Her zaman izin ver” yalnızca kart onu sunacaksa görünür ve kart düğmesiyle aynı sahip yetkisini ister. Önce okuman gereken bir şey taşıyan onaylar (incelenecek bir yük, bir zamanlama, bir bot profili, bir bilgisayar denetimi izni, mesaj ya da e-posta gönderen her şey) düğmesiz bir bildirim alır: ona tıklamak uygulamayı kartın üstünde açar. Bildirimin kendisine (bir düğmeye değil) tıklamak uygulamayı her zaman öne getirir.
 

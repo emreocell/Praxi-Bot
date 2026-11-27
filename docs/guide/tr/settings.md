@@ -3,6 +3,8 @@
 **Ayarlar**'ı hesap menüsünden aç. Her şey sade adlı on sayfada toplanmıştır.
 Değişiklikler kendiliğinden kaydedilir: her değişiklikten sonra sağ üstteki etikette **Kaydedildi** yazar.
 
+![Ayarlar, Genel sayfası: adın, dilin, bildirimler ve solda sayfa listesi](../images/tr/settings-general.webp)
+
 Güvenlik ve izinler sayfasında soldaki sayfa listesini, Basit / Gelişmiş anahtarını, "Önerilene sıfırla" düğmesini ve üç güvenlik düzeyini görürsün.
 
 ## Sayfalar

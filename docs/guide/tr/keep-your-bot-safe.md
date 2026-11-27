@@ -2,8 +2,6 @@
 
 Botun senin bilgisayarında çalışır, yani kontrol sende kalır. Bu sayfa kuralları sade sözlerle anlatır.
 
-> **Resimler:** "Resim:" ile başlayan satırlar, sonradan eklenecek bir ekran görüntüsünü anlatır.
-
 ## Üç seviye
 
 Hesap menüsünden **Ayarlar**'ı, sonra **Güvenlik ve izinler**'i aç. Bir seviye seçersin. Bir bota kendi kurallarını vermediysen her bot bu seviyeye uyar.
@@ -20,7 +18,7 @@ Hangi seviyeyi seçersen seç, ödemeler her zaman onayını ister.
 
 Yeniysen **Dengeli**'yi kullan. Bir şey yanlış geliyorsa **Dikkatli**'ye geç. O sayfadaki **Önerilene sıfırla** düğmesi seviyeyi **Dengeli**'ye geri alır. Yalnızca o sayfayı değiştirir. Botların, sohbetlerin ve anahtarların olduğu gibi kalır.
 
-> **Resim:** üç seviyeyle **Ayarlar → Güvenlik ve izinler**.
+![Dört erişim düzeyiyle Ayarlar, Güvenlik sayfası](../images/tr/settings-safety.webp)
 
 ## Onaylar
 
@@ -37,7 +35,7 @@ Hiçbir şey yapmazsan kart geri sayar ("… sn içinde otomatik reddedilir") ve
 
 Tüm sohbetlerde bekleyen onaylar sol çubukta **Senden bekleyenler** altında da durur.
 
-> **Resim:** **Bir kez izin ver**, **Reddet** ve **Her zaman** düğmeli bir **Onay gerekiyor** kartı.
+![Onay kartı olan bir sohbet: bot bir komut çalıştırmak istiyor ve İzin ver ya da Reddet'i bekliyor](../images/tr/approval.webp)
 
 ## Durdur
 

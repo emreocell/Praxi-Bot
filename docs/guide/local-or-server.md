@@ -36,7 +36,7 @@ Things to know first:
 
 The full walk-through, including a free option, is in [Adding a server](servers.md). Commands for a Linux server are in [Linux always-on host](linux-host.md).
 
-> **Picture:** the computer menu with **This computer** and **Add server…**.
+![The computer menu with This computer and Add a server](images/en/computer-menu.webp)
 
 ## Go back or remove a server
 

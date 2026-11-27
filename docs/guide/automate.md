@@ -2,8 +2,6 @@
 
 A **scheduled job** lets a bot do something by itself at the times you choose. For example: "every morning, tell me what is on my plate today". You set it up once. After that it runs on its own.
 
-> **Pictures:** lines that start with "Picture:" describe a screenshot that will be added later.
-
 ## Make your first job
 
 1. Click **Scheduled tasks** in the left rail.
@@ -15,7 +13,7 @@ A **scheduled job** lets a bot do something by itself at the times you choose. F
 7. Under **Tell me when it ran**, choose **Every time**, **Only if something goes wrong** or **Never**.
 8. Press **Create**.
 
-> **Picture:** the **New scheduled task** window with **How often?**, **At what time?** and **Next 5 runs**.
+![The New scheduled task window, with When, At what time? and Next 5 runs](images/en/new-schedule.webp)
 
 ## Three examples you can copy
 
@@ -58,6 +56,8 @@ If you want jobs to run at night, use a server. See [Run it on this computer or 
 
 On each job you can press **Run now**, **Edit** or **Delete**. A job that failed or was missed has **Retry**. Deleting asks you to confirm.
 
+![Scheduled tasks: every schedule with its next run and its last result](images/en/automations.webp)
+
 ## Safety
 
 - A job has the same permissions as its bot, never more.
@@ -76,6 +76,8 @@ A **webhook** starts this bot when something else calls an address: GitHub, a fo
 2. Name the webhook and, if you want, write what the bot should do with the data. Press **Create webhook**.
 3. Copy the secret immediately. Praxi shows it only this once.
 4. Praxi listens only on this computer. Point a tunnel you choose (Cloudflare Tunnel, or ssh) at `127.0.0.1`. Do not open a new port on your router.
+
+![The Automation tab of a bot's panel: describe a schedule in one sentence and see what runs on its own](images/en/bot-panel-automation.webp)
 
 Each call sends the time in `X-Webhook-Timestamp` and `X-Signature-256: sha256=` plus the HMAC of that time, a dot, and the raw body. The same signed call works once, and only within 5 minutes. The body can be at most 64 KB. More than 30 calls a minute are refused. The text is data, never an order. The bot still asks before it acts, and that question shows up as a notification.
 

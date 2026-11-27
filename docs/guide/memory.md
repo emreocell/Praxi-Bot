@@ -29,6 +29,8 @@ If you switch on **Smart** finding (below) with an online embedding provider, th
 
 Open **Settings → Personal memory**, choose a bot, and you can:
 
+![The Library tab of a bot's panel: skills, documents, notes and memory as shelves with one action each](images/en/bot-panel-library.webp)
+
 * read every note, with its category, the bot it belongs to, when it was saved and the quote it came from;
 * **Edit** a note (your edit counts as something you said), or **Forget** it;
 * **Undo** the last change to a note;

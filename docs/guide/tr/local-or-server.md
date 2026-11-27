@@ -36,7 +36,7 @@ Sunucuyu yalnızca şu durumlarda seç:
 
 Ücretsiz bir seçenek dahil tam anlatım [Sunucu ekleme](servers.md) sayfasında. Linux sunucu komutları [Her zaman açık Linux sunucusu](linux-host.md) sayfasında.
 
-> **Resim:** **Bu bilgisayar** ve **Sunucu ekle…** ile bilgisayar menüsü.
+![Bu bilgisayar ve Sunucu ekle seçenekleriyle bilgisayar menüsü](../images/tr/computer-menu.webp)
 
 ## Geri dön ya da sunucuyu kaldır
 

@@ -2,8 +2,6 @@
 
 Your bot works on your computer, so you stay in charge. This page explains the rules in plain words.
 
-> **Pictures:** lines that start with "Picture:" describe a screenshot that will be added later.
-
 ## The three levels
 
 Open **Settings** from the account menu, then **Safety & permissions**. You pick one level. Every bot follows it, unless you gave that bot its own rules.
@@ -20,7 +18,7 @@ Payments always need your confirmation, whatever level you choose.
 
 If you are new, use **Balanced**. If something feels wrong, go to **Careful**. The button **Reset to recommended** on that page puts the level back to **Balanced**. It only changes that page. Your bots, chats and keys stay as they are.
 
-> **Picture:** **Settings → Safety & permissions** with the three levels.
+![Settings, Safety page with the four access levels](images/en/settings-safety.webp)
 
 ## Approvals
 
@@ -37,7 +35,7 @@ If you do nothing, the card counts down ("Auto-deny in … s") and the answer be
 
 All waiting approvals from all chats are also in **Needs you** in the left rail.
 
-> **Picture:** an **Approval needed** card with **Allow once**, **Deny** and **Always**.
+![A chat with an approval card: the bot wants to run a command and waits for Allow or Deny](images/en/approval.webp)
 
 ## Stop
 

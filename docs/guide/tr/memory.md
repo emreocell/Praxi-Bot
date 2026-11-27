@@ -29,6 +29,8 @@ Her şey, bilgisayarında Praxi veri klasöründe (`memory.db` dosyası), sohbet
 
 **Ayarlar → Kişisel bellek**'i aç, bir bot seç; şunları yapabilirsin:
 
+![Bir botun panelindeki Kitaplık sekmesi: beceriler, belgeler, notlar ve hafıza; her rafta tek bir eylem](../images/tr/bot-panel-library.webp)
+
 * her notu kategorisi, ait olduğu bot, ne zaman kaydedildiği ve geldiği alıntıyla birlikte okumak;
 * bir notu **Düzenle** (düzenlemen senin söylediğin sayılır) veya **Unut**;
 * bir notta yapılan son değişikliği **Geri al**;

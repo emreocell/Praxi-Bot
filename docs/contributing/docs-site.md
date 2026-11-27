@@ -48,6 +48,19 @@ The build fails on a dead link, so fix the link in the Markdown file. Also run
 - Text such as `<bot-id>` that is not real HTML is shown as written, so you do not need to escape it.
 - Every page has an **Edit this page on GitHub** link.
 
+## Screenshots
+
+The pictures in the guide (`docs/guide/images/<lang>/`, English and Turkish) are made from the mock-mode app by
+a script, not by hand. After a UI change, refresh them with one command and commit the result with the page
+changes:
+
+```sh
+pnpm --dir apps/desktop/ui docs:screenshots
+```
+
+See [apps/desktop/ui/scripts/docs-screenshots/README.md](../../apps/desktop/ui/scripts/docs-screenshots/README.md)
+for the options and for how to add a screen.
+
 ## Translations
 
 English, Turkish and German pages live in `docs/guide/`, `docs/guide/tr/` and `docs/guide/de/`, as described in

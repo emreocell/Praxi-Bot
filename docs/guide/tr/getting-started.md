@@ -38,7 +38,7 @@ Hazır değil misin? **Bunu sonra eklerim**'e bas. Etrafa göz atabilirsin. Anah
 
 Modeller ve anahtarlar hakkında daha fazlası: [Sağlayıcılar ve modeller](providers-and-models.md).
 
-> **Resim:** **Ücretsiz bir model kullan** ve **Anahtarımı al** düğmesiyle **Bir beyin seç** ekranı.
+![Yapay zeka bağla ilk açılış ekranı: bu bilgisayardaki hazır seçenekler, ücretsiz bir model ya da kendi erişim anahtarın](../images/tr/first-run.webp)
 
 ## 3. Adım: Ne kadar serbest olacağını seç
 
@@ -69,7 +69,7 @@ Emin değilsen **Dengeli**'yi bırak. Sonra değiştirebilirsin. Bkz. [Botunu g�
 - "Bir komşuma kısa ve samimi bir mesaj yazmama yardım et"
 - "Bugünün en önemli yapay zekâ haberlerini bul"
 
-> **Resim:** **Bir kez izin ver** ve **Reddet** düğmeli bir **Onay gerekiyor** kartıyla bir sohbet.
+![Onay kartı olan bir sohbet: bot bir komut çalıştırmak istiyor ve İzin ver ya da Reddet'i bekliyor](../images/tr/approval.webp)
 
 ## Sonra nereye?
 

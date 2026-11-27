@@ -39,6 +39,8 @@ ve model adları değişir. Esas kaynak `providers/catalog/` içindeki katalog d
 
 ## Sağlayıcı eklemek ve yönetmek
 
+![Ayarlar, Yapay zeka ve hafıza sayfası: bu bilgisayarda bulunan hesaplar, erişim anahtarları ve varsayılan model](../images/tr/settings-models.webp)
+
 ```sh
 bot providers list                         # * genel varsayılanı gösterir
 bot providers add gemini                   # anahtarı sorar (yazdığın görünmez)
@@ -63,6 +65,8 @@ bot providers default gemini --model gemini-2.5-flash-lite
 
 Bir botun profili modelleri **rollerine** göre adlandırır (bkz.
 [Botlar ve profiller](bots-and-profiles.md)):
+
+![Mesaj kutusundaki model menüsü: önce önerilen modeller, sonra kodlama CLI'ların ve API sağlayıcıların](../images/tr/composer-model.webp)
 
 - `executor`: ajan döngüsünü çalıştırır (zorunlu).
 - `light`: basit ilk turlar için isteğe bağlı model. Bkz. [model katmanlama](model-tiering.md).

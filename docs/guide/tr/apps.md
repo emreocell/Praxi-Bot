@@ -4,6 +4,8 @@ Sol çubuktan ya da komut paletinden (`Ctrl/Cmd+K`) **Uygulamalar**'ı aç.
 Ana görünümde Composio üzerinden uygulama bağlayabilirsin. Doğrudan, yerel ve
 özel bağlantılar için üst çubuktaki **MCP sunucuları** düğmesini kullan.
 
+![Uygulamalar penceresi: arama, Composio, Home Assistant ve uygulama kataloğu](../images/tr/apps/apps-main.webp)
+
 ## Composio hesabını bağla
 
 **Composio hesabını bağla** ile tarayıcında oturum aç ya da **Proje API anahtarı
@@ -96,6 +98,8 @@ Doğrudan ve kendin yönettiğin bağlantılar için üst çubukta **MCP sunucul
   **API anahtarı al** bağlantısı da görünür. Gizli bilgiler işletim sisteminin anahtarlığına
   kaydedilir ve bir daha hiç gösterilmez.
 
+![MCP sunucuları görünümü, özel bir MCP sunucusu formuyla başlar](../images/tr/apps/apps-advanced.webp)
+
 ## MCP sunucusunun durumu
 
 Yeni bir OAuth bağlantısı, izin tamamlanana kadar **Giriş yapılıyor** durumunda
@@ -138,6 +142,8 @@ ya da bir anahtar) [Her uygulamayı bağlamak için ne gerekir](app-catalog.md) 
   hemen yeniden başlatmasını ya da yeniden bağlamasını söyler.
 - **Bağlantıyı kes**: önce onay ister (**Bu sunucunun bağlantısı kesilsin mi?**), sonra sunucu
   ayarını `mcp.toml` dosyasından siler.
+
+![Bağlı bir uygulamanın Yönet paneli: bot erişimi, güven sorusu, araçlar ve Bağlantıyı test et](../images/tr/apps/apps-manage.webp)
 
 ## Bot başına erişim
 
@@ -201,6 +207,8 @@ Birkaç önemli kural:
 Başarısız MCP sunucuları, satırın hemen altında duruma özel bir ipucu gösterir. Yanında,
 **Hata** mesajını ve **Sunucunun yazdıkları** bölümünü (`stderr`) içeren bir
 **Ayrıntıları göster** düğmesi bulunur:
+
+![Başlamayan yerel bir sunucu: uv kur önerisi ve açılmış ayrıntılar](../images/tr/apps/apps-error.webp)
 
 - **Eksik çalışma ortamı (`Node.js`, `uv`, `pipx`, `docker`):** **Node.js** ve **uv** için
   Praxi orada bir **Kur** önerisi gösterir (istersen bunları resmi sitelerinden kurup

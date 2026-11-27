@@ -4,6 +4,8 @@ Bots can work in apps on your Windows PC when the chat uses **This computer** an
 the owner switch *Let my bots use this computer* is on. If it is off, the chat shows
 a **Turn on computer use** card with one button.
 
+![Live view: watch the screen a bot is working on, take control, or stop all bots](images/en/live-view.webp)
+
 ## What a bot can do
 
 | Tool | Purpose |

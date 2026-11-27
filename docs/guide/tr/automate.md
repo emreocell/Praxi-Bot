@@ -2,8 +2,6 @@
 
 **Zamanlanmış iş**, bir botun senin seçtiğin zamanlarda kendiliğinden bir şey yapmasını sağlar. Örneğin: "her sabah bugün önümde ne var söyle". Bir kez kurarsın. Sonra kendi kendine çalışır.
 
-> **Resimler:** "Resim:" ile başlayan satırlar, sonradan eklenecek bir ekran görüntüsünü anlatır.
-
 ## İlk işini oluştur
 
 1. Sol çubukta **Zamanlanmış görevler**'e tıkla.
@@ -15,7 +13,7 @@
 7. **Çalışınca bana haber ver** altında **Her seferinde**, **Sadece bir sorun olursa** ya da **Hiçbir zaman**'ı seç.
 8. **Oluştur**'a bas.
 
-> **Resim:** **Ne sıklıkla?**, **Saat kaçta?** ve **Sonraki 5 çalışma** ile **Yeni zamanlanmış görev** penceresi.
+![Ne zaman, Saat kaçta? ve Sonraki 5 çalışma bölümleriyle Yeni zamanlanmış görev penceresi](../images/tr/new-schedule.webp)
 
 ## Kopyalayabileceğin üç örnek
 
@@ -58,6 +56,8 @@ Aynı listede **Gelen kutusu ayıklama** ve **Yedekleme hatırlatması** da var.
 
 Her işte **Şimdi çalıştır**'a, **Düzenle**'ye ya da **Sil**'e basabilirsin. Başarısız olan ya da kaçırılan işte **Yeniden dene** vardır. Silmeden önce onay istenir.
 
+![Zamanlanmış görevler: her zamanlama, sonraki çalışması ve son sonucuyla](../images/tr/automations.webp)
+
 ## Güvenlik
 
 - Bir iş, botunun izinlerine sahiptir; asla fazlasına değil.
@@ -76,6 +76,8 @@ Bir **webhook**, başka bir şey bir adresi çağırınca bu botu başlatır: Gi
 2. Webhook'a bir ad ver. İstersen botun veriyle ne yapacağını yaz. **Webhook oluştur**'a bas.
 3. Gizli anahtarı hemen kopyala. Praxi onu yalnızca bu kez gösterir.
 4. Praxi yalnızca bu bilgisayarı dinler. Kendi seçtiğin bir tüneli (Cloudflare Tunnel ya da ssh) `127.0.0.1` adresine yönelt. Yönlendiricide yeni bir kapı açma.
+
+![Bir botun panelindeki Otomasyon sekmesi: zamanlamayı tek cümleyle anlat, kendi kendine çalışanları gör](../images/tr/bot-panel-automation.webp)
 
 Her çağrı `X-Webhook-Timestamp` başlığında zamanı ve `X-Signature-256: sha256=` ile o zamanın, bir noktanın ve ham metnin HMAC imzasını gönderir. Aynı imzalı çağrı bir kez geçerlidir ve yalnızca 5 dakika içinde. Metin en fazla 64 KB olabilir. Dakikada 30 çağrıdan fazlası reddedilir. Metin veridir, emir değildir. Bot yine harekete geçmeden önce sorar; soru bir bildirim olarak görünür.
 

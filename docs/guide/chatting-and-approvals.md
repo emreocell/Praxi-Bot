@@ -7,6 +7,8 @@ back later. A message starts a **run** (also called a turn): the bot thinks,
 calls tools, and streams its answer back. You can follow it in the desktop app,
 in a terminal, or in Telegram.
 
+![A chat with a bot: the left rail with your bots, the conversation and the message box](images/en/chat.webp)
+
 From the terminal:
 
 ```sh
@@ -63,6 +65,8 @@ menu that also includes local commands handled by the app itself (never sent to
 the bot): `/export` (download the open chat as Markdown) and app shortcuts
 `/help`, `/settings`, `/models`, `/apps`, and `/schedules`. In Telegram there
 are extra commands, see [Telegram](telegram.md).
+
+![Typing / in the message box opens the command menu](images/en/composer-commands.webp)
 
 ### Managing chats (desktop app)
 
@@ -592,6 +596,8 @@ When the window is not focused and a run needs your approval, the desktop app
 shows a short notification in plain words ("Praxi wants to use Playwright
 (browser evaluate)"), never the raw call, its arguments or computer ids. With
 "private notifications" on, only a generic text is shown.
+
+![The Notifications list, grouped by bot: what needs you, what failed and what finished](images/en/notifications.webp)
 
 **Windows.** The toast has buttons: **Allow** (this call only), **Always allow**
 and **Deny**. A button runs the same approval path as the card in the chat: it

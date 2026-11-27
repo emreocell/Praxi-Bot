@@ -38,7 +38,7 @@ Not ready? Press **I will add this later**. You can look around. Your bot starts
 
 More about models and keys: [Providers and models](providers-and-models.md).
 
-> **Picture:** the **Choose a brain** screen with **Use a free model** and the **Get my key** button.
+![The first-run screen Connect an AI, with the options to use what is already on this computer, a free model, or your own access key](images/en/first-run.webp)
 
 ## Step 3: Choose how much freedom
 
@@ -69,7 +69,7 @@ Good first questions:
 - "Help me write a short, friendly message to a neighbour"
 - "Find today's top AI news"
 
-> **Picture:** a chat with one **Approval needed** card showing **Allow once** and **Deny**.
+![A chat with an approval card: the bot wants to run a command and waits for Allow or Deny](images/en/approval.webp)
 
 ## Where to go next
 

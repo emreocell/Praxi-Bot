@@ -41,6 +41,8 @@ reference.
 
 ## Add and manage providers
 
+![Settings, AI and memory page: accounts found on this computer, access keys and the default model](images/en/settings-models.webp)
+
 ```sh
 bot providers list                         # * marks the global default
 bot providers add gemini                   # asks for the key (hidden input)
@@ -64,6 +66,8 @@ bot providers default gemini --model gemini-2.5-flash-lite
 
 A bot's profile names models by **role** (see
 [Bots and profiles](bots-and-profiles.md)):
+
+![The model menu in the message box: recommended models first, then your coding CLIs and API providers](images/en/composer-model.webp)
 
 - `executor`: runs the agent loop (required).
 - `light`: optional model for simple first turns; see [model tiering](model-tiering.md).

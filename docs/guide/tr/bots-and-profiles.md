@@ -18,6 +18,16 @@ bot bots list
 `bot bots add`, dosyayı çalışan daemon'a gönderir (`bot serve` açık olmalı). Masaüstü
 uygulamasında aynı yapıyı yazan bir bot formu vardır.
 
+![Yeni bot penceresi](../images/tr/new-bot.webp)
+
+Bir botu panelindeki kalem düğmesiyle düzenlersin. Her şey tek sayfadadır; soldaki bölüm listesi seni ilgili yere götürür:
+
+![Bot düzenleyici: kimlik, talimatlar, model, nerede çalıştığı, erişim, araçlar ve uygulamalar, hafıza, harcama sınırları ve gelişmiş seçenekler tek sayfada](../images/tr/bot-editor.webp)
+
+Bot paneli botun şu an ne yaptığını gösterir; Etkinlik, Otomasyon, Kitaplık ve Araçlar sekmelerde durur:
+
+![Bir botun paneli: durumu, Yeni sohbet düğmesi ve Etkinlik, Otomasyon, Kitaplık ve Araçlar sekmeleri](../images/tr/bot-panel-activity.webp)
+
 ## Kayıtlı tarayıcı oturumları
 
 Bir botun **Araçlar** sekmesini aç ve **Kendiniz oturum açın**'ı seç. Botun çalıştığı
