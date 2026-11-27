@@ -70,7 +70,7 @@ impl AppState {
 /// `(method, pattern)` of every route that changes authority, secrets,
 /// providers or keys, installs or runs software, pairs devices, takes over
 /// control or DECIDES an approval (card 262). One table, one middleware
-/// ([`owner_gate`]): a holder of only the general API token (a CLI engine, an
+/// (`owner_gate`): a holder of only the general API token (a CLI engine, an
 /// MCP client, a script) is refused with `owner_key_required`.
 ///
 /// Pattern segments: `{}` is one segment, a trailing `*` is the rest of the
@@ -509,7 +509,7 @@ pub const TOKEN_OK_ROUTES: &[(&str, &str)] = &[
 /// Routes of [`OWNER_ROUTES`] that EVERY paired device (phone or desktop) may
 /// still call without being the owner's administrator: what a device does for
 /// the owner every day. Everything else in [`OWNER_ROUTES`] is refused to a
-/// paired peer (see [`peer_may_call`]) unless it is the administrator desktop
+/// paired peer (see `peer_may_call`) unless it is the administrator desktop
 /// of a host, which is the owner (`peer.rs`, `admin_desktop_never`).
 ///
 /// * deciding an approval or a question (audited as `peer.decision_requested`);

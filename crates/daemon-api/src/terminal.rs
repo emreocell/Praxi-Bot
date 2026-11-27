@@ -10,10 +10,10 @@
 //!   open a session nor read its output;
 //! * desktop side (`/v1/hosts/{id}/terminal...`): the local user's owner key is required, the
 //!   same key that guards every other action that reaches into a host;
-//! * one session per desktop (a new one replaces the old), at most [`MAX_SESSIONS`] in total;
+//! * one session per desktop (a new one replaces the old), at most `MAX_SESSIONS` in total;
 //!   a session belongs to the desktop that opened it and nobody else can poll, type into or
 //!   close it;
-//! * it ends when the desktop stops polling ([`DISCONNECT_AFTER`]), after [`IDLE_AFTER`]
+//! * it ends when the desktop stops polling (`DISCONNECT_AFTER`), after `IDLE_AFTER`
 //!   without input, at the hard cap, when the desktop loses administration or is unpaired,
 //!   and when the shell exits;
 //! * the environment is the shell tool's allowlist (see `builtin_tools::shell::terminal_env`: the bot shell's allowlist plus the `bot` directory on PATH, which a bot's own shell does not get)
@@ -21,7 +21,7 @@
 //! * audit: session open and close (peer, size, duration, byte counts, reason). Keystrokes
 //!   and output are never recorded.
 //!
-//! Output is a bounded ring ([`MAX_BUFFER`]); the desktop polls with the absolute byte offset
+//! Output is a bounded ring (`MAX_BUFFER`); the desktop polls with the absolute byte offset
 //! it has seen. Linux hosts only: elsewhere the open route answers `terminal_unsupported`.
 
 #![cfg_attr(not(unix), allow(dead_code, unused_imports))]

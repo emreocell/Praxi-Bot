@@ -39,7 +39,7 @@ pub const MAX_ID_LEN: usize = 1024;
 
 /// Check an id that will be placed in a URL path: printable ASCII only, at most
 /// 1024 characters, never `.` or `..`. Every path segment is percent-encoded
-/// strictly before it is sent (see [`http::encode_segment`]), so `/`, `%`, `?`,
+/// strictly before it is sent (see `http::encode_segment`), so `/`, `%`, `?`,
 /// `#`, `<`, `>`, `@`, `+` and `=` in an id can never change which resource a
 /// URL names; only the dot segments (which URL parsers resolve) are refused.
 ///

@@ -8,7 +8,7 @@
 //! found) and the page it started on (so its links are still judged against
 //! the site the form was submitted on). It is one JSON file in the data
 //! directory, private to the user, written in one piece (temp file and rename;
-//! on Windows see [`write_private`]). The records are tiny and bounded: a file
+//! on Windows see `write_private`). The records are tiny and bounded: a file
 //! larger than [`MAX_FILE_BYTES`] is never read, and a record with an over-long
 //! field is dropped on load. A file that cannot be read or written only costs
 //! the persistence, never the wait itself.

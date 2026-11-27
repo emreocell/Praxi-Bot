@@ -317,7 +317,7 @@ impl EmailConnector {
     }
 
     /// "Test connection" for a stored account: IMAP login and SMTP
-    /// authentication, nothing sent or read (see [`crate::probe`]).
+    /// authentication, nothing sent or read (see the `probe` function).
     ///
     /// # Errors
     /// [`EmailError::Input`] for an unknown account, [`EmailError::Credential`]

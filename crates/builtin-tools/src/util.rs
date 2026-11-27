@@ -10,7 +10,7 @@ use tool_registry::{
 };
 
 /// Classification of a built-in tool. `None` means the name is not a built-in
-/// (a test double); [`spec`] then leaves it undeclared so registration fails
+/// (a test double); `spec` then leaves it undeclared so registration fails
 /// until the author classifies it.
 ///
 /// Arms that share a class are one pattern. Comments name the family.

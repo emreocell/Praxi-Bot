@@ -558,7 +558,7 @@ pub fn check_daemon_write(data_dir: &Path, raw: &str) -> Result<(), ToolError> {
 /// Build all file tools; `data_dir` hosts checkpoints and spill files.
 ///
 /// UNC paths, device paths, and credential files are refused. No root limit
-/// is applied; use [`tools_bounded`] when the host has configured roots or grants.
+/// is applied; use `tools_bounded` when the host has configured roots or grants.
 #[must_use]
 pub fn tools(data_dir: &Path) -> Vec<Arc<dyn Tool>> {
     tools_bounded(data_dir, &[], &[])
@@ -641,7 +641,7 @@ pub struct OptionalTools {
     pub developer: bool,
 }
 
-/// Like [`tools_bounded`] with a per-bot scope source and the home directory.
+/// Like `tools_bounded` with a per-bot scope source and the home directory.
 #[must_use]
 pub(crate) fn tools_scoped(
     data_dir: &Path,

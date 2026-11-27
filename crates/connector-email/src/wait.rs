@@ -1018,7 +1018,7 @@ pub trait TrackingResolver: Send + Sync {
 
 /// The production [`TrackingResolver`]: one `GET` through the SSRF guard (no
 /// private, loopback or metadata addresses, DNS pinned to checked addresses,
-/// no proxy, no cookies, no credentials), at most [`HOP_TIMEOUT`] long, the target never
+/// no proxy, no cookies, no credentials), at most `HOP_TIMEOUT` long, the target never
 /// requested, and only for https on port 443 at a known tracking provider (checked here
 /// as well as by the caller that picks the links). The daemon passes its own
 /// [`web_tools::UrlPolicy`] ([`WebResolver::with_policy`]) so the sockets it

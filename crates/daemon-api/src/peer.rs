@@ -721,7 +721,7 @@ fn audit_chat_start(
 /// `method path` as an owner action, if it is: the owner settings
 /// (`host_local_denial`, `host_mode_desktop_denial`) and every owner-gated
 /// route that is not one a paired device may call
-/// (`crate::owner::peer_may_call`). A desktop of a daemon that is not an
+/// (`peer_may_call` in `owner`). A desktop of a daemon that is not an
 /// always-on host keeps its older, wider reach.
 fn owner_denial(
     method: &Method,

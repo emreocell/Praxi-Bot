@@ -45,7 +45,9 @@
 //! ```
 //!
 //! Large tool sets are meant to be fronted by `agent-router`'s discovery
-//! meta-tools rather than shown to the model directly.
+//! meta-tools rather than shown to the model directly. The owner can search the
+//! official MCP Registry ([`registry`]) and install signed `.mcpb` bundles
+//! ([`mcpb`]); flat form elicitation from a server is normalized in `form`.
 
 mod catalog;
 mod client;

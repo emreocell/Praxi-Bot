@@ -418,7 +418,7 @@ pub struct LoopConfig {
     /// when that is set.
     pub secret_request_timeout: Duration,
     /// How long the form of a mission's `secret_request` stays open (default
-    /// [`DEFAULT_MISSION_SECRET_REQUEST_TIMEOUT`]). Nothing waits on it: the item is parked.
+    /// `DEFAULT_MISSION_SECRET_REQUEST_TIMEOUT`). Nothing waits on it: the item is parked.
     pub mission_secret_request_timeout: Duration,
     /// Handovers (a CAPTCHA, a one-time code) one run may ask the owner for
     /// (default [`DEFAULT_MAX_HANDOVERS_PER_RUN`]). A refused or cancelled one counts.

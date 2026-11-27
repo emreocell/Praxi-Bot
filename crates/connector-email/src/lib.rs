@@ -9,7 +9,7 @@
 //!   `STARTTLS` for SMTP) and certificates are always verified.
 //! - Credentials are [`secret_store::SecretRef`]s resolved only when connecting.
 //!
-//! Entry points: [`tools`] / [`register`]. Wiring into `builtin-tools` is a
+//! Entry points: [`register`] (which builds tools from the `tools` module). Wiring into `builtin-tools` is a
 //! follow-up. IMAP folder selectors accept Unicode or a complete modified
 //! UTF-7 wire name. LIST names are decoded and capped for display and may not
 //! be exact selectors: if a display name looks like modified UTF-7, pass the

@@ -1,6 +1,6 @@
 //! Windows OS backend: UI Automation, `SendInput`, and screenshot capture.
 //!
-//! [`WindowsBackend`] implements [`desktop_api::DesktopBackend`] using UI
+//! `WindowsBackend` implements [`desktop_api::DesktopBackend`] using UI
 //! Automation COM APIs on a dedicated STA thread, with `SendInput` for
 //! keyboard and mouse actions. On other platforms this crate only exposes the
 //! platform-independent helpers in [`pure`].

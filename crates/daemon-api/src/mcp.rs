@@ -71,7 +71,7 @@ pub struct McpServerDto {
     /// Public OAuth identity and secret names only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth: Option<McpOAuthConfig>,
-    /// Server name (the `<server>` of `mcp:<server>/<tool>`).
+    /// Server name (the server segment of a qualified `mcp:…/…` tool name).
     pub name: String,
     /// Transport.
     pub transport: McpTransportKind,
@@ -377,7 +377,7 @@ pub struct McpServerPatch {
 /// A tool of an MCP server (`GET /v1/mcp/servers/{name}/tools`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpToolDto {
-    /// Qualified tool name (`mcp:<server>/<tool>`).
+    /// Qualified tool name (`mcp:server/tool`).
     pub name: String,
     /// Description given by the server.
     pub description: String,

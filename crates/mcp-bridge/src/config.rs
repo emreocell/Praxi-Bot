@@ -159,7 +159,7 @@ pub struct McpServerConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     pub browser: bool,
     /// Bots that may use this server's tools; `None` = all bots.
-    /// [`crate::tool::McpToolAdapter`] refuses a call whose bot id is missing
+    /// The MCP tool adapter refuses a call whose bot id is missing
     /// or not in the list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bots: Option<Vec<String>>,

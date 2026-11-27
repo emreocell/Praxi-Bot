@@ -5,7 +5,9 @@
 //! execute -> results back -> repeat.  Every model call and tool batch is a
 //! persisted step (intent before, result after), the conversation is rebuilt
 //! from those rows, and progress is streamed as [`protocol::Event`]s (also
-//! appended to the run's NDJSON log).
+//! appended to the run's NDJSON log). Per-bot spend caps live in [`bot_limits`];
+//! the global monthly ceiling is in [`spend`]; MCP form elicitation is in
+//! `elicitation` (see [`ElicitationRefusal`]).
 //!
 //! Reference ideas: goose (loop / tool dispatch), codex-rs (turn loop,
 //! approvals), deepseek-harness (spill, guard) - patterns only, no code copied.

@@ -92,7 +92,7 @@ pub struct CopyRequest {
     #[serde(default)]
     pub set_home: bool,
     /// Also move the schedules and triggers of the moved bots (the local copies are then
-    /// disabled and marked "moved to <server>").
+    /// disabled and marked moved to the destination host).
     #[serde(default)]
     pub schedules: bool,
     /// Also move the chat history of the moved bots (messages and run metadata; files and

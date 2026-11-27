@@ -6,7 +6,7 @@
 //!
 //! * a `<div>` host on the document element, `position: fixed`, `pointer-events: none`, the
 //!   highest `z-index`, `aria-hidden`, holding the arrow and the click ripples inside a
-//!   **closed shadow root**. It can never be hit by a click ([`Page::hit_at`] uses
+//!   **closed shadow root**. It can never be hit by a click (`Page::hit_at` uses
 //!   `DOM.getNodeForLocation` with `ignorePointerEventsNone: false`), is not in the
 //!   accessibility tree, has no text, and is not reached by `querySelectorAll`;
 //! * the script runs in an **isolated world** (`Page.createIsolatedWorld`), so page scripts
@@ -174,7 +174,7 @@ const SCRIPT: &str = r"(op, fx, fy, x, y, ms, fadeMs) => {
   return 'ok';
 }";
 
-/// The expression that runs [`SCRIPT`] for `op`. Numbers only: nothing from the page or the
+/// The expression that runs the injected cursor script for `op`. Numbers only: nothing from the page or the
 /// owner goes into it.
 #[must_use]
 pub fn expression(op: &CursorOp) -> String {

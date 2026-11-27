@@ -1544,7 +1544,7 @@ pub(crate) fn is_occurrence_kind(kind: &str) -> bool {
         .is_some_and(|rest| rest.split(':').count() == 3)
 }
 
-/// The schedule behind a run kind written by [`kind_for_schedule`] or [`occurrence_kind`].
+/// The schedule behind a run kind written by `kind_for_schedule` or `occurrence_kind`.
 pub fn schedule_id_of(kind: &str) -> Option<TaskId> {
     kind.strip_prefix("turn:schedule:")
         .or_else(|| kind.strip_prefix("turn:external_schedule:"))?

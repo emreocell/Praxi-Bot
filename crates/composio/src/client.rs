@@ -188,7 +188,7 @@ impl std::fmt::Debug for ComposioClient {
 const LINK_HOSTS: [&str; 2] = ["connect.composio.dev", "app.composio.dev"];
 
 /// Whether `url` is a hosted Composio connect link: `https://<host>/link/<token>` where the host
-/// is exactly one of [`LINK_HOSTS`] (no user, port or escapes), the token matches
+/// is exactly one of the hosted connect hosts (no user, port or escapes), the token matches
 /// `^[A-Za-z0-9_-]{1,128}$`, and only a query or fragment follows it. Printable ASCII only.
 ///
 /// The same rule, with the same cases (`link_vectors.json`), guards the UI (`isComposioLink`) and

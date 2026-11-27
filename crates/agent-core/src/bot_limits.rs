@@ -1,7 +1,7 @@
 //! Per-bot spending limits (ADR-0034): daily / weekly / monthly, soft and hard,
 //! in money and/or tokens.
 //!
-//! Enforced in [`crate::usage::CallGuard::start`], below every caller (chat,
+//! Enforced in `CallGuard::start` (`usage`), below every caller (chat,
 //! scheduled and channel-triggered runs, subagents, memory and router calls),
 //! so no API client can skip it. The counters are the usage ledger itself
 //! (`audit_log` rows of the run's bot), which is durable; limits live in the
