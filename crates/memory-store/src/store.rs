@@ -41,6 +41,24 @@ pub(crate) fn now_ms() -> i64 {
     storage::now_ms()
 }
 
+/// How many memories a bot may note itself in unattended runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OwnNoteCaps {
+    /// Per bot, over all runs.
+    pub total: usize,
+    /// Per bot, from one run.
+    pub per_run: usize,
+}
+
+/// Which cap an unattended memory save ran into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnNoteCapReached {
+    /// The run already saved its share.
+    PerRun,
+    /// The bot already holds its total.
+    Total,
+}
+
 /// Hybrid memory database.  Cheap to share behind an `Arc`; calls serialise on
 /// an internal mutex.
 pub struct MemoryStore {
@@ -292,6 +310,37 @@ impl MemoryStore {
     /// # Errors
     /// `Invalid` for empty content or secrets; storage/embedder failures otherwise.
     pub fn add(&self, new: &NewMemory, reason: &str) -> Result<Memory> {
+        match self.add_gated(new, reason, None)? {
+            Ok(memory) => Ok(memory),
+            // Unreachable without a gate; kept as an error rather than a panic.
+            Err(_) => Err(MemoryError::Invalid("memory not saved".into())),
+        }
+    }
+
+    /// Add a memory a bot noted itself in an unattended run, enforcing its caps in the SAME
+    /// transaction as the insert: the count and the insert cannot be separated by another save,
+    /// so two concurrent saves can never both take the last free slot.
+    ///
+    /// Returns `Ok(Err(cap))` (nothing written) when a cap is already reached.
+    ///
+    /// # Errors
+    /// Validation, SQLite failure.
+    pub fn add_own_note(
+        &self,
+        new: &NewMemory,
+        reason: &str,
+        run_id: &str,
+        caps: OwnNoteCaps,
+    ) -> Result<std::result::Result<Memory, OwnNoteCapReached>> {
+        self.add_gated(new, reason, Some((run_id, caps)))
+    }
+
+    fn add_gated(
+        &self,
+        new: &NewMemory,
+        reason: &str,
+        gate: Option<(&str, OwnNoteCaps)>,
+    ) -> Result<std::result::Result<Memory, OwnNoteCapReached>> {
         validate_text(&new.content, new.source_quote.as_deref())?;
         let now = now_ms();
         let mem = Memory {
@@ -314,7 +363,27 @@ impl MemoryStore {
         };
         let emb = self.embed_for_index(&mem.content);
         let mut conn = self.conn();
-        let tx = conn.transaction()?;
+        // A gated add takes the write lock up front, so the count below is still true at insert.
+        let tx = if gate.is_some() {
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?
+        } else {
+            conn.transaction()?
+        };
+        if let (Some((run_id, caps)), Some(bot_id)) = (gate, new.bot_id) {
+            let (all, run): (i64, i64) = tx.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(json_extract(origin_json, '$.run_id') = ?3), 0) \
+                 FROM memories WHERE user_id = ?1 AND bot_id = ?2 AND deleted = 0 \
+                 AND origin_json IS NOT NULL",
+                params![new.user_id.0.to_string(), bot_id.0.to_string(), run_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            if usize::try_from(run).unwrap_or(usize::MAX) >= caps.per_run {
+                return Ok(Err(OwnNoteCapReached::PerRun));
+            }
+            if usize::try_from(all).unwrap_or(usize::MAX) >= caps.total {
+                return Ok(Err(OwnNoteCapReached::Total));
+            }
+        }
         tx.execute(
             "INSERT INTO memories (id, user_id, bot_id, kind, content, source_quote, \
              source_chat_id, source_message_id, trust, importance, created_ms, last_used_ms, \
@@ -344,7 +413,7 @@ impl MemoryStore {
         crate::tombstones::clear_matching(&tx, mem.user_id, mem.bot_id, &mem.content)?;
         journal_insert(&tx, &mem, JournalOp::Add, None, Some(&mem), reason)?;
         tx.commit()?;
-        Ok(mem)
+        Ok(Ok(mem))
     }
 
     /// How many live memories `bot_id` saved itself in unattended runs, and how many of those

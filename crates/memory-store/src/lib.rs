@@ -49,7 +49,7 @@ pub use sessions::SessionHit;
 pub use settings::{
     DEFAULT_BUDGET_TOKENS, MAX_BUDGET_TOKENS, MIN_BUDGET_TOKENS, MemoryMode, MemorySettings,
 };
-pub use store::MemoryStore;
+pub use store::{MemoryStore, OwnNoteCapReached, OwnNoteCaps};
 pub use tools::MEMORY_TOOL_NAMES;
 pub use types::{
     JournalEntry, JournalOp, Kind, ListFilter, Memory, MemoryOrigin, MemoryPatch, NewMemory,

@@ -147,6 +147,8 @@ pub enum PaymentApproval {
 }
 
 /// Context supplied to every tool call.
+// Each flag is a separate fact the gate decides on (taint, untrusted, private, unattended mail).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct ToolContext {
     /// The run that invoked the tool.

@@ -790,20 +790,6 @@ impl MemoryTool {
                 "memory_save rejected: a memory noted in an unattended run holds at most {MAX_OWN_MEMORY_CHARS} characters; keep longer progress in notes_write"
             )));
         }
-        let (all, this_run) = self
-            .store
-            .count_own_notes(user_id, bot_id, &ctx.run_id)
-            .map_err(|e| ToolError::Execution(format!("memory_save: {e}")))?;
-        if this_run >= MAX_OWN_MEMORIES_PER_RUN {
-            return Err(ToolError::InvalidInput(format!(
-                "memory_save rejected: at most {MAX_OWN_MEMORIES_PER_RUN} memories per unattended run; use notes_write for the rest"
-            )));
-        }
-        if all >= MAX_OWN_MEMORIES {
-            return Err(ToolError::InvalidInput(format!(
-                "memory_save rejected: this bot already holds {MAX_OWN_MEMORIES} memories it noted itself; forget an old one with memory_forget first"
-            )));
-        }
         // Untrusted when the tool context says so, when the trigger is outside data, or when
         // any message of this run (an incoming trigger payload) was marked untrusted.
         let mut untrusted = ctx.exposure_untrusted || outside;
@@ -830,10 +816,33 @@ impl MemoryTool {
             reference,
             untrusted,
         });
-        let saved = self
+        // The caps are checked in the same transaction as the insert, so two concurrent saves
+        // cannot both take the last free slot.
+        let saved = match self
             .store
-            .add(&new, "unattended tool save")
-            .map_err(|e| ToolError::Execution(format!("memory_save: {e}")))?;
+            .add_own_note(
+                &new,
+                "unattended tool save",
+                &ctx.run_id,
+                crate::OwnNoteCaps {
+                    total: MAX_OWN_MEMORIES,
+                    per_run: MAX_OWN_MEMORIES_PER_RUN,
+                },
+            )
+            .map_err(|e| ToolError::Execution(format!("memory_save: {e}")))?
+        {
+            Ok(saved) => saved,
+            Err(crate::OwnNoteCapReached::PerRun) => {
+                return Err(ToolError::InvalidInput(format!(
+                    "memory_save rejected: at most {MAX_OWN_MEMORIES_PER_RUN} memories per unattended run; use notes_write for the rest"
+                )));
+            }
+            Err(crate::OwnNoteCapReached::Total) => {
+                return Err(ToolError::InvalidInput(format!(
+                    "memory_save rejected: this bot already holds {MAX_OWN_MEMORIES} memories it noted itself; forget an old one with memory_forget first"
+                )));
+            }
+        };
         let held = if saved.pending {
             " (waiting for the owner's OK before it is used)"
         } else {
@@ -1539,6 +1548,81 @@ mod tests {
         // Another bot has its own allowance.
         let other = start_run(&env, env.bot_b, None, "turn:schedule:s8:1:0", None, None);
         save.call(&other, own_args("Fine for bot B")).await.unwrap();
+    }
+
+    /// The count and the insert are one transaction: with one free slot left, eight saves that
+    /// race for it (each from its own run, so only the per-bot cap is in play) store exactly one.
+    #[test]
+    fn concurrent_unattended_saves_cannot_both_take_the_last_slot() {
+        let (env, _tools) = setup(800);
+        for n in 0..MAX_OWN_MEMORIES - 1 {
+            let mut m = NewMemory::new(
+                env.user,
+                Some(env.bot_a),
+                Kind::Episodic,
+                format!("filler {n}"),
+            );
+            m.origin = Some(MemoryOrigin {
+                run_id: format!("old-{n}"),
+                source: "schedule".into(),
+                reference: None,
+                untrusted: false,
+            });
+            env.store.add(&m, "test").unwrap();
+        }
+        let racers = 8;
+        let start = std::sync::Barrier::new(racers);
+        let stored = std::sync::atomic::AtomicUsize::new(0);
+        let refused = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for i in 0..racers {
+                let (env, start, stored, refused) = (&env, &start, &stored, &refused);
+                scope.spawn(move || {
+                    let mut m = NewMemory::new(
+                        env.user,
+                        Some(env.bot_a),
+                        Kind::Episodic,
+                        format!("racing fact {i}"),
+                    );
+                    m.origin = Some(MemoryOrigin {
+                        run_id: format!("race-{i}"),
+                        source: "schedule".into(),
+                        reference: None,
+                        untrusted: false,
+                    });
+                    start.wait();
+                    let outcome = env
+                        .store
+                        .add_own_note(
+                            &m,
+                            "test",
+                            &format!("race-{i}"),
+                            crate::OwnNoteCaps {
+                                total: MAX_OWN_MEMORIES,
+                                per_run: MAX_OWN_MEMORIES_PER_RUN,
+                            },
+                        )
+                        .unwrap();
+                    match outcome {
+                        Ok(_) => stored.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                        Err(cap) => {
+                            assert_eq!(cap, crate::OwnNoteCapReached::Total);
+                            refused.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                        }
+                    };
+                });
+            }
+        });
+        assert_eq!(stored.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            refused.load(std::sync::atomic::Ordering::SeqCst),
+            racers - 1
+        );
+        let (all, _) = env
+            .store
+            .count_own_notes(env.user, env.bot_a, "none")
+            .unwrap();
+        assert_eq!(all, MAX_OWN_MEMORIES);
     }
 
     #[tokio::test]
