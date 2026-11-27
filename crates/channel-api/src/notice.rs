@@ -673,6 +673,81 @@ mod tests {
         assert!(feedback(NoticeLang::En, Feedback::UnknownNumber(3)).contains('3'));
     }
 
+    #[test]
+    fn both_languages_show_the_same_facts_for_every_kind_of_notice() {
+        for kind in [
+            NoticeKind::Finished,
+            NoticeKind::Failed,
+            NoticeKind::Blocked,
+            NoticeKind::Progress,
+        ] {
+            let mut n = notice(kind);
+            n.late = true;
+            n.reason = Some("REASON_x7".into());
+            n.done = vec![NoticeItem {
+                key: "d".into(),
+                title: "d".into(),
+                text: Some("DONE_x7".into()),
+            }];
+            n.failed = vec![NoticeItem {
+                key: "FAILKEY_x7".into(),
+                title: String::new(),
+                text: Some("FAILTEXT_x7".into()),
+            }];
+            n.questions = vec![q("QKEY_x7")];
+            n.app_only = (0..6).map(|i| format!("APP{i}_x7")).collect();
+            let en = render(&n, NoticeLang::En, Flavor::Plain);
+            let tr = render(&n, NoticeLang::Tr, Flavor::Plain);
+            assert_ne!(en, tr, "{kind:?} is translated");
+            for text in [&en, &tr] {
+                for fact in [
+                    "Backlinks",
+                    "Scout",
+                    "REASON_x7",
+                    "DONE_x7",
+                    "FAILKEY_x7",
+                    "FAILTEXT_x7",
+                    "site QKEY_x7",
+                    "APP0_x7",
+                    "APP4_x7",
+                    "/answer",
+                ] {
+                    assert_eq!(
+                        text.matches(fact).count(),
+                        1,
+                        "{fact:?} in {kind:?}: {text}"
+                    );
+                }
+                assert!(!text.contains("APP5_x7"), "only five are listed: {text}");
+                for number in ["6", "10", "2", "1"] {
+                    assert!(text.contains(number), "{number} in {kind:?}: {text}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn feedback_keeps_its_numbers_and_commands_in_both_languages() {
+        for lang in [NoticeLang::En, NoticeLang::Tr] {
+            let unknown = feedback(lang, Feedback::UnknownNumber(137));
+            assert_eq!(unknown.matches("137").count(), 1, "{unknown}");
+            let answered = feedback(
+                lang,
+                Feedback::Answered {
+                    answered: 41,
+                    skipped: 59,
+                },
+            );
+            assert_eq!(answered.matches("41").count(), 1, "{answered}");
+            assert_eq!(answered.matches("59").count(), 1, "{answered}");
+            assert_eq!(
+                feedback(lang, Feedback::Empty).matches("/answer").count(),
+                1
+            );
+            assert!(feedback(lang, Feedback::NeedsNumbers).contains("`1: "));
+        }
+    }
+
     fn hostile() -> OwnerNotice {
         let mut n = notice(NoticeKind::Blocked);
         n.title = "[Pay now](https://evil.example/pay) @everyone".into();

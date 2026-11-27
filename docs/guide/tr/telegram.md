@@ -39,8 +39,9 @@ dili vardır ve bunu yeniden başlatmalarda korur; `/lang` istediğin an değiş
 - Bundan sonra `/pair` ile eşleştirilen bir sohbet, Telegram uygulamasının diline göre Türkçe ya da İngilizce
   başlar; başka her uygulama dili İngilizceye döner. (Kanal masaüstü uygulamasının diline de dönebilir, ancak
   masaüstü uygulaması bunu henüz daemon'a iletmiyor.)
-- Dille yalnızca düğme etiketleri değişir. Bir düğmenin ne yaptığı, karttaki bilgiler ve nelerin maskelendiği aynı kalır.
-- Bazı sabit metinler (eşleştirme yanıtları, çalışma bitti bildirimleri) hâlâ yalnızca İngilizcedir.
+- Kanalın kendi sözleri dile göre değişir: yanıtlar, düğme etiketleri, kart başlıkları ve bildirimler. Bir düğmenin ne yaptığı, karttaki bilgiler ve nelerin maskelendiği aynı kalır.
+- Onay kartının ayrıntı bölümünü (tam olarak ne olacağı; `DAEMON SUMMARY:` ile başlayan satırla biter) daemon İngilizce yazar ve henüz çevrilmez. Anlayamıyorsan kararı masaüstü uygulamasında ver.
+- Eşleştirilmemiş hesaplara giden ret metni ve `/pair` ile eşleşmeden önceki hatalar bilerek İngilizcedir: kanal henüz kimin dilini bilmiyor.
 
 ## Bilmen gerekenler
 

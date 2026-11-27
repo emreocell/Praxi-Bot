@@ -84,8 +84,13 @@ daemon messages are not translated.
   on the Telegram app's language; any other app language falls back to
   English. (The channel can also fall back to the desktop app's language, but
   the desktop app does not pass it to the daemon yet.)
-- Only the button labels change with the language. What a button does, the
-  information on the card and what is masked stay the same.
+- The channel's own words change with the language: replies, button labels,
+  card headings and notices. What a button does, the information on the card and
+  what is masked stay the same.
+- The detail block of an approval card (what exactly will happen, ending with
+  the line that starts with `DAEMON SUMMARY:`) is written by the daemon in
+  English and is not translated yet. If you cannot follow it, decide in the
+  desktop app.
 - Before a chat is paired it has no language, so `/pair` errors are in English.
   The reply to a successful `/pair` already uses the chat's new language.
 - The refusal sent to accounts that are not paired is **English on purpose**:

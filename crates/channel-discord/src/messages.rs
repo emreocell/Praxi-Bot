@@ -300,3 +300,224 @@ impl Msg<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LANGS: [Lang; 3] = [Lang::En, Lang::Tr, Lang::De];
+    /// A marker that no catalog text contains, so "exactly once" is unambiguous.
+    const ARG: &str = "ARG_x7";
+
+    /// Every message, built with the marker as its text arguments. The match in
+    /// [`arguments`] has no wildcard, so a new variant must be added to both.
+    fn every_message() -> Vec<Msg<'static>> {
+        vec![
+            Msg::NotPaired,
+            Msg::Paired,
+            Msg::PairInvalid,
+            Msg::PairExpired,
+            Msg::PairInDm,
+            Msg::Allowed,
+            Msg::Disallowed,
+            Msg::AllowInServer,
+            Msg::NoBots,
+            Msg::BotsHeading,
+            Msg::UseOk(ARG),
+            Msg::UseUnknown,
+            Msg::UseUsage,
+            Msg::Status {
+                running: 4_242,
+                pending: 7_373,
+            },
+            Msg::LangSet,
+            Msg::LangUsage,
+            Msg::Help,
+            Msg::TooLong,
+            Msg::TooFast,
+            Msg::Queued,
+            Msg::RunStopped,
+            Msg::RunFinished,
+            Msg::RunFailed(ARG),
+            Msg::RunError(ARG),
+            Msg::StreamLost,
+            Msg::TooManyRuns,
+            Msg::AttachmentsNotOpened(ARG),
+            Msg::Failed(ARG),
+            Msg::ApprovalHeading(ARG),
+            Msg::ApprovalDesktopOnly(ARG),
+            Msg::ApprovalMasked(ARG),
+            Msg::ApprovalDetailsUnavailable(ARG),
+            Msg::ApprovalTooLarge(ARG),
+            Msg::ApprovalIncomplete,
+            Msg::ButtonApprove,
+            Msg::ButtonDeny,
+            Msg::Approved,
+            Msg::Denied,
+            Msg::UnknownOrExpired,
+            Msg::NotYours,
+            Msg::Answered,
+        ]
+    }
+
+    /// What must appear exactly once in every language's text.
+    fn arguments(msg: Msg<'_>) -> Vec<String> {
+        match msg {
+            Msg::UseOk(a)
+            | Msg::RunFailed(a)
+            | Msg::RunError(a)
+            | Msg::AttachmentsNotOpened(a)
+            | Msg::Failed(a)
+            | Msg::ApprovalHeading(a)
+            | Msg::ApprovalDesktopOnly(a)
+            | Msg::ApprovalMasked(a)
+            | Msg::ApprovalDetailsUnavailable(a)
+            | Msg::ApprovalTooLarge(a) => vec![a.to_owned()],
+            Msg::Status { running, pending } => vec![running.to_string(), pending.to_string()],
+            Msg::NotPaired => vec!["!pair 123456".into()],
+            Msg::PairInDm
+            | Msg::Paired
+            | Msg::PairInvalid
+            | Msg::PairExpired
+            | Msg::Allowed
+            | Msg::Disallowed
+            | Msg::AllowInServer
+            | Msg::NoBots
+            | Msg::BotsHeading
+            | Msg::UseUnknown
+            | Msg::UseUsage
+            | Msg::LangSet
+            | Msg::LangUsage
+            | Msg::Help
+            | Msg::TooLong
+            | Msg::TooFast
+            | Msg::Queued
+            | Msg::RunStopped
+            | Msg::RunFinished
+            | Msg::StreamLost
+            | Msg::TooManyRuns
+            | Msg::ApprovalIncomplete
+            | Msg::ButtonApprove
+            | Msg::ButtonDeny
+            | Msg::Approved
+            | Msg::Denied
+            | Msg::UnknownOrExpired
+            | Msg::NotYours
+            | Msg::Answered => vec![],
+        }
+    }
+
+    #[test]
+    fn every_message_is_translated_and_keeps_its_arguments() {
+        for msg in every_message() {
+            let english = msg.render(Lang::En);
+            for lang in LANGS {
+                let text = msg.render(lang);
+                assert!(!text.trim().is_empty(), "{msg:?} is empty in {lang:?}");
+                for arg in arguments(msg) {
+                    assert_eq!(
+                        text.matches(&arg).count(),
+                        1,
+                        "{arg:?} in {msg:?} ({lang:?}): {text}"
+                    );
+                }
+                if lang != Lang::En {
+                    // "Problem: ..." is the same word in English and German.
+                    let same_word = matches!(msg, Msg::RunError(_)) && lang == Lang::De;
+                    assert!(
+                        same_word || text != english,
+                        "{msg:?} has no real {lang:?} text"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn commands_do_not_change_with_the_language() {
+        for lang in LANGS {
+            for command in [
+                "!bots",
+                "!use",
+                "!stop",
+                "!status",
+                "!lang",
+                "!allow",
+                "!disallow",
+            ] {
+                assert!(
+                    Msg::Help.render(lang).contains(command),
+                    "{command} in {lang:?}"
+                );
+            }
+            let usage = Msg::LangUsage.render(lang);
+            for code in ["!lang en", "!lang tr", "!lang de"] {
+                assert_eq!(usage.matches(code).count(), 1, "{code} in {lang:?}");
+            }
+            assert_eq!(Msg::UseUsage.render(lang).matches("!use").count(), 1);
+            assert_eq!(Msg::UseUnknown.render(lang).matches("!bots").count(), 1);
+            assert_eq!(Msg::BotsHeading.render(lang).matches("!use").count(), 1);
+            assert_eq!(Msg::Paired.render(lang).matches("!help").count(), 1);
+            assert_eq!(Msg::AllowInServer.render(lang).matches("!allow").count(), 1);
+        }
+    }
+
+    #[test]
+    fn approval_fallbacks_send_the_owner_to_the_app_in_every_language() {
+        // What the card hides or cannot show must say where to decide, in every
+        // language, so no translation reads as if a button could settle it here.
+        for lang in LANGS {
+            let app = match lang {
+                Lang::En => "app on your computer",
+                Lang::Tr => "bilgisayarınızdaki uygulama",
+                Lang::De => "app auf ihrem computer",
+            };
+            for msg in [
+                Msg::ApprovalDesktopOnly("t"),
+                Msg::ApprovalMasked("t"),
+                Msg::ApprovalDetailsUnavailable("t"),
+                Msg::ApprovalTooLarge("t"),
+                Msg::ApprovalIncomplete,
+            ] {
+                let text = msg.render(lang);
+                assert!(
+                    text.to_lowercase().contains(app),
+                    "{msg:?} ({lang:?}) names the app: {text}"
+                );
+            }
+        }
+        assert_eq!(Msg::ButtonApprove.render(Lang::En), "Approve once");
+        assert_eq!(Msg::ButtonApprove.render(Lang::Tr), "Bir kez onayla");
+        assert_eq!(Msg::ButtonApprove.render(Lang::De), "Einmal erlauben");
+    }
+
+    #[test]
+    fn language_codes_round_trip_and_unknown_ones_are_refused() {
+        for lang in LANGS {
+            assert_eq!(Lang::from_code(lang.code()), Some(lang));
+        }
+        assert_eq!(Lang::from_code(" TR_tr "), Some(Lang::Tr));
+        assert_eq!(Lang::from_code("de-AT"), Some(Lang::De));
+        assert_eq!(Lang::from_code("en-US"), Some(Lang::En));
+        for other in ["fr", "", "turkish", "t"] {
+            assert_eq!(Lang::from_code(other), None, "{other:?}");
+        }
+        assert_eq!(Lang::default(), Lang::En);
+    }
+
+    #[test]
+    fn english_wording_of_the_common_replies_is_pinned() {
+        assert_eq!(Msg::RunStopped.render(Lang::En), "Stopped.");
+        assert_eq!(Msg::RunFinished.render(Lang::En), "Done.");
+        assert_eq!(Msg::Approved.render(Lang::En), "✅ Approved once.");
+        assert_eq!(Msg::Denied.render(Lang::En), "⛔ Denied.");
+        assert_eq!(
+            Msg::Status {
+                running: 1,
+                pending: 2
+            }
+            .render(Lang::En),
+            "Connected to your computer. Running now: 1. Waiting for your OK: 2."
+        );
+    }
+}

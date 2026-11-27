@@ -83,8 +83,9 @@ place, `i18n/scaffold-locales.json`:
   `apps/cli/src/presets.rs`); a new CLI language is a separate, larger change.
 - The natural-language schedule parser understands English and Turkish phrases
   (`crates/scheduler/src/nl.rs`).
-- The Telegram channel's own texts are a Rust catalog; see [The Telegram message catalog](#the-telegram-message-catalog)
-  below.
+- The Telegram and Discord channels' own texts are Rust catalogs, and the owner notices both share are one more; see
+  [The Telegram message catalog](#the-telegram-message-catalog) and
+  [The Discord and shared notice catalogs](#the-discord-and-shared-notice-catalogs) below.
 - The user guide in `docs/guide/` is English, with Turkish and German pages in `docs/guide/tr/` and `docs/guide/de/`; see
   [Translating the user guide](translating-the-guide.md).
 
@@ -114,3 +115,26 @@ a secret.
 Adding a third Telegram language is a larger change: `Language` is currently a two-way choice, so
 it would become an enum with a code for `/lang`, and every arm in `render` gets a new text. Run
 `cargo test -p channel-telegram` and `cargo clippy -p channel-telegram --all-targets -- -D warnings`.
+
+## The Discord and shared notice catalogs
+
+Discord has the same shape as Telegram, in `crates/channel-discord/src/messages.rs`: a `Msg` enum with
+typed arguments and one `Msg::render(lang)` `match` per language, with no wildcard. It speaks English,
+Turkish and German (`!lang en|tr|de`, `bot channels discord setup --lang ...`; see
+[the Discord guide](../guide/discord.md)). The tests in that file check that every message exists in
+every language, that no translation is a copy of the English text, and that each argument and each
+command (`!use`, `!bots`, ...) appears exactly once. Commands and button ids never change with the
+language. Add a message to `every_message()` and `arguments()` in the tests; the latter has no wildcard
+either.
+
+What a bot reports on its own (a finished, failed or blocked mission, the questions in it, and the
+answers the owner gets back) is written once for both channels in `crates/channel-api/src/notice.rs`
+(`render` and `feedback`, `NoticeLang` is English or Turkish). Each bridge picks the language of its
+own chat. A Discord chat set to German therefore still gets these notices in English until a German
+text is added there: this is the fallback, not a bug. A new notice text needs an English and a Turkish
+arm, and the tests in that file check that both show the same facts.
+
+Credentials, tool output, daemon errors and the body of an approval card (`protocol::approval_text`,
+whose fixed `DAEMON SUMMARY:` line the channels rely on) are not part of any catalog. Run
+`cargo test -p channel-api -p channel-discord` and
+`cargo clippy -p channel-api -p channel-discord --all-targets -- -D warnings`.
