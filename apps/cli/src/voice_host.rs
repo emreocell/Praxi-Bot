@@ -601,8 +601,13 @@ impl VoiceHost {
     }
 
     #[cfg(feature = "local-voice")]
-    async fn synthesize_local(&self, input: SynthesizeInput) -> Result<Vec<u8>, VoiceControlError> {
+    async fn synthesize_local(
+        &self,
+        mut input: SynthesizeInput,
+    ) -> Result<Vec<u8>, VoiceControlError> {
         use crate::voice_local::{TTS, model_files_present};
+        // Every caller of `VoiceControl::synthesize` gets the route's limits, not only the route.
+        input.validate()?;
         if !model_files_present(&self.data_dir, &TTS) {
             return Err(VoiceControlError::NotConfigured);
         }
@@ -620,9 +625,9 @@ impl VoiceHost {
     #[cfg(not(feature = "local-voice"))]
     fn synthesize_local(
         &self,
-        _input: SynthesizeInput,
+        mut input: SynthesizeInput,
     ) -> std::future::Ready<Result<Vec<u8>, VoiceControlError>> {
-        std::future::ready(Err(VoiceControlError::NotConfigured))
+        std::future::ready(input.validate().and(Err(VoiceControlError::NotConfigured)))
     }
 }
 
@@ -753,6 +758,21 @@ mod tests {
             .await,
             Err(VoiceControlError::NotConfigured),
         );
+        // The limits hold for a direct caller of the trait too, not only on the route.
+        for (text, language) in [
+            ("a".repeat(1001), "tr"),
+            ("a\0b".to_owned(), "tr"),
+            ("hello".to_owned(), "../../x"),
+        ] {
+            let err = host
+                .synthesize(SynthesizeInput {
+                    text,
+                    language: language.into(),
+                })
+                .await
+                .unwrap_err();
+            assert!(matches!(err, VoiceControlError::Invalid(_)), "{err:?}");
+        }
         assert_eq!(
             check_offline_voice(&dir).status,
             if cfg!(feature = "local-voice") {
@@ -761,6 +781,42 @@ mod tests {
                 daemon_api::doctor::Status::Skipped
             }
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn local_only_never_falls_back_to_a_network_provider() {
+        // A loopback "cloud" service that would see the recording if the daemon forwarded it.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let dir = std::env::temp_dir().join(format!("praxi-voice-only-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = secret_store::MemoryStore::new();
+        let host = VoiceHost::new(&dir, 7000, Some(Arc::new(store)));
+        for provider in [VoiceProvider::Whisper, VoiceProvider::GeminiLive] {
+            host.update(VoiceConfigInput {
+                stt_provider: Some(provider),
+                stt_base_url: Some(format!(
+                    "http://127.0.0.1:{}/v1",
+                    listener.local_addr().unwrap().port()
+                )),
+                stt_key: Some("sk-test-key".into()),
+                gemini_key: Some("gemini-test-key".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                host.transcribe(vec![1; 64], "audio/pcm".into(), Some("tr".into()), true)
+                    .await,
+                Err(VoiceControlError::NotConfigured),
+                "{provider:?}"
+            );
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "{provider:?}: the recording was sent to a network service"
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -13,8 +13,32 @@ let generation = 0;
 let offline: AbortController | null = null;
 const listeners = new Set<Listener>();
 
+/** A reply read aloud on its own is cut to this many characters (the daemon refuses more per request). */
+export const MAX_SPEECH_CHARS = 1000;
+
+/** The one read-aloud that waits for the current one to end instead of cutting it off. */
+let waiting: { start: () => void; drop: () => void } | null = null;
+
 function emit(): void {
   listeners.forEach((l) => l());
+}
+
+function startWaiting(): void {
+  const next = waiting;
+  waiting = null;
+  next?.start();
+}
+
+/** At most `max` characters, ending at a sentence boundary when one fits (whole Unicode characters). */
+export function truncateForSpeech(text: string, lang: string, max = MAX_SPEECH_CHARS): string {
+  const clean = text.replaceAll("\0", "").trim();
+  if (Array.from(clean).length <= max) return clean;
+  let out = "";
+  for (const { segment } of new Intl.Segmenter(lang, { granularity: "sentence" }).segment(clean)) {
+    if (Array.from(out + segment).length > max) break;
+    out += segment;
+  }
+  return out.trim() || Array.from(clean).slice(0, max).join("").trim();
 }
 
 export function speechSupported(): boolean {
@@ -38,6 +62,8 @@ export function stopSpeaking(): void {
 
 function cancelPlayback(): void {
   generation += 1;
+  waiting?.drop();
+  waiting = null;
   offline?.abort();
   offline = null;
   if (speechSupported()) {
@@ -69,6 +95,7 @@ export function speak(id: string, text: string, opts: { voiceName: string; rate:
     if (generation === active) {
       speakingId = null;
       emit();
+      startWaiting();
     }
   };
   u.onend = done;
@@ -81,14 +108,29 @@ export function speak(id: string, text: string, opts: { voiceName: string; rate:
 type Synthesize = (text: string, lang: string, signal: AbortSignal) => Promise<Blob>;
 type PlayWav = (wav: Blob, rate: number, signal: AbortSignal) => Promise<void>;
 
-/** Abort the pending request or audio on Stop, barge-in or the next read-aloud. */
+/**
+ * Abort the pending request or audio on Stop, barge-in or the next read-aloud. One utterance plays
+ * at a time. With `whenIdle` (a reply read aloud on its own) the text waits for the current one to
+ * end instead of cutting it off, a newer waiting one replaces an older one, and Stop drops it.
+ * `maxChars` cuts a long text at a sentence boundary.
+ */
 export async function speakOffline(
   id: string,
   text: string,
-  opts: { lang: string; rate: number; synthesize: Synthesize },
+  opts: { lang: string; rate: number; synthesize: Synthesize; whenIdle?: boolean; maxChars?: number },
   play: PlayWav = playWav
 ): Promise<void> {
-  if (!text.trim()) return;
+  const spoken = opts.maxChars === undefined ? text : truncateForSpeech(text, opts.lang, opts.maxChars);
+  if (!spoken.trim()) return;
+  if (opts.whenIdle && speakingId !== null) {
+    return new Promise<void>((resolve, reject) => {
+      waiting?.drop();
+      waiting = {
+        start: () => void speakOffline(id, spoken, { ...opts, whenIdle: false }, play).then(resolve, reject),
+        drop: resolve
+      };
+    });
+  }
   cancelPlayback();
   const controller = new AbortController();
   const { signal } = controller;
@@ -96,7 +138,7 @@ export async function speakOffline(
   speakingId = id;
   emit();
   try {
-    for (const piece of speechPieces(text, opts.lang)) {
+    for (const piece of speechPieces(spoken, opts.lang)) {
       signal.throwIfAborted();
       const audio = await opts.synthesize(piece, opts.lang, signal);
       signal.throwIfAborted();
@@ -109,6 +151,7 @@ export async function speakOffline(
       offline = null;
       speakingId = null;
       emit();
+      startWaiting();
     }
   }
 }

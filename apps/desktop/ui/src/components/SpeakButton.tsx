@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { effectiveVoice } from "../lib/botVoice";
 import { markdownToSpeech } from "../lib/speechText";
 import { ApiError } from "../api/client";
-import { currentSpeakingId, speak, speakOffline, speechSupported, stopSpeaking, subscribeSpeaking } from "../lib/speaker";
+import { MAX_SPEECH_CHARS, currentSpeakingId, speak, speakOffline, speechSupported, stopSpeaking, subscribeSpeaking, truncateForSpeech } from "../lib/speaker";
 import { useLocalDaemonClient } from "../state/DaemonContext";
 import { DEFAULT_SETTINGS, loadSettingsSync } from "../store/settingsStore";
 import tipStyles from "./ActionTip.module.css";
@@ -25,9 +25,11 @@ export function useReplySpeaker() {
   const toast = useToast();
   const client = useLocalDaemonClient();
   const lang = i18n.language;
-  return useCallback((id: string, text: string, botId?: string | null) => {
+  /** `auto`: a reply read aloud on its own (cut to the limit, waits its turn); a click always interrupts. */
+  return useCallback((id: string, text: string, botId?: string | null, auto = false) => {
     const prefs = loadSettingsSync() ?? DEFAULT_SETTINGS;
-    const spoken = markdownToSpeech(text, { code: t("voice.codeOmitted"), table: t("voice.tableOmitted") });
+    const plain = markdownToSpeech(text, { code: t("voice.codeOmitted"), table: t("voice.tableOmitted") });
+    const spoken = auto ? truncateForSpeech(plain, lang, MAX_SPEECH_CHARS) : plain;
     const opts = { ...voiceOptions(botId, prefs), lang };
     if (!prefs.offlineReadAloud) {
       speak(id, spoken, opts);
@@ -37,7 +39,7 @@ export function useReplySpeaker() {
       toast.show(t("voice.offlineReadAloud.unavailable"), "danger");
       return;
     }
-    void speakOffline(id, spoken, { ...opts, synthesize: (piece, language, signal) => client.synthesizeVoice(piece, language, signal) })
+    void speakOffline(id, spoken, { ...opts, whenIdle: auto, synthesize: (piece, language, signal) => client.synthesizeVoice(piece, language, signal) })
       .catch((e: unknown) => {
         const key = e instanceof ApiError && e.status === 409
           ? "notInstalled"

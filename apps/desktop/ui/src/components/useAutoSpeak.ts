@@ -25,6 +25,6 @@ export function useAutoSpeak(chatId: string, runs: readonly RunState[], external
     if (!last || !prefs.speakReplies || !replySpeechSupported()) {
       return;
     }
-    speakReply(`auto:${last.id}`, last.text);
+    speakReply(`auto:${last.id}`, last.text, undefined, true);
   }, [chatId, runs, speakReply, external]);
 }

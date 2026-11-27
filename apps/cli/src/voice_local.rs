@@ -21,7 +21,8 @@ use std::sync::{Arc, atomic::AtomicBool};
 use daemon_api::voice::{LocalVoiceModelDto, LocalVoiceStatusDto};
 use parking_lot::Mutex;
 use provider_catalog::local_runtime::download::{
-    DownloadSpec, check_disk_space, download_verified, missing_bytes, sha256_file,
+    DownloadSpec, check_disk_space, download_verified, is_pinned_https_url, missing_bytes,
+    pinned_redirects, sha256_file,
 };
 
 /// Sample rate the recogniser and the VAD expect.
@@ -287,23 +288,15 @@ pub fn file_path(data_dir: &Path, spec: &ModelSpec, name: &str) -> PathBuf {
 /// `https` and a host the catalog may point at. Applied to the first URL and to every redirect.
 #[must_use]
 pub fn is_allowed_download_url(url: &url::Url) -> bool {
-    if url.scheme() != "https"
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return false;
-    }
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    let host = host.to_ascii_lowercase();
-    let under = |root: &str| host == root || host.ends_with(&format!(".{root}"));
-    under("huggingface.co")
-        || under("hf.co")
-        || under("github.com")
-        || under("githubusercontent.com")
+    is_pinned_https_url(url, DOWNLOAD_HOSTS)
 }
+
+const DOWNLOAD_HOSTS: &[&str] = &[
+    "huggingface.co",
+    "hf.co",
+    "github.com",
+    "githubusercontent.com",
+];
 
 /// Download state shared between the installer task and `GET /v1/voice/local`.
 #[derive(Default)]
@@ -456,13 +449,7 @@ async fn install_models(data_dir: &Path, models: &[&ModelSpec]) -> Result<(), St
         }
         let builder = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(20))
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 || !is_allowed_download_url(attempt.url()) {
-                    attempt.stop()
-                } else {
-                    attempt.follow()
-                }
-            }));
+            .redirect(pinned_redirects(DOWNLOAD_HOSTS));
         let spec = DownloadSpec {
             url: file.url,
             dest: &dest,
@@ -697,6 +684,11 @@ mod tests {
         assert!(!ok("https://huggingface.co.evil.example/a"));
         assert!(!ok("https://evilhuggingface.co/a"));
         assert!(!ok("https://user:pw@huggingface.co/a"));
+        assert!(!ok("https://huggingface.co:8443/a"));
+        assert!(
+            !ok("https://storage.googleapis.com/a"),
+            "the browser host is not a voice host"
+        );
     }
 
     #[test]

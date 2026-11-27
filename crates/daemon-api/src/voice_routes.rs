@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
+use axum::{Extension, Json};
 use base64::Engine as _;
 
 use crate::AppState;
@@ -14,6 +14,7 @@ use crate::routes::ApiJson;
 use crate::voice::{
     LocalVoiceInstallInput, LocalVoiceStatusDto, SynthesizeInput, TranscribeInput,
     TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl, VoiceControlError,
+    VoiceProvider,
 };
 
 /// Longest accepted API key (bytes).
@@ -90,19 +91,30 @@ pub(crate) async fn update_voice(
 }
 
 /// Transcribe a recording with the configured service (owner-triggered dictation).
+///
+/// With `local_only` the daemon refuses (409) unless the provider is on-device, so the recording
+/// is never uploaded. A paired peer cannot use the host's on-device engine (403): decoding and
+/// recognition burn the host's CPU for up to two minutes and would starve the owner's own dictation.
 #[utoipa::path(post, path = "/v1/voice/transcribe", tag = "voice", security(("bearer" = [])),
     request_body = TranscribeInput,
     responses((status = 200, body = TranscribeOutput),
               (status = 400, body = ErrorBody, description = "bad or oversized audio"),
-              (status = 409, body = ErrorBody, description = "dictation is not set up"),
+              (status = 403, body = ErrorBody, description = "on-device dictation is for the local owner"),
+              (status = 409, body = ErrorBody, description = "dictation is not set up, or `local_only` and the provider is not on-device"),
               (status = 429, body = ErrorBody, description = "offline voice is busy"),
               (status = 502, body = ErrorBody, description = "the transcription service failed"),
               (status = 503, body = ErrorBody, description = "voice is not available")))]
 pub(crate) async fn transcribe(
     State(s): State<AppState>,
+    peer: Option<Extension<crate::PeerIdentity>>,
     ApiJson(input): ApiJson<TranscribeInput>,
 ) -> Result<Json<TranscribeOutput>, ApiError> {
     let control = voice(&s)?;
+    if peer.is_some() && control.get().stt_provider == VoiceProvider::LocalVoice {
+        return Err(ApiError::forbidden(
+            "on-device dictation runs on the computer that owns it",
+        ));
+    }
     if !input.mime.starts_with("audio/") || input.mime.len() > 100 {
         return Err(ApiError::bad_request("`mime` must be an audio/* type"));
     }
@@ -164,23 +176,10 @@ pub(crate) async fn synthesize(
     State(s): State<AppState>,
     ApiJson(mut input): ApiJson<SynthesizeInput>,
 ) -> Result<impl IntoResponse, ApiError> {
-    input.text = input.text.trim().to_owned();
-    if input.text.is_empty() || input.text.contains('\0') || input.text.chars().count() > 1_000 {
-        return Err(ApiError::bad_request(
-            "text must be 1 to 1000 characters without NUL",
-        ));
-    }
-    if input.language.is_empty()
-        || input.language.len() > 35
-        || !input
-            .language
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-    {
-        return Err(ApiError::bad_request(
-            "language must be a BCP 47 language tag",
-        ));
-    }
+    input.validate().map_err(|e| match e {
+        VoiceControlError::Invalid(m) => ApiError::bad_request(m),
+        other => other.into(),
+    })?;
     let audio = voice(&s)?.synthesize(input).await.map_err(|e| match e {
         VoiceControlError::NotConfigured => ApiError::new(
             StatusCode::CONFLICT,

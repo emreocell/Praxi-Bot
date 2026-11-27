@@ -181,6 +181,45 @@ pub struct SynthesizeInput {
     pub language: String,
 }
 
+/// Longest text one synthesis request may carry (Unicode characters).
+pub const MAX_SYNTHESIS_CHARS: usize = 1_000;
+/// Longest accepted BCP 47 language tag (bytes).
+pub const MAX_LANGUAGE_TAG_BYTES: usize = 35;
+
+impl SynthesizeInput {
+    /// Trim the text and check the limits: 1 to [`MAX_SYNTHESIS_CHARS`] characters without NUL,
+    /// and a language tag of ASCII letters, digits and `-` (at most [`MAX_LANGUAGE_TAG_BYTES`]).
+    ///
+    /// This is the one rule every layer applies (the route, the host and the worker process), so
+    /// a caller that skips the route cannot make the worker synthesize an unbounded text.
+    ///
+    /// # Errors
+    /// [`VoiceControlError::Invalid`] with a plain-language reason.
+    pub fn validate(&mut self) -> Result<(), VoiceControlError> {
+        self.text = self.text.trim().to_owned();
+        if self.text.is_empty()
+            || self.text.contains('\0')
+            || self.text.chars().count() > MAX_SYNTHESIS_CHARS
+        {
+            return Err(VoiceControlError::Invalid(format!(
+                "text must be 1 to {MAX_SYNTHESIS_CHARS} characters without NUL"
+            )));
+        }
+        if self.language.is_empty()
+            || self.language.len() > MAX_LANGUAGE_TAG_BYTES
+            || !self
+                .language
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err(VoiceControlError::Invalid(
+                "language must be a BCP 47 language tag".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Why a [`VoiceControl`] operation failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceControlError {
@@ -265,4 +304,43 @@ pub(crate) fn offline_voice_unavailable() -> crate::doctor::Check {
         "offline voice",
         "this build does not include offline voice",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(text: &str, language: &str) -> SynthesizeInput {
+        SynthesizeInput {
+            text: text.into(),
+            language: language.into(),
+        }
+    }
+
+    #[test]
+    fn synthesis_input_is_trimmed_and_bounded() {
+        let mut ok = input("  Günaydın.  ", "tr-TR");
+        ok.validate().unwrap();
+        assert_eq!(ok.text, "Günaydın.");
+        input(&"ğ".repeat(MAX_SYNTHESIS_CHARS), "es-419")
+            .validate()
+            .unwrap();
+        for (text, language) in [
+            (String::new(), "tr"),
+            ("   ".to_owned(), "tr"),
+            ("a\0b".to_owned(), "tr"),
+            ("ğ".repeat(MAX_SYNTHESIS_CHARS + 1), "tr"),
+            // a 32 KiB worker header would otherwise carry about 30,000 characters
+            ("a".repeat(30_000), "tr"),
+            ("hello".to_owned(), ""),
+            ("hello".to_owned(), "en_US"),
+            ("hello".to_owned(), "en US"),
+            ("hello".to_owned(), "../x"),
+            ("hello".to_owned(), "ğ"),
+            ("hello".to_owned(), &"a".repeat(MAX_LANGUAGE_TAG_BYTES + 1)),
+        ] {
+            let err = input(&text, language).validate().unwrap_err();
+            assert!(matches!(err, VoiceControlError::Invalid(_)), "{err:?}");
+        }
+    }
 }

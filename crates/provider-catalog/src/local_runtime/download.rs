@@ -55,6 +55,50 @@ fn io_err(e: &std::io::Error) -> DownloadError {
     DownloadError::Io(e.kind().to_string())
 }
 
+/// Hosts the pinned downloads of this catalog come from (the llama.cpp release, the GGUF models
+/// and the managed browser). A redirect may only lead to one of these (or a subdomain of one),
+/// so a compromised or hijacked mirror cannot send the download somewhere else.
+pub const PINNED_HOST_ROOTS: &[&str] = &[
+    "huggingface.co",
+    "hf.co",
+    "github.com",
+    "githubusercontent.com",
+    "storage.googleapis.com",
+];
+
+/// `https`, no user name or password, the default port, and a host that is one of `roots` or a
+/// subdomain of one. The rule for the first URL and for every redirect hop alike.
+#[must_use]
+pub fn is_pinned_https_url(url: &reqwest::Url, roots: &[&str]) -> bool {
+    if url.scheme() != "https"
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.to_ascii_lowercase();
+    roots
+        .iter()
+        .any(|root| host == *root || host.ends_with(&format!(".{root}")))
+}
+
+/// Follow at most 5 redirects, each only to a URL that passes [`is_pinned_https_url`] for
+/// `roots`. Anything else is not followed and surfaces as "server answered 3xx".
+#[must_use]
+pub fn pinned_redirects(roots: &'static [&'static str]) -> Policy {
+    Policy::custom(move |attempt| {
+        if attempt.previous().len() < 5 && is_pinned_https_url(attempt.url(), roots) {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
 /// http is only accepted towards this machine (tests and local mirrors).
 fn url_allowed(url: &str) -> bool {
     reqwest::Url::parse(url).is_ok_and(|url| {
@@ -144,7 +188,8 @@ fn expected_range(response: &reqwest::Response, have: u64, size: u64) -> bool {
         == Some(expected.as_str())
 }
 
-/// [`download_verified`] with the default HTTP client (the system proxy settings apply).
+/// [`download_verified`] with the default HTTP client (the system proxy settings apply) and
+/// redirects limited to [`PINNED_HOST_ROOTS`].
 ///
 /// # Errors
 /// See [`DownloadError`].
@@ -153,13 +198,14 @@ pub async fn download(
     progress: &(dyn Fn(u64) + Send + Sync),
     cancel: &AtomicBool,
 ) -> Result<(), DownloadError> {
-    let builder = reqwest::Client::builder().redirect(Policy::custom(|attempt| {
-        if attempt.url().scheme() == "https" && attempt.previous().len() < 5 {
-            attempt.follow()
-        } else {
-            attempt.stop()
-        }
-    }));
+    // The first URL obeys the rule its redirects do (plain http is left to `download_verified`,
+    // which only accepts this machine).
+    let pinned = reqwest::Url::parse(spec.url)
+        .is_ok_and(|url| url.scheme() == "http" || is_pinned_https_url(&url, PINNED_HOST_ROOTS));
+    if !pinned {
+        return Err(DownloadError::InsecureUrl);
+    }
+    let builder = reqwest::Client::builder().redirect(pinned_redirects(PINNED_HOST_ROOTS));
     download_verified(builder, spec, progress, cancel).await
 }
 
@@ -435,6 +481,79 @@ mod tests {
         assert!(
             matches!(err, DownloadError::NotEnoughDisk { .. }),
             "{err:?}"
+        );
+    }
+
+    #[test]
+    fn the_pinned_rule_checks_scheme_credentials_port_and_host() {
+        let ok = |u: &str| is_pinned_https_url(&reqwest::Url::parse(u).unwrap(), PINNED_HOST_ROOTS);
+        assert!(ok("https://huggingface.co/a/b"));
+        assert!(ok("https://cas-bridge.xethub.hf.co/x"));
+        assert!(ok("https://release-assets.githubusercontent.com/x"));
+        assert!(ok(
+            "https://storage.googleapis.com/chrome-for-testing-public/x.zip"
+        ));
+        assert!(
+            ok("https://HuggingFace.co:443/a"),
+            "the default port is the same thing"
+        );
+        assert!(!ok("http://huggingface.co/a"));
+        assert!(!ok("https://huggingface.co:8443/a"));
+        assert!(!ok("https://user@huggingface.co/a"));
+        assert!(!ok("https://user:pw@huggingface.co/a"));
+        assert!(!ok("https://huggingface.co.evil.example/a"));
+        assert!(!ok("https://evilhuggingface.co/a"));
+        assert!(!ok("https://huggingface.co@evil.example/a"));
+        assert!(!ok("https://evil.googleapis.com/a"));
+        assert!(!ok("https://127.0.0.1/a"));
+        assert!(!ok("https://[::1]/a"));
+    }
+
+    /// A server whose first answer is a redirect to `location`.
+    async fn redirecting_to(location: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", location))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn the_shared_downloader_does_not_follow_a_redirect_off_the_allow_list() {
+        // The second server would answer with the right bytes: following the redirect would
+        // install them. The policy must refuse before any request reaches it.
+        let target = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(BODY))
+            .mount(&target)
+            .await;
+        let hops = [
+            format!("{}/m.gguf", target.uri()), // plain http, loopback, explicit port
+            "https://user:pw@huggingface.co/m.gguf".to_owned(),
+            "https://huggingface.co:8443/m.gguf".to_owned(),
+            "https://huggingface.co.evil.example/m.gguf".to_owned(),
+        ];
+        for hop in hops {
+            let first = redirecting_to(&hop).await;
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("m.gguf");
+            let url = format!("{}/m.gguf", first.uri());
+            let sha = good_sha();
+            let err = download_verified(
+                builder().redirect(pinned_redirects(PINNED_HOST_ROOTS)),
+                &spec(&url, &dest, &sha),
+                &|_| {},
+                &AtomicBool::new(false),
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(err, DownloadError::Network(_)), "{hop}: {err:?}");
+            assert!(!dest.exists(), "{hop}");
+        }
+        assert!(
+            target.received_requests().await.unwrap().is_empty(),
+            "a refused redirect must not be requested"
         );
     }
 }

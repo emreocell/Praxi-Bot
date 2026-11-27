@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use daemon_api::voice::VoiceControlError;
+use daemon_api::voice::{SynthesizeInput, VoiceControlError};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -48,6 +48,17 @@ pub async fn run(
     };
     let failure =
         || VoiceControlError::Upstream("the offline voice worker stopped unexpectedly".into());
+    // The same limits the worker applies, so an oversized text never even starts a process.
+    let operation = match operation {
+        Operation::Synthesize { text, language } => {
+            let input = checked_synthesis(text, language)?;
+            Operation::Synthesize {
+                text: input.text,
+                language: input.language,
+            }
+        }
+        transcribe @ Operation::Transcribe { .. } => transcribe,
+    };
     let executable = std::env::current_exe().map_err(|_| failure())?;
     let request = Request {
         data_dir: data_dir.to_owned(),
@@ -135,6 +146,13 @@ fn read_request(mut stdin: impl BufRead) -> io::Result<(Request, Vec<u8>)> {
     Ok((request, audio))
 }
 
+/// 1 to 1000 characters, no NUL, and a language tag: see [`SynthesizeInput::validate`].
+fn checked_synthesis(text: String, language: String) -> Result<SynthesizeInput, VoiceControlError> {
+    let mut input = SynthesizeInput { text, language };
+    input.validate()?;
+    Ok(input)
+}
+
 fn infer(request: Request, audio: &[u8]) -> Result<Vec<u8>, VoiceControlError> {
     match request.operation {
         Operation::Transcribe {
@@ -154,10 +172,12 @@ fn infer(request: Request, audio: &[u8]) -> Result<Vec<u8>, VoiceControlError> {
                 .map_err(VoiceControlError::Upstream)
         }
         Operation::Synthesize { text, language } => {
+            // The header is untrusted input: the limits hold here, not only on the route.
+            let input = checked_synthesis(text, language)?;
             if !voice_local::is_installed(&request.data_dir, &voice_local::TTS) {
                 return Err(VoiceControlError::NotConfigured);
             }
-            voice_local_engine::synthesize(&request.data_dir, &text, &language)
+            voice_local_engine::synthesize(&request.data_dir, &input.text, &input.language)
                 .map_err(VoiceControlError::Upstream)
         }
     }
@@ -178,5 +198,54 @@ mod tests {
         );
         assert_eq!(audio, pcm);
         assert!(read_request(b"{}".as_slice()).is_err());
+    }
+
+    fn synthesize(text: &str, language: &str) -> Request {
+        Request {
+            data_dir: std::env::temp_dir().join("praxi-sidecar-no-models"),
+            operation: Operation::Synthesize {
+                text: text.into(),
+                language: language.into(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_worker_refuses_text_the_route_would_have_refused() {
+        for (text, language) in [
+            (String::new(), "tr"),
+            ("  ".to_owned(), "tr"),
+            ("a\0b".to_owned(), "tr"),
+            ("a".repeat(1001), "tr"),
+            ("\u{11f}".repeat(30_000), "tr"),
+            ("hello".to_owned(), ""),
+            ("hello".to_owned(), "../../x"),
+            ("hello".to_owned(), "en_US"),
+            ("hello".to_owned(), &"a".repeat(36)),
+        ] {
+            let err = infer(synthesize(&text, language), &[]).unwrap_err();
+            assert!(matches!(err, VoiceControlError::Invalid(_)), "{err:?}");
+        }
+        // Valid input passes the limits and stops at "no model installed", not at "invalid".
+        assert_eq!(
+            infer(synthesize(&"\u{11f}".repeat(1000), "tr-TR"), &[]),
+            Err(VoiceControlError::NotConfigured)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_host_side_run_refuses_before_starting_a_process() {
+        let dir = std::env::temp_dir().join("praxi-sidecar-no-models");
+        let err = run(
+            &dir,
+            Operation::Synthesize {
+                text: "a".repeat(1001),
+                language: "tr".into(),
+            },
+            &[],
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, VoiceControlError::Invalid(_)), "{err:?}");
     }
 }

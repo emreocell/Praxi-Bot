@@ -21144,6 +21144,7 @@
           "voice"
         ],
         "summary": "Transcribe a recording with the configured service (owner-triggered dictation).",
+        "description": "With `local_only` the daemon refuses (409) unless the provider is on-device, so the recording\nis never uploaded. A paired peer cannot use the host's on-device engine (403): decoding and\nrecognition burn the host's CPU for up to two minutes and would starve the owner's own dictation.",
         "operationId": "transcribe",
         "requestBody": {
           "content": {
@@ -21176,8 +21177,18 @@
               }
             }
           },
+          "403": {
+            "description": "on-device dictation is for the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "dictation is not set up",
+            "description": "dictation is not set up, or `local_only` and the provider is not on-device",
             "content": {
               "application/json": {
                 "schema": {

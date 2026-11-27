@@ -5718,7 +5718,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Transcribe a recording with the configured service (owner-triggered dictation). */
+        /**
+         * Transcribe a recording with the configured service (owner-triggered dictation).
+         * @description With `local_only` the daemon refuses (409) unless the provider is on-device, so the recording
+         *     is never uploaded. A paired peer cannot use the host's on-device engine (403): decoding and
+         *     recognition burn the host's CPU for up to two minutes and would starve the owner's own dictation.
+         */
         post: operations["transcribe"];
         delete?: never;
         options?: never;
@@ -27930,7 +27935,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
-            /** @description dictation is not set up */
+            /** @description on-device dictation is for the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description dictation is not set up, or `local_only` and the provider is not on-device */
             409: {
                 headers: {
                     [name: string]: unknown;
