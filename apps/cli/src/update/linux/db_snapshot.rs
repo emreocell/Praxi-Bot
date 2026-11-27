@@ -41,6 +41,8 @@ const MANIFEST: &str = "manifest.json";
 /// left behind. Written under another name and renamed: it is absent or whole.
 const COMMIT: &str = "restore-commit";
 const COMMIT_NEW: &str = "restore-commit.new";
+/// Where a snapshot is built before it replaces the old one; a killed `take` leaves one behind.
+const STAGING_PREFIX: &str = ".db-snapshot-";
 /// A staged database is `<name>.restore-new` beside its target; not a name `is_database` matches.
 const STAGED: &str = ".restore-new";
 const SUFFIXES: [&str; 3] = [".db", ".db-wal", ".db-shm"];
@@ -259,7 +261,15 @@ pub(super) fn take(data: &Path, snapshot: &Path) -> Result<()> {
     if pending(&parent, name)? {
         return Err(PENDING.into());
     }
-    let (staging_name, staging) = parent.mkdir_unique(".db-snapshot-", 0o700)?;
+    for stale in parent.names()? {
+        if stale
+            .to_str()
+            .is_some_and(|n| n.starts_with(STAGING_PREFIX))
+        {
+            parent.remove_tree(&stale)?;
+        }
+    }
+    let (staging_name, staging) = parent.mkdir_unique(STAGING_PREFIX, 0o700)?;
     if let Err(error) = copy_databases(&data, &staging) {
         drop(staging);
         let _ = parent.remove_tree(&staging_name);
@@ -416,12 +426,17 @@ pub(super) fn restore_pending(snapshot: &Path) -> Result<bool> {
     }
 }
 
-/// One database of a restore, ready to be staged: its entry, where it goes and the snapshot's copy.
+/// One database of a restore, ready to be staged: its entry and where it goes.
 struct Staging<'a> {
     entry: &'a Entry,
     directory: &'a Dir,
     name: OsString,
-    copy: File,
+}
+
+fn open_copy(snapshot: &Dir, entry: &Entry) -> Result<File> {
+    snapshot
+        .open_read(Path::new(&snapshot_name(&entry.path)))
+        .map_err(|e| failed(&entry.path, &e))
 }
 
 /// Stage every database beside its target, under a new name. Nothing live is touched: a failure here
@@ -431,10 +446,7 @@ fn stage(snapshot: &Dir, manifest: &Manifest, directories: &Directories) -> Resu
     let mut pending = Vec::new();
     for entry in &manifest.files {
         let (directory, name) = plain_entry(&entry.path)?;
-        let copy = snapshot
-            .open_read(Path::new(&snapshot_name(&entry.path)))
-            .map_err(|e| failed(&entry.path, &e))?;
-        let meta = copy.metadata()?;
+        let meta = open_copy(snapshot, entry)?.metadata()?;
         if !meta.is_file() || meta.len() != entry.len {
             return Err(format!("the snapshot of {} is damaged", entry.path.display()).into());
         }
@@ -442,7 +454,6 @@ fn stage(snapshot: &Dir, manifest: &Manifest, directories: &Directories) -> Resu
             entry,
             directory: directories.get(&directory)?,
             name,
-            copy,
         });
     }
     let staged = || -> Result<Vec<Staged>> {
@@ -452,7 +463,8 @@ fn stage(snapshot: &Dir, manifest: &Manifest, directories: &Directories) -> Resu
             // Left by a run that was interrupted: removed by name (a link is removed, not followed).
             item.directory.unlink_if_exists(&temporary)?;
             let mut file = item.directory.create_file(&temporary, 0o600)?;
-            let copied = io::copy(&mut &item.copy, &mut file)?;
+            // Opened one at a time: a host with many bots has more databases than open files to spare.
+            let copied = io::copy(&mut &open_copy(snapshot, item.entry)?, &mut file)?;
             // On the descriptor: the file is root's until this is done, and no path leads to it.
             std::os::unix::fs::fchown(&file, Some(item.entry.uid), Some(item.entry.gid))?;
             file.set_permissions(std::fs::Permissions::from_mode(item.entry.mode))?;
@@ -845,6 +857,28 @@ mod tests {
                     .unwrap_or_default()
                     .contains("secret"))
         );
+    }
+
+    #[test]
+    fn the_staging_left_by_a_killed_snapshot_is_removed_by_the_next_one() {
+        let dir = data_dir();
+        let snapshots = private_dir();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("keep"), "keep").unwrap();
+        // What a `take` that was killed leaves: a staging directory, here with a link inside it.
+        let stale = snapshots.path().join(".db-snapshot-4242-0");
+        fs::create_dir(&stale).unwrap();
+        fs::write(stale.join("bot.db"), "half").unwrap();
+        symlink(outside.path(), stale.join("link")).unwrap();
+        fs::write(snapshots.path().join("unrelated"), "x").unwrap();
+        take(dir.path(), &snapshots.path().join("snapshot")).unwrap();
+        assert!(!stale.exists());
+        assert!(snapshots.path().join("unrelated").exists());
+        assert_eq!(
+            fs::read_to_string(outside.path().join("keep")).unwrap(),
+            "keep"
+        );
+        assert!(snapshots.path().join("snapshot").join(MANIFEST).exists());
     }
 
     #[test]
