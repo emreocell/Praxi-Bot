@@ -1,4 +1,10 @@
 /** Feature copy that ships in English and Turkish and uses English elsewhere. */
 export function usesEnglishFallback(locale: string, key: string): boolean {
-  return (locale === "de" || locale === "es") && key.startsWith("apps.composioHub.");
+  if (locale !== "de" && locale !== "es") return false;
+  return (
+    key.startsWith("apps.composioHub.") ||
+    // The newer pasted-secret kinds (labelled values, card numbers), #421.
+    key.startsWith("pastedSecret.kind.labelled_") ||
+    key === "pastedSecret.kind.payment_card"
+  );
 }

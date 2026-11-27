@@ -37,6 +37,68 @@ test("prose, hashes, uuids and look-alike words are not reported", () => {
   }
 });
 
+// The Rust detector's corpus (crates/secret-store/tests): the same rows must give the same answer here.
+interface Row { text: string; value: string; kind?: string }
+const CORPUS = JSON.parse(
+  readFileSync(new URL("../../../../../crates/secret-store/tests/fixtures/detect-corpus.json", import.meta.url), "utf8")
+) as { labelled: Row[]; cards: Row[]; negatives: string[] };
+
+test("labelled values are found with the kind and exact span (shared corpus)", () => {
+  assert.ok(CORPUS.labelled.length >= 20);
+  for (const { text, value, kind } of CORPUS.labelled) {
+    const found = detectSecrets(text);
+    assert.equal(found.length, 1, text);
+    assert.equal(found[0].kind, kind, text);
+    assert.equal(text.slice(found[0].start, found[0].end), value, text);
+  }
+});
+
+test("card numbers are found with the exact span (shared corpus)", () => {
+  assert.ok(CORPUS.cards.length >= 20);
+  for (const { text, value } of CORPUS.cards) {
+    const found = detectSecrets(text);
+    assert.equal(found.length, 1, text);
+    assert.equal(found[0].kind, "payment_card", text);
+    assert.equal(text.slice(found[0].start, found[0].end), value, text);
+  }
+});
+
+test("the negative corpus has zero false positives, bare and inside a longer unicode message", () => {
+  assert.ok(CORPUS.negatives.length >= 90);
+  for (const text of CORPUS.negatives) {
+    assert.deepEqual(detectSecrets(text), [], text);
+    const wrapped = `Şu mesajı gönder 🙂 «${text}» çok teşekkürler\nsonra devam`;
+    assert.deepEqual(detectSecrets(wrapped), [], wrapped);
+  }
+});
+
+test("spans index the original string when emoji and Turkish letters come first", () => {
+  const text = "🙂 şifre: Tr0ub4dor&3 ve 🙂 kart 4111 1111 1111 1111";
+  const found = detectSecrets(text);
+  assert.deepEqual(found.map((c) => text.slice(c.start, c.end)), ["Tr0ub4dor&3", "4111 1111 1111 1111"]);
+});
+
+test("a known shape wins over a label on the same bytes, several secrets come back in order", () => {
+  const text = `api key: ${CANARY} and sifre: Tr0ub4dor&3`;
+  const found = detectSecrets(text);
+  assert.deepEqual(found.map((c) => c.kind), ["openai_style_key", "labelled_password"]);
+});
+
+test("storing a labelled password keeps the label and swaps only the value", () => {
+  const text = "my password is Tr0ub4dor&3, thanks";
+  const plan = planStore(text, detectSecrets(text), "pasted/pw");
+  assert.equal(plan.text, "my password is [secret: pasted/pw], thanks");
+  assert.deepEqual(plan.entries, [{ name: "pasted/pw", value: "Tr0ub4dor&3" }]);
+  assert.deepEqual(detectSecrets(plan.text), []);
+});
+
+test("huge input stays fast", () => {
+  const big = "ahahahah token: ".repeat(50_000);
+  const t0 = Date.now();
+  assert.deepEqual(detectSecrets(big), []);
+  assert.ok(Date.now() - t0 < 5000);
+});
+
 test("storing swaps the value for a placeholder: the text keeps the name only", () => {
   const text = `key ${CANARY} end`;
   const plan = planStore(text, detectSecrets(text), "pasted/openai");
