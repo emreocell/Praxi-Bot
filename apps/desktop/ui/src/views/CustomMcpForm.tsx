@@ -266,10 +266,10 @@ export function CustomMcpForm({
         void submit();
       }}
     >
-      <header className={styles.head}>
+      <div className={styles.head}>
         <h3 className={styles.title} id={`${id}-title`}>{t("apps.mcpForm.title")}</h3>
         <p className={formStyles.hint}>{t("apps.mcpForm.intro")}</p>
-      </header>
+      </div>
 
       {stdio ? (
         <section className={styles.section} aria-labelledby={`${id}-cmd-h`}>

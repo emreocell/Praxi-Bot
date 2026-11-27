@@ -512,7 +512,12 @@ export async function flows(ctx) {
     await form.getByLabel('Name', { exact: true }).fill(name);
     await page.getByTestId('mcp-add').click();
     // The form stays open (fresh) and the new server's row, switched off, shows in the list below it.
-    await page.getByTestId(`mcp-server-${name}`).waitFor(T);
+    const row = page.getByTestId(`mcp-server-${name}`);
+    const alert = form.locator('[role=alert]').first();
+    await Promise.race([row.waitFor(T), alert.waitFor(T)]).catch(() => null);
+    if (!(await row.count())) {
+      throw new Error(`custom MCP server row missing; form says: ${(await alert.textContent().catch(() => null)) ?? (await form.textContent().catch(() => '')).slice(-200)}`);
+    }
     await page.keyboard.press('Escape');
   });
   await run(s, 'mission: start from the bot panel form', async (page) => {
