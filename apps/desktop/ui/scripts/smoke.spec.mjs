@@ -173,10 +173,13 @@ export async function flows(ctx) {
           await page.getByTestId('ws-entry-summary.md').getByRole('button', { name: 'Delete', exact: true }).click();
           await page.getByTestId('workspace-undo-button').click();
           await page.getByTestId('ws-entry-summary.md').waitFor(T);
+          // The panel shows its search field only once a folder is long; a short fixture folder has none.
           const search = page.getByTestId('bot-workspace-search');
-          await search.fill('summary');
-          await page.getByTestId('ws-entry-preview.png').waitFor({ state: 'hidden', ...T });
-          await search.fill('');
+          if (await search.count()) {
+            await search.fill('summary');
+            await page.getByTestId('ws-entry-preview.png').waitFor({ state: 'hidden', ...T });
+            await search.fill('');
+          }
           await page.getByTestId('ws-entry-preview.png').locator('button').first().click();
           await page.getByTestId('workspace-preview-modal').locator('img').waitFor(T);
           await page.screenshot({ path: join(ctx.shots, 'workspace-image-preview.png') });
