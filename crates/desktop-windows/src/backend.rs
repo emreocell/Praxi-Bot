@@ -161,8 +161,14 @@ impl DesktopBackend for WindowsBackend {
     }
 
     async fn focus_target(&self, window_id: u64) -> Result<Option<InputTarget>, DesktopError> {
-        self.run(move |_| Ok(identity::top_level_facts(winlist::hwnd_from_id(window_id))))
-            .await
+        // A window whose program cannot be identified is an error, not "this backend
+        // cannot tell": nothing is managed or focused unidentified.
+        self.run(move |_| {
+            identity::top_level_facts(winlist::hwnd_from_id(window_id))
+                .map(Some)
+                .ok_or_else(|| DesktopError::GuardRefused(Refusal::NoIdentity.why().into()))
+        })
+        .await
     }
 
     async fn focus(&self, window_id: u64, guard: Option<ActGuard>) -> Result<(), DesktopError> {
@@ -193,14 +199,11 @@ impl DesktopBackend for WindowsBackend {
         let res = self
             .run(move |_| {
                 let hwnd = winlist::hwnd_from_id(window_id);
-                if let Some(guard) = guard
-                    && !identity::top_level_facts(hwnd)
-                        .is_some_and(|target| guard.expect.same_program(&target.identity))
-                {
-                    return Err(DesktopError::GuardRefused(
-                        Refusal::ForegroundChanged.why().into(),
-                    ));
-                }
+                // Right before the OS call: the same program as approved, and still a
+                // window that may be managed (not a dialog turned up since, not Praxi).
+                let now = identity::top_level_facts(hwnd);
+                desktop_api::guard::check_window_op(guard.as_ref(), now.as_ref(), op)
+                    .map_err(|r| DesktopError::GuardRefused(r.why().into()))?;
                 winlist::window_op(hwnd, op)
             })
             .await;

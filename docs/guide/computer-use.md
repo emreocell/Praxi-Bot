@@ -33,10 +33,17 @@ the list of matches, so an operation never lands on a guess. `move` takes `x` an
 screen), `resize` takes `width` and `height` in pixels. The result says where the window is now and which windows
 appeared or went away, so a "save changes?" dialog that a `close` opened is reported at once.
 
+The window is judged again right before the request goes out, on Windows and on Linux alike: it must still belong to
+the program the call was made for. Refused whatever the permission level: a program that is elevated or runs in another
+account, Praxi itself, a system shell, a sign-in or UAC prompt, a password manager, and, for `close`, any dialog or
+owned popup (a message box, a save prompt): answering it is up to you. A window that looks like a checkout or payment
+screen is a payment decision (see Safety).
+
 ### Accessibility actions
 
-`desktop_element` acts through the accessibility API, so it does not move your pointer or type, and it works on a
-window that is behind others:
+`desktop_element` acts through the accessibility API, so it does not move your pointer or type. The window does not
+have to be in front, but another program's window on top of the element (a dialog, a sign-in prompt) refuses the action
+before it is made, like a click would be, and the model is told to look again:
 
 | `action` | What it does | Windows (UI Automation) | Linux (AT-SPI) |
 | --- | --- | --- | --- |
@@ -56,22 +63,29 @@ symbols work on any layout. `desktop_type` can replace the field's content first
 (`submit`). `desktop_key` presses a chord (`"ctrl+s"` or `["ctrl", "s"]`), or a `sequence` of chords
 (`["ctrl+a", "Delete"]`), optionally `repeat`ed up to 20 times (at most 50 presses per call). Keys are named by what
 they are: on Windows a punctuation key in a shortcut (`ctrl+/`) is the key your current layout gives that character.
+A list is not one blind burst: between chords it checks again whether you took over (the rest is dropped and the
+result says how far it got) and whether the screen became a checkout (the rest is withheld).
 
 ### Clipboard
 
 `desktop_clipboard_read` returns the text on the clipboard inside a data fence: it comes from whoever copied it, so it
 is data and never instructions, exactly like page text. A run that reads it counts as having read untrusted, private
 content. On Windows, content that a password manager marked as private is not returned. `desktop_clipboard_write`
-replaces the text for a later paste (`desktop_key` with `ctrl+v`); it never pastes by itself. Cards show the size of
-the text, and the text itself is on the card's details.
+replaces the text for a later paste (`desktop_key` with `ctrl+v`); it never pastes by itself. The clipboard never
+carries a secret, because every program can read it: text that names a stored secret (`secret:` or `[secret: name]`),
+holds a stored value or a known key shape, or looks like a labelled password or a card number is refused, and nothing
+is copied. Type a stored secret with `secret` on `desktop_type` instead. The activity line shows a short, redacted
+preview of the text and its size; this adds no question at any level.
 
 ### Waiting instead of sleeping
 
 `desktop_wait` takes `until`: `window_appears`, `window_gone`, `element_appears`, `element_enabled`, `element_gone`,
 `text_visible` or `text_gone`, with `title` or `window_id`, `query` (part of an element's name or role) or `text`, and
 `timeout_ms` (default 3 s, at most 30 s). It polls about every 200 ms and fails with a timeout when the condition never
-holds. The text conditions read the window's elements, not pixels. When it succeeds on a window's contents it returns
-that window's fresh state, ready to act on.
+holds. The text conditions read the window's elements, not pixels, and never compare a password field's value. The
+observation rules apply on every poll: nothing is read while you drive or Stop / pause is active, and the contents of a
+password manager, a sign-in prompt, Praxi itself, another account's program or (on Full access) a payment screen are not
+read. When it succeeds on a window's contents it returns that window's fresh state, ready to act on.
 
 ### Results that need fewer screenshots
 
@@ -83,6 +97,9 @@ instead. A model can usually tell whether the action worked from this alone, wit
 ## Safety
 
 - Every focus, click, type, key, scroll, element action, window operation and clipboard write goes through the permission engine: it asks by default, and an approval can be limited to the current task. The same money, never-list and per-app rules apply as for any other action.
+- On Full access nothing asks except money. A checkout or payment window, or a button labelled like a payment button
+  ("Pay now", "Place order"), is treated as money: it asks at every level, and a call that finds the screen turned into a
+  checkout while it runs (each chord of a key list, each step of a type call) is withheld instead of sent.
 - **Closing a window always asks you**, whatever your permission level, because it can throw away unsaved work.
 - A window of a program that must not be managed is refused: an elevated program, a system shell or sign-in surface, and a password manager.
 - A run that read clipboard text has read untrusted content: a later action that could send data out asks first.
@@ -94,7 +111,10 @@ instead. A model can usually tell whether the action worked from this alone, wit
 
 - Behaviour with a real WhatsApp (packaged app) install was not tested on a live machine.
 - A Notepad/Calculator integration test against the real desktop was not added; coverage is a fake backend plus unit tests.
-- Linux/macOS peers: focus and wait fall back to "unsupported".
+- Linux/macOS peers: focus and wait fall back to "unsupported". On Linux the program behind a window is read from
+  `/proc` (image, pid, start time); a window with no `_NET_WM_PID` cannot be identified and is not managed.
+- A payment screen is recognised by its title and by element labels (English and Turkish): a positive signal that asks,
+  never proof that a window is harmless.
 - Window management, clipboard and accessibility actions on **another computer** (a paired PC or server) are not available yet: they answer "unavailable". Only the local computer supports them.
 - macOS has no desktop backend yet, so none of the above works there.
 - The Windows (UI Automation, Win32) and Linux (AT-SPI, X11) code paths of the new tools were compiled for their targets and unit-tested for their pure logic; they were not run against real applications in this change.

@@ -27,7 +27,7 @@ fn payment_url(raw: &str) -> bool {
         })
 }
 
-fn payment_label(label: &str) -> bool {
+pub(crate) fn payment_label(label: &str) -> bool {
     let label = label.to_lowercase();
     let label = label.trim();
     [

@@ -25,18 +25,19 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tool_registry::{
-    ControlIdentity, ControlKind, ControlTarget, Effect, PermissionCategory, Tool, ToolContext,
-    ToolError, ToolOutput, ToolSpec,
+    ControlIdentity, ControlKind, ControlTarget, Effect, PaymentApproval, PermissionCategory, Tool,
+    ToolContext, ToolError, ToolOutput, ToolSpec,
 };
 use tracing::Instrument as _;
 use vision::{BoundingBox, OcrEngine};
 
 use protocol::event::ControlRect;
 
+use crate::browser::payment::payment_label;
 use crate::control::{ActionPermit, ControlRequest, DesktopControlGate};
 use crate::fill_secret::{Source, names_a_secret, refused, scrub, source};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
-use secret_store::{FillSecrets, SecretValue, sanitize_label};
+use secret_store::{FillSecrets, Redactor, SecretValue, sanitize_label, secret_variants};
 
 /// An OCR engine usable from tools.
 pub type SharedOcr = Arc<dyn OcrEngine + Send + Sync>;
@@ -155,6 +156,49 @@ const INTERACTIVE_ROLES: &[&str] = &[
 const STALE_HINT: &str = " (the index is stale; call desktop_get_state and use the new indexes)";
 const MISSING_GEN_MSG: &str = "missing required parameter 'gen'; call desktop_get_state first and pass gen from that observation";
 const NO_OBSERVATION_MSG: &str = "no observation for this run; call desktop_get_state first";
+const PAYMENT_WITHHELD: &str = "Payment input withheld: a checkout or payment window is on screen. Nothing was sent. Look again with desktop_get_state and make the payment action a call of its own, which the owner is asked about.";
+
+tokio::task_local! {
+    /// What the daemon decided about money for the desktop call running on this task.
+    static DESKTOP_PAYMENT: PaymentApproval;
+}
+
+/// Title words of a window that takes a payment (lower case): a positive signal that
+/// asks the owner, never a proof that a window is harmless.
+const PAYMENT_TITLE_WORDS: &[&str] = &[
+    "checkout",
+    "check out",
+    "payment",
+    "pay now",
+    "purchase",
+    "place order",
+    "credit card",
+    "card number",
+    "wire transfer",
+    "ödeme",
+    "satın al",
+    "sipariş",
+    "havale",
+];
+
+/// Token of `win` when it is a payment surface (by its title, or by the label of an
+/// element a call touches in it): its id, title and program, hashed. `None` otherwise.
+fn window_payment(win: &desktop_api::WindowInfo, names: &[String]) -> Option<u64> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    if !(payment_title(&win.title) || names.iter().any(|n| payment_label(n))) {
+        return None;
+    }
+    let mut h = DefaultHasher::new();
+    (win.id, &win.title, win.pid).hash(&mut h);
+    Some(h.finish().max(1))
+}
+
+/// Whether a window title marks a checkout or payment screen, or names a payment API.
+fn payment_title(title: &str) -> bool {
+    let t = title.to_lowercase();
+    PAYMENT_TITLE_WORDS.iter().any(|w| t.contains(w))
+        || tool_registry::payment::text_names_payment_host(&t)
+}
 
 /// Desktop state of one run. Runs must never see each other's indexes.
 // NOTE(concurrency): While `State` (`window_id`, `generation`, `targets`, `marks`) is tracked per `run_id`
@@ -262,9 +306,10 @@ impl ObsFilter {
             Some(q) => {
                 n.name.to_lowercase().contains(q)
                     || n.role.to_lowercase().contains(q)
-                    || n.value
-                        .as_deref()
-                        .is_some_and(|v| v.to_lowercase().contains(q))
+                    || (!is_secure(n)
+                        && n.value
+                            .as_deref()
+                            .is_some_and(|v| v.to_lowercase().contains(q)))
             }
             None => true,
         }
@@ -315,6 +360,11 @@ fn pick_surface(
 /// Most bot cursors kept (one per desktop backend); more would be a leak of per-run backends.
 const MAX_CURSORS: usize = 8;
 
+/// A password field: its value is never shown, compared or searched.
+fn is_secure(n: &desktop_api::UiNode) -> bool {
+    n.states.iter().any(|s| s == "secure")
+}
+
 /// One point a desktop action touches, and how the bot cursor treats it.
 struct Touch {
     target: Target,
@@ -349,12 +399,13 @@ fn touches(action: &Action) -> Vec<Touch> {
             gesture: Gesture::Move,
             verify: is_coordinate(target),
         }],
-        // An accessibility action goes to the element, not to a point: the cursor shows where
-        // it lands, and there is nothing under a pointer to cover.
+        // An accessibility action goes to the element, not to a point, but another program's
+        // window on top of the element (a dialog, a sign-in prompt) is still not what the
+        // model looked at: it is refused like a pointer action, not made behind it.
         Action::SetValue { target, .. } | Action::Element { target, .. } => vec![Touch {
             target: target.clone(),
             gesture: Gesture::Move,
-            verify: false,
+            verify: true,
         }],
         // Typed text and key presses go to the focus: the pointer does not move.
         Action::TypeText { .. } | Action::KeyPress { .. } => Vec::new(),
@@ -841,6 +892,138 @@ impl Shared {
         }
     }
 
+    /// The redactor of this daemon's stored secrets: every value (and the encodings of
+    /// it) the vault holds, plus the known key shapes. A vault that cannot be read is an
+    /// error: nothing is judged "clean" by a redactor that knows nothing.
+    fn redactor(&self) -> Result<Redactor, ToolError> {
+        let mut r = Redactor::new();
+        if let Some(secrets) = &self.fill_secrets {
+            let values = secrets.values_for_redaction().map_err(|_| {
+                exec_err("the secret store cannot be read, so nothing is copied to the clipboard")
+            })?;
+            for v in values {
+                for variant in secret_variants(&v) {
+                    r.add_secret(&variant);
+                }
+            }
+        }
+        Ok(r)
+    }
+
+    /// Under a run-scoped control grant a chord must be on the backend's short list of keys
+    /// a task-wide permission may send (the backend checks it again right before it sends).
+    /// Without a grant every key was shown on the owner's card or is the owner's Full
+    /// access, so no list applies.
+    fn chord_allowed_under(
+        &self,
+        run_id: &str,
+        keys: &[String],
+        guard: Option<&ActGuard>,
+    ) -> Result<(), ToolError> {
+        if guard.is_none() {
+            return Ok(());
+        }
+        match self.backend(run_id)?.key_chord_refusal(keys) {
+            Some(r) => Err(exec_err(format!(
+                "refused ({}): {}. Nothing was sent.",
+                r.code(),
+                r.why()
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// The centre of the window the last observation described.
+    fn window_centre(&self, run_id: &str) -> Option<(f64, f64)> {
+        let mut states = self.state.lock();
+        let b = states.get(run_id)?.window_bounds?;
+        Some((b.x + b.width / 2.0, b.y + b.height / 2.0))
+    }
+
+    /// The accessible name of the element a target stands for, from the last observation.
+    fn element_name(&self, run_id: &str, t: &Target) -> Option<String> {
+        let Target::ByIndex { index, .. } = t else {
+            return None;
+        };
+        let mut states = self.state.lock();
+        let st = states.get(run_id)?;
+        st.last_nodes
+            .iter()
+            .find(|n| n.index == *index)
+            .map(|n| n.name.clone())
+    }
+
+    /// Token of the payment surface a call would act on right now, or `None` when it is
+    /// not one: `window` is the window id (`None` = the one that has the focus), `names`
+    /// the elements it touches. A window is a payment surface by its title, an element by
+    /// its label ("Pay now"); a positive signal only, like the browser's. The token names
+    /// this window (id, title, program), so an approval of one screen is not an approval
+    /// of the next.
+    async fn payment_token(
+        &self,
+        run_id: &str,
+        window: Option<u64>,
+        names: &[String],
+    ) -> Option<u64> {
+        let backend = self.backend(run_id).ok()?;
+        let wins = backend.windows().await.ok()?;
+        let win = match window {
+            Some(id) => wins.iter().find(|w| w.id == id),
+            None => wins.iter().find(|w| w.focused).or_else(|| {
+                self.scope(run_id)
+                    .and_then(|id| wins.iter().find(|w| w.id == id))
+            }),
+        }?;
+        window_payment(win, names)
+    }
+
+    /// The money rule right before an action is dispatched. The daemon says what it
+    /// decided (`DESKTOP_PAYMENT`): unchecked, check (a Full-access call: withheld on a
+    /// payment surface), or approved for exactly one payment window. Nothing is asked here:
+    /// a refusal tells the model to make the payment its own call, which the daemon asks
+    /// the owner about.
+    async fn check_payment(&self, run_id: &str, action: &Action) -> Result<(), ToolError> {
+        let approval = DESKTOP_PAYMENT.try_with(Clone::clone).unwrap_or_default();
+        if matches!(approval, PaymentApproval::Unchecked) {
+            return Ok(());
+        }
+        let (window, names): (Option<u64>, Vec<String>) = match action {
+            // Keys and text go to whatever has the focus.
+            Action::KeyPress { .. } | Action::TypeText { .. } => (None, Vec::new()),
+            Action::Click { target, .. }
+            | Action::Scroll { target, .. }
+            | Action::SetValue { target, .. }
+            | Action::Element { target, .. } => (
+                self.scope(run_id),
+                self.element_name(run_id, target).into_iter().collect(),
+            ),
+            Action::Drag { from, to, .. } => (
+                self.scope(run_id),
+                [from, to]
+                    .into_iter()
+                    .filter_map(|t| self.element_name(run_id, t))
+                    .collect(),
+            ),
+        };
+        Self::payment_verdict(&approval, self.payment_token(run_id, window, &names).await)
+    }
+
+    fn payment_verdict(approval: &PaymentApproval, now: Option<u64>) -> Result<(), ToolError> {
+        let ok = match approval {
+            PaymentApproval::Unchecked => true,
+            PaymentApproval::Check => now.is_none(),
+            // An approval binds one window; a payment surface that is not it is withheld.
+            PaymentApproval::Approved(approved) => {
+                now.is_none() || (*approved != 0 && now == Some(*approved))
+            }
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(ToolError::PermissionDenied(PAYMENT_WITHHELD.into()))
+        }
+    }
+
     /// The bot cursor for `backend`, made on first use. `None` when nothing draws it here: a
     /// backend with no screen of its own (a paired computer; the tool runs elsewhere), or no
     /// surface and no app overlay.
@@ -937,12 +1120,22 @@ impl Shared {
         guard: Option<&ActGuard>,
     ) -> Result<String, ToolError> {
         let backend = self.backend(run_id)?;
+        // Every dispatch (each chord of a key list, each step of a type call) is judged
+        // for money again: the screen can have turned into a checkout since the last one.
+        self.check_payment(run_id, &action).await?;
         if self.human_in_control() {
             self.release_cursors();
         } else {
+            // An accessibility action may have no bounds to hit-test: the observed window's
+            // centre stands in, so a window on top of it is still found.
+            let by_element = matches!(action, Action::Element { .. } | Action::SetValue { .. });
             let points: Vec<_> = touches(&action)
                 .into_iter()
-                .filter_map(|t| self.target_point(run_id, &t.target).map(|p| (p, t)))
+                .filter_map(|t| {
+                    self.target_point(run_id, &t.target)
+                        .or_else(|| by_element.then(|| self.window_centre(run_id)).flatten())
+                        .map(|p| (p, t))
+                })
                 .collect();
             for ((x, y), t) in &points {
                 if t.verify {
@@ -1581,7 +1774,7 @@ pub fn tools_dynamic_with_secrets(
             Op::ClipboardWrite,
             spec(
                 "desktop_clipboard_write",
-                "Replace the text on the clipboard of the desktop, for a later paste (desktop_key ctrl+v). It does not paste by itself. Example: {\"text\":\"hello\"}",
+                "Replace the text on the clipboard of the desktop, for a later paste (desktop_key ctrl+v). It does not paste by itself. Never a secret (refused). Example: {\"text\":\"hello\"}",
                 json!({"type":"object","properties":{
                     "text":{"type":"string","description":"The text to put on the clipboard."}
                 },"required":["text"]}),
@@ -1698,11 +1891,14 @@ impl WaitUntil {
         let by_query = |n: &desktop_api::UiNode| {
             n.name.to_lowercase().contains(query) || n.role.to_lowercase().contains(query)
         };
+        // A password field's value is never compared: a wait that matches part of it would
+        // read it out one guess at a time.
         let by_text = |n: &desktop_api::UiNode| {
             n.name.to_lowercase().contains(text)
-                || n.value
-                    .as_deref()
-                    .is_some_and(|v| v.to_lowercase().contains(text))
+                || (!is_secure(n)
+                    && n.value
+                        .as_deref()
+                        .is_some_and(|v| v.to_lowercase().contains(text)))
         };
         match self {
             Self::ElementAppears => nodes.iter().any(by_query),
@@ -1900,6 +2096,36 @@ fn key_chords(input: &Value) -> Result<Vec<Vec<String>>, ToolError> {
         )));
     }
     Ok((0..repeat).flat_map(|_| once.iter().cloned()).collect())
+}
+
+const CLIPBOARD_SECRET_MSG: &str = "The clipboard never carries a secret: any program can read it. To enter a stored secret use desktop_type or desktop_set_value with `secret`.";
+
+/// Why `text` may not go on the clipboard, if it carries or names a secret: a stored
+/// secret's name (`secret:` / `[secret: name]`), a value or key shape the redactor knows,
+/// or a credential the detector recognises (a labelled password, a card number).
+fn clipboard_secret_refusal(text: &str, redactor: &Redactor) -> Option<&'static str> {
+    if text.to_lowercase().contains("secret:") {
+        Some("names a stored secret")
+    } else if redactor.contains_secret(text) {
+        Some("contains a stored secret or a key")
+    } else if !secret_store::detect_secrets(text).is_empty() {
+        Some("looks like a password, a key or a card number")
+    } else {
+        None
+    }
+}
+
+/// A failure in the middle of a key list says how far it got.
+fn stopped_at(e: ToolError, sent: usize, of: usize) -> ToolError {
+    if sent == 0 {
+        return e;
+    }
+    let note = format!(" ({sent} of {of} key presses had already been sent)");
+    match e {
+        ToolError::PermissionDenied(m) => ToolError::PermissionDenied(m + &note),
+        ToolError::Execution(m) => ToolError::Execution(m + &note),
+        other => other,
+    }
 }
 
 /// Pause between the chords of one key call, so the program handles each.
@@ -2444,9 +2670,19 @@ impl DesktopTool {
                 }
                 let backend = sh.backend(run_id)?;
                 let ms = i.timeout_ms.unwrap_or(3000).clamp(100, 30_000);
+                let approval = DESKTOP_PAYMENT.try_with(Clone::clone).unwrap_or_default();
+                let epoch = sh.control.as_ref().map(|g| g.observation_epoch());
+                let mut vetted: HashSet<u64> = HashSet::new();
                 let found = tokio::time::timeout(Duration::from_millis(ms), async {
                     loop {
+                        // The observation rules hold on every poll, not only at the start: a
+                        // pause, a takeover or a changed display ends the wait unseen.
                         sh.refuse_observation_while_latched()?;
+                        if let (Some(g), Some(e)) = (&sh.control, epoch)
+                            && g.observation_epoch() != e
+                        {
+                            return Err(exec_err(crate::control::OBSERVATION_DISCARDED));
+                        }
                         let windows = backend.windows().await.map_err(|e| derr(&e))?;
                         let window = windows.iter().find(|w| {
                             window_id.is_none_or(|id| id == w.id)
@@ -2468,6 +2704,27 @@ impl DesktopTool {
                                 return Ok(("the window is gone".to_owned(), None));
                             }
                             (u, Some(w)) if u.reads_elements() => {
+                                // Elements are read only from a window the model may read at
+                                // all (not a password manager, a sign-in prompt, Praxi itself,
+                                // another account's program) and, under the money rule, not
+                                // from a payment screen.
+                                if !vetted.contains(&w.id) {
+                                    if let Some(t) =
+                                        backend.focus_target(w.id).await.map_err(|e| derr(&e))?
+                                        && let Some(r) = desktop_api::guard::window_op_refusal(
+                                            &t,
+                                            WindowOp::Minimize,
+                                        )
+                                    {
+                                        return Err(exec_err(format!(
+                                            "refused ({}): {}. The window was not read.",
+                                            r.code(),
+                                            r.why()
+                                        )));
+                                    }
+                                    vetted.insert(w.id);
+                                }
+                                Shared::payment_verdict(&approval, window_payment(w, &[]))?;
                                 let tree =
                                     backend.snapshot(Some(w.id)).await.map_err(|e| derr(&e))?;
                                 if u.holds(&tree.nodes, &query, &text) {
@@ -2609,6 +2866,14 @@ impl DesktopTool {
                     return Ok(format!(
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
+                }
+                // The keys this call adds itself go through the same chord rules as a key
+                // call, checked before anything is sent (not even the click on the field).
+                if clear {
+                    sh.chord_allowed_under(run_id, &["ctrl", "a"].map(str::to_owned), guard)?;
+                }
+                if submit {
+                    sh.chord_allowed_under(run_id, &["Return"].map(str::to_owned), guard)?;
                 }
                 // A secret is resolved only now (after the approval and the
                 // live program check), held in memory and wiped on drop.
@@ -2752,10 +3017,18 @@ impl DesktopTool {
                 for (n, keys) in chords.into_iter().enumerate() {
                     if n > 0 {
                         tokio::time::sleep(KEY_GAP).await;
+                        // One approval covers the list, not a change of hands in the middle
+                        // of it: a human who took over, or a changed display, ends it here.
+                        if let Some(fresh) = sh.handed_over(run_id, &permit).await? {
+                            return Ok(format!(
+                                "stopped after {n} of {count} key presses.\n{fresh}"
+                            ));
+                        }
                     }
                     head = sh
                         .act(run_id, Action::KeyPress { keys }, &permit, guard)
-                        .await?;
+                        .await
+                        .map_err(|e| stopped_at(e, n, count))?;
                 }
                 if count > 1 {
                     let _ = write!(head, ", chords: {count}");
@@ -2905,6 +3178,14 @@ impl DesktopTool {
                         r.why()
                     )));
                 }
+                // Money: closing or moving a checkout window is a payment decision.
+                if let Some(approval) = DESKTOP_PAYMENT
+                    .try_with(Clone::clone)
+                    .ok()
+                    .filter(|a| !matches!(a, PaymentApproval::Unchecked))
+                {
+                    Shared::payment_verdict(&approval, window_payment(&window, &[]))?;
+                }
                 let guard = identity
                     .as_ref()
                     .filter(|t| t.identity.is_complete())
@@ -2983,6 +3264,11 @@ impl DesktopTool {
                 ))
             }
             Op::ClipboardWrite => {
+                // The clipboard is readable by every program: it never carries a secret.
+                // A stored secret is typed with `secret` on desktop_type, never copied.
+                if names_a_secret(&input) {
+                    return Err(ToolError::InvalidInput(CLIPBOARD_SECRET_MSG.into()));
+                }
                 let ClipboardWriteIn { text } = parse(input)?;
                 let n = text.chars().count();
                 if n > MAX_CLIPBOARD_WRITE_CHARS {
@@ -2990,11 +3276,22 @@ impl DesktopTool {
                         "the text is {n} characters; the clipboard takes at most {MAX_CLIPBOARD_WRITE_CHARS}"
                     )));
                 }
+                let redactor = sh.redactor()?;
+                if let Some(why) = clipboard_secret_refusal(&text, &redactor) {
+                    return Err(ToolError::PermissionDenied(format!(
+                        "{CLIPBOARD_SECRET_MSG} The text {why}. Nothing was copied."
+                    )));
+                }
+                // The activity line shows what is copied, redacted and short.
+                let preview = sanitize_label(&redactor.redact(&text), 60);
                 let permit = sh
                     .gate(
                         run_id,
                         "clipboard write",
-                        format!("clipboard text ({n} characters)"),
+                        format!(
+                            "clipboard text \"{}\" ({n} characters)",
+                            preview.replace('"', "'")
+                        ),
                         None,
                     )
                     .await?;
@@ -3036,6 +3333,54 @@ impl Tool for DesktopTool {
 
     async fn control_target(&self, ctx: &ToolContext, input: &Value) -> Option<ControlTarget> {
         self.resolve_control_target(&ctx.run_id, input).await
+    }
+
+    /// The money rule for the desktop: an action on a checkout or payment window, or on an
+    /// element labelled like a payment button, is a payment and is asked about at every
+    /// level, whatever else the owner allowed. Decided from the live window list and the
+    /// run's last observation, never from the model's words.
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
+        let sh = &self.shared;
+        let run_id = ctx.run_id.as_str();
+        let names = |keys: &[&str]| -> Vec<String> {
+            keys.iter()
+                .filter_map(|k| input.get(*k).filter(|v| !v.is_null()))
+                .filter_map(|v| parse_ref(v).ok())
+                .filter_map(|r| match r {
+                    ElementRef::Index(i) => Some(i),
+                    ElementRef::Mark(_) => None,
+                })
+                .filter_map(|i| {
+                    sh.element_name(
+                        run_id,
+                        &Target::ByIndex {
+                            index: i,
+                            generation: 0,
+                        },
+                    )
+                })
+                .collect()
+        };
+        match self.op {
+            Op::Click | Op::Type | Op::SetValue | Op::Scroll | Op::Element => {
+                sh.payment_token(run_id, sh.scope(run_id), &names(&["index"]))
+                    .await
+            }
+            Op::Drag => {
+                sh.payment_token(run_id, sh.scope(run_id), &names(&["from", "to"]))
+                    .await
+            }
+            // Keys go to the focused window (after the element, when one is named).
+            Op::Key => sh.payment_token(run_id, None, &names(&["index"])).await,
+            Op::Window => {
+                let i: WindowIn = parse(input.clone()).ok()?;
+                let backend = sh.backend(run_id).ok()?;
+                let wins = backend.windows().await.ok()?;
+                let win = pick_window(&wins, i.window_id, i.title.as_deref()).ok()?;
+                window_payment(win, &[])
+            }
+            _ => None,
+        }
     }
 
     /// Typing an owner-stored secret is confirmed on every call, however
@@ -3134,13 +3479,16 @@ impl Tool for DesktopTool {
         } else {
             None
         };
-        let text = self
-            .run(&ctx.run_id, input, guard, ctx.bot_id.as_deref())
-            .instrument(tracing::info_span!(
-                "desktop.tool",
-                tool = %self.spec.name,
-                run_id = %ctx.run_id
-            ))
+        let text = DESKTOP_PAYMENT
+            .scope(
+                ctx.payment.clone(),
+                self.run(&ctx.run_id, input, guard, ctx.bot_id.as_deref())
+                    .instrument(tracing::info_span!(
+                        "desktop.tool",
+                        tool = %self.spec.name,
+                        run_id = %ctx.run_id
+                    )),
+            )
             .await?;
         Ok(finish_text(ctx, &self.shared.data_dir.join("spill"), text))
     }
@@ -3164,6 +3512,10 @@ pub(crate) mod fake {
         pub weak: bool,
         pub screenshot_png: Vec<u8>,
         pub typed: Mutex<String>,
+        /// Title of the observed window (id 77); `None` = "Fake Notepad".
+        pub title: Mutex<Option<String>>,
+        /// A key (lower case) the backend's chord refusal also refuses.
+        pub refuse_key: Mutex<Option<String>>,
         /// Window scope of every snapshot taken.
         pub scopes: Mutex<Vec<Option<u64>>>,
         /// Accept actions whose generation is not the latest one.
@@ -3218,6 +3570,8 @@ pub(crate) mod fake {
                 weak,
                 screenshot_png: Vec::new(),
                 typed: Mutex::new(String::new()),
+                title: Mutex::new(None),
+                refuse_key: Mutex::new(None),
                 scopes: Mutex::new(Vec::new()),
                 lenient_gen: false,
                 extra_rows: Mutex::new(0),
@@ -3330,8 +3684,14 @@ pub(crate) mod fake {
                     .collect()
             };
             let quality = TreeQuality::assess(&nodes);
+            let mut observed = window(win);
+            if win == 77
+                && let Some(t) = self.title.lock().clone()
+            {
+                observed.title = t;
+            }
             Ok(Snapshot {
-                window: window(win),
+                window: observed,
                 nodes,
                 generation: *g,
                 quality,
@@ -3400,7 +3760,10 @@ pub(crate) mod fake {
 
         fn key_chord_refusal(&self, keys: &[String]) -> Option<desktop_api::Refusal> {
             // The same allowlist the real backends use.
-            (!desktop_api::guarded::chord_allowed(keys)).then_some(desktop_api::Refusal::Chord)
+            let refused = self.refuse_key.lock().clone();
+            let named = refused.is_some_and(|r| keys.iter().any(|k| k.eq_ignore_ascii_case(&r)));
+            (named || !desktop_api::guarded::chord_allowed(keys))
+                .then_some(desktop_api::Refusal::Chord)
         }
 
         async fn screenshot(&self, _r: Region, _q: Quality) -> Result<Image, DesktopError> {
@@ -3422,6 +3785,9 @@ pub(crate) mod fake {
                 hook("windows");
             }
             let mut wins = vec![window(77)];
+            if let Some(t) = self.title.lock().clone() {
+                wins[0].title = t;
+            }
             wins.extend(self.extra_windows.lock().iter().cloned());
             if let (Some(at), Some(delay)) = (*self.launched_at.lock(), self.launch_window_delay)
                 && at.elapsed() >= delay
@@ -6057,9 +6423,11 @@ mod tests {
         assert!(out.contains("clipboard set (8 characters)"), "{out}");
         let seen = gate.seen.lock().clone();
         assert_eq!(seen[0].action, "clipboard write");
-        assert_eq!(seen[0].label, "clipboard text (8 characters)");
-        // The gate sees the size, never the text.
-        assert!(!seen[0].label.contains("hello"));
+        // The activity line shows a short preview of the (redacted) text and its size.
+        assert_eq!(
+            seen[0].label,
+            "clipboard text \"hello \u{11f}\u{15f}\" (8 characters)"
+        );
 
         let out = call(&t, "desktop_clipboard_read", json!({})).await.unwrap();
         assert!(
@@ -6400,5 +6768,661 @@ mod tests {
         assert!(news.contains("new window: id=2 \"B 'x'\""), "{news}");
         assert!(news.contains("window gone: id=3 \"C\""), "{news}");
         assert_eq!(window_news(&now, &now), "");
+    }
+
+    // ── Review fixes (PR #1014) ───────────────────────────────────────────────
+
+    fn pay_ctx(payment: PaymentApproval) -> ToolContext {
+        ToolContext {
+            run_id: "r1".into(),
+            payment,
+            ..ToolContext::default()
+        }
+    }
+
+    fn other_programs_window() -> desktop_api::WindowInfo {
+        desktop_api::WindowInfo {
+            id: 99,
+            title: "Sign in to continue".into(),
+            pid: 555,
+            bounds: desktop_api::snapshot::Rect {
+                x: 100.0,
+                y: 200.0,
+                width: 400.0,
+                height: 300.0,
+            },
+            focused: false,
+        }
+    }
+
+    #[test]
+    fn accessibility_actions_are_hit_tested_like_pointer_actions() {
+        let by_index = Target::ByIndex {
+            index: 3,
+            generation: 1,
+        };
+        let element = touches(&Action::Element {
+            target: by_index.clone(),
+            op: ElementOp::Invoke,
+        });
+        let set = touches(&Action::SetValue {
+            target: by_index,
+            value: "x".into(),
+        });
+        assert!(element[0].verify && set[0].verify);
+    }
+
+    #[tokio::test]
+    async fn an_element_action_under_another_programs_window_is_refused_not_made_behind_it() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        fake.extra_windows.lock().push(other_programs_window());
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ctx_for("r1");
+        observed(&t, &ctx).await;
+        // Nothing on top: an element with bounds (2) and one without (1, tested at the
+        // observed window's centre) both go ahead.
+        *fake.point_window.lock() = Some(77);
+        let mut generation = 1;
+        for index in [2, 1] {
+            let out = get(&t, "desktop_element")
+                .call(
+                    &ctx,
+                    json!({"index": index, "gen": generation, "action": "invoke"}),
+                )
+                .await
+                .unwrap();
+            generation = gen_of(&text(&out));
+        }
+        assert_eq!(fake.actions.lock().len(), 2);
+
+        // A sign-in window of another program is on top of the window.
+        *fake.point_window.lock() = Some(99);
+        for (tool, input) in [
+            (
+                "desktop_element",
+                json!({"index": 2, "gen": generation, "action": "invoke"}),
+            ),
+            (
+                "desktop_element",
+                json!({"index": 1, "gen": generation, "action": "toggle"}),
+            ),
+            (
+                "desktop_set_value",
+                json!({"index": 3, "gen": generation, "value": "x"}),
+            ),
+        ] {
+            let err = get(&t, tool)
+                .call(&ctx, input)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("Sign in to continue") && err.contains("NOT made"),
+                "{tool}: {err}"
+            );
+        }
+        assert_eq!(fake.actions.lock().len(), 2, "nothing was sent");
+    }
+
+    #[tokio::test]
+    async fn window_operations_go_through_the_full_judge() {
+        let notepad = FakeDesktop::notepad();
+        let with = |f: &dyn Fn(&mut desktop_api::InputTarget)| {
+            let mut t = notepad.clone();
+            f(&mut t);
+            t
+        };
+        let cases = [
+            (
+                "an owner-account check: another account's program",
+                with(&|t| t.elevated = Some(true)),
+                "minimize",
+                "elevated",
+            ),
+            (
+                "unreadable elevation",
+                with(&|t| t.elevated = None),
+                "move",
+                "elevated",
+            ),
+            (
+                "Praxi itself",
+                with(&|t| {
+                    t.identity.image_path = "C:\\Program Files\\Praxi-Bot\\bot-desktop.exe".into();
+                    t.title = "Praxi-Bot".into();
+                }),
+                "minimize",
+                "praxi_itself",
+            ),
+            (
+                "a password manager",
+                with(&|t| t.identity.image_path = "C:\\KeePass\\KeePass.exe".into()),
+                "minimize",
+                "password_manager",
+            ),
+            (
+                "the UAC consent window",
+                with(&|t| {
+                    t.identity.image_path = "C:\\Windows\\System32\\consent.exe".into();
+                    t.class = "Credential Dialog Xaml Host".into();
+                }),
+                "close",
+                "system_surface",
+            ),
+            (
+                "a message box",
+                with(&|t| t.class = "#32770".into()),
+                "close",
+                "dialog",
+            ),
+            (
+                "an owned popup",
+                with(&|t| t.owned = true),
+                "close",
+                "dialog",
+            ),
+        ];
+        for (what, target, action, code) in cases {
+            let fake = Arc::new(FakeDesktop::new(false));
+            *fake.input.lock() = Some(target);
+            let (_d, t) = build(fake.clone(), None);
+            let err = call(
+                &t,
+                "desktop_window",
+                json!({"window_id": 77, "action": action, "x": 5, "y": 5}),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains(&format!("refused ({code})")), "{what}: {err}");
+            assert!(fake.window_ops.lock().is_empty(), "{what}");
+        }
+        // A terminal is not a window that must not be managed, and a dialog may be moved.
+        for (target, action) in [
+            (
+                with(&|t| {
+                    t.identity.image_path = "C:\\Windows\\System32\\cmd.exe".into();
+                    t.class = "ConsoleWindowClass".into();
+                }),
+                "minimize",
+            ),
+            (with(&|t| t.class = "#32770".into()), "move"),
+        ] {
+            let fake = Arc::new(FakeDesktop::new(false));
+            *fake.input.lock() = Some(target);
+            let (_d, t) = build(fake.clone(), None);
+            call(
+                &t,
+                "desktop_window",
+                json!({"window_id": 77, "action": action, "x": 5, "y": 5}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(fake.window_ops.lock().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_window_op_on_a_checkout_window_is_a_payment_for_the_money_rule() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake.clone(), None);
+        let window = get(&t, "desktop_window");
+        let input = json!({"window_id": 77, "action": "close"});
+        // An ordinary window is not a payment.
+        let plain = pay_ctx(PaymentApproval::Check);
+        assert_eq!(window.payment_page(&plain, &input).await, None);
+        call(
+            &t,
+            "desktop_window",
+            json!({"window_id": 77, "action": "minimize"}),
+        )
+        .await
+        .unwrap();
+
+        *fake.title.lock() = Some("Checkout - Complete purchase".into());
+        let token = window
+            .payment_page(&plain, &input)
+            .await
+            .expect("a checkout window is a payment");
+        // Full access, nothing decided about money yet: withheld, and the model is told how
+        // to make it a payment call.
+        let err = window.call(&plain, input.clone()).await.unwrap_err();
+        assert!(err.to_string().contains("Payment input withheld"), "{err}");
+        assert!(fake.window_ops.lock().len() == 1, "only the first minimise");
+        // Approved for another window: still withheld. Approved for this one: it runs.
+        let err = window
+            .call(
+                &pay_ctx(PaymentApproval::Approved(token ^ 1)),
+                input.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Payment input withheld"), "{err}");
+        window
+            .call(&pay_ctx(PaymentApproval::Approved(token)), input.clone())
+            .await
+            .unwrap();
+        assert_eq!(fake.window_ops.lock().len(), 2);
+        // Below Full the existing rules apply and nothing new is asked here.
+        window
+            .call(&pay_ctx(PaymentApproval::Unchecked), input)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn actions_on_a_payment_screen_or_button_are_withheld_unless_approved_for_it() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = pay_ctx(PaymentApproval::Check);
+        observed(&t, &ctx).await;
+        // A normal screen runs under the money check.
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 1, "gen": 1}))
+            .await
+            .unwrap();
+        assert_eq!(fake.actions.lock().len(), 1);
+        // The window turns into a checkout: a click and a key press are both withheld.
+        *fake.title.lock() = Some("Payment - Card number".into());
+        let state = get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        let generation = gen_of(&text(&state));
+        for (tool, input) in [
+            ("desktop_click", json!({"index": 1, "gen": generation})),
+            ("desktop_key", json!({"keys": "Return"})),
+            (
+                "desktop_type",
+                json!({"index": 3, "gen": generation, "text": "4111"}),
+            ),
+        ] {
+            let err = get(&t, tool).call(&ctx, input).await.unwrap_err();
+            assert!(
+                err.to_string().contains("Payment input withheld"),
+                "{tool}: {err}"
+            );
+        }
+        assert_eq!(fake.actions.lock().len(), 1, "nothing was sent");
+        // The same decision at the card: the call is a payment (Money category).
+        assert!(
+            get(&t, "desktop_key")
+                .payment_page(&ctx, &json!({"keys": "Return"}))
+                .await
+                .is_some()
+        );
+        // A button labelled like a payment button is one on any window; the label is read
+        // from the observation, not from the model's words.
+        *fake.title.lock() = None;
+        let state = get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        assert!(
+            get(&t, "desktop_click")
+                .payment_page(&ctx, &json!({"index": 1, "gen": gen_of(&text(&state))}))
+                .await
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_key_list_stops_when_the_window_becomes_a_checkout_midway() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = pay_ctx(PaymentApproval::Check);
+        observed(&t, &ctx).await;
+        // The first Return opens the checkout.
+        let f = fake.clone();
+        *fake.hook.lock() = Some(Arc::new(move |what| {
+            if what == "act" {
+                *f.title.lock() = Some("Checkout".into());
+            }
+        }));
+        let err = get(&t, "desktop_key")
+            .call(&ctx, json!({"sequence": ["Return", "Return", "Return"]}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("Payment input withheld") && err.contains("1 of 3 key presses"),
+            "{err}"
+        );
+        assert_eq!(fake.actions.lock().len(), 1, "only the first chord went");
+    }
+
+    /// A gate whose observation epoch the test moves.
+    struct EpochGate {
+        backend: Arc<dyn DesktopBackend>,
+        epoch: std::sync::atomic::AtomicU64,
+    }
+    #[async_trait]
+    impl DesktopControlGate for EpochGate {
+        fn desktop_for_run(&self, _: &str) -> Option<Arc<dyn DesktopBackend>> {
+            Some(self.backend.clone())
+        }
+        fn observation_epoch(&self) -> u64 {
+            self.epoch.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn epoch_gated(
+        fake: &Arc<FakeDesktop>,
+    ) -> (tempfile::TempDir, Vec<Arc<dyn Tool>>, Arc<EpochGate>) {
+        let d = tempfile::tempdir().unwrap();
+        let gate = Arc::new(EpochGate {
+            backend: fake.clone(),
+            epoch: std::sync::atomic::AtomicU64::new(1),
+        });
+        let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
+        (d, t, gate)
+    }
+
+    #[tokio::test]
+    async fn a_key_list_stops_when_control_changes_hands_midway() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t, gate) = epoch_gated(&fake);
+        let ctx = ctx_for("r1");
+        observed(&t, &ctx).await;
+        let g = gate.clone();
+        *fake.hook.lock() = Some(Arc::new(move |what| {
+            if what == "act" {
+                g.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }));
+        let out = get(&t, "desktop_key")
+            .call(&ctx, json!({"sequence": ["Down", "Down", "Down"]}))
+            .await
+            .unwrap();
+        let out = text(&out);
+        assert!(
+            out.starts_with("stopped after 1 of 3 key presses.")
+                && out.contains("Human intervention completed"),
+            "{out}"
+        );
+        assert_eq!(
+            fake.actions.lock().len(),
+            1,
+            "the other chords were dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_keys_a_type_call_adds_itself_go_through_the_chord_refusal_under_a_grant() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let notepad = FakeDesktop::notepad();
+        *fake.input.lock() = Some(notepad.clone());
+        let (_d, t) = build(fake.clone(), None);
+        let mut ctx = ctx_for("r1");
+        observed(&t, &ctx).await;
+        ctx.control_guard = Some(guard_for(&notepad));
+        for (flag, key) in [("clear", "a"), ("submit", "return")] {
+            *fake.refuse_key.lock() = Some(key.to_owned());
+            let err = get(&t, "desktop_type")
+                .call(&ctx, json!({"index": 3, "gen": 1, "text": "x", flag: true}))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("refused (chord)"), "{flag}: {err}");
+            assert!(fake.actions.lock().is_empty(), "{flag}: not even the click");
+        }
+        // Allowed keys: the call goes through, guarded.
+        *fake.refuse_key.lock() = None;
+        get(&t, "desktop_type")
+            .call(
+                &ctx,
+                json!({"index": 3, "gen": 1, "text": "x", "clear": true, "submit": true}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fake.guarded.lock().len(), 4);
+    }
+
+    fn secrets_with(name: &str, value: &str) -> Arc<FillSecrets> {
+        let s = FillSecrets::in_memory(Arc::new(secret_store::MemoryStore::new()));
+        s.upsert(name, Some(value), None, None).unwrap();
+        Arc::new(s)
+    }
+
+    #[tokio::test]
+    async fn the_clipboard_never_carries_a_secret_and_the_activity_line_shows_a_redacted_preview() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let d = tempfile::tempdir().unwrap();
+        let gate = Arc::new(Recorder {
+            backend: fake.clone(),
+            seen: Mutex::new(Vec::new()),
+            refuse: false,
+        });
+        let t = tools_dynamic_with_secrets(
+            None,
+            None,
+            d.path(),
+            settings(),
+            Some(gate.clone()),
+            Some(secrets_with("login/bank", "correct horse/battery#staple")),
+        );
+        let clip = get(&t, "desktop_clipboard_write");
+        // No new question on Full: the call is not always-ask, whatever it carries.
+        assert!(!clip.always_ask_for(&json!({"text": "hello"})));
+        assert!(!clip.always_ask_for(&json!({"text": "[secret: login/bank]"})));
+
+        for (what, input) in [
+            ("a secret name", json!({"text": "[secret: login/bank]"})),
+            (
+                "a bare secret reference",
+                json!({"text": "use secret:login/bank here"}),
+            ),
+            (
+                "the secret parameter",
+                json!({"text": "x", "secret": "login/bank"}),
+            ),
+            (
+                "a stored value",
+                json!({"text": "pw is correct horse/battery#staple ok"}),
+            ),
+            (
+                "a stored value, percent-encoded",
+                json!({"text": "q=correct%20horse%2Fbattery%23staple"}),
+            ),
+            (
+                "a known key shape",
+                json!({"text": "sk-abcdefghijklmnopqrstuvwxyz123456"}),
+            ),
+            (
+                "a labelled password",
+                json!({"text": "password: Zq8!vN3#tR7w"}),
+            ),
+        ] {
+            let err = call(&t, "desktop_clipboard_write", input)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("never carries a secret"), "{what}: {err}");
+            assert!(
+                !err.contains("horse"),
+                "{what}: the value is not echoed: {err}"
+            );
+        }
+        assert_eq!(*fake.clipboard.lock(), None, "nothing was copied");
+        assert!(gate.seen.lock().is_empty(), "and nobody was asked");
+
+        // Ordinary text goes through; the card shows a short single-line preview.
+        let long = format!("line one\nline two {}", "z".repeat(200));
+        call(&t, "desktop_clipboard_write", json!({"text": long}))
+            .await
+            .unwrap();
+        let seen = gate.seen.lock().clone();
+        assert!(
+            seen[0]
+                .label
+                .starts_with("clipboard text \"line one line two zzz")
+                && seen[0].label.contains('…')
+                && seen[0].label.ends_with("(218 characters)")
+                && !seen[0].label.contains('\n'),
+            "{}",
+            seen[0].label
+        );
+    }
+
+    #[tokio::test]
+    async fn a_vault_that_cannot_be_read_is_not_taken_for_a_clean_one() {
+        // Without a vault only the key shapes and labelled credentials are known.
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake.clone(), None);
+        call(&t, "desktop_clipboard_write", json!({"text": "hello"}))
+            .await
+            .unwrap();
+        let err = call(
+            &t,
+            "desktop_clipboard_write",
+            json!({"text": "ghp_abcdefghijklmnopqrstuvwxyz0123456789"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("never carries a secret"), "{err}");
+    }
+
+    #[test]
+    fn a_waits_text_never_matches_a_password_fields_value() {
+        let node = |role: &str, name: &str, value: &str, states: &[&str]| {
+            desktop_api::UiNode::new(
+                1,
+                role,
+                name,
+                Some(value.into()),
+                None,
+                states.iter().map(|s| (*s).to_owned()).collect(),
+            )
+        };
+        let nodes = vec![node("edit", "Password", "hunter2", &["secure"])];
+        // One guess at a time would read the value out: the value is never compared.
+        assert!(!WaitUntil::TextVisible.holds(&nodes, "", "hunter"));
+        assert!(WaitUntil::TextGone.holds(&nodes, "", "hunter"));
+        // The name still matches, and an ordinary field's value still does.
+        assert!(WaitUntil::TextVisible.holds(&nodes, "", "password"));
+        let plain = vec![node("edit", "Status", "Saved 3 files", &[])];
+        assert!(WaitUntil::TextVisible.holds(&plain, "", "saved 3"));
+        // The state filter of desktop_get_state has the same rule.
+        let filter = ObsFilter {
+            query: Some("hunter".into()),
+            ..ObsFilter::default()
+        };
+        assert!(!filter.keeps(&nodes[0]));
+    }
+
+    #[tokio::test]
+    async fn wait_is_refused_while_the_human_drives_and_never_reads_a_window_it_must_not() {
+        // The observation rules hold for a wait: no read while the human drives.
+        let fake = Arc::new(FakeDesktop::new(false));
+        let d = tempfile::tempdir().unwrap();
+        let t = tools(
+            fake.clone(),
+            None,
+            d.path(),
+            settings(),
+            Some(Arc::new(HumanDrives)),
+        );
+        let err = get(&t, "desktop_wait")
+            .call(
+                &ToolContext::default(),
+                json!({"until": "text_visible", "text": "x", "title": "notepad"}),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("observation paused"), "{err}");
+
+        // A control change during the wait discards it.
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t, gate) = epoch_gated(&fake);
+        let g = gate.clone();
+        *fake.hook.lock() = Some(Arc::new(move |what| {
+            if what == "windows" {
+                g.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }));
+        let err = get(&t, "desktop_wait")
+            .call(
+                &ctx_for("r1"),
+                json!({"until": "text_visible", "text": "never", "title": "notepad", "timeout_ms": 2000}),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("discarded"), "{err}");
+
+        // A password manager, another account's program and Praxi itself are not read.
+        for (what, edit) in [
+            (
+                "a password manager",
+                Box::new(|t: &mut desktop_api::InputTarget| {
+                    t.identity.image_path = "C:\\KeePass\\KeePass.exe".into();
+                }) as Box<dyn Fn(&mut desktop_api::InputTarget)>,
+            ),
+            ("another account", Box::new(|t| t.elevated = Some(true))),
+            (
+                "Praxi itself",
+                Box::new(|t| t.title = "Praxi-Bot approvals".into()),
+            ),
+        ] {
+            let fake = Arc::new(FakeDesktop::new(false));
+            let mut target = FakeDesktop::notepad();
+            edit(&mut target);
+            *fake.input.lock() = Some(target);
+            let (_d, t) = build(fake.clone(), None);
+            let err = call(
+                &t,
+                "desktop_wait",
+                json!({"until": "element_appears", "query": "el1", "title": "notepad"}),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("The window was not read"),
+                "{what}: {err}"
+            );
+            assert!(
+                fake.scopes.lock().is_empty(),
+                "{what}: no snapshot was taken"
+            );
+            // Waiting for the window itself reads nothing and still works.
+            call(
+                &t,
+                "desktop_wait",
+                json!({"until": "window_appears", "title": "notepad"}),
+            )
+            .await
+            .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_wait_does_not_read_a_payment_screen_unless_approved_for_it() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        *fake.title.lock() = Some("Checkout".into());
+        let (_d, t) = build(fake.clone(), None);
+        let wait = get(&t, "desktop_wait");
+        let input = json!({"until": "element_appears", "query": "el1", "title": "checkout"});
+        let err = wait
+            .call(&pay_ctx(PaymentApproval::Check), input.clone())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Payment input withheld"), "{err}");
+        assert!(
+            fake.scopes.lock().is_empty(),
+            "no snapshot of the payment screen"
+        );
+        // The window itself may be waited for: only titles are listed.
+        wait.call(
+            &pay_ctx(PaymentApproval::Check),
+            json!({"until": "window_appears", "title": "checkout"}),
+        )
+        .await
+        .unwrap();
+        // Below Full, or approved for it, the wait reads as before.
+        wait.call(&pay_ctx(PaymentApproval::Unchecked), input)
+            .await
+            .unwrap();
     }
 }

@@ -51,7 +51,7 @@ from gi.repository import Gtk, GLib
 
 class TestWindow(Gtk.Window):
     def __init__(self):
-        super().__init__(title="Praxi GTK Test App")
+        super().__init__(title="GTK Test App")
         self.set_default_size(420, 240)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add(box)
@@ -145,7 +145,7 @@ fn xvfb_gtk_test_app_roundtrip() {
             let wins = backend.windows().await.expect("list windows");
             if let Some(w) = wins
                 .iter()
-                .find(|w| w.pid == pid || w.title.contains("Praxi GTK Test App"))
+                .find(|w| w.pid == pid || w.title.contains("GTK Test App"))
             {
                 window_id = Some(w.id);
                 break;
@@ -153,7 +153,7 @@ fn xvfb_gtk_test_app_roundtrip() {
             std::thread::sleep(Duration::from_millis(200));
         }
 
-        let win_id = window_id.expect("Praxi GTK Test App window did not appear on X11");
+        let win_id = window_id.expect("GTK Test App window did not appear on X11");
         backend
             .activate_window(win_id)
             .await

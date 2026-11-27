@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use desktop_api::{
-    DesktopError, WindowOp,
+    ActGuard, DesktopError, InputTarget, WindowOp,
     snapshot::{AppSpec, Image, Pid, Quality, Rect, Region, WindowInfo},
 };
 use x11rb::{
@@ -30,7 +30,8 @@ use x11rb::{
 use crate::helper::{LaunchFail, explain_launch};
 use crate::pure::{
     Key, KeyPlace, TypeAction, char_to_keysym, clamp_capture_rect, detect_display_session,
-    find_keysym, free_keycodes, parse_key, plan_text_actions, x_unreachable, zpixmap_to_bgra,
+    find_keysym, free_keycodes, parse_key, parse_wm_class, plan_text_actions, x_unreachable,
+    zpixmap_to_bgra,
 };
 
 fn display_name() -> String {
@@ -500,10 +501,56 @@ fn send_to_root(
     Ok(())
 }
 
+/// The program and kind of a top-level window, read now: who owns it (image, pid
+/// and start time from `/proc`), whether that program runs outside the user's own
+/// account, the window class, and whether it is a dialog (transient for another
+/// window, or of the dialog window type). `None` when the window is gone or its
+/// program cannot be identified.
+pub fn top_level_facts(window_id: u64) -> Option<InputTarget> {
+    let win = u32::try_from(window_id).ok()?;
+    let info = window_info(window_id)?;
+    let identity = crate::identity::process_identity(info.pid)?;
+    let (conn, _) = connect().ok()?;
+    let class = conn
+        .get_property(false, win, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 256)
+        .ok()?
+        .reply()
+        .ok()
+        .map(|r| parse_wm_class(&r.value))
+        .unwrap_or_default();
+    let transient = read_u32_prop(&conn, win, AtomEnum::WM_TRANSIENT_FOR.into())
+        .is_some_and(|t| t != 0 && t != win);
+    let dialog = intern_atom(&conn, b"_NET_WM_WINDOW_TYPE")
+        .ok()
+        .zip(intern_atom(&conn, b"_NET_WM_WINDOW_TYPE_DIALOG").ok())
+        .and_then(|(kind, dialog)| {
+            read_u32_list_prop(&conn, win, kind).map(|types| types.contains(&dialog))
+        })
+        .unwrap_or(false);
+    Some(InputTarget {
+        window_id,
+        title: info.title,
+        class,
+        elevated: crate::identity::process_elevated(info.pid),
+        identity,
+        password_focus: false,
+        owned: transient || dialog,
+    })
+}
+
 /// Minimise, maximise, restore, move, resize or ask to close a window. The window
 /// manager is asked the standard (EWMH / ICCCM) way; a program that does not
 /// support a graceful close is never killed.
-pub fn window_op(window_id: u64, op: WindowOp) -> Result<(), DesktopError> {
+///
+/// Right before the request the window is judged again: with a `guard` it must
+/// still belong to the program the approval was shown for, and in any case it
+/// must still pass [`desktop_api::guard::window_op_refusal`]. A mismatch is a
+/// refusal and nothing is sent.
+pub fn window_op(
+    window_id: u64,
+    op: WindowOp,
+    guard: Option<&ActGuard>,
+) -> Result<(), DesktopError> {
     let win = u32::try_from(window_id)
         .map_err(|_| DesktopError::Accessibility("invalid X11 window id".into()))?;
     if window_info(window_id).is_none() {
@@ -511,6 +558,8 @@ pub fn window_op(window_id: u64, op: WindowOp) -> Result<(), DesktopError> {
             "window no longer exists".into(),
         ));
     }
+    desktop_api::guard::check_window_op(guard, top_level_facts(window_id).as_ref(), op)
+        .map_err(|r| DesktopError::GuardRefused(format!("not sent: {}", r.why())))?;
     let (conn, screen_num) = connect()?;
     let root = conn.setup().roots[screen_num].root;
     let maximise = |add: bool| -> Result<(), DesktopError> {

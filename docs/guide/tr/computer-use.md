@@ -33,10 +33,17 @@ köşenin ekrandaki konumu), `resize` için piksel cinsinden `width` ve `height`
 olduğunu ve hangi pencerelerin açıldığını ya da kapandığını söyler; yani `close` sonrası çıkan "değişiklikler
 kaydedilsin mi?" penceresi hemen bildirilir.
 
+Pencere, istek gönderilmeden hemen önce yeniden değerlendirilir (Windows'ta da Linux'ta da): çağrının yapıldığı
+programa hâlâ ait olmalıdır. İzin düzeyi ne olursa olsun reddedilenler: yükseltilmiş ya da başka bir hesapta çalışan
+program, Praxi'nin kendisi, bir sistem kabuğu, oturum açma ya da UAC istemi, bir parola yöneticisi ve `close` için her
+iletişim kutusu ya da sahipli açılır pencere (bir ileti kutusu, bir kaydetme sorusu): yanıtı vermek sana kalır. Ödeme ya
+da sepet ekranına benzeyen bir pencere bir para kararıdır (bkz. Güvenlik).
+
 ### Erişilebilirlik eylemleri
 
-`desktop_element` erişilebilirlik API'siyle çalışır; bu yüzden fareni oynatmaz, yazı yazmaz ve başka pencerelerin
-arkasında kalan bir pencerede de çalışır:
+`desktop_element` erişilebilirlik API'siyle çalışır; bu yüzden fareni oynatmaz ve yazı yazmaz. Pencerenin önde olması
+gerekmez; ama öğenin üstünde başka bir programın penceresi varsa (bir iletişim kutusu, bir oturum açma istemi) eylem,
+tıklama gibi, yapılmadan reddedilir ve modele yeniden bakması söylenir:
 
 | `action` | Ne yapar | Windows (UI Automation) | Linux (AT-SPI) |
 | --- | --- | --- | --- |
@@ -56,15 +63,20 @@ semboller her düzende çalışır. `desktop_type` önce alanın içeriğini de�
 basabilir (`submit`). `desktop_key` bir tuş bileşimine (`"ctrl+s"` ya da `["ctrl", "s"]`) ya da bir bileşim dizisine
 (`sequence`, örneğin `["ctrl+a", "Delete"]`) basar; istenirse en çok 20 kez `repeat` edilir (çağrı başına en çok 50
 basış). Tuşlar ne olduklarıyla adlandırılır: Windows'ta bir kısayoldaki noktalama tuşu (`ctrl+/`), o anki düzenin o
-karaktere verdiği tuştur.
+karaktere verdiği tuştur. Bir liste tek parça bir seri değildir: tuş takımları arasında senin devralıp devralmadığına
+(kalanlar atılır, sonuç nereye kadar gidildiğini söyler) ve ekranın bir ödeme sayfasına dönüşüp dönüşmediğine (kalanlar
+tutulur) yeniden bakar.
 
 ### Pano
 
 `desktop_clipboard_read`, panodaki metni bir veri çitinin içinde döndürür: metni kopyalayan kişi yazdığı için bu bir
 veridir, asla talimat değildir; tıpkı sayfa metni gibi. Bunu okuyan bir çalışma, güvenilmeyen ve özel içerik okumuş
 sayılır. Windows'ta bir parola yöneticisinin özel işaretlediği içerik döndürülmez. `desktop_clipboard_write`, daha
-sonra yapıştırmak için metni değiştirir (`desktop_key` ile `ctrl+v`); kendiliğinden yapıştırmaz. Kartlar metnin
-boyutunu gösterir; metnin kendisi kartın ayrıntılarındadır.
+sonra yapıştırmak için metni değiştirir (`desktop_key` ile `ctrl+v`); kendiliğinden yapıştırmaz. Pano asla bir sır
+taşımaz, çünkü her program okuyabilir: kayıtlı bir sırrın adını (`secret:` ya da `[secret: ad]`), kayıtlı bir değeri ya da
+bilinen bir anahtar biçimini içeren, etiketli bir parolaya ya da kart numarasına benzeyen metin reddedilir ve hiçbir şey
+kopyalanmaz. Kayıtlı bir sırrı `desktop_type`'ta `secret` ile yaz. Etkinlik satırı metnin kısa, gizlenmiş bir önizlemesini
+ve boyutunu gösterir; bu hiçbir düzeyde yeni bir soru eklemez.
 
 ### Uyumak yerine beklemek
 
@@ -72,8 +84,10 @@ boyutunu gösterir; metnin kendisi kartın ayrıntılarındadır.
 `element_gone`, `text_visible` ya da `text_gone`; yanında `title` ya da `window_id`, `query` (bir öğenin adının ya da
 rolünün parçası) veya `text` ve `timeout_ms` (varsayılan 3 sn, en çok 30 sn) verilir. Yaklaşık her 200 ms'de bir
 yoklar; koşul hiç gerçekleşmezse zaman aşımı hatasıyla biter. Metin koşulları pikselleri değil, pencerenin öğelerini
-okur. Bir pencerenin içeriği üzerinde başarılı olursa, o pencerenin taze durumunu, hemen işlem yapılabilecek şekilde
-döndürür.
+okur ve bir parola alanının değerini asla karşılaştırmaz. Gözlem kuralları her yoklamada geçerlidir: sen kullanırken ya da
+Durdur / duraklat etkinken hiçbir şey okunmaz; parola yöneticisinin, oturum açma isteminin, Praxi'nin kendisinin, başka
+bir hesabın programının ve (Tam erişimde) bir ödeme ekranının içeriği okunmaz. Bir pencerenin içeriği üzerinde başarılı
+olursa, o pencerenin taze durumunu, hemen işlem yapılabilecek şekilde döndürür.
 
 ### Daha az ekran görüntüsü gerektiren sonuçlar
 
@@ -85,6 +99,9 @@ eylemin işe yarayıp yaramadığını çoğunlukla yalnızca bundan anlayabilir
 ## Güvenlik
 
 - Her odaklanma, tıklama, yazma, tuş, kaydırma, öğe eylemi, pencere işlemi ve pano yazma izin motorundan geçer: varsayılan olarak sorar ve bir onay yalnızca o anki görevle sınırlanabilir. Diğer tüm eylemlerdeki para, yasaklı komut ve uygulama başına kurallar burada da geçerlidir.
+- Tam erişimde para dışında hiçbir şey sormaz. Bir ödeme ya da sepet penceresi, ya da ödeme düğmesi gibi adlandırılmış bir
+  düğme ("Pay now", "Siparişi ver") para sayılır: her düzeyde sorar; çalışırken ekranın ödeme sayfasına döndüğünü gören
+  bir çağrı (bir tuş listesinin her tuşu, bir yazma çağrısının her adımı) gönderilmez, tutulur.
 - **Bir pencereyi kapatmak her zaman sana sorar**, izin düzeyin ne olursa olsun; çünkü kaydedilmemiş işi kaybettirebilir.
 - Yönetilmemesi gereken bir programın penceresi reddedilir: yükseltilmiş (yönetici) bir program, bir sistem kabuğu ya da oturum açma yüzeyi ve bir parola yöneticisi.
 - Pano metnini okuyan bir çalışma, güvenilmeyen içerik okumuş sayılır: sonrasında veri dışarı gönderebilecek bir eylem önce sorar.
@@ -96,7 +113,10 @@ eylemin işe yarayıp yaramadığını çoğunlukla yalnızca bundan anlayabilir
 
 - Gerçek bir WhatsApp (paketlenmiş uygulama) kurulumuyla davranış, canlı bir makinede denenmedi.
 - Gerçek masaüstüne karşı bir Not Defteri/Hesap Makinesi entegrasyon testi eklenmedi; kapsam, sahte bir arka uç ve birim testlerinden oluşuyor.
-- Linux/macOS eşleri: odaklanma ve bekleme "desteklenmiyor" yanıtına döner.
+- Linux/macOS eşleri: odaklanma ve bekleme "desteklenmiyor" yanıtına döner. Linux'ta bir pencerenin arkasındaki program
+  `/proc`'tan okunur (imaj, pid, başlangıç zamanı); `_NET_WM_PID` olmayan bir pencere tanınamaz ve yönetilmez.
+- Ödeme ekranı başlığından ve öğe etiketlerinden (İngilizce ve Türkçe) tanınır: sorulmasına yol açan olumlu bir işarettir,
+  bir pencerenin zararsız olduğunun kanıtı değildir.
 - **Başka bir bilgisayarda** (eşleşmiş bir PC ya da sunucu) pencere yönetimi, pano ve erişilebilirlik eylemleri henüz yok: "kullanılamıyor" yanıtı verir. Yalnızca yerel bilgisayar destekler.
 - macOS'un henüz masaüstü arka ucu yok; bu yüzden yukarıdakilerin hiçbiri orada çalışmaz.
 - Yeni araçların Windows (UI Automation, Win32) ve Linux (AT-SPI, X11) kod yolları kendi hedefleri için derlendi ve saf mantıkları birim testlerle sınandı; bu değişiklikte gerçek uygulamalara karşı çalıştırılmadı.
