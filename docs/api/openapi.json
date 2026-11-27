@@ -13916,6 +13916,257 @@
         ]
       }
     },
+    "/v1/mcp/import/bundle": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "install_bundle",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/BundleInstallForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/import/bundle/inspect": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "inspect_bundle",
+        "parameters": [
+          {
+            "name": "expected_sha256",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inspection"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/import/registry": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "search_registry",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RegistryResult"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "install_registry",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryApproval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/mcp/servers": {
       "get": {
         "tags": [
@@ -22883,6 +23134,47 @@
           }
         }
       },
+      "BundleApproval": {
+        "type": "object",
+        "description": "JSON metadata inside the bundle installation form.",
+        "required": [
+          "approval_sha256",
+          "launch_sha256"
+        ],
+        "properties": {
+          "approval_sha256": {
+            "type": "string",
+            "description": "SHA-256 returned by the inspection and approved by the owner."
+          },
+          "launch_sha256": {
+            "type": "string",
+            "description": "`launch_sha256` of the inspection: the resolved command line the owner saw."
+          },
+          "values": {
+            "$ref": "#/components/schemas/ImportValues",
+            "description": "Owner-provided MCPB user settings."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BundleInstallForm": {
+        "type": "object",
+        "description": "Multipart installation request. The browser uploads the reviewed file again.",
+        "required": [
+          "bundle",
+          "approval"
+        ],
+        "properties": {
+          "approval": {
+            "type": "string",
+            "description": "JSON-encoded `BundleApproval`."
+          },
+          "bundle": {
+            "type": "string",
+            "format": "binary"
+          }
+        }
+      },
       "Button": {
         "type": "string",
         "enum": [
@@ -24458,6 +24750,56 @@
           "files": {
             "type": "boolean",
             "description": "Let them read files here (writing asks every time)."
+          }
+        }
+      },
+      "ConfigField": {
+        "type": "object",
+        "description": "A setting the owner is asked for (the form of the install dialog).",
+        "required": [
+          "key",
+          "kind",
+          "title",
+          "description",
+          "required",
+          "sensitive",
+          "multiple"
+        ],
+        "properties": {
+          "default": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Default value as text."
+          },
+          "description": {
+            "type": "string",
+            "description": "Help text, may be empty."
+          },
+          "key": {
+            "type": "string",
+            "description": "Key used in `${user_config.KEY}`."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`string`, `number`, `boolean`, `directory` or `file`."
+          },
+          "multiple": {
+            "type": "boolean",
+            "description": "Multiple full paths, one per line in the approval form."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Must be filled in (no default)."
+          },
+          "sensitive": {
+            "type": "boolean",
+            "description": "Stored in the secret store, never in the config file."
+          },
+          "title": {
+            "type": "string",
+            "description": "Label to show."
           }
         }
       },
@@ -30204,6 +30546,16 @@
           }
         }
       },
+      "ImportValues": {
+        "type": "object",
+        "description": "Install settings, including write-only secrets.",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "propertyNames": {
+          "type": "string"
+        }
+      },
       "ImportWorkflow": {
         "type": "object",
         "required": [
@@ -30650,6 +31002,130 @@
           },
           "state": {
             "$ref": "#/components/schemas/ViewState"
+          }
+        }
+      },
+      "Inspection": {
+        "type": "object",
+        "description": "The approval card: everything the owner should see before anything runs.",
+        "required": [
+          "id",
+          "display_name",
+          "version",
+          "description",
+          "runtime",
+          "command",
+          "args",
+          "cwd",
+          "env_names",
+          "launch_sha256",
+          "fields",
+          "sha256",
+          "checksum_verified",
+          "signature",
+          "tools",
+          "file_count",
+          "unpacked_bytes",
+          "warnings"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments exactly as they will be passed, after every `${...}`\nsubstitution. A setting with a default shows its default; a setting\nyou must fill in shows as `<name>`."
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Author name, if given (untrusted text)."
+          },
+          "checksum_verified": {
+            "type": "boolean",
+            "description": "The file matched an independently supplied SHA-256."
+          },
+          "command": {
+            "type": "string",
+            "description": "The program that will be started."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The folder the server is started in (the bundle's own folder)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Short description from the manifest (untrusted text)."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Human name."
+          },
+          "env_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of the environment variables the server will receive (no values)."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigField"
+            },
+            "description": "Settings the owner must fill in."
+          },
+          "file_count": {
+            "type": "integer",
+            "description": "Number of files that will be unpacked.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Server id (becomes `mcp:<id>/<tool>`), derived from the bundle name."
+          },
+          "launch_sha256": {
+            "type": "string",
+            "description": "SHA-256 (hex) of the resolved launch line shown here (command,\narguments, working folder and variable names). Installing needs the\nsame digest, and is refused if the launch line it would really run\ndiffers from this one."
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/Runtime",
+            "description": "What it needs to run."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 (hex) of the bundle file. The approval is for exactly these bytes."
+          },
+          "signature": {
+            "$ref": "#/components/schemas/SignatureStatus",
+            "description": "What the embedded signature, if any, proves. It never proves who\npublished the bundle."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of tools declared by the bundle. Actual tools are discovered on enable."
+          },
+          "unpacked_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unpacked size in bytes.",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "Bundle version."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            },
+            "description": "Things the owner should read before approving (suspicious text, ...).",
+            "uniqueItems": true
           }
         }
       },
@@ -34647,6 +35123,34 @@
           "shift"
         ]
       },
+      "Needed": {
+        "type": "object",
+        "description": "An environment variable or header the server needs.",
+        "required": [
+          "name",
+          "description",
+          "secret",
+          "required"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What it is for (untrusted text)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Variable or header name."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Must be provided."
+          },
+          "secret": {
+            "type": "boolean",
+            "description": "The value is a secret (goes to the secret store)."
+          }
+        }
+      },
       "NoticeAnswersDto": {
         "type": "object",
         "description": "How many questions an answer took.",
@@ -35929,6 +36433,118 @@
           "daemon_restart"
         ]
       },
+      "RegistryApproval": {
+        "type": "object",
+        "description": "Explicit registry install approval. The server is looked up again by version.",
+        "required": [
+          "name",
+          "version",
+          "approval_sha256"
+        ],
+        "properties": {
+          "approval_sha256": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ImportValues"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegistryPreview": {
+        "type": "object",
+        "description": "Launch details serialized for the approval card.",
+        "required": [
+          "approval_sha256",
+          "args",
+          "fields"
+        ],
+        "properties": {
+          "approval_sha256": {
+            "type": "string",
+            "description": "Opaque digest binding the approval to this result and launch source."
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact argv entries following the command."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact executable name, for a stdio source."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Needed"
+            },
+            "description": "Environment variables or headers that the server will receive."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint, for a remote source."
+          }
+        }
+      },
+      "RegistryResult": {
+        "type": "object",
+        "description": "One search result and the supported launch previews it offers.",
+        "required": [
+          "name",
+          "description",
+          "version",
+          "publisher",
+          "namespace_verified",
+          "active",
+          "sources"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace_verified": {
+            "type": "boolean"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "repository": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistryPreview"
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
       "ReleaseRequest": {
         "type": "object",
         "required": [
@@ -36544,6 +37160,16 @@
           }
         },
         "additionalProperties": false
+      },
+      "Runtime": {
+        "type": "string",
+        "description": "What the server needs to run. Shown on the approval card.",
+        "enum": [
+          "node",
+          "python",
+          "uv",
+          "binary"
+        ]
       },
       "RuntimeConfigDto": {
         "type": "object",
@@ -37565,6 +38191,14 @@
           }
         },
         "additionalProperties": false
+      },
+      "SignatureStatus": {
+        "type": "string",
+        "description": "What a bundle signature proves.\n\nThe signer certificate travels inside the bundle and chains to no root\nthat Praxi trusts, so the best a signature can say is that the file has not\nchanged since that certificate's key signed it. Anyone can make such a\nsignature, so it must never be presented as verified or trusted.",
+        "enum": [
+          "unsigned",
+          "integrity_only"
+        ]
       },
       "SiteRuleDto": {
         "type": "object",
@@ -39607,6 +40241,15 @@
           "whisper",
           "gemini_live",
           "local_voice"
+        ]
+      },
+      "Warning": {
+        "type": "string",
+        "description": "Findings from the static review of untrusted manifest text.",
+        "enum": [
+          "hidden_text",
+          "ai_instructions",
+          "bundled_binary"
         ]
       },
       "WebSearchConfigDto": {

@@ -65,11 +65,7 @@ rmcp = { version = "3.9", default-features = false, features = [
     "server",
     "transport-io",
 ] }
-<<<<<<< HEAD
 proptest.workspace = true
-tempfile = "3"
-=======
->>>>>>> dad7c431 (feat(mcp): import bundles and official registry servers)
 tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "time", "test-util"] }
 
 # `O_NOFOLLOW` for the files unpacked from a bundle.

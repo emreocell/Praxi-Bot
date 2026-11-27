@@ -3661,6 +3661,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mcp/import/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["install_bundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/import/bundle/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["inspect_bundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/import/registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search_registry"];
+        put?: never;
+        post: operations["install_registry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mcp/servers": {
         parameters: {
             query?: never;
@@ -6456,6 +6504,22 @@ export interface components {
             /** Format: int64 */
             size_bytes: number;
         };
+        /** @description JSON metadata inside the bundle installation form. */
+        BundleApproval: {
+            /** @description SHA-256 returned by the inspection and approved by the owner. */
+            approval_sha256: string;
+            /** @description `launch_sha256` of the inspection: the resolved command line the owner saw. */
+            launch_sha256: string;
+            /** @description Owner-provided MCPB user settings. */
+            values?: components["schemas"]["ImportValues"];
+        };
+        /** @description Multipart installation request. The browser uploads the reviewed file again. */
+        BundleInstallForm: {
+            /** @description JSON-encoded `BundleApproval`. */
+            approval: string;
+            /** Format: binary */
+            bundle: string;
+        };
         /** @enum {string} */
         Button: "left" | "middle" | "right";
         /** @description One calendar account (non-secret fields only). */
@@ -7061,6 +7125,25 @@ export interface components {
             enabled: boolean;
             /** @description Let them read files here (writing asks every time). */
             files?: boolean;
+        };
+        /** @description A setting the owner is asked for (the form of the install dialog). */
+        ConfigField: {
+            /** @description Default value as text. */
+            default?: string | null;
+            /** @description Help text, may be empty. */
+            description: string;
+            /** @description Key used in `${user_config.KEY}`. */
+            key: string;
+            /** @description `string`, `number`, `boolean`, `directory` or `file`. */
+            kind: string;
+            /** @description Multiple full paths, one per line in the approval form. */
+            multiple: boolean;
+            /** @description Must be filled in (no default). */
+            required: boolean;
+            /** @description Stored in the secret store, never in the config file. */
+            sensitive: boolean;
+            /** @description Label to show. */
+            title: string;
         };
         /** @description A configured provider (never carries a key). */
         ConfiguredProviderDto: {
@@ -9266,6 +9349,10 @@ export interface components {
             /** @description `env` or `header`. */
             place: string;
         };
+        /** @description Install settings, including write-only secrets. */
+        ImportValues: {
+            [key: string]: string;
+        };
         ImportWorkflow: {
             /** Format: uuid */
             bot_id: string;
@@ -9429,6 +9516,62 @@ export interface components {
             /** Format: int64 */
             applied_through: number;
             state: components["schemas"]["ViewState"];
+        };
+        /** @description The approval card: everything the owner should see before anything runs. */
+        Inspection: {
+            /**
+             * @description The arguments exactly as they will be passed, after every `${...}`
+             *     substitution. A setting with a default shows its default; a setting
+             *     you must fill in shows as `<name>`.
+             */
+            args: string[];
+            /** @description Author name, if given (untrusted text). */
+            author?: string | null;
+            /** @description The file matched an independently supplied SHA-256. */
+            checksum_verified: boolean;
+            /** @description The program that will be started. */
+            command: string;
+            /** @description The folder the server is started in (the bundle's own folder). */
+            cwd: string;
+            /** @description Short description from the manifest (untrusted text). */
+            description: string;
+            /** @description Human name. */
+            display_name: string;
+            /** @description Names of the environment variables the server will receive (no values). */
+            env_names: string[];
+            /** @description Settings the owner must fill in. */
+            fields: components["schemas"]["ConfigField"][];
+            /** @description Number of files that will be unpacked. */
+            file_count: number;
+            /** @description Server id (becomes `mcp:<id>/<tool>`), derived from the bundle name. */
+            id: string;
+            /**
+             * @description SHA-256 (hex) of the resolved launch line shown here (command,
+             *     arguments, working folder and variable names). Installing needs the
+             *     same digest, and is refused if the launch line it would really run
+             *     differs from this one.
+             */
+            launch_sha256: string;
+            /** @description What it needs to run. */
+            runtime: components["schemas"]["Runtime"];
+            /** @description SHA-256 (hex) of the bundle file. The approval is for exactly these bytes. */
+            sha256: string;
+            /**
+             * @description What the embedded signature, if any, proves. It never proves who
+             *     published the bundle.
+             */
+            signature: components["schemas"]["SignatureStatus"];
+            /** @description Names of tools declared by the bundle. Actual tools are discovered on enable. */
+            tools: string[];
+            /**
+             * Format: int64
+             * @description Unpacked size in bytes.
+             */
+            unpacked_bytes: number;
+            /** @description Bundle version. */
+            version: string;
+            /** @description Things the owner should read before approving (suspicious text, ...). */
+            warnings: components["schemas"]["Warning"][];
         };
         /**
          * @description Why it failed, as a stable kind the UI turns into a sentence.
@@ -10950,6 +11093,17 @@ export interface components {
         };
         /** @enum {string} */
         Modifier: "alt" | "ctrl" | "meta" | "shift";
+        /** @description An environment variable or header the server needs. */
+        Needed: {
+            /** @description What it is for (untrusted text). */
+            description: string;
+            /** @description Variable or header name. */
+            name: string;
+            /** @description Must be provided. */
+            required: boolean;
+            /** @description The value is a secret (goes to the secret store). */
+            secret: boolean;
+        };
         /** @description How many questions an answer took. */
         NoticeAnswersDto: {
             /**
@@ -11467,6 +11621,37 @@ export interface components {
         };
         /** @enum {string} */
         RecoveryReason: "owner_lost" | "device_revoked" | "daemon_restart";
+        /** @description Explicit registry install approval. The server is looked up again by version. */
+        RegistryApproval: {
+            approval_sha256: string;
+            name: string;
+            values?: components["schemas"]["ImportValues"];
+            version: string;
+        };
+        /** @description Launch details serialized for the approval card. */
+        RegistryPreview: {
+            /** @description Opaque digest binding the approval to this result and launch source. */
+            approval_sha256: string;
+            /** @description Exact argv entries following the command. */
+            args: string[];
+            /** @description Exact executable name, for a stdio source. */
+            command?: string | null;
+            /** @description Environment variables or headers that the server will receive. */
+            fields: components["schemas"]["Needed"][];
+            /** @description Endpoint, for a remote source. */
+            url?: string | null;
+        };
+        /** @description One search result and the supported launch previews it offers. */
+        RegistryResult: {
+            active: boolean;
+            description: string;
+            name: string;
+            namespace_verified: boolean;
+            publisher: string;
+            repository?: string | null;
+            sources: components["schemas"]["RegistryPreview"][];
+            version: string;
+        };
         ReleaseRequest: {
             /** Format: int64 */
             control_epoch: number;
@@ -11704,6 +11889,11 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * @description What the server needs to run. Shown on the approval card.
+         * @enum {string}
+         */
+        Runtime: "node" | "python" | "uv" | "binary";
         /** @description Bot `[runtime]` settings (ADR-0027 §7). */
         RuntimeConfigDto: {
             /**
@@ -12188,6 +12378,16 @@ export interface components {
              */
             exclude: string[];
         };
+        /**
+         * @description What a bundle signature proves.
+         *
+         *     The signer certificate travels inside the bundle and chains to no root
+         *     that Praxi trusts, so the best a signature can say is that the file has not
+         *     changed since that certificate's key signed it. Anyone can make such a
+         *     signature, so it must never be presented as verified or trusted.
+         * @enum {string}
+         */
+        SignatureStatus: "unsigned" | "integrity_only";
         /** @description One rule as the owner sees it. */
         SiteRuleDto: {
             /** @description `block`, `ask` or `allow`. */
@@ -13034,6 +13234,11 @@ export interface components {
          * @enum {string}
          */
         VoiceProvider: "whisper" | "gemini_live" | "local_voice";
+        /**
+         * @description Findings from the static review of untrusted manifest text.
+         * @enum {string}
+         */
+        Warning: "hidden_text" | "ai_instructions" | "bundled_binary";
         /**
          * @description Current web search configuration (`GET /v1/web/search`): non-secret fields
          *     only.
@@ -22575,6 +22780,178 @@ export interface operations {
             };
             /** @description MCP management is not available */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    install_bundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["BundleInstallForm"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    inspect_bundle: {
+        parameters: {
+            query?: {
+                expected_sha256?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Inspection"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    search_registry: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryResult"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    install_registry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegistryApproval"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
