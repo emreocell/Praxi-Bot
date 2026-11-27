@@ -5137,10 +5137,6 @@
         "past": "That time has already passed. Pick a later one.",
         "time": "Pick a time like 09:00."
       },
-      "templates": {
-        "hint": "Pick one to fill in the form. You can change everything afterwards.",
-        "title": "Start from an example"
-      },
       "text": "Schedule in words",
       "textHint": "English or Turkish. Times use {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -5148,7 +5144,6 @@
       "tz": "Timezone",
       "tzCronHint": "Used if the cron expression has 5 fields without a timezone.",
       "tzSearch": "Search a timezone, e.g. Europe/Istanbul",
-      "tzShown": "Times are in {{tz}}.",
       "tzUnknown": "Not a known timezone. Pick one from the list.",
       "weekday": "On which day of the week?",
       "when": "When"

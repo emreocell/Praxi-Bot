@@ -108,8 +108,13 @@ test("slash group is read from the composer command lists, and ? only fires outs
   const { slashShortcuts, isHelpKey } = await import("./shortcuts.ts");
   const { APP_COMMANDS, LOCAL_COMMANDS, SLASH_COMMANDS } = await import("./slash.ts");
   assert.equal(slashShortcuts().length, APP_COMMANDS.length + LOCAL_COMMANDS.length + SLASH_COMMANDS.length);
+  // Copy that ships in English and Turkish first (scaffold-locales.json) shows the English text in German.
+  const { englishFallbackPrefixes } = JSON.parse(readFileSync(join(srcDir, "i18n/scaffold-locales.json"), "utf8")) as { englishFallbackPrefixes: string[] };
   for (const s of slashShortcuts()) {
-    for (const name of ["en", "tr", "de"]) assert.equal(typeof lookup(locale(name), s.labelKey), "string", `${name}: ${s.labelKey}`);
+    for (const name of ["en", "tr", "de"]) {
+      const lang = name === "de" && englishFallbackPrefixes.some((p) => s.labelKey.startsWith(p)) ? "en" : name;
+      assert.equal(typeof lookup(locale(lang), s.labelKey), "string", `${name}: ${s.labelKey}`);
+    }
   }
   const ev = (key: string, tag: string, extra = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, target: { tagName: tag, isContentEditable: false }, ...extra }) as never;
   assert.equal(isHelpKey(ev("?", "DIV")), true);

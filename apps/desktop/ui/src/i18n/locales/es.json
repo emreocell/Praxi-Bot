@@ -5483,14 +5483,6 @@
     "sessions": "{{count}} sesiones",
     "sessions_one": "{{count}} sesión",
     "sessions_other": "{{count}} sesiones",
-    "start": {
-      "button": "Iniciar",
-      "goalLabel": "¿Qué debe hacer el bot?",
-      "help": "Describe toda la tarea una sola vez; el bot preguntará al principio lo que necesite, luego trabajará hasta terminar y te informará.",
-      "placeholder": "Por ejemplo: registra mi tienda en estos 15 sitios web y dime en cuáles funcionó.",
-      "starting": "Iniciando…",
-      "summary": "Iniciar una misión"
-    },
     "stop": "Detener",
     "stopConfirm": "¿Detener esta misión definitivamente?",
     "stopNo": "Que siga",
@@ -6367,10 +6359,6 @@
         "past": "Esa hora ya pasó. Elige una posterior.",
         "time": "Elige una hora como 09:00."
       },
-      "templates": {
-        "hint": "Elige un ejemplo para rellenar el formulario. Luego puedes cambiarlo todo.",
-        "title": "Empezar con un ejemplo"
-      },
       "text": "Horario en palabras",
       "textHint": "Escribe en inglés o turco. Se usa la zona horaria {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -6378,7 +6366,6 @@
       "tz": "Zona horaria",
       "tzCronHint": "Se usa si la expresión cron tiene cinco campos y no incluye zona horaria.",
       "tzSearch": "Buscar zona horaria, p. ej. Europe/Istanbul",
-      "tzShown": "Las horas se muestran en {{tz}}.",
       "tzUnknown": "No es una zona horaria conocida. Elige una de la lista.",
       "weekday": "¿Qué día de la semana?",
       "when": "Cuándo"

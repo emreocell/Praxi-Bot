@@ -238,15 +238,6 @@
 }
 
 
-.previewBox {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  border: var(--size-border) solid var(--color-border);
-  background-color: var(--color-surface);
-}
 
 .previewList {
   margin: var(--space-0);
@@ -470,48 +461,11 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.templateRow {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--size-control-lg) * 3), 1fr));
-  gap: var(--space-2);
-}
 
-.template {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  border: var(--size-border) solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text);
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-}
 
-.template:hover {
-  border-color: var(--color-accent-text);
-}
 
-.template:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
 
-.templateName {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
 
-.templateBlurb {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
 
 .advanced {
   border: var(--size-border) solid var(--color-border);
@@ -520,10 +474,21 @@
 }
 
 .advanced > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
   cursor: pointer;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
+}
+
+/* What the folded options are set to, so nothing hides behind the fold. */
+.moreLine {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-muted);
 }
 
 .advanced > summary:focus-visible {
@@ -665,4 +630,138 @@
   align-items: center;
   gap: var(--space-2);
   margin-inline-start: auto;
+}
+
+/* The examples: one row of small chips under the sentence field (the blurb is the tooltip). */
+.exampleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.exampleLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.exampleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--size-control-sm);
+  padding: var(--space-half) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: var(--size-border) solid var(--color-border);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.exampleChip:hover {
+  border-color: var(--color-accent-text);
+  color: var(--color-text);
+}
+
+.exampleChip:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.exampleChip > svg {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+/* The day and time next to each other, each only as wide as it needs. */
+.whenRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.whenField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: calc(var(--size-control-lg) * 3);
+}
+
+/* "Every weekday at 09:00, Istanbul": the one line that says what was picked. */
+.whenSummary {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-active);
+}
+
+.whenIcon {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  margin-top: var(--space-half);
+  color: var(--color-accent-text);
+}
+
+.whenLines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.whenText {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.linkButton {
+  margin-inline-start: var(--space-2);
+  padding: var(--space-0);
+  border: none;
+  background: none;
+  color: var(--color-accent-text);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.linkButton:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--radius-sm);
+}
+
+.nextRuns > summary {
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.nextRuns > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.nextRuns > ol {
+  margin-top: var(--space-1);
+}
+
+/* Bot and name side by side; they stack on a narrow window. */
+.formPair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--size-control-lg) * 6), 1fr));
+  gap: var(--space-3);
 }

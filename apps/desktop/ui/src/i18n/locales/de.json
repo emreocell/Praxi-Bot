@@ -5483,14 +5483,6 @@
     "sessions": "{{count}} Sitzungen",
     "sessions_one": "{{count}} Sitzung",
     "sessions_other": "{{count}} Sitzungen",
-    "start": {
-      "button": "Starten",
-      "goalLabel": "Was soll der Bot tun?",
-      "help": "Beschreibe die ganze Aufgabe einmal; der Bot fragt am Anfang, was er braucht, arbeitet dann bis alles erledigt ist und berichtet.",
-      "placeholder": "Zum Beispiel: Trage meinen Shop auf diesen 15 Webseiten ein und sag mir, welche geklappt haben.",
-      "starting": "Wird gestartet…",
-      "summary": "Auftrag starten"
-    },
     "stop": "Stoppen",
     "stopConfirm": "Diesen Auftrag endgültig stoppen?",
     "stopNo": "Weiterlaufen lassen",
@@ -6367,10 +6359,6 @@
         "past": "Diese Zeit ist schon vorbei. Wähle eine spätere.",
         "time": "Wähle eine Uhrzeit wie 09:00."
       },
-      "templates": {
-        "hint": "Wähle eines, um das Formular auszufüllen. Danach kannst du alles ändern.",
-        "title": "Mit einem Beispiel beginnen"
-      },
       "text": "Zeitplan in Worten",
       "textHint": "Englisch oder Türkisch. Zeiten verwenden {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -6378,7 +6366,6 @@
       "tz": "Zeitzone",
       "tzCronHint": "Wird verwendet, wenn der Cron-Ausdruck 5 Felder ohne Zeitzone hat.",
       "tzSearch": "Zeitzone suchen, z. B. Europe/Istanbul",
-      "tzShown": "Die Zeiten gelten in {{tz}}.",
       "tzUnknown": "Keine bekannte Zeitzone. Bitte aus der Liste wählen.",
       "weekday": "An welchem Wochentag?",
       "when": "Wann"

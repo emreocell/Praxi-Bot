@@ -232,6 +232,7 @@
 .routeRow,
 .rememberRow,
 .laneRow,
+.missionRow,
 .runError,
 .runStopped {
   margin-left: var(--lane);

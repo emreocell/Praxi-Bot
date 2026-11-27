@@ -33,7 +33,7 @@ export function commandOptions(query: string, recent: readonly string[], transla
   const priority = (name: string) => group(name) === "recent" ? 0 : group(name) === "chat" ? 1 : 2;
   commands.sort((a, b) => priority(a.name) - priority(b.name) ||
     (group(a.name) === "recent" ? recent.indexOf(a.name) - recent.indexOf(b.name) : 0));
-  return rank(commands, query, (c) => ({ text: c.name, keywords: [translate(c.i18nKey)] })).map((r) => ({
+  return rank(commands, query, (c) => ({ text: c.name, keywords: [...(c.aliases ?? []), translate(c.i18nKey)] })).map((r) => ({
     id: r.item.name, label: `/${r.item.name}`, detail: translate(r.item.i18nKey), insert: r.item.name,
     indices: r.indices.map((i) => i + 1), group: group(r.item.name)
   }));

@@ -5249,10 +5249,6 @@
         "past": "Cette heure est déjà passée. Choisissez-en une plus tardive.",
         "time": "Choisissez une heure comme 09:00."
       },
-      "templates": {
-        "hint": "Choisissez-en un pour remplir le formulaire. Vous pourrez ensuite tout modifier.",
-        "title": "Partir d'un exemple"
-      },
       "text": "Planification en toutes lettres",
       "textHint": "Anglais ou turc. Les heures utilisent {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -5260,7 +5256,6 @@
       "tz": "Fuseau horaire",
       "tzCronHint": "Utilisé si l'expression cron comporte 5 champs sans fuseau horaire.",
       "tzSearch": "Rechercher un fuseau horaire, p. ex. Europe/Istanbul",
-      "tzShown": "Les heures sont en {{tz}}.",
       "tzUnknown": "Fuseau horaire inconnu. Choisissez-en un dans la liste.",
       "weekday": "Quel jour de la semaine ?",
       "when": "Quand"

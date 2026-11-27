@@ -5713,6 +5713,22 @@
     "when_month": "Son 30 gün",
     "when_week": "Son 7 gün"
   },
+  "missionChat": {
+    "eyebrow": "Görev",
+    "needsGoal": "/görev yazdıktan sonra işi yaz, örneğin: /görev Bu 20 dizin sitesine kaydol.",
+    "open": "Görevi aç",
+    "openAnswers": "Yanıtla ({{count}})",
+    "openAnswers_one": "Yanıtla ({{count}})",
+    "openAnswers_other": "Yanıtla ({{count}})",
+    "openReport": "Raporu gör",
+    "panelEmpty": "Henüz görev yok: sohbete /görev ve işi yaz ya da uzun bir işi doğrudan iste.",
+    "slash": "Görev başlat: bot uzun bir işi kendi başına bitirir (/görev de yazabilirsin)",
+    "startFailed": "Görev başlatılamadı: {{reason}}",
+    "startInChat": "Şimdi başlat",
+    "waiting": "Bekleyenler ({{count}})",
+    "waiting_one": "Bekleyenler ({{count}})",
+    "waiting_other": "Bekleyenler ({{count}})"
+  },
   "missions": {
     "chip": {
       "done": "Bitti",
@@ -5809,14 +5825,6 @@
     "sessions": "{{count}} oturum",
     "sessions_one": "{{count}} oturum",
     "sessions_other": "{{count}} oturum",
-    "start": {
-      "button": "Başlat",
-      "goalLabel": "Bot ne yapsın?",
-      "help": "Tüm işi bir kez anlat; bot başta ihtiyaç duyduklarını sorar, sonra iş bitene kadar çalışır ve sana rapor verir.",
-      "placeholder": "Örneğin: dükkânımı şu 15 sitede kaydet ve hangilerinin olduğunu söyle.",
-      "starting": "Başlatılıyor…",
-      "summary": "Görev başlat"
-    },
     "stop": "Durdur",
     "stopConfirm": "Bu görev tamamen durdurulsun mu?",
     "stopNo": "Devam etsin",
@@ -6632,6 +6640,22 @@
       "hint": "Servisi araçlar, zamanlamalar ve kanallar kapalı başlatır; sorunu düzeltebilirsin. Hiçbir şey silinmez."
     }
   },
+  "scheduleEditor": {
+    "changeZone": "Saat dilimini değiştir",
+    "examples": "Örnekler:",
+    "more": "Diğer seçenekler",
+    "moreLine": "Haber ver: {{notify}} · {{zone}}",
+    "summary": {
+      "daily": "Her gün saat {{time}}, {{zone}}",
+      "monthly": "Her ayın {{day}}. günü saat {{time}}, {{zone}}",
+      "once": "Bir kez: {{date}}, saat {{time}}, {{zone}}",
+      "onceNoDate": "Bir kez, saat {{time}}, {{zone}}: günü seç",
+      "weekdays": "Hafta içi her gün saat {{time}}, {{zone}}",
+      "weekly": "Her {{weekday}} saat {{time}}, {{zone}}"
+    },
+    "whatPlaceholder": "Örneğin: gelen kutumu kontrol et ve yenileri özetle.",
+    "whatToDo": "Bot ne yapsın?"
+  },
   "schedules": {
     "bot": "Bot",
     "calendar": {
@@ -6735,10 +6759,6 @@
         "past": "Bu zaman geçti. Daha ileri bir zaman seçin.",
         "time": "09:00 gibi bir saat seçin."
       },
-      "templates": {
-        "hint": "Formu doldurmak için birini seçin. Sonra her şeyi değiştirebilirsiniz.",
-        "title": "Bir örnekle başla"
-      },
       "text": "Zamanlama cümlesi",
       "textHint": "Türkçe ya da İngilizce. Saatler {{tz}} diliminde.",
       "textPlaceholder": "her gün 09:00, every weekday at 9",
@@ -6746,7 +6766,6 @@
       "tz": "Saat dilimi",
       "tzCronHint": "Cron ifadesinde saat dilimi belirtilmemiş 5 alan varsa kullanılır.",
       "tzSearch": "Saat dilimi ara, örn. Europe/Istanbul",
-      "tzShown": "Saatler {{tz}} dilimine göre.",
       "tzUnknown": "Bilinen bir saat dilimi değil. Listeden seçin.",
       "weekday": "Haftanın hangi günü?",
       "when": "Ne zaman"

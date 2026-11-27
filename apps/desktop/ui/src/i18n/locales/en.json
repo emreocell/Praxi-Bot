@@ -5713,6 +5713,22 @@
     "when_month": "Past month",
     "when_week": "Past week"
   },
+  "missionChat": {
+    "eyebrow": "Mission",
+    "needsGoal": "Write the job after /mission, for example: /mission Sign up on these 20 directory sites.",
+    "open": "Open mission",
+    "openAnswers": "Answer ({{count}})",
+    "openAnswers_one": "Answer ({{count}})",
+    "openAnswers_other": "Answer ({{count}})",
+    "openReport": "See the report",
+    "panelEmpty": "No missions yet: type /mission and the job in the chat, or just ask for a long job.",
+    "slash": "Start a mission: the bot works through a long job on its own",
+    "startFailed": "Could not start the mission: {{reason}}",
+    "startInChat": "Start one",
+    "waiting": "Waiting ({{count}})",
+    "waiting_one": "Waiting ({{count}})",
+    "waiting_other": "Waiting ({{count}})"
+  },
   "missions": {
     "chip": {
       "done": "Done",
@@ -5809,14 +5825,6 @@
     "sessions": "{{count}} sessions",
     "sessions_one": "{{count}} session",
     "sessions_other": "{{count}} sessions",
-    "start": {
-      "button": "Start",
-      "goalLabel": "What should the bot do?",
-      "help": "Describe the whole task once; the bot will ask what it needs at the start, then work until it is done and report.",
-      "placeholder": "For example: register my shop on these 15 websites and tell me which ones worked.",
-      "starting": "Starting…",
-      "summary": "Start a mission"
-    },
     "stop": "Stop",
     "stopConfirm": "Stop this mission for good?",
     "stopNo": "Keep going",
@@ -6632,6 +6640,22 @@
       "hint": "Starts the service with tools, schedules and channels off, so you can fix the problem. Nothing is deleted."
     }
   },
+  "scheduleEditor": {
+    "changeZone": "Change time zone",
+    "examples": "Examples:",
+    "more": "More options",
+    "moreLine": "Tell me: {{notify}} · {{zone}}",
+    "summary": {
+      "daily": "Every day at {{time}}, {{zone}}",
+      "monthly": "On day {{day}} of every month at {{time}}, {{zone}}",
+      "once": "Once, on {{date}} at {{time}}, {{zone}}",
+      "onceNoDate": "Once at {{time}}, {{zone}}: pick the day",
+      "weekdays": "Every weekday at {{time}}, {{zone}}",
+      "weekly": "Every {{weekday}} at {{time}}, {{zone}}"
+    },
+    "whatPlaceholder": "For example: check my inbox and summarise what is new.",
+    "whatToDo": "What should the bot do?"
+  },
   "schedules": {
     "bot": "Bot",
     "calendar": {
@@ -6735,10 +6759,6 @@
         "past": "That time has already passed. Pick a later one.",
         "time": "Pick a time like 09:00."
       },
-      "templates": {
-        "hint": "Pick one to fill in the form. You can change everything afterwards.",
-        "title": "Start from an example"
-      },
       "text": "Schedule in words",
       "textHint": "English or Turkish. Times use {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -6746,7 +6766,6 @@
       "tz": "Timezone",
       "tzCronHint": "Used if the cron expression has 5 fields without a timezone.",
       "tzSearch": "Search a timezone, e.g. Europe/Istanbul",
-      "tzShown": "Times are in {{tz}}.",
       "tzUnknown": "Not a known timezone. Pick one from the list.",
       "weekday": "On which day of the week?",
       "when": "When"
