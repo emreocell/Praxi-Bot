@@ -551,7 +551,8 @@ pub(crate) fn mission_draft(
         S::Done => NoticeKind::Finished,
         S::Blocked => NoticeKind::Blocked,
         S::Failed => NoticeKind::Failed,
-        S::Running | S::Paused | S::Cancelled => return None,
+        // A mission asleep until its wake has nothing to report yet.
+        S::Running | S::Paused | S::Cancelled | S::Waiting => return None,
     };
     let digest = m.digest.as_ref()?;
     let mut d = Draft::new(kind, NoticeSource::Mission, clip(&m.title, 90));
