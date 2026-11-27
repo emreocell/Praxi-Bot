@@ -1249,8 +1249,8 @@ pub fn serve(
     let composio_tools = mcp_tools.clone();
     // Safe mode registers no connector at all: no email, Home Assistant, calendar or web
     // tools (their settings routes answer "not configured" until a normal start).
-    let (email, calendar) = if safe_mode {
-        (None, None)
+    let (email, calendar, homeassistant) = if safe_mode {
+        (None, None, None)
     } else {
         let email = crate::email_host::start_email(data_dir, &mcp_tools, telegram_store.as_ref())
             .map(|(host, _)| host);
@@ -1259,10 +1259,11 @@ pub fn serve(
         if let Some(host) = &email {
             agent.mail_handle().set(Arc::clone(host.connector()));
         }
-        crate::homeassistant_host::start_homeassistant(
+        let homeassistant = crate::homeassistant_host::start_homeassistant(
             data_dir,
             &mcp_tools,
             telegram_store.as_ref(),
+            port,
         );
         // Calendar invitations go out through the e-mail connector when the calendar
         // server does not send them itself.
@@ -1274,7 +1275,7 @@ pub fn serve(
             port,
         );
         register_web(data_dir, port, &mcp_tools, telegram_store.as_ref());
-        (email, calendar)
+        (email, calendar, homeassistant)
     };
     step("web tools registered");
     let web_host =
@@ -1578,6 +1579,9 @@ pub fn serve(
         }
         if let Some(calendar) = calendar {
             state.set_calendar(calendar as Arc<dyn daemon_api::CalendarControl>);
+        }
+        if let Some(homeassistant) = homeassistant {
+            state.set_homeassistant(homeassistant as Arc<dyn daemon_api::HomeAssistantControl>);
         }
         if !safe_mode {
             state.set_web(Arc::new(web_host) as Arc<dyn daemon_api::WebControl>);

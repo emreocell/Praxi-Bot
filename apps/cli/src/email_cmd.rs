@@ -73,7 +73,7 @@ pub fn enc(segment: &str) -> String {
 }
 
 /// `--bot <name-or-id>`: a bot id as is, else the one bot with that name.
-async fn resolve_bot(c: &Client, wanted: &str) -> Result<String> {
+pub(crate) async fn resolve_bot(c: &Client, wanted: &str) -> Result<String> {
     let bots = c.request(Method::GET, "/v1/bots", None).await?;
     let list = bots.as_array().cloned().unwrap_or_default();
     if let Some(b) = list.iter().find(|b| b["id"].as_str() == Some(wanted)) {
