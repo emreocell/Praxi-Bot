@@ -144,12 +144,64 @@ function pnpm {
              "WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD"},
         )
 
-    def test_a_tag_build_cannot_ship_without_the_signing_key_or_the_public_key(self):
-        early = self.step_text("Check the updater configuration and signing key")
-        self.assertIn("throw", early)
-        self.assertIn("--require-pubkey", early)
-        # ...and the check runs before the long build.
+    def test_the_updater_check_runs_before_the_long_build_and_the_signing_step_can_be_skipped(self):
         self.assertLess(self.text.index("Check the updater configuration"), self.text.index("- name: Build installer"))
+        sign = self.step_text("Sign the installer and write the update feed (latest.json)")
+        self.assertIn("if: env.PRAXI_UPDATER_MODE != 'off'", sign)
+        # The release files are assembled with or without the feed.
+        self.assertIn("if (Test-Path update-assets)", self.text)
+
+    def run_updater_check(self, *, tag, have_key, pubkey):
+        """Runs the real decision step in a scratch checkout; returns (process, mode written to GITHUB_ENV, summary)."""
+        script = self.step_script("Check the updater configuration and signing key")
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / "scripts" / "release").mkdir(parents=True)
+            shutil.copy(SCRIPT_MANIFEST, work / "scripts" / "release")
+            (work / "apps" / "desktop").mkdir(parents=True)
+            conf = json.loads((ROOT / "apps" / "desktop" / "tauri.conf.json").read_text(encoding="utf-8"))
+            conf["plugins"]["updater"]["pubkey"] = pubkey
+            (work / "apps" / "desktop" / "tauri.conf.json").write_text(json.dumps(conf), encoding="utf-8")
+            github_env, summary = work / "github_env.txt", work / "summary.md"
+            env = {**os.environ, "GITHUB_REF_TYPE": "tag" if tag else "branch", "GITHUB_ENV": str(github_env),
+                   "GITHUB_STEP_SUMMARY": str(summary), "HAVE_UPDATER_KEY": "true" if have_key else "false"}
+            done = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+                                  env=env, cwd=work, capture_output=True, encoding="utf-8", errors="replace", timeout=60)
+            read = lambda path: path.read_text(encoding="utf-8-sig") if path.exists() else ""
+            return done, read(github_env), read(summary)
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_tag_build_without_either_key_part_is_released_unsigned_with_a_warning(self):
+        done, github_env, summary = self.run_updater_check(tag=True, have_key=False, pubkey="")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("PRAXI_UPDATER_MODE=off", github_env)
+        self.assertIn("::warning", done.stdout)
+        self.assertIn("in-app updates not enabled: run scripts/release/setup-updater-key.ps1", summary)
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_tag_build_with_both_key_parts_signs(self):
+        done, github_env, summary = self.run_updater_check(tag=True, have_key=True, pubkey=FIXTURES["pub_a"])
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("PRAXI_UPDATER_MODE=release", github_env)
+        self.assertEqual(summary, "")
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_tag_build_with_only_one_key_part_fails(self):
+        for have_key, pubkey, expected in ((True, "", "has no updater public key"),
+                                           (False, FIXTURES["pub_a"], "secret TAURI_SIGNING_PRIVATE_KEY is not set")):
+            with self.subTest(have_key=have_key):
+                done, github_env, _ = self.run_updater_check(tag=True, have_key=have_key, pubkey=pubkey)
+                self.assertNotEqual(done.returncode, 0, done.stdout)
+                self.assertIn(expected, done.stdout + done.stderr)
+                self.assertEqual(github_env, "")
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_rehearsal_never_depends_on_the_real_key_and_always_rehearses(self):
+        for have_key, pubkey in ((False, ""), (True, FIXTURES["pub_a"])):
+            done, github_env, summary = self.run_updater_check(tag=False, have_key=have_key, pubkey=pubkey)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertIn("PRAXI_UPDATER_MODE=rehearsal", github_env)
+            self.assertEqual(summary, "")
 
     @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
     def test_the_signing_step_writes_a_feed_the_app_accepts(self):

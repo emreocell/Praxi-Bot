@@ -123,8 +123,10 @@ after the review. Do not attach only the installer: users are told to verify it 
 `SHA256SUMS.txt` and the bundle ([Check your download](../guide/verify-download.md)).
 
 **In-app updates.** A tag build signs the installer with the update key (`TAURI_SIGNING_PRIVATE_KEY`,
-set up once with `scripts/release/setup-updater-key.ps1`) and writes `latest.json`; without the secret
-or the public key in `tauri.conf.json` the tag build fails on purpose. For a **final tag** also attach
+set up once with `scripts/release/setup-updater-key.ps1`) and writes `latest.json`. Until that setup
+is done (no secret and no public key in `tauri.conf.json`) the tag build is still built and published,
+without a signature and `latest.json`, and the job summary warns "in-app updates not enabled"; having
+only one of the two fails the build on purpose. For a **final tag** also attach
 `latest.json` and the `.sig` (they are part of the artifact set above), because GitHub's "latest
 release" address is the Stable feed, then run `gh workflow run update-feed.yml -f tag=<tag>` to move
 the Preview feed. Pre-release tags need nothing extra. Details and the one-time setup:

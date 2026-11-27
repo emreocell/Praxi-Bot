@@ -55,10 +55,35 @@ key as the Actions secret `TAURI_SIGNING_PRIVATE_KEY`, and writes the public key
    The public key is not secret.
 3. Tag the next release as usual (docs/contributing/releasing.md).
 
-From then on a **tag build refuses to run** without the secret or the public key, so no release can
-ship with updates silently off. Builds for pull requests, the weekly build and manual runs
-rehearse the whole path (sign, write `latest.json`, check it) with a throwaway key and never use the
-real secret.
+What a tag build does depends on the two halves of the key:
+
+| secret `TAURI_SIGNING_PRIVATE_KEY` | public key in `tauri.conf.json` | tag build |
+| --- | --- | --- |
+| missing | empty | **Not blocked.** Built and published as before: no signature, no `latest.json`. The job summary says "in-app updates not enabled: run scripts/release/setup-updater-key.ps1" and the app keeps showing "updates not set up". |
+| set | set | Signed installer and `latest.json`, checked against the public key before anything is published. |
+| set | empty | **Fails** (the app could not verify the update). Commit the public key, or remove the secret. |
+| missing | set | **Fails** (the release could not be signed). Set the secret again. |
+
+So until the owner runs the command above, releases keep working without in-app updates. The setup
+script sets the secret first and the public key arrives with the pull request: a tag pushed in
+between fails with the "set / empty" message; merge the public-key pull request, then run the tag
+build again. Builds for pull requests, the weekly build and manual runs rehearse the whole path
+(sign, write `latest.json`, check it) with a throwaway key and never use the real secret.
+
+### Optional: keep the signing key out of reach of other workflow runs
+
+The workflow only hands the secret to the single signing step of a tag build, and never to the
+build. If you want GitHub to enforce that as well, store the secret in an environment that only
+`v*` tags may use. This needs repository settings, so it is not part of the workflow file:
+
+1. Settings > Environments > New environment, with a name of your choice (not `release`: that one is
+   the reviewer-gated environment of the final Linux release in `linux-release.yml`).
+2. *Deployment branches and tags* > *Selected branches and tags* > add the tag rule `v*`.
+3. Add `TAURI_SIGNING_PRIVATE_KEY` (and the password, if any) as environment secrets and delete the
+   repository-level copies.
+4. Add `environment: <name>` to the signing job. That job also runs for pull requests and the weekly
+   build, which the tag-only environment would block, so the signing has to be split into its own
+   tag-only job first. This is not done yet: until then keep the secret as a repository secret.
 
 Replacing the public key later is possible (`-Replace`) but only makes sense together with a
 release that every install can still verify, because installed copies only trust the key they were
