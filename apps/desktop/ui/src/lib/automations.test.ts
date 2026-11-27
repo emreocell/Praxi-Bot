@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Schedule, ScheduleHistoryEntry } from "../api/types";
-import { botAutomationRows, dayWord, lastOutcome, localSpecLabel, primaryAction, scheduleKind } from "./automations.ts";
+import { botAutomationRows, confirmableAuthor, dayWord, lastOutcome, localSpecLabel, primaryAction, scheduleKind } from "./automations.ts";
 import { newTrigger, type BotTrigger } from "./triggers.ts";
 
 const schedule = (id: string, extra: Partial<Schedule> = {}): Schedule =>
   ({
     id, bot_id: "a", name: id, enabled: true, has_webhook: false, created_at_ms: 0, misfire_policy: "skip",
-    origin: "user", payload: { kind: "agent_prompt", text: "x" }, spec: { cron: "0 9 * * *" },
+    origin: "user", author: "owner", payload: { kind: "agent_prompt", text: "x" }, spec: { cron: "0 9 * * *" },
     next_run_at_ms: 1000, ...extra
   }) as Schedule;
 const trigger = (id: string, origin: BotTrigger["origin"], kind: "mail" | "webhook" | "time" = "mail"): BotTrigger => {
   const base = newTrigger();
   const source = kind === "mail" ? base.config.source : kind === "webhook" ? { kind: "webhook" as const, id: "h" } : { kind: "time" as const, spec: { cron: "0 9 * * *" } };
-  return { ...base, config: { ...base.config, source }, name: id, origin, id, bot_id: "a", last_fired_at_ms: null, count_today: 0, queued: 0, last_error: null };
+  return { ...base, config: { ...base.config, source }, name: id, origin, author: "owner", id, bot_id: "a", last_fired_at_ms: null, count_today: 0, queued: 0, last_error: null };
 };
 const entry = (status: string, extra: Partial<ScheduleHistoryEntry> = {}): ScheduleHistoryEntry =>
   ({ due_ms: 500, run_id: null, chat_id: null, status, started_at_ms: null, finished_at_ms: null, error: null, retryable: false, ...extra }) as ScheduleHistoryEntry;
@@ -66,4 +66,18 @@ test("the local time zone is left out of the 'when' line, another one stays", ()
   assert.equal(localSpecLabel({ cron: "0 9 * * 1-5 Europe/Istanbul" }, fmt, "en", "Europe/Istanbul").values.zone, "");
   assert.equal(localSpecLabel({ cron: "0 9 * * 1-5 America/New_York" }, fmt, "en", "Europe/Istanbul").values.zone, " (America/New_York)");
   assert.equal(localSpecLabel({ every: { seconds: 3600 } }, fmt, "en", "UTC").i18nKey, "schedules.spec.every.hours");
+});
+
+test("only an unconfirmed user-side schedule or stored rule on a Full bot offers the one-click confirm", () => {
+  const row = (s: Schedule) => botAutomationRows("a", [s], [])[0]!;
+  const rule = (extra: Partial<BotTrigger>) => botAutomationRows("a", [], [{ ...trigger("r", "rule"), ...extra }])[0]!;
+  assert.equal(confirmableAuthor(row(schedule("s", { author: "unknown" })), true), true);
+  assert.equal(confirmableAuthor(rule({ author: "unknown" }), true), true);
+  // not on Full, already confirmed, bot-made (editing takes it over), moved away, or only an adoptable source
+  assert.equal(confirmableAuthor(row(schedule("s", { author: "unknown" })), false), false);
+  assert.equal(confirmableAuthor(row(schedule("s", { author: "owner" })), true), false);
+  assert.equal(confirmableAuthor(row(schedule("s", { origin: "bot", author: "bot" })), true), false);
+  assert.equal(confirmableAuthor(row(schedule("s", { author: "unknown", moved_to: "Server" })), true), false);
+  assert.equal(confirmableAuthor(rule({ author: "bot" }), true), false);
+  assert.equal(confirmableAuthor(rule({ author: "unknown", origin: "webhook" }), true), false);
 });

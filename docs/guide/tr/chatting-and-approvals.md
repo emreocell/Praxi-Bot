@@ -190,6 +190,26 @@ Durduramadığı şeyler: harf harf hecelemeyi (`h-a-n-n-e-l-o-r-e`) ve punycode
 
 **Tam seviyede hâlâ soranlar.** Çalışma bir web sayfası okuduktan sonra bir program ya da kabuk komutu başlatmak (bir sayfa komutu seçmemelidir) her zaman sorar, yukarıdaki kesin durma noktaları da öyle. **Telegram** (ya da herhangi bir kanal, yerel API ya da yönetici masaüstün olmayan eşleşmiş bir cihaz) üzerinden gelen çalışma bu kurala göre sahibin başlattığı sayılmaz: onun web ve tarayıcı adımları tek seferlik kartlarını korur. Bu, şu anki durumdur, gelecek için bir söz değildir.
 
+### Tam seviye: kendi zamanlamaların ve tetikleyicilerin
+
+**Tam** seviyedeki bir bot, para harcamak ve kesin durma noktaları dışında hiçbir şey için sormaz. Bu, **senin yazdığın** otomasyon için de geçerlidir: bu bilgisayarda (ya da yönetici masaüstünde) masaüstü uygulamasında oluşturduğun bir zamanlanmış görev, e-posta kuralı, webhook kuralı ya da dosya izleyici Tam şeritte, kart çıkmadan çalışır. Böyle bir çalışmanın alt ajanı da aynısını yapar (derinlik sınırı her zamanki gibi).
+
+Karar veren şey çalışmayı neyin başlattığı değil, **talimatı kimin yazdığıdır**. Daemon, her zamanlamayı ve kuralı kaydederken bir **yazar** not eder:
+
+| Yazar | Kim | Tam seviyede kartsız çalışır mı? |
+| --- | --- | --- |
+| `owner` | Sen, bu bilgisayardaki uygulamada ya da yönetici masaüstünde | **Evet** |
+| `bot` | Bir bot, zamanlama araçlarıyla (kartı onayladıktan sonra) | Hayır: tek seferlik kartlarını korur |
+| `unknown` | Yazar kaydedilmeye başlamadan önce yapılmış, eşleşmiş bir telefonda ya da başka bir cihazda yapılmış ya da başka bir bilgisayardan buraya taşınmış | Hayır, sen onaylayana kadar |
+
+Bir zamanlamayı ya da kuralı yeniden kaydetmek **seni** yazarı yapar (kayıt eşleşmiş bir telefondan geldiyse yine `unknown` olur). Böylece daha önce onayladığın bir şeye kimse yeni metin sokamaz. Kendi zamanlamasını düzenleyen bir bot onu `bot` zamanlaması yapar.
+
+**Tek tıkla onayla.** Tam seviyedeki bir botun bot panelindeki **Otomasyon** sekmesi, yazarı bilinmeyen her zamanlamanın ya da kuralın altında **Bu benim** düğmesini gösterir. Bir kez bas, kayıt o andan itibaren senin sayılır (daemon denetim kaydına yazar). Bir botun yaptığı zamanlama böyle onaylanmaz: aç, metni kontrol et ve kaydet, böylece onu devralmış olursun.
+
+**Alt ajanlar.** Şeridin hizmet verdiği bir çalışmanın (senin yazdığın bir çalışma, ya da senin yazdığın bir zamanlama veya tetikleyici) alt ajanları, her zamanki derinlik sınırı içinde onu devralır. Başka bir botun çağırdığı yardımcı bot hiçbir zaman devralmaz.
+
+**Değişmeyenler.** Yalnızca “kim başlattı” kısıtı kalkar, o da yalnızca senin yazdığın otomasyon için. Bir e-postanın, webhook'un ya da dosyanın metni **güvenilmeyen veri** olarak kalır (alıntılanmış bir blok, çalışma güvenilmeyen işaretiyle başlar). **Para** her zaman sorar, yasak listesi, güvenilmeyen metinden üretilen kalıcı izinler, kendi hesapların için koruma kuralları ve gizli bilgi kuralları da öyle. Tam seviyenin altındaki bir bot değişmez: zamanlamaları ve tetikleyicileri her araç için bir kez sorar.
+
 ### Her zaman açık bir sunucuda sunucu durumu komutları
 
 Normalde `shell_run` çıktısı çalışmayı güvenilmez (“komut çıktısı”) olarak işaretler, bu da sonraki her `shell_run` çağrısının yürütücü kapısında sormasına yol açar, `full` hazır ayarında bile. Her zaman açık bir sunucuda (`bot serve --host`), bir çalışma botun kendi sunucu bilgisayarını (`host` ya da `browser`, asla kullanıcının bilgisayarı değil) hedeflediğinde, sabit ve salt okunur durum komutlarından oluşan dar bir küme çalışmayı ne kirletir ne de güvenilmeyen içerik yürütücü kapısını tetikler:

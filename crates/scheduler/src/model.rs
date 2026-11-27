@@ -632,6 +632,47 @@ impl ScheduleOrigin {
     }
 }
 
+/// Who wrote a schedule's definition, as far as the daemon can prove it.
+///
+/// Separate from [`ScheduleOrigin`] (which only says who may edit): this is what lets the Full
+/// lane serve owner-authored automation without cards. Only [`ScheduleAuthor::Owner`] does;
+/// `Unknown` (every row written before this field existed, a paired phone, an import) never
+/// does until the owner confirms it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleAuthor {
+    /// The owner: the local app (owner key) or the owner's administrator desktop.
+    Owner,
+    /// A bot, through its schedule tools.
+    Bot,
+    /// Not proven (older rows, other paired devices, imports).
+    #[default]
+    Unknown,
+}
+
+impl ScheduleAuthor {
+    /// Stable lowercase string stored in SQLite.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Bot => "bot",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// Parse a stored author string.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "owner" => Some(Self::Owner),
+            "bot" => Some(Self::Bot),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+}
+
 /// Lifecycle state of a persisted schedule occurrence in `occurrences`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -764,6 +805,9 @@ pub struct Schedule {
     /// Who created it (immutable after creation).
     #[serde(default)]
     pub origin: ScheduleOrigin,
+    /// Who wrote the definition (see [`ScheduleAuthor`]). A bot-origin row is always `Bot`.
+    #[serde(default)]
+    pub author: ScheduleAuthor,
     /// Occurrences that were reserved or dispatched but never confirmed
     /// because the process stopped (`missed` / `interrupted`). They are not
     /// replayed automatically; UIs can show them as "missed".
@@ -777,6 +821,17 @@ pub struct Schedule {
 }
 
 impl Schedule {
+    /// The author to store: a bot-made row is always `Bot`, whatever the caller set, so the
+    /// owner's authorship can never ride on a row a bot may still edit.
+    #[must_use]
+    pub fn stored_author(&self) -> ScheduleAuthor {
+        if self.origin == ScheduleOrigin::Bot {
+            ScheduleAuthor::Bot
+        } else {
+            self.author
+        }
+    }
+
     /// Create a new enabled schedule at `now_ms` and compute its initial
     /// `next_run_at`.
     ///
@@ -813,6 +868,7 @@ impl Schedule {
             misfire_policy,
             revision: 0,
             origin: ScheduleOrigin::User,
+            author: ScheduleAuthor::Unknown,
             missed_occurrences: 0,
             catchup_window_secs: None,
         })

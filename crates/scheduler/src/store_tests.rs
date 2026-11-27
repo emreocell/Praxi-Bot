@@ -648,3 +648,112 @@ fn delete_exact_only_deletes_the_state_that_was_approved() {
     );
     assert!(store.get(s.id).unwrap().is_none());
 }
+
+#[test]
+fn migration_marks_existing_rows_conservatively() {
+    // A database from before `author` existed: a user row and a bot row.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("schedules.db");
+    let (user_row, bot_row) = (recurring(), recurring());
+    {
+        let conn = Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../migrations/0001_schedules.sql"),
+            include_str!("../migrations/0002_schedule_consistency.sql"),
+            include_str!("../migrations/0003_occurrence_recovery.sql"),
+            include_str!("../migrations/0004_schedule_origin.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4).unwrap();
+        for (row, origin) in [(&user_row, "user"), (&bot_row, "bot")] {
+            conn.execute(
+                "INSERT INTO schedules VALUES (?1, ?2, NULL, 'n', ?3, ?4, 1, 0, NULL, 1000, 'skip', 0, ?5)",
+                params![
+                    row.id.to_string(),
+                    row.bot_id.to_string(),
+                    serde_json::to_string(&row.spec).unwrap(),
+                    serde_json::to_string(&row.payload).unwrap(),
+                    origin,
+                ],
+            )
+            .unwrap();
+        }
+    }
+    assert_eq!(
+        ScheduleStore::validate_and_migrate(&path).unwrap(),
+        SCHEMA_VERSION
+    );
+    let store = ScheduleStore::open(dir.path()).unwrap();
+    // `origin = user` only says "not a bot's tools": nobody proved the owner wrote it.
+    assert_eq!(
+        store.get(user_row.id).unwrap().unwrap().author,
+        ScheduleAuthor::Unknown
+    );
+    assert_eq!(
+        store.get(bot_row.id).unwrap().unwrap().author,
+        ScheduleAuthor::Bot
+    );
+}
+
+#[test]
+fn author_round_trips_and_a_bot_row_is_never_owner_authored() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let mut owner = recurring();
+    owner.author = ScheduleAuthor::Owner;
+    store.insert(&owner).unwrap();
+    assert_eq!(
+        store.get(owner.id).unwrap().unwrap().author,
+        ScheduleAuthor::Owner
+    );
+    // New rows default to "unknown": `Schedule::new` never claims the owner.
+    let fresh = recurring();
+    assert_eq!(fresh.author, ScheduleAuthor::Unknown);
+    // A bot-origin row stores `bot` even if the caller says owner.
+    let mut bot = recurring();
+    bot.origin = crate::ScheduleOrigin::Bot;
+    bot.author = ScheduleAuthor::Owner;
+    store.insert(&bot).unwrap();
+    assert_eq!(
+        store.get(bot.id).unwrap().unwrap().author,
+        ScheduleAuthor::Bot
+    );
+    // ... and an edit that keeps it a bot row cannot raise it either.
+    let mut edited = store.get(bot.id).unwrap().unwrap();
+    edited.author = ScheduleAuthor::Owner;
+    store.update_definition_and_rearm(&edited, None, 5).unwrap();
+    assert_eq!(
+        store.get(bot.id).unwrap().unwrap().author,
+        ScheduleAuthor::Bot
+    );
+    // Handing a bot row to the owner flips origin; the author only moves with an owner edit.
+    store
+        .set_origin(bot.id, crate::ScheduleOrigin::User)
+        .unwrap();
+    assert_eq!(
+        store.get(bot.id).unwrap().unwrap().author,
+        ScheduleAuthor::Bot
+    );
+}
+
+#[test]
+fn confirm_author_only_promotes_a_user_row_with_an_unknown_author() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let unknown = recurring();
+    store.insert(&unknown).unwrap();
+    let mut bot = recurring();
+    bot.origin = crate::ScheduleOrigin::Bot;
+    store.insert(&bot).unwrap();
+    let before = store.get(unknown.id).unwrap().unwrap().revision;
+    assert!(store.confirm_author(unknown.id).unwrap());
+    let after = store.get(unknown.id).unwrap().unwrap();
+    assert_eq!(after.author, ScheduleAuthor::Owner);
+    assert_eq!(after.revision, before + 1);
+    // Idempotent, and a bot's row (which the bot may still edit) is refused.
+    assert!(!store.confirm_author(unknown.id).unwrap());
+    assert!(!store.confirm_author(bot.id).unwrap());
+    assert_eq!(
+        store.get(bot.id).unwrap().unwrap().author,
+        ScheduleAuthor::Bot
+    );
+}

@@ -58,8 +58,8 @@ pub use engine::{CLOCK_JUMP_THRESHOLD_MS, MISFIRE_GRACE_MS, ScheduleExecutor, Sc
 pub use error::{Result, SchedulerError};
 pub use model::{
     AttemptRun, FileEvent, MisfirePolicy, Occurrence, OccurrenceState, ParsedCron, Payload,
-    Precheck, RUN_ALL_CAP, Schedule, ScheduleId, ScheduleOrigin, SchedulePayload, ScheduleSpec,
-    Spec, Trigger,
+    Precheck, RUN_ALL_CAP, Schedule, ScheduleAuthor, ScheduleId, ScheduleOrigin, SchedulePayload,
+    ScheduleSpec, Spec, Trigger,
 };
 pub use nl::{parse_natural_language, parse_natural_language_with_tz, parse_nl};
 pub use protocol::{BotId, ChatId, Initiator, InitiatorKind, TaskId};

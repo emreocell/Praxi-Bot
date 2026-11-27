@@ -1,8 +1,8 @@
-import { CalendarClock, ChevronRight, Clock3, FolderOpen, Mail, type LucideIcon, Rocket, RotateCcw, Sparkles, Webhook } from "lucide-react";
+import { CalendarClock, ChevronRight, Clock3, ShieldCheck, FolderOpen, Mail, type LucideIcon, Rocket, RotateCcw, Sparkles, Webhook } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Schedule, ScheduleHistoryEntry } from "../api/types";
-import { type AutomationKind, type AutomationRow, botAutomationRows, dayWord, lastOutcome, localSpecLabel, primaryAction } from "../lib/automations";
+import { type AutomationKind, type AutomationRow, botAutomationRows, confirmableAuthor, dayWord, lastOutcome, localSpecLabel, primaryAction } from "../lib/automations";
 import { nameFromTask, parseAutomationSentence } from "../lib/automationSentence";
 import { formatTimeOfDay, formatWhen } from "../lib/dateFormat";
 import { humanLine } from "../lib/humanError";
@@ -29,12 +29,15 @@ const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 export function BotPanelAutomation({
   botId,
   botName,
+  botIsFull = false,
   visible,
   onOpenSchedules,
   onOpenMissions
 }: {
   botId: string;
   botName: string;
+  /** The bot is on the Full level: its unconfirmed automations offer "I wrote this". */
+  botIsFull?: boolean;
   visible: boolean;
   onOpenSchedules?: () => void;
   onOpenMissions: () => void;
@@ -221,6 +224,28 @@ export function BotPanelAutomation({
                         <RotateCcw aria-hidden="true" />
                         {last?.tone === "missed" ? t("automation.runMissed") : t("automation.retry")}
                       </button>
+                    ) : null}
+                    {confirmableAuthor(row, botIsFull) ? (
+                      <div className={styles.confirm} data-testid="automation-confirm-row">
+                        <span className={styles.muted}>{t("automation.confirm.line")}</span>
+                        <button
+                          type="button"
+                          className={styles.rowAction}
+                          disabled={busy !== null}
+                          data-testid="automation-confirm"
+                          aria-label={t("automation.confirm.label", { name: row.name })}
+                          onClick={() =>
+                            void act(
+                              row.key,
+                              () => (s ? client!.confirmSchedule(s.id) : client!.confirmTrigger(botId, row.trigger!.id)),
+                              t("automation.confirm.done", { name: row.name })
+                            )
+                          }
+                        >
+                          <ShieldCheck aria-hidden="true" />
+                          {t("automation.confirm.action")}
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                   {s && !s.moved_to ? (

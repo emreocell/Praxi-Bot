@@ -1198,6 +1198,12 @@
         "webhook": "When an app calls in"
       }
     },
+    "confirm": {
+      "action": "Das ist von mir",
+      "done": "„{{name}}“ läuft jetzt ohne Nachfrage (bei Geldausgaben wird weiter gefragt).",
+      "label": "Bestätigen, dass Sie „{{name}}“ geschrieben haben",
+      "line": "Nicht als Ihre bestätigt. Bei Vollzugriff fragt sie trotzdem erst nach."
+    },
     "day": {
       "today": "today {{time}}",
       "tomorrow": "tomorrow {{time}}",

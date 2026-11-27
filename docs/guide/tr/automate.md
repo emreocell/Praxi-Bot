@@ -64,6 +64,7 @@ Her işte **Şimdi çalıştır**'a, **Düzenle**'ye ya da **Sil**'e basabilirsi
 - Bir iş onayını gerektiriyorsa **Senden bekleyenler**'de bekler. Kendi başına ilerlemez. Kimse yanıt vermezse yanıt hayır olur.
 - İşin okuduğu web sayfaları ve e-postalar bilgidir, emir değildir.
 - Koyduğun harcama limitleri işler için de geçerlidir.
+- **Tam** seviyedeki bir botta, **senin** yazdığın bir iş ya da kural sormadan çalışır (para harcamak yine sorar). Bir botun yaptığı ya da yazarı bilinmeyen bir iş, üzerindeki **Bu benim** düğmesine basana kadar sormaya devam eder. Bkz. [Tam seviye: kendi zamanlamaların ve tetikleyicilerin](chatting-and-approvals.md#tam-seviye-kendi-zamanlamaların-ve-tetikleyicilerin).
 
 Daha fazlası: [Zamanlanmış işler, sade sözlerle](schedules.md) ve [teknik başvuru](scheduled-tasks.md).
 

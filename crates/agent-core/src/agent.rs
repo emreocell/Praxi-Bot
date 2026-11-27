@@ -277,6 +277,7 @@ impl AgentLoop {
                 skills: OnceLock::new(),
                 fill_secrets: OnceLock::new(),
                 browser_profiles: OnceLock::new(),
+                schedule_owner: RwLock::new(None),
                 secret_requests: Mutex::new(HashMap::new()),
                 handovers: Mutex::new(HashMap::new()),
                 skill_hints: RwLock::new(None),
@@ -538,6 +539,13 @@ impl AgentLoop {
     /// display and connected remote PC desktops here).
     pub fn set_computer_provider(&self, provider: Arc<dyn computer_target::ComputerProvider>) {
         *self.sh.computer_provider.write() = Some(provider);
+    }
+
+    /// Tell the loop how to ask the scheduler whether the owner wrote schedule `id` (`serve` wires
+    /// the schedule store's recorded author here). The Full lane serves only schedules and
+    /// triggers the owner wrote; without it none counts.
+    pub fn set_schedule_owner_check(&self, check: crate::shared::ScheduleOwnerCheck) {
+        *self.sh.schedule_owner.write() = Some(check);
     }
 
     /// Install the mission ledger (`serve` wires the daemon's `missions.db` here).

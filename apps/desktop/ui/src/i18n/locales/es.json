@@ -1198,6 +1198,12 @@
         "webhook": "When an app calls in"
       }
     },
+    "confirm": {
+      "action": "Es mía",
+      "done": "«{{name}}» ahora se ejecuta sin preguntar (los gastos siguen pidiendo permiso).",
+      "label": "Confirmar que escribiste «{{name}}»",
+      "line": "No confirmada como tuya. Con acceso total sigue preguntando antes."
+    },
     "day": {
       "today": "today {{time}}",
       "tomorrow": "tomorrow {{time}}",

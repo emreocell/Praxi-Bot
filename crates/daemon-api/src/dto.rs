@@ -1090,6 +1090,11 @@ pub struct ScheduleDto {
     /// Who created it: `user`, or `bot` (a bot's schedule tools, after you
     /// approved it). A bot may change only its own `bot` schedules.
     pub origin: String,
+    /// Who wrote the definition, as the daemon recorded it: `owner` (the local app or your
+    /// administrator desktop), `bot` (its schedule tools) or `unknown` (older schedules,
+    /// other paired devices, imports). Only an `owner` schedule runs without cards on a bot
+    /// at the Full level; confirm an `unknown` one with `POST /v1/schedules/{id}/confirm`.
+    pub author: String,
     /// Occurrences that never ran because the daemon stopped (for example the
     /// computer was off or asleep). They are not replayed; shown as "missed".
     #[serde(default)]

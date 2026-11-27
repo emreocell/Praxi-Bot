@@ -395,7 +395,7 @@ export function BotPanel({
             })}
           </>
         ) : tab === "automation" ? (
-          <BotPanelAutomation key={bot.id} botId={bot.id} botName={bot.name} visible={visible} onOpenSchedules={onOpenSchedules} onOpenMissions={() => setTab("activity")} />
+          <BotPanelAutomation key={bot.id} botId={bot.id} botName={bot.name} botIsFull={preset === "full"} visible={visible} onOpenSchedules={onOpenSchedules} onOpenMissions={() => setTab("activity")} />
         ) : tab === "tools" ? (
           <>
             <BotBrowserProfile key={bot.id} botId={bot.id} />

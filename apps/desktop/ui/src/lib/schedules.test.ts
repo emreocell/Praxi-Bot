@@ -36,6 +36,7 @@ function sched(over: Partial<Schedule> = {}): Schedule {
     enabled: true,
     has_webhook: false,
     origin: "user",
+    author: "owner",
     created_at_ms: 1,
     misfire_policy: "skip",
     next_run_at_ms: 1000,

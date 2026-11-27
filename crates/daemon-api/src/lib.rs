@@ -941,6 +941,16 @@ impl AppState {
             return Ok(Arc::clone(s));
         }
         let store = Arc::new(ScheduleStore::from_storage(self.storage())?);
+        // The agent loop asks the store, live, whether the owner wrote the schedule behind a
+        // run (the Full level serves the owner's own automation without cards).
+        let authors = Arc::clone(&store);
+        self.0.agent.set_schedule_owner_check(Arc::new(move |id| {
+            authors
+                .get(id)
+                .ok()
+                .flatten()
+                .is_some_and(|sc| sc.stored_author() == scheduler::ScheduleAuthor::Owner)
+        }));
         *g = Some(Arc::clone(&store));
         Ok(store)
     }
@@ -1666,6 +1676,10 @@ fn api_routes() -> Router<AppState> {
             axum::routing::put(triggers::update).delete(triggers::delete),
         )
         .route(
+            "/v1/bots/{id}/triggers/{trigger}/confirm",
+            post(triggers::confirm),
+        )
+        .route(
             "/v1/bots/{id}/incoming-webhooks",
             get(incoming_webhook::list_webhooks).post(incoming_webhook::create_webhook),
         )
@@ -1847,6 +1861,7 @@ fn api_routes() -> Router<AppState> {
             post(r::retry_schedule_occurrence),
         )
         .route("/v1/schedules/{id}/run-now", post(r::run_schedule_now))
+        .route("/v1/schedules/{id}/confirm", post(r::confirm_schedule))
         .route("/v1/schedules/{id}/reclaim", post(host_import::reclaim))
         .route(
             "/v1/webhooks/{id}",

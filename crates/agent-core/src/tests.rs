@@ -429,6 +429,8 @@ pub(crate) fn make_loop(
         config,
     );
     lp.add_profile(bot, prof);
+    // the fixture's schedules are the owner's; the author tests install their own answer
+    lp.set_schedule_owner_check(Arc::new(|_| true));
     lp.sh
         .legacy_always
         .store(true, std::sync::atomic::Ordering::Relaxed);

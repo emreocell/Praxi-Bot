@@ -926,6 +926,85 @@ async fn editing_a_bot_made_schedule_in_the_ui_hands_it_to_the_user() {
     assert!(e.contains("created by the user"), "{e}");
 }
 
+/// The daemon records who wrote a schedule: the local app is the owner, an edit by anyone else
+/// moves it back to unknown, a bot's schedule is never confirmed with one click, and confirming
+/// is audited and idempotent-safe (the second click is a 409).
+#[tokio::test]
+async fn a_schedule_records_its_author_and_the_owner_confirms_an_unknown_one() {
+    let t = setup_with(Policy::approve_destructive());
+    let (bot, _chat) = make_chat(&t).await;
+    let created = create(&t, new_schedule(&bot, prompt("hi"))).await;
+    assert_eq!(created["author"], "owner", "the local app is the owner");
+    let id = created["id"].as_str().unwrap().to_owned();
+    let tid = scheduler::TaskId(uuid::Uuid::parse_str(&id).unwrap());
+    let store = t.state.schedule_store().unwrap();
+    // An already confirmed schedule has nothing to confirm.
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/schedules/{id}/confirm"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    // A row written before authorship was recorded reads as unknown, and a click confirms it.
+    let mut row = store.get(tid).unwrap().unwrap();
+    row.author = scheduler::ScheduleAuthor::Unknown;
+    assert!(store.update_definition(&row).unwrap());
+    let listed = call(&t, Method::GET, &format!("/v1/schedules/{id}"), None).await;
+    assert_eq!(listed.json()["author"], "unknown");
+    let rev = store.get(tid).unwrap().unwrap().revision;
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/schedules/{id}/confirm"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["author"], "owner");
+    assert!(store.get(tid).unwrap().unwrap().revision > rev);
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/schedules/{id}/confirm"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    // A bot's schedule is never the owner's by confirmation: the owner edits it instead.
+    store
+        .set_origin(tid, scheduler::ScheduleOrigin::Bot)
+        .unwrap();
+    let listed = call(&t, Method::GET, &format!("/v1/schedules/{id}"), None).await;
+    assert_eq!(listed.json()["author"], "bot");
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/schedules/{id}/confirm"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    let r = call(
+        &t,
+        Method::PUT,
+        &format!("/v1/schedules/{id}"),
+        Some(new_schedule(&bot, prompt("mine now"))),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["author"], "owner", "saving it takes it over");
+    assert!(
+        t.state
+            .storage()
+            .list_audit(t.state.user_id())
+            .unwrap()
+            .iter()
+            .any(|e| e.action == "schedule.confirm_author")
+    );
+}
+
 #[tokio::test]
 async fn a_schedule_approval_over_http_cannot_be_an_always_grant() {
     let t = setup_with(Policy::approve_destructive());

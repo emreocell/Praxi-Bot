@@ -13,6 +13,19 @@ export type AutomationRow =
   | { key: string; kind: AutomationKind; name: string; enabled: boolean; schedule: Schedule; trigger?: undefined }
   | { key: string; kind: AutomationKind; name: string; enabled: boolean; trigger: BotTrigger; schedule?: undefined };
 
+/**
+ * Whether a row offers the one-click "I wrote this": a user-side schedule or stored rule whose
+ * author the daemon could not prove (made before authorship was recorded, on a paired phone, or
+ * moved from another computer). A bot-made row is never confirmable (editing it takes it over),
+ * and neither is an event source that is not a stored rule yet. Only a Full bot shows it: the
+ * confirmation matters only there, where an owner-written automation runs without cards.
+ */
+export function confirmableAuthor(row: AutomationRow, botIsFull: boolean): boolean {
+  if (!botIsFull) return false;
+  if (row.schedule) return row.schedule.origin === "user" && row.schedule.author === "unknown" && !row.schedule.moved_to;
+  return row.trigger.origin === "rule" && row.trigger.author === "unknown";
+}
+
 /** What started a schedule: its event trigger (`file_watch`, `email`) or the clock. */
 export function scheduleKind(s: Pick<Schedule, "trigger" | "has_webhook">): AutomationKind {
   const kind = (s.trigger as { kind?: unknown } | null | undefined)?.kind;

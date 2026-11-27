@@ -2323,6 +2323,7 @@ fn schedule_dto(sc: &Schedule, has_webhook: bool) -> ScheduleDto {
         skipped_by_precheck: 0,
         consecutive_errors: 0,
         origin: sc.origin.as_str().to_owned(),
+        author: sc.stored_author().as_str().to_owned(),
         missed_occurrences: sc.missed_occurrences,
         moved_to: None,
         next_runs_ms: Vec::new(),
@@ -2610,6 +2611,7 @@ pub(crate) async fn create_schedule(
         p.policy,
         now_ms(),
     )?;
+    sc.author = author_of_caller(&s, peer.as_deref());
     if let CatchupChange::Set(n) = p.catchup_window_secs {
         sc.catchup_window_secs = Some(n);
     }
@@ -2663,6 +2665,8 @@ pub(crate) async fn import_schedule(
     sc.id = id;
     sc.created_at = created_at_ms.min(now_ms());
     sc.origin = origin;
+    // The sending computer's record is not proof: the owner confirms the moved schedule here.
+    sc.author = scheduler::ScheduleAuthor::Unknown;
     if input.enabled == Some(false) {
         sc.enabled = false;
         sc.next_run_at = None;
@@ -2679,6 +2683,63 @@ pub(crate) async fn import_schedule(
     store.insert_config(&sc, trigger.flatten().as_ref())?;
     s.publish_schedule_changed(sc.id.0, ScheduleChangeKind::Created);
     Ok(store.get(sc.id)?.unwrap_or(sc))
+}
+
+/// Who a schedule definition written by this caller counts as: the owner for the local app
+/// (owner routes need the owner key) and for the owner's administrator desktop, nobody provable
+/// for any other paired device.
+pub(crate) fn author_of_caller(
+    s: &AppState,
+    peer: Option<&crate::peer::PeerIdentity>,
+) -> scheduler::ScheduleAuthor {
+    match peer {
+        None => scheduler::ScheduleAuthor::Owner,
+        Some(p) if p.role == crate::peer::PeerRole::Desktop && s.leader().peer_is_admin(&p.key) => {
+            scheduler::ScheduleAuthor::Owner
+        }
+        Some(_) => scheduler::ScheduleAuthor::Unknown,
+    }
+}
+
+/// Confirm that you wrote this schedule: one click for a schedule whose author the daemon
+/// could not prove (made before authorship was recorded, on a paired phone, or moved from
+/// another computer). From then on it counts as your own automation, so on a bot at the Full
+/// level it runs without cards (money still asks). A schedule a bot made is not confirmed
+/// this way: edit and save it, which takes it over.
+#[utoipa::path(post, path = "/v1/schedules/{id}/confirm", tag = "schedules",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Schedule id")),
+    responses((status = 200, body = ScheduleDto), (status = 404, body = ErrorBody),
+              (status = 409, body = ErrorBody, description = "not an unconfirmed schedule of yours")))]
+pub(crate) async fn confirm_schedule(
+    State(s): State<AppState>,
+    Path(sid): Path<String>,
+    peer: Option<axum::Extension<crate::peer::PeerIdentity>>,
+) -> Result<Json<ScheduleDto>, ApiError> {
+    let sc = schedule_of_user(&s, &sid)?;
+    if author_of_caller(&s, peer.as_deref()) != scheduler::ScheduleAuthor::Owner {
+        return Err(ApiError::forbidden(
+            "confirm a schedule in the desktop app on this computer or your administrator desktop",
+        ));
+    }
+    let store = s.schedule_store()?;
+    if store.frozen_for(sc.id)?.is_some() {
+        return Err(scheduler::SchedulerError::Frozen(sc.id.to_string()).into());
+    }
+    s.0.storage.append_audit(
+        s.user_id(),
+        None,
+        "user",
+        "schedule.confirm_author",
+        &serde_json::json!({"schedule_id":sc.id.to_string(),"bot_id":sc.bot_id.to_string()}),
+    )?;
+    if !store.confirm_author(sc.id)? {
+        return Err(ApiError::conflict(
+            "this schedule is already confirmed, or a bot made it: edit and save it to take it over",
+        ));
+    }
+    s.publish_schedule_changed(sc.id.0, ScheduleChangeKind::Updated);
+    Ok(Json(dto_of(&s, &store.get(sc.id)?.unwrap_or(sc))?))
 }
 
 /// Get one schedule.
@@ -2747,8 +2808,10 @@ pub(crate) async fn update_schedule(
         "schedule.update_intent",
         &serde_json::json!({"schedule_id":sc.id.to_string(),"bot_id":sc.bot_id.to_string()}),
     )?;
-    // User edits take ownership in the same revision-checked transaction.
+    // User edits take ownership in the same revision-checked transaction, and the author is
+    // whoever made this edit: an edit from a paired phone makes it unconfirmed again.
     sc.origin = scheduler::ScheduleOrigin::User;
+    sc.author = author_of_caller(&s, peer.as_deref());
     // Run progress may have changed after schedule_of_user. The store reads
     // it again and computes any re-arm under the same write transaction.
     let (sc, was_enabled) = persist_schedule_edit(

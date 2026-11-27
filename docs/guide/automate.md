@@ -64,6 +64,7 @@ On each job you can press **Run now**, **Edit** or **Delete**. A job that failed
 - If a job needs your OK, it waits in **Needs you**. It does not go ahead alone. If nobody answers, the answer becomes no.
 - Web pages and emails a job reads are information, never orders.
 - Spending limits you set also apply to jobs.
+- On a bot at the **Full** level, a job or rule **you** wrote runs without asking (money still asks). One that a bot made, or whose author is unknown, keeps asking until you press **This is mine** on it. See [Full access for your own schedules and triggers](chatting-and-approvals.md#full-access-for-your-own-schedules-and-triggers-who-wrote-it).
 
 More: [Scheduled jobs in plain words](schedules.md) and the [technical reference](scheduled-tasks.md).
 

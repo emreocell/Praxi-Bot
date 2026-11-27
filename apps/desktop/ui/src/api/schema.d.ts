@@ -908,6 +908,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bots/{bot}/triggers/{trigger}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm that you wrote this trigger rule (one click for an `unknown` one). From then on it
+         *     counts as your own automation: on a bot at the Full level its runs go without cards (money
+         *     still asks) while the event data stays untrusted.
+         */
+        post: operations["triggers_confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots/{id}": {
         parameters: {
             query?: never;
@@ -4666,6 +4687,29 @@ export interface paths {
         post?: never;
         /** Delete a schedule (and its webhook trigger).  Runs it already started stay. */
         delete: operations["delete_schedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/schedules/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm that you wrote this schedule: one click for a schedule whose author the daemon
+         *     could not prove (made before authorship was recorded, on a paired phone, or moved from
+         *     another computer). From then on it counts as your own automation, so on a bot at the Full
+         *     level it runs without cards (money still asks). A schedule a bot made is not confirmed
+         *     this way: edit and save it, which takes it over.
+         */
+        post: operations["confirm_schedule"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -11272,6 +11316,13 @@ export interface components {
         /** @description A schedule (`/v1/schedules`). */
         ScheduleDto: {
             /**
+             * @description Who wrote the definition, as the daemon recorded it: `owner` (the local app or your
+             *     administrator desktop), `bot` (its schedule tools) or `unknown` (older schedules,
+             *     other paired devices, imports). Only an `owner` schedule runs without cards on a bot
+             *     at the Full level; confirm an `unknown` one with `POST /v1/schedules/{id}/confirm`.
+             */
+            author: string;
+            /**
              * Format: uuid
              * @description Bot that runs it.
              */
@@ -12297,6 +12348,12 @@ export interface components {
             text: string;
         };
         TriggerDto: {
+            /**
+             * @description Who wrote the rule: `owner`, `bot` or `unknown` (made before authorship was
+             *     recorded). Only an `owner` rule runs without cards on a bot at the Full level;
+             *     `POST /v1/bots/{bot}/triggers/{trigger}/confirm` confirms an `unknown` one.
+             */
+            author: string;
             /** Format: uuid */
             bot_id: string;
             config: unknown;
@@ -15194,6 +15251,52 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    triggers_confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bot: string;
+                trigger: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24051,6 +24154,45 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    confirm_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Schedule id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not an unconfirmed schedule of yours */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

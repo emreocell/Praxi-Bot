@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::error::{Result, SchedulerError};
 use crate::model::{
-    AttemptRun, MisfirePolicy, Occurrence, OccurrenceState, Payload, Schedule, ScheduleOrigin,
-    ScheduleSpec, Trigger,
+    AttemptRun, MisfirePolicy, Occurrence, OccurrenceState, Payload, Schedule, ScheduleAuthor,
+    ScheduleOrigin, ScheduleSpec, Trigger,
 };
 
 #[path = "registry_store.rs"]
@@ -63,10 +63,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0017_trigger_registry",
         include_str!("../migrations/0017_trigger_registry.sql"),
     ),
+    (
+        "0018_schedule_author",
+        include_str!("../migrations/0018_schedule_author.sql"),
+    ),
 ];
 
 /// Schema version produced by the newest embedded migration.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// Manual retries allowed per occurrence.
 pub const MAX_OCCURRENCE_RETRIES: u32 = 5;
@@ -81,7 +85,7 @@ const OCCURRENCE_HISTORY_LIMIT: i64 = 100;
 const TERMINAL_STATES: &str = "'succeeded', 'failed', 'started', 'missed', 'interrupted'";
 
 const SCHEDULE_SELECT: &str = "SELECT id, bot_id, chat_id, name, spec_json, payload_json, \
-    enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, revision, origin,     (SELECT COUNT(*) FROM occurrences o WHERE o.schedule_id = schedules.id      AND o.state IN ('missed', 'interrupted')), precheck_json, catchup_window_secs FROM schedules";
+    enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, revision, origin, author,     (SELECT COUNT(*) FROM occurrences o WHERE o.schedule_id = schedules.id      AND o.state IN ('missed', 'interrupted')), precheck_json, catchup_window_secs FROM schedules";
 
 /// Type alias for [`ScheduleStore`].
 pub type Store = ScheduleStore;
@@ -230,8 +234,8 @@ impl ScheduleStore {
         let payload_json = serde_json::to_string(&schedule.payload)?;
         tx.execute(
             "INSERT INTO schedules (id, bot_id, chat_id, name, spec_json, payload_json, \
-             enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, origin, precheck_json, catchup_window_secs) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, origin, precheck_json, catchup_window_secs, author) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 schedule.id.to_string(),
                 schedule.bot_id.to_string(),
@@ -247,6 +251,7 @@ impl ScheduleStore {
                 schedule.origin.as_str(),
                 schedule.precheck.as_ref().map(serde_json::to_string).transpose()?,
                 window_param(schedule),
+                schedule.stored_author().as_str(),
             ],
         )?;
         if let Some(t) = trigger {
@@ -289,8 +294,8 @@ impl ScheduleStore {
         } else {
             tx.execute(
                 "INSERT INTO schedules (id, bot_id, chat_id, name, spec_json, payload_json, \
-                 enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, origin, precheck_json, catchup_window_secs) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 enabled, created_at_ms, last_run_at_ms, next_run_at_ms, misfire_policy, origin, precheck_json, catchup_window_secs, author) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     schedule.id.to_string(),
                     schedule.bot_id.to_string(),
@@ -306,6 +311,7 @@ impl ScheduleStore {
                     schedule.origin.as_str(),
                 schedule.precheck.as_ref().map(serde_json::to_string).transpose()?,
                     window_param(schedule),
+                    schedule.stored_author().as_str(),
                 ],
             )?;
         }
@@ -629,8 +635,30 @@ impl ScheduleStore {
     /// Fails on SQLite errors.
     pub fn set_origin(&self, id: TaskId, origin: ScheduleOrigin) -> Result<bool> {
         let changed = self.conn().execute(
-            "UPDATE schedules SET origin = ?2, revision = revision + 1 WHERE id = ?1 AND origin <> ?2",
+            "UPDATE schedules SET origin = ?2, author = CASE WHEN ?2 = 'bot' THEN 'bot' ELSE author END, \
+             revision = revision + 1 WHERE id = ?1 AND origin <> ?2",
             params![id.to_string(), origin.as_str()],
+        )?;
+        if changed > 0 {
+            self.notify();
+        }
+        Ok(changed > 0)
+    }
+
+    /// The owner confirms the definition of a user-origin schedule whose author is not proven
+    /// (an older row, one a paired phone wrote, an import): from now on it counts as the
+    /// owner's own automation. A definition change: bumps the revision so an approval
+    /// prepared against the old state goes stale. A bot-made row is never confirmed this way
+    /// (the bot could still rewrite it): the owner edits and saves it, which takes it over.
+    /// Returns whether the row changed.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn confirm_author(&self, id: TaskId) -> Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE schedules SET author = 'owner', revision = revision + 1 \
+             WHERE id = ?1 AND origin = 'user' AND author = 'unknown'",
+            [id.to_string()],
         )?;
         if changed > 0 {
             self.notify();
@@ -1413,7 +1441,7 @@ fn update_definition_in(conn: &Connection, schedule: &Schedule) -> Result<bool> 
     let changed = conn.execute(
         "UPDATE schedules SET chat_id = ?2, name = ?3, spec_json = ?4, payload_json = ?5, \
          enabled = ?6, misfire_policy = ?7, revision = revision + 1, precheck_json = ?9, \
-         catchup_window_secs = ?10 \
+         catchup_window_secs = ?10, author = ?11 \
          WHERE id = ?1 AND revision = ?8",
         params![
             schedule.id.to_string(),
@@ -1430,6 +1458,7 @@ fn update_definition_in(conn: &Connection, schedule: &Schedule) -> Result<bool> 
                 .map(serde_json::to_string)
                 .transpose()?,
             window_param(schedule),
+            schedule.stored_author().as_str(),
         ],
     )?;
     if changed > 0 {
@@ -1528,13 +1557,25 @@ fn schedule_row(row: &Row<'_>) -> rusqlite::Result<Schedule> {
                 )
             })?
         },
-        missed_occurrences: row.get(13)?,
+        author: {
+            let a: String = row.get(13)?;
+            ScheduleAuthor::parse(&a).ok_or_else(|| {
+                conv_err(
+                    13,
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("unknown author '{a}'"),
+                    ),
+                )
+            })?
+        },
+        missed_occurrences: row.get(14)?,
         precheck: row
-            .get::<_, Option<String>>(14)?
-            .map(|v| serde_json::from_str(&v).map_err(|e| conv_err(14, e)))
+            .get::<_, Option<String>>(15)?
+            .map(|v| serde_json::from_str(&v).map_err(|e| conv_err(15, e)))
             .transpose()?,
         catchup_window_secs: row
-            .get::<_, Option<i64>>(15)?
+            .get::<_, Option<i64>>(16)?
             .and_then(|v| u64::try_from(v).ok()),
         external_input: None,
         precheck_failed: false,

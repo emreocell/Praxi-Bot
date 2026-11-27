@@ -261,6 +261,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/schedules/{}/run-now"),
     ("POST", "/v1/schedules/{}/occurrences/{}/retry"),
     ("POST", "/v1/schedules/{}/reclaim"),
+    ("POST", "/v1/schedules/{}/confirm"),
+    ("POST", "/v1/bots/{}/triggers/{}/confirm"),
     ("POST", "/v1/channels/telegram/pair-code"),
     ("POST", "/v1/channels/discord/pair-code"),
     // providers, tool servers, installs

@@ -61,6 +61,8 @@ mod approval_expiry_tests;
 #[cfg(test)]
 mod auto_continue_tests;
 #[cfg(test)]
+mod automation_author_tests;
+#[cfg(test)]
 mod bot_limit_tests;
 #[cfg(test)]
 mod browser_mcp_tests;

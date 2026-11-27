@@ -3849,6 +3849,81 @@
         ]
       }
     },
+    "/v1/bots/{bot}/triggers/{trigger}/confirm": {
+      "post": {
+        "tags": [
+          "triggers"
+        ],
+        "summary": "Confirm that you wrote this trigger rule (one click for an `unknown` one). From then on it\ncounts as your own automation: on a bot at the Full level its runs go without cards (money\nstill asks) while the event data stays untrusted.",
+        "operationId": "triggers_confirm",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "trigger",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots/{id}": {
       "get": {
         "tags": [
@@ -17033,6 +17108,64 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/schedules/{id}/confirm": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Confirm that you wrote this schedule: one click for a schedule whose author the daemon\ncould not prove (made before authorship was recorded, on a paired phone, or moved from\nanother computer). From then on it counts as your own automation, so on a bot at the Full\nlevel it runs without cards (money still asks). A schedule a bot made is not confirmed\nthis way: edit and save it, which takes it over.",
+        "operationId": "confirm_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "not an unconfirmed schedule of yours",
             "content": {
               "application/json": {
                 "schema": {
@@ -35276,9 +35409,14 @@
           "created_at_ms",
           "misfire_policy",
           "has_webhook",
-          "origin"
+          "origin",
+          "author"
         ],
         "properties": {
+          "author": {
+            "type": "string",
+            "description": "Who wrote the definition, as the daemon recorded it: `owner` (the local app or your\nadministrator desktop), `bot` (its schedule tools) or `unknown` (older schedules,\nother paired devices, imports). Only an `owner` schedule runs without cards on a bot\nat the Full level; confirm an `unknown` one with `POST /v1/schedules/{id}/confirm`."
+          },
           "bot_id": {
             "type": "string",
             "format": "uuid",
@@ -37585,9 +37723,14 @@
           "name",
           "instruction",
           "config",
-          "enabled"
+          "enabled",
+          "author"
         ],
         "properties": {
+          "author": {
+            "type": "string",
+            "description": "Who wrote the rule: `owner`, `bot` or `unknown` (made before authorship was\nrecorded). Only an `owner` rule runs without cards on a bot at the Full level;\n`POST /v1/bots/{bot}/triggers/{trigger}/confirm` confirms an `unknown` one."
+          },
           "bot_id": {
             "type": "string",
             "format": "uuid"

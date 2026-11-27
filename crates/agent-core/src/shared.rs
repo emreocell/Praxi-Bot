@@ -909,6 +909,9 @@ impl ComputerProvider for FallbackComputerProvider {
     }
 }
 
+/// Answers "did the owner write this schedule or rule?" from the scheduler's own record.
+pub type ScheduleOwnerCheck = Arc<dyn Fn(TaskId) -> bool + Send + Sync>;
+
 pub(crate) struct RunCtx {
     pub computer: Arc<tokio::sync::OnceCell<tokio::sync::OwnedSemaphorePermit>>,
     pub waiting_computer: Arc<AtomicBool>,
@@ -1206,6 +1209,9 @@ pub(crate) struct Shared {
     /// to tell a bot's OWN inbox from one every bot may use.
     pub mail: Arc<builtin_tools::connector_email::MailHandle>,
     pub browser_profiles: OnceLock<Arc<builtin_tools::browser::BrowserProfiles>>,
+    /// Whether the owner wrote schedule `id` (the scheduler store's recorded author), set by the
+    /// daemon. Unset, or a schedule that is gone: no, so the run keeps its once-only cards.
+    pub schedule_owner: RwLock<Option<ScheduleOwnerCheck>>,
     /// Foreground browser / app source for skill suggestions.
     pub skill_hints: RwLock<Option<SkillHintFn>>,
     /// The K0-K3 decision ladders (one per bot) and the workflow wiring.

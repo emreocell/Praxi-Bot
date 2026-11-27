@@ -284,8 +284,9 @@ A bot on the **Full access** level (or any bot without its own level while the g
 level is Full access) asks the owner for **nothing except spending money**. Shell
 commands, file changes and deletes inside the allowed folders, installs, browsing,
 forms, sign-ups with the bot's own e-mail address, sending e-mail and messages and
-connector writes all run without a card. That holds for runs you typed, for a
-schedule's own run and for runs a webhook, trigger or inbound mail of yours started.
+connector writes all run without a card. That holds for runs you typed, for the run of a
+schedule you wrote and for runs a trigger you wrote, or a webhook or inbound mail of yours,
+started (see [who wrote it](#full-access-for-your-own-schedules-and-triggers-who-wrote-it)).
 Every call the level let through is written to the audit log as `approval.auto_allowed`
 with the reason `mode.full.policy`, the tool and who started the run.
 
@@ -318,7 +319,8 @@ What still asks, and why:
   by a run that read untrusted content, and by every run a webhook, trigger, external
   schedule or inbound mail started: their text is untrusted from the first call.
 * Anything that is not served by the lane: a helper bot, an unpaired chat, an external
-  agent, a Balanced or custom level.
+  agent, a Balanced or custom level, and a schedule or trigger whose author is not you
+  (a bot made it, or it is not confirmed yet).
 
 Mail the safety checks flag (a recipient who opted out, the daily volume) is not sent in an
 unattended run; the bot is told why and nobody is asked.
@@ -340,6 +342,39 @@ file, a desktop window or an API Praxi does not recognise. See the threat model.
 The rest of this section describes the older, narrower waivers; they apply only if the
 operator switches the lane off (`[security]` `full_access_lane = false` in `host.toml`, or
 `BOT_FULL_ACCESS_LANE=off`; the environment wins).
+
+### Full access for your own schedules and triggers: who wrote it
+
+The Full lane serves a schedule or a trigger (a mail rule, a webhook rule, a file watch)
+**only when you wrote it**. What decides it is who wrote the instruction, not what started
+the run: a timer or an incoming mail starts the run, but the text it carries out is the
+rule's. The daemon records an **author** on every schedule and rule when it is saved:
+
+| Author | Who | Runs without cards on Full? |
+| --- | --- | --- |
+| `owner` | You, in the app on this computer or on your admin desktop | **Yes** |
+| `bot` | A bot, through its schedule tools (after you approved the card) | No: it keeps its once-only cards |
+| `unknown` | Made before the author was recorded, on a paired phone or other device, or moved here from another computer | No, until you confirm it |
+
+Saving a schedule or rule again makes **you** its author (or `unknown` again if the save came
+from a paired phone), so nobody can slip new text into something you confirmed earlier. A bot
+that edits its own schedule makes it a `bot` schedule. The answer is read at every call, so an
+edit by anyone else ends the lane at once.
+
+**Confirm in one click.** On a bot at the Full level, the **Automation** tab of the bot panel
+shows **This is mine** under every schedule or rule whose author is unknown. Press it once and
+the entry counts as yours from then on (the daemon writes an audit entry). A schedule that a
+bot made is not confirmed this way: open it, check the text and save it, which takes it over.
+
+**Subagents** of a run the lane serves (a run you typed, or a schedule or trigger you wrote)
+inherit it, within the usual depth limit; a helper bot another bot called never does.
+
+**What does not change.** Only the "who started it" restriction is lifted, and only for
+automation you wrote. The text of a mail, a webhook or a file stays **untrusted data** (a
+quoted block, and the run starts marked untrusted), money always asks, and so do the
+never-list, durable permissions minted from untrusted text, the owner-account guards and the
+secret rules. A bot below the Full level is unchanged: its schedules and triggers ask once for
+every tool.
 
 ### Full level: working on the web after a read (owner-started runs)
 

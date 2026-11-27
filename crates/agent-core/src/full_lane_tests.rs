@@ -71,13 +71,13 @@ fn start_run(
 }
 
 /// A tool that always asks at a lower level (a send, a sign-up, a schedule), one per category.
-struct Asks {
-    spec: tool_registry::ToolSpec,
+pub(crate) struct Asks {
+    pub(crate) spec: tool_registry::ToolSpec,
     count: AtomicUsize,
 }
 
 impl Asks {
-    fn new(name: &str, category: PermissionCategory, class: ContentClass) -> Arc<Self> {
+    pub(crate) fn new(name: &str, category: PermissionCategory, class: ContentClass) -> Arc<Self> {
         Arc::new(Self {
             spec: tool_registry::ToolSpec {
                 name: name.into(),
@@ -175,7 +175,7 @@ fn one_per_category() -> Vec<Arc<Asks>> {
     all
 }
 
-fn decide(
+pub(crate) fn decide(
     lp: &crate::AgentLoop,
     ctx: &crate::shared::RunCtx,
     tool: &Asks,
