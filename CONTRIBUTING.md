@@ -151,16 +151,30 @@ listener on 127.0.0.1 receives a single request. CI may run it on a runner that 
 but that is optional.
 
 CI runs, on **both Linux and Windows**: `cargo fmt --all --check`,
-`cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. It also runs
+`cargo clippy --workspace --all-targets -- -D warnings` and the workspace tests (`cargo nextest run --workspace`
+plus `cargo test --workspace --doc`; plain `cargo test --workspace` runs both locally). It also runs
 `cargo deny check licenses bans advisories sources`, the browser integration tests (Chrome for
 Testing) and the UI checks below. It also checks that `docs/api/openapi.json` and
 `apps/desktop/ui/src/api/schema.d.ts` are up to date: after an API change run
 `UPDATE_OPENAPI=1 cargo test -p daemon-api openapi_snapshot` and then
 `pnpm --dir apps/desktop/ui gen:api`, and commit both files. Pull requests that only change
-documentation skip the long Rust jobs, but still run the Markdown link check
+documentation, the marketing site (`site/`), packaging manifests (`packaging/`) or the UI sources
+(`apps/desktop/ui/`, `packages/`) skip the long Rust jobs, but still run the Markdown link check
 (`python3 scripts/check_markdown_links.py`) and the guide-index check
-(`python3 scripts/check_guide_index.py`): run both locally when you edit `docs/` or a README. A PR is
-merged only when CI is green.
+(`python3 scripts/check_guide_index.py`): run both locally when you edit `docs/` or a README. A PR
+that only changes UI sources also skips the Windows real-app smoke run (Linux still runs it; every
+push to `main` runs both). A PR is merged only when CI is green.
+
+**How the pull request jobs are laid out.** The workspace tests run with
+[cargo-nextest](https://nexte.st) (the `ci` profile in `.config/nextest.toml`, no retries) and the
+doctests with `cargo test --doc`. The Windows workspace tests are split in two jobs that run at the
+same time: `Build & Test (windows-latest)` runs formatting, Clippy and the first half of the tests;
+`Build & Test (windows-latest, tests 2/2)` runs the second half and the doctests. nextest picks the
+half by a hash of the test name, so a test stays in its half when others are added. `ci-result`
+depends on both. Required checks: `ci-result` is the one gate that covers everything; the existing
+job names are unchanged, `Build & Test (windows-latest, tests 2/2)` is new, and
+`Real-app smoke (windows-latest)` does not appear on UI-only pull requests (`ci-result` accepts a
+skipped job, a branch rule that lists the job names itself would wait for it forever).
 
 **Evaluation scenarios.** Safety behaviour (approvals, the egress gate, prompt injection) is tested by
 hermetic YAML scenarios in `evals/scenarios/`, run by `cargo test -p evals` with no network and no
@@ -179,13 +193,27 @@ job summary lists the flaky tests (failed, then passed on a retry), the tests th
 attempt, the 20 slowest tests and the 20 slowest test binaries. The same data is in the
 `test-report-*` artifacts (`report.json` and the raw `junit.xml`). A red check on your pull
 request that names a test from that flaky list is probably not your change; say so in the pull
-request. The pull request checks themselves still use `cargo test` without retries. Doctests are
+request. The pull request checks themselves use nextest without retries. Doctests are
 not part of the report (nextest does not run them). To measure locally:
 
 ```sh
 cargo install cargo-nextest --locked                        # once
 cargo nextest run -p <crate> --profile ci-report            # retries, writes JUnit XML
 python3 scripts/test_report.py target/nextest/ci-report/junit.xml
+```
+
+Every Monday the `Test report (weekly)` workflow (`.github/workflows/test-report-weekly.yml`) reads
+the nightly reports of the past seven days and posts one comment on the open issue titled "Weekly
+test report" (it creates the issue on the first run). The comment lists the tests that were flaky or
+failing on several nights, the 10 slowest tests and test binaries per OS, and the median, 90th
+percentile and maximum duration of each pull request job. To build the same comment locally (needs
+the `gh` CLI, logged in):
+
+```sh
+mkdir reports && gh run list --workflow test-report.yml --limit 7 --json databaseId --jq '.[].databaseId' |
+  while read -r id; do gh run download "$id" --pattern 'test-report-*' --dir "reports/$id"; done
+python3 scripts/ci_report.py --runs 40 --no-artifacts --json-out ci.json --output /dev/null
+python3 scripts/test_report_weekly.py reports --ci-json ci.json
 ```
 
 The CLI reference is checked too: `apps/cli/tests/cli_reference.rs` fails when a visible

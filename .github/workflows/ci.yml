@@ -16,8 +16,10 @@ concurrency:
 
 jobs:
   # Decides which of the long jobs a pull request needs. A change that only touches
-  # documentation, repository metadata or the desktop UI sources skips the Rust jobs;
-  # everything else, and every push to main, runs them all.
+  # documentation, repository metadata, the marketing site, packaging manifests or the
+  # desktop UI sources (apps/desktop/ui, packages/ui) skips the Rust jobs. A change that only
+  # touches UI sources also skips the Windows real-app smoke lane (Linux still runs it).
+  # Everything else, and every push to main, runs them all.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
@@ -26,6 +28,8 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       ui: ${{ steps.filter.outputs.ui }}
       smoke: ${{ steps.filter.outputs.smoke }}
+      # JSON list of the operating systems the real-app smoke job runs on.
+      smoke_os: ${{ steps.filter.outputs.smoke_os }}
     steps:
       - name: Checkout (merge commit and its first parent)
         uses: actions/checkout@v4
@@ -40,22 +44,25 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify -q HEAD^2 >/dev/null; then
             echo "Not a pull request merge commit: run everything."
-            printf '%s\n' rust=true ui=true smoke=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' rust=true ui=true smoke=true 'smoke_os=["ubuntu-latest","windows-latest"]' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # HEAD is the merge of the PR into main; HEAD^1 is main.
           git diff --name-only HEAD^1 HEAD > changed.txt
           echo "Changed files:"; cat changed.txt
-          # Documentation and repository metadata only (generated docs/api stays "code").
-          docs_only='^((docs|docs-site)/.*|[^/]+\.md|LICENSE|NOTICE|\.github/(ISSUE_TEMPLATE/.*|CODEOWNERS|labeler\.yml|pull_request_template\.md|workflows/(docs-site|labeler|installer|linux-release|linux-scripts)\.yml))$'
-          # Desktop UI sources. No Rust crate reads them: apps/desktop/build.rs only creates an
-          # empty ui/dist when it is missing, and the UI job below covers these files (the
-          # generated API schema is checked against docs/api/openapi.json, which stays "code").
-          ui_only='^apps/desktop/ui/'
+          # Documentation, repository metadata, the marketing site (the UI job covers it) and the
+          # packaging manifests (no crate or test reads them); generated docs/api stays "code".
+          # Workflows other than this one cannot change what this run does.
+          docs_only='^((docs|docs-site|site|packaging)/.*|[^/]+\.md|LICENSE|NOTICE|\.github/(ISSUE_TEMPLATE/.*|CODEOWNERS|labeler\.yml|pull_request_template\.md|workflows/(docs-site|labeler|installer|linux-release|linux-scripts|test-report|test-report-weekly)\.yml))$'
+          # Desktop UI sources and the shared UI package (packages/ui, used by the desktop UI
+          # only). No Rust crate reads them: apps/desktop/build.rs only creates an empty ui/dist
+          # when it is missing, and the UI job below covers these files (the generated API schema
+          # is checked against docs/api/openapi.json, which stays "code").
+          ui_only='^(apps/desktop/ui/|packages/)'
           # The smoke harness uses the desktop UI and the CLI daemon, including shared crates and
           # the provider/skill assets embedded in the daemon build.
           smoke_paths='^(apps/(desktop|cli)/|crates/|packages/|providers/|skills/|\.cargo/|(Cargo\.(toml|lock)|rust-toolchain\.toml|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.base\.json|docs/api/openapi\.json|\.github/workflows/ci\.yml)$)'
-          rust=false; ui=false; smoke=false
+          rust=false; ui=false; smoke=false; smoke_windows=false
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             if [ "$f" = "docs/api/openapi.json" ] \
@@ -63,9 +70,16 @@ jobs:
               rust=true
             fi
             if printf '%s\n' "$f" | grep -Eq '^(apps/desktop/ui/|packages/|site/|eslint\.config\.js$|\.stylelintrc\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|docs/api/openapi\.json$|\.github/workflows/ci\.yml$)'; then ui=true; fi
-            if printf '%s\n' "$f" | grep -Eq "$smoke_paths"; then smoke=true; fi
+            if printf '%s\n' "$f" | grep -Eq "$smoke_paths"; then
+              smoke=true
+              # UI-only changes leave the daemon as main tests it: Linux smoke is enough for them
+              # (pushes to main still run both).
+              printf '%s\n' "$f" | grep -Eq "$ui_only" || smoke_windows=true
+            fi
           done < changed.txt
-          printf '%s\n' "rust=$rust" "ui=$ui" "smoke=$smoke" >> "$GITHUB_OUTPUT"
+          smoke_os='["ubuntu-latest"]'
+          if [ "$smoke_windows" = true ]; then smoke_os='["ubuntu-latest","windows-latest"]'; fi
+          printf '%s\n' "rust=$rust" "ui=$ui" "smoke=$smoke" "smoke_os=$smoke_os" >> "$GITHUB_OUTPUT"
 
   # Always runs and is cheap: relative Markdown links must resolve.
   docs-check:
@@ -83,7 +97,10 @@ jobs:
         run: python3 scripts/check_guide_index.py
 
       - name: Test CI report parser
-        run: python3 -m unittest discover -s scripts/tests -p test_ci_report.py -v
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_ci_report.py -v
+          python3 scripts/test_report.py --self-test
+          python3 -m unittest discover -s scripts/tests -p test_test_report_weekly.py -v
 
       - name: Test the MCP catalog checker (offline, loopback only)
         run: python3 -B -m unittest discover -s scripts/tests -p test_check_mcp_catalog.py -v
@@ -110,9 +127,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The Windows test run is the longest job, so its tests are split in two halves by
+          # nextest (hash of the test name: stable when tests are added). Both halves build the
+          # tests in parallel. The first one keeps the old job name and also runs fmt and Clippy;
+          # the second one runs the other half and the doctests, so every test still runs once.
           - os: windows-latest
             suite: workspace
+            partition: hash:1/2
+            no-doctests: true
             name: Build & Test (windows-latest)
+          - os: windows-latest
+            suite: workspace
+            partition: hash:2/2
+            tests-only: true
+            name: Build & Test (windows-latest, tests 2/2)
           - os: windows-latest
             suite: embeddings
             name: Local Embeddings (windows-latest)
@@ -155,15 +183,16 @@ jobs:
         with:
           # The feature-enabled lane saves a different set of compiled dependencies.
           key: ${{ matrix.suite == 'embeddings' && 'local-embeddings' || '' }}
-          # PRs restore main's cache; avoid costly PR-only uploads and cache eviction.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # PRs restore main's cache; avoid costly PR-only uploads and cache eviction. The second
+          # Windows half uses the first one's cache key, so only the first one saves it.
+          save-if: ${{ github.ref == 'refs/heads/main' && !matrix.tests-only }}
 
       - name: Check formatting
-        if: matrix.suite != 'embeddings'
+        if: matrix.suite != 'embeddings' && !matrix.tests-only
         run: cargo fmt --all --check
 
       - name: Run Clippy
-        if: matrix.suite != 'embeddings'
+        if: matrix.suite != 'embeddings' && !matrix.tests-only
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Workspace feature unification enables the server and masks proxy-only lint failures.
@@ -174,15 +203,22 @@ jobs:
       # Run even when clippy failed so one gate cannot hide another's evidence.
       # nextest runs every test in its own process and schedules them across all
       # binaries at once (no retries: see the `ci` profile in .config/nextest.toml).
-      # It does not run doctests, so `cargo test --doc` follows; both always run.
+      # It does not run doctests, so `cargo test --doc` follows; both always run. The first
+      # Windows half skips the doctests, the second one runs them (see the matrix).
       - name: Run tests
         if: (success() || failure()) && matrix.suite != 'embeddings'
         timeout-minutes: ${{ matrix.os == 'windows-latest' && 65 || 35 }}
         shell: bash
+        env:
+          # `count:1/1` is every test; Windows runs two halves (see the matrix).
+          PARTITION: ${{ matrix.partition || 'count:1/1' }}
+          NO_DOCTESTS: ${{ matrix.no-doctests }}
         run: |
           status=0
-          cargo nextest run --workspace --no-fail-fast --profile ci || status=$?
-          cargo test --workspace --doc --no-fail-fast || status=$?
+          cargo nextest run --workspace --no-fail-fast --profile ci --partition "$PARTITION" || status=$?
+          if [ "$NO_DOCTESTS" != true ]; then
+            cargo test --workspace --doc --no-fail-fast || status=$?
+          fi
           exit "$status"
 
       - name: Verify explicit-artifact dependency features
@@ -383,13 +419,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            chrome-platform: win64
-            chrome-sha256: ae0deef27d449e1d7529df7705d609bab102de48464da13567ed3dd2ee1a0586
-          - os: ubuntu-latest
-            chrome-platform: linux64
-            chrome-sha256: 8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66
+        # Linux always; Windows too unless only UI sources changed (see "Detect changed areas").
+        os: ${{ fromJSON(needs.changes.outputs.smoke_os) }}
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -432,8 +463,8 @@ jobs:
         shell: pwsh
         env:
           CHROME_VERSION: "157.0.8103.38" # Match the browser integration lane.
-          CHROME_PLATFORM: ${{ matrix.chrome-platform }}
-          CHROME_SHA256: ${{ matrix.chrome-sha256 }}
+          CHROME_PLATFORM: ${{ matrix.os == 'windows-latest' && 'win64' || 'linux64' }}
+          CHROME_SHA256: ${{ matrix.os == 'windows-latest' && 'ae0deef27d449e1d7529df7705d609bab102de48464da13567ed3dd2ee1a0586' || '8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66' }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'smoke-chrome.zip'
           $unpacked = Join-Path $env:RUNNER_TEMP 'smoke-chrome'

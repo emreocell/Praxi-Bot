@@ -1,0 +1,96 @@
+name: Test report (weekly)
+
+# Once a week, combines the nightly `Test report` runs (#463) of the last seven days into one
+# issue comment: tests that were flaky or failing on several nights, the slowest tests and test
+# binaries per OS, and how long the pull request jobs took. The comment goes to the open issue
+# titled "Weekly test report" (created on the first run), or to the issue given when the
+# workflow is started by hand. It runs no tests itself and never touches pull request checks.
+# To build the same comment locally, see CONTRIBUTING.md ("Test report").
+on:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Issue number to comment on (default: the open issue titled Weekly test report)"
+        required: false
+        type: string
+      dry-run:
+        description: "Only write the job summary; post no comment and create no issue"
+        required: false
+        type: boolean
+        default: false
+
+# `actions: read` lists and downloads the nightly artifacts; `issues: write` posts the comment.
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: test-report-weekly
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    name: Weekly test report
+    # A scheduled run on a fork has no nightly reports to read; a manual run is the owner's choice.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'emreocell/Praxi-Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the nightly reports of the last seven days
+        shell: bash
+        run: |
+          set -euo pipefail
+          since="$(date -u -d '8 days ago' +%F)"
+          mkdir -p reports
+          # Cancelled and skipped runs have no report; a run whose tests failed still uploads one.
+          gh run list --workflow test-report.yml --status completed --created ">=$since" --limit 30 \
+            --json databaseId,conclusion \
+            --jq '.[] | select(.conclusion == "success" or .conclusion == "failure") | .databaseId' > runs.txt
+          echo "Nightly runs since $since: $(wc -l < runs.txt)"
+          while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            gh run download "$id" --pattern 'test-report-*' --dir "reports/$id" \
+              || echo "::warning::Run $id has no test-report artifact (expired or never uploaded)."
+          done < runs.txt
+
+      - name: Read recent pull request check timings
+        shell: bash
+        run: python3 scripts/ci_report.py --repo "$GITHUB_REPOSITORY" --runs 40 --no-artifacts --json-out ci.json --output /dev/null
+
+      - name: Build the comment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/test_report_weekly.py reports --repo "$GITHUB_REPOSITORY" \
+            --ci-json ci.json --week-end "$(date -u +%F)" > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post the comment
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry-run
+        shell: bash
+        env:
+          ISSUE_INPUT: ${{ inputs.issue }}
+        run: |
+          set -euo pipefail
+          number="$ISSUE_INPUT"
+          if [ -z "$number" ]; then
+            number="$(gh issue list --state open --search 'in:title "Weekly test report"' --json number,title \
+              --jq '[.[] | select(.title == "Weekly test report")][0].number // empty')"
+          fi
+          if [ -z "$number" ]; then
+            url="$(gh issue create --title "Weekly test report" --body "One comment a week from the \`Test report (weekly)\` workflow (\`.github/workflows/test-report-weekly.yml\`): flaky and slow tests from the nightly \`Test report\` runs, and pull request check timings. Reading guide: CONTRIBUTING.md, \"Test report\". Tracking issue for the work behind it: #463.")"
+            number="${url##*/}"
+          fi
+          gh issue comment "$number" --body-file comment.md
+          echo "Posted the weekly report to issue #$number."
