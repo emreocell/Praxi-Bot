@@ -1,4 +1,4 @@
-import { Download, Gauge, Info, LoaderCircle, RefreshCw } from "lucide-react";
+import { ChevronDown, Download, Gauge, Info, LoaderCircle, RefreshCw } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,6 +16,7 @@ import { botView } from "../lib/botProfile";
 import { humanLine } from "../lib/humanError";
 import {
   USAGE_RANGES,
+  topModelsSummary,
   exportFileName,
   formatTokenCount,
   formatUsageCost,
@@ -28,17 +29,42 @@ import {
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./UsageView.module.css";
 
-/** `embedded`: inside the settings modal (no page padding / title). */
+/** How many finished runs the app has seen: limits and usage reload when it grows. */
+function useFinishedRuns(): number {
+  const { events } = useDaemon();
+  return Object.values(events.runs).filter((r) => r.finishedMs !== undefined).length;
+}
+
+/** Settings > System > Limits and quota: today's spend, the monthly limit and the quota left, side by side. */
+export function UsageLimitsCard() {
+  const finished = useFinishedRuns();
+  return (
+    <div className={styles.limits} data-testid="usage-limits">
+      <SpendLimitCard refreshKey={finished} />
+      <div className={styles.limitsRow}>
+        <DailyDigestCard refreshKey={finished} />
+        <QuotaBlock />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Usage. `embedded` (Settings > System): a short summary (range, totals, the top models and the
+ * total cost) with "Show details" for the trend, breakdowns, tables and the CSV export; the limits
+ * live in their own card (`UsageLimitsCard`). Without `embedded` everything shows at once.
+ */
 export function UsageView({ embedded = false }: { embedded?: boolean }) {
   const { t, i18n } = useTranslation();
   const toast = useToast();
-  const { client, bots, events } = useDaemon();
+  const { client, bots } = useDaemon();
   const [range, setRange] = useState<UsageRange>("month");
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [spend, setSpend] = useState<SpendLimit | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(!embedded);
   const nf = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const unknownLabel = t("usage.unknown");
   const money = (v?: number | null) =>
@@ -62,9 +88,7 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
   }, [client, range]);
 
   // reload on range change and whenever a run finishes
-  const finished = Object.values(events.runs).filter(
-    (r) => r.finishedMs !== undefined
-  ).length;
+  const finished = useFinishedRuns();
   useEffect(() => {
     void load();
   }, [load, finished]);
@@ -107,6 +131,7 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
     () => sortModelUsage(usage?.by_model ?? []),
     [usage?.by_model]
   );
+  const top = useMemo(() => topModelsSummary(usage?.by_model ?? [], 3), [usage?.by_model]);
 
   const callsWithoutUsage = usage?.calls_without_usage ?? 0;
   const callsWithoutCost = usage?.calls_without_cost ?? 0;
@@ -129,11 +154,7 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
           </header>
         )}
 
-        <DailyDigestCard refreshKey={finished} />
-
-        <QuotaBlock />
-
-        <SpendLimitCard refreshKey={finished} />
+        {embedded ? null : <UsageLimitsCard />}
 
         <div className={styles.toolbar}>
           <div
@@ -166,20 +187,6 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
                 className={loading ? styles.spin : undefined}
               />
               {t("usage.refresh")}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!client || loading || exporting}
-              onClick={() => void downloadCsv()}
-              data-testid="usage-export-csv"
-            >
-              {exporting ? (
-                <LoaderCircle size={14} aria-hidden="true" className={styles.spin} />
-              ) : (
-                <Download size={14} aria-hidden="true" />
-              )}
-              {t("usage.exportCsv")}
             </Button>
           </div>
         </div>
@@ -266,6 +273,49 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
               </Card>
             ) : (
               <>
+                {top.rows.length > 0 ? (
+                  <section className={styles.topModels} aria-labelledby="usage-top-models-h" data-testid="usage-top-models">
+                    <div className={styles.topHead}>
+                      <h3 id="usage-top-models-h" className={styles.topTitle}>{t("settingsUi.usage.topModels")}</h3>
+                      <span className={styles.topTotal} data-testid="usage-total-cost">
+                        {t("settingsUi.usage.totalCost", { cost: money(usage.total.cost_usd) })}
+                      </span>
+                    </div>
+                    <ol className={styles.topList}>
+                      {top.rows.map((m) => (
+                        <li key={m.model} className={styles.topRow}>
+                          <span className={styles.topName} title={m.model}>
+                            {m.model}
+                            {m.provider ? <span className={styles.providerTag}>{m.provider}</span> : null}
+                          </span>
+                          <span className={styles.topBar} aria-hidden="true">
+                            <span style={{ width: `${Math.round(m.share * 100)}%` }} />
+                          </span>
+                          <span className={styles.topCalls}>{t("settingsUi.usage.calls", { formatted: nf.format(m.model_calls) })}</span>
+                          <span className={styles.topCost}>{money(m.cost_usd)}</span>
+                        </li>
+                      ))}
+                    </ol>
+                    {top.more > 0 ? <p className={styles.topMore}>{t("settingsUi.usage.moreModels", { n: top.more })}</p> : null}
+                  </section>
+                ) : null}
+
+                {embedded ? (
+                  <button
+                    type="button"
+                    className={styles.detailsToggle}
+                    aria-expanded={detailsOpen}
+                    aria-controls="usage-details"
+                    data-testid="usage-details-toggle"
+                    onClick={() => setDetailsOpen((o) => !o)}
+                  >
+                    <span>{detailsOpen ? t("settingsUi.usage.hideDetails") : t("settingsUi.usage.showDetails")}</span>
+                    <ChevronDown aria-hidden="true" className={detailsOpen ? styles.chevOpen : undefined} />
+                  </button>
+                ) : null}
+
+                {detailsOpen ? (
+                <div id="usage-details" className={styles.details}>
                 <UsageTrendChart
                   daily={usage.daily ?? []}
                   timeZone={usage.time_zone}
@@ -472,10 +522,28 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
                     </Card>
                   </section>
                 ) : null}
+
+                <div className={styles.detailsFoot}>
+                  <p className={formStyles.hint}>{t("usage.costNote")}</p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={!client || loading || exporting}
+                    onClick={() => void downloadCsv()}
+                    data-testid="usage-export-csv"
+                  >
+                    {exporting ? (
+                      <LoaderCircle size={14} aria-hidden="true" className={styles.spin} />
+                    ) : (
+                      <Download size={14} aria-hidden="true" />
+                    )}
+                    {t("usage.exportCsv")}
+                  </Button>
+                </div>
+                </div>
+                ) : null}
               </>
             )}
-
-            <p className={formStyles.hint}>{t("usage.costNote")}</p>
           </div>
         ) : null}
       </div>

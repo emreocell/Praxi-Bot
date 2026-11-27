@@ -119,6 +119,28 @@ export function sortModelUsage<T extends ModelUsageLike>(models: readonly T[]): 
   });
 }
 
+/**
+ * The few models that matter most (by cost, then tokens, then calls) for the short summary, each
+ * with its share of the biggest one (0..1, by cost when priced, else by calls), and how many more
+ * models the full table lists.
+ */
+export function topModelsSummary<T extends ModelUsageLike>(
+  models: readonly T[],
+  limit: number
+): { rows: Array<T & { share: number }>; more: number } {
+  const sorted = sortModelUsage(models).filter((m) => m.model_calls > 0);
+  const rows = sorted.slice(0, Math.max(0, limit));
+  const maxCost = Math.max(0, ...rows.map((m) => m.cost_usd ?? 0));
+  const maxCalls = Math.max(1, ...rows.map((m) => m.model_calls));
+  return {
+    rows: rows.map((m) => ({
+      ...m,
+      share: maxCost > 0 ? (m.cost_usd ?? 0) / maxCost : m.model_calls / maxCalls
+    })),
+    more: sorted.length - rows.length
+  };
+}
+
 /** Format a USD cost or return `unknownLabel` when pricing is unknown. */
 export function formatUsageCost(
   costUsd: number | null | undefined,

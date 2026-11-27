@@ -169,7 +169,6 @@ import type { PrereqFix } from "./lib/recipePrereqs";
 import { MyBotsView } from "./views/MyBotsView";
 import { nativePauseAction } from "./lib/myBots";
 import { SettingsModal, type SettingsTargetRequest } from "./views/SettingsModal";
-import { VaultModal } from "./views/VaultModal";
 import { type AppsStart, OPEN_APPS_EVENT, OPEN_SETTINGS_EVENT, OPEN_VAULT_EVENT, type SettingsTarget } from "./lib/settingsLink";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
 import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
@@ -329,7 +328,6 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     if (fix.kind === "apps") setAppsOpen(true);
     else setSettingsOpen(fix.section);
   };
-  const [vaultOpen, setVaultOpen] = useState(false);
   // The model picker's "Install <CLI>" rows open Settings > AI models, where the install flow lives.
   useEffect(() => {
     const open = () => openSettings("models", "detectedAccounts");
@@ -345,15 +343,12 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     window.addEventListener(OPEN_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, [openSettings]);
-  // Settings -> Apps & connections -> Vault button opens the Vault modal cleanly.
+  // The Vault is a page of Settings now; "open the vault" from anywhere lands there.
   useEffect(() => {
-    const open = () => {
-      setSettingsOpen(null);
-      setVaultOpen(true);
-    };
+    const open = () => openSettings("vault");
     window.addEventListener(OPEN_VAULT_EVENT, open);
     return () => window.removeEventListener(OPEN_VAULT_EVENT, open);
-  }, []);
+  }, [openSettings]);
   const [newBotOpen, setNewBotOpen] = useState(false);
   // The dialogs of a bot (card 244-C): edit and profile replace the old pages; "add skill" can
   // sit on top of the skills dialog or the edit dialog.
@@ -472,7 +467,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         const screen = params.get("screen");
         if (screen === "settings") setSettingsOpen((params.get("section") ?? "general") as SettingsSectionId);
         if (screen === "apps") setAppsOpen(true);
-        if (screen === "vault") setVaultOpen(true);
+        if (screen === "vault") setSettingsOpen("vault");
         if (params.get("panel") === "1") setPanelOpen(true);
         // Review state of the run bar: `?control=bot_driving|paused|human_driving`.
         const ctl = params.get("control");
@@ -859,7 +854,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     if (action === "settings") {
       setSettingsOpen("general");
     } else if (action === "vault") {
-      setVaultOpen(true);
+      setSettingsOpen("vault");
     } else if (action === "appearance" || action === "ai" || action === "usage" || action === "updates") {
       setSettingsOpen(action);
     } else if (action === "computer") {
@@ -1104,7 +1099,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const railWidth = fitRail(viewportWidth, layout.rail, panelWidth, float, panelReserve);
   const fitStored = (candidate: number) => fitRail(viewportWidth, candidate, panelWidth, float, panelReserve);
   // A dialog opened by a shortcut sits above the message search: close the search instead of leaving it beneath.
-  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || recipeOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen || vaultOpen;
+  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || recipeOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen;
   useEffect(() => {
     if (dialogOpen) setSearchOpen(false);
   }, [dialogOpen]);
@@ -1764,11 +1759,6 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         }}
       />
       <AppsModal open={appsOpen} start={appsStart} onClose={() => { setAppsOpen(false); setAppsStart(null); }} />
-      <VaultModal
-        open={vaultOpen}
-        onClose={() => setVaultOpen(false)}
-        onManageEmail={() => setSettingsOpen("mail")}
-      />
       <RecipeFlow
         open={recipeOpen}
         recheckKey={recipeRecheck}

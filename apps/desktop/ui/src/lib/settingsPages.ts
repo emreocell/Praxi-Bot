@@ -10,9 +10,10 @@ import { foldText } from "./searchText.ts";
 import type { SettingsSectionId } from "../views/settings/types.ts";
 
 /**
- * The settings, as a non-programmer sees them: six plainly named pages, each split into a few
- * titled groups (`SETTINGS_GROUPS`).  Cards keep their old technical `section` for fallback;
- * `CARD_META` places each card on a page and in a group.
+ * The settings, as a non-programmer sees them: plainly named pages, each split into a few titled
+ * groups (`SETTINGS_GROUPS`).  Vault and Updates are whole tools, so each is a page with one group.
+ * Cards keep their old technical `section` for fallback; `CARD_META` places each card on a page and
+ * in a group.
  */
 export const SETTINGS_PAGES = [
   "general",
@@ -20,7 +21,9 @@ export const SETTINGS_PAGES = [
   "models",
   "connections",
   "safety",
-  "system"
+  "vault",
+  "system",
+  "updates"
 ] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
@@ -32,11 +35,38 @@ export const SETTINGS_GROUPS = {
   general: ["you", "notifications", "voice", "startup"],
   appearance: ["look", "readability"],
   models: ["models", "memory"],
-  connections: ["computers", "mailWeb", "vault"],
+  connections: ["computers", "mailWeb"],
   safety: ["level", "access", "history"],
-  system: ["usage", "about"]
+  vault: ["vault"],
+  system: ["usage", "troubleshooting"],
+  updates: ["updates"]
 } as const satisfies Record<SettingsPageId, readonly string[]>;
 export type SettingsGroupId = (typeof SETTINGS_GROUPS)[SettingsPageId][number];
+
+/**
+ * Pages and groups added after the first six pages, and page texts that changed with them (System
+ * no longer holds updates, Connections no longer holds passwords), keep their words under
+ * `settingsUi.` (EN + TR; the other languages fall back to English there).
+ */
+const NEW_PAGE_TEXTS: ReadonlySet<string> = new Set([
+  "vault.name",
+  "vault.description",
+  "updates.name",
+  "updates.description",
+  "system.description",
+  "connections.description"
+]);
+const NEW_GROUPS: ReadonlySet<string> = new Set(["troubleshooting", "updates"]);
+
+/** The i18n key of a page's `name` or `description`. */
+export function pageTextKey(page: SettingsPageId, field: "name" | "description"): string {
+  return NEW_PAGE_TEXTS.has(`${page}.${field}`) ? `settingsUi.pages.${page}.${field}` : `settingsModal.pages.${page}.${field}`;
+}
+
+/** The i18n key of a group title. */
+export function groupTextKey(group: SettingsGroupId): string {
+  return NEW_GROUPS.has(group) ? `settingsUi.groups.${group}` : `settingsModal.groups.${group}`;
+}
 
 /** Words that get a short plain-language "What is this?" popover (and a docs link). */
 export type LearnTerm = "apiKey" | "permissions" | "folders" | "memory" | "provider" | "safeMode";
@@ -106,7 +136,7 @@ export const CARD_META: Record<string, CardMeta> = {
   calendar: { page: "connections", group: "mailWeb" },
   "email-channel": { page: "connections", group: "mailWeb", advanced: true },
   "mail-guard": { page: "connections", group: "mailWeb", advanced: true },
-  vault: { page: "connections", group: "vault" },
+  vault: { page: "vault", group: "vault" },
 
   // Safety: how freely bots work, what they may reach, what they did
   "safety-levels": { page: "safety", group: "level", learn: "permissions" },
@@ -118,12 +148,15 @@ export const CARD_META: Record<string, CardMeta> = {
   "site-rules": { page: "safety", group: "access", advanced: true, learn: "permissions" },
   "audit-log": { page: "safety", group: "history" },
 
-  // System: usage and storage, version and troubleshooting
+  // System: usage, limits and storage; troubleshooting
   usage: { page: "system", group: "usage" },
+  "spend-limits": { page: "system", group: "usage" },
   data: { page: "system", group: "usage" },
-  version: { page: "system", group: "about" },
-  diagnostics: { page: "system", group: "about", advanced: true },
-  logs: { page: "system", group: "about", advanced: true }
+  diagnostics: { page: "system", group: "troubleshooting", advanced: true },
+  logs: { page: "system", group: "troubleshooting", advanced: true },
+
+  // Updates: its own page
+  version: { page: "updates", group: "updates" }
 };
 
 const SECTION_PAGE: Record<SettingsSectionId, SettingsPageId> = {
@@ -134,7 +167,7 @@ const SECTION_PAGE: Record<SettingsSectionId, SettingsPageId> = {
   mail: "connections",
   usage: "system",
   diagnostics: "system",
-  updates: "system"
+  updates: "updates"
 };
 
 /** Legacy section ids and retired page ids (Computers and Mail & web are now Connections) resolve to a current page. */
@@ -174,8 +207,8 @@ export const SETTINGS_PAGE_GROUPS: ReadonlyArray<{
   pages: readonly SettingsPageId[];
 }> = [
   { id: "you", pages: ["general", "appearance"] },
-  { id: "bots", pages: ["models", "connections", "safety"] },
-  { id: "app", pages: ["system"] }
+  { id: "bots", pages: ["models", "connections", "safety", "vault"] },
+  { id: "app", pages: ["system", "updates"] }
 ];
 
 // ---------------------------------------------------------------- simple / more options

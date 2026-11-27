@@ -158,6 +158,110 @@
   transform: translate(var(--space-4), -50%);
 }
 
+/* A title with the card's "?" right after it. */
+.titleLine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+/* An on / off tile: text on the left, a native checkbox drawn as the same switch on the right. */
+.switchGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--size-widget-width) * 0.72)), 1fr));
+  gap: var(--space-2);
+}
+
+.switchField {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: var(--space-0);
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.switchField:hover {
+  border-color: var(--color-border-strong);
+}
+
+.switchFieldDisabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.switchFieldText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+  min-width: var(--space-0);
+}
+
+.switchFieldLabel {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  color: var(--color-text);
+}
+
+.switchFieldHint {
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-muted);
+}
+
+.switchInput {
+  position: relative;
+  flex-shrink: 0;
+  width: var(--space-10);
+  height: var(--space-6);
+  margin: var(--space-0);
+  border: var(--size-border) solid transparent;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-active);
+  appearance: none;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.switchInput::after {
+  position: absolute;
+  top: 50%;
+  left: var(--space-1);
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+  content: "";
+  transform: translateY(-50%);
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.switchInput:checked {
+  background-color: var(--color-primary);
+}
+
+.switchInput:checked::after {
+  background-color: var(--color-primary-contrast);
+  transform: translate(var(--space-4), -50%);
+}
+
+.switchInput:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.switchInput:disabled {
+  cursor: default;
+}
+
 /* stylelint-disable-next-line unit-disallowed-list -- desktop window resize boundary */
 @media (width <= 56em) {
   .row {

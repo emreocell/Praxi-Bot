@@ -64,6 +64,22 @@ export function normalizeOrigin(raw: string): string | null {
   }
 }
 
+/**
+ * The host whose favicon a Vault row may show: the first saved origin's bare host name, lower case,
+ * with no port, path, query or fragment (so no tracking parameter is ever passed on). IP addresses,
+ * single-label names (`localhost`, `router`) and other non-public shapes give null: their tile stays the initial.
+ */
+export function vaultFaviconDomain(origins: readonly string[]): string | null {
+  const first = origins.find((o) => o.trim() !== "");
+  const origin = first ? normalizeOrigin(first) : null;
+  if (!origin) return null;
+  const host = new URL(origin).hostname.toLowerCase().replace(/\.$/, "");
+  if (host.startsWith("[") || /^[0-9.]+$/.test(host)) return null;
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(host)) return null;
+  if (/\.(local|localhost|internal|lan|home|arpa)$/.test(host)) return null;
+  return host;
+}
+
 /** Build a valid, unique `fill/<name>` identifier for a newly created Vault item. */
 export function suggestSecretName(
   siteOrLabel: string,

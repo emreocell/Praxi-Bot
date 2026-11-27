@@ -1,7 +1,7 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { MoreInfo } from "../components/ChoiceList";
-import { SettingsCard } from "../components/SettingsUi";
+import { SettingsCard, SwitchField, SwitchGrid } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
 import { type QuietHours } from "../lib/quietHours";
 import { ChannelNotifySettings } from "./ChannelNotifySettings";
@@ -15,10 +15,12 @@ type Toggle =
   | "notifyPrivate"
   | "showAgentRoute";
 
+/** The everyday switches, two per line: what to be told about, and whether to hide the text. */
 const NOTIFY_TOGGLES: readonly Toggle[] = [
   "notifyNeedsYou",
   "notifyLongRun",
-  "notifyFailed"
+  "notifyFailed",
+  "notifyPrivate"
 ];
 
 /** Settings: OS notifications per kind, private mode, and the route-chip debug switch. */
@@ -44,21 +46,14 @@ export function NotificationSettings({
       : [];
 
   const row = (key: Toggle) => (
-    <label key={key} className={styles.row}>
-      <input
-        type="checkbox"
-        className={styles.check}
-        checked={settings[key]}
-        onChange={(e) => onChange({ [key]: e.target.checked })}
-        data-testid={`settings-${key}`}
-      />
-      <span className={styles.text}>
-        <span className={styles.label}>{t(`settings.notifications.${key}`)}</span>
-        <span className={formStyles.hint}>
-          {t(`settings.notifications.${key}Hint`)}
-        </span>
-      </span>
-    </label>
+    <SwitchField
+      key={key}
+      checked={settings[key]}
+      onChange={(on) => onChange({ [key]: on })}
+      label={t(`settings.notifications.${key}`)}
+      hint={t(`settings.notifications.${key}Hint`)}
+      testId={`settings-${key}`}
+    />
   );
 
   return (
@@ -66,28 +61,22 @@ export function NotificationSettings({
       title={t("settings.notifications.title")}
       description={t("settings.notifications.description")}
     >
-      <div className={styles.group}>{NOTIFY_TOGGLES.map(row)}</div>
-      <div className={styles.group}>{row("notifyPrivate")}</div>
+      <SwitchGrid>{NOTIFY_TOGGLES.map(row)}</SwitchGrid>
       <div className={styles.group} data-testid="channel-notify-block">
         <h3 className={styles.subHeading}>{t("settings.channelNotify.title")}</h3>
         <p className={formStyles.hint}>{t("settings.channelNotify.description")}</p>
         <ChannelNotifySettings />
       </div>
+      <div className={styles.pair}>
       <div className={styles.group} data-testid="quiet-hours">
         <h3 className={styles.subHeading}>{t("settings.quiet.title")}</h3>
-        <label className={styles.row}>
-          <input
-            type="checkbox"
-            className={styles.check}
-            checked={q.enabled}
-            onChange={(e) => setQuiet({ enabled: e.target.checked })}
-            data-testid="settings-quiet-enabled"
-          />
-          <span className={styles.text}>
-            <span className={styles.label}>{t("settings.quiet.enabled")}</span>
-            <span className={formStyles.hint}>{t("settings.quiet.enabledHint")}</span>
-          </span>
-        </label>
+        <SwitchField
+          checked={q.enabled}
+          onChange={(enabled) => setQuiet({ enabled })}
+          label={t("settings.quiet.enabled")}
+          hint={t("settings.quiet.enabledHint")}
+          testId="settings-quiet-enabled"
+        />
         {q.enabled ? (
           <>
             <div className={styles.times}>
@@ -152,37 +141,25 @@ export function NotificationSettings({
                 </label>
               ))}
             </fieldset>
-            <label className={styles.row}>
-              <input
-                type="checkbox"
-                className={styles.check}
-                checked={q.allowUrgent}
-                onChange={(e) => setQuiet({ allowUrgent: e.target.checked })}
-                data-testid="settings-quiet-urgent"
-              />
-              <span className={styles.text}>
-                <span className={styles.label}>{t("settings.quiet.allowUrgent")}</span>
-                <span className={formStyles.hint}>{t("settings.quiet.allowUrgentHint")}</span>
-              </span>
-            </label>
+            <SwitchField
+              checked={q.allowUrgent}
+              onChange={(allowUrgent) => setQuiet({ allowUrgent })}
+              label={t("settings.quiet.allowUrgent")}
+              hint={t("settings.quiet.allowUrgentHint")}
+              testId="settings-quiet-urgent"
+            />
           </>
         ) : null}
       </div>
       <div className={styles.group} data-testid="digest-settings">
         <h3 className={styles.subHeading}>{t("settings.digest.title")}</h3>
-        <label className={styles.row}>
-          <input
-            type="checkbox"
-            className={styles.check}
-            checked={settings.digestTime !== ""}
-            onChange={(e) => onChange({ digestTime: e.target.checked ? "18:00" : "" })}
-            data-testid="settings-digest-enabled"
-          />
-          <span className={styles.text}>
-            <span className={styles.label}>{t("settings.digest.enabled")}</span>
-            <span className={formStyles.hint}>{t("settings.digest.enabledHint")}</span>
-          </span>
-        </label>
+        <SwitchField
+          checked={settings.digestTime !== ""}
+          onChange={(on) => onChange({ digestTime: on ? "18:00" : "" })}
+          label={t("settings.digest.enabled")}
+          hint={t("settings.digest.enabledHint")}
+          testId="settings-digest-enabled"
+        />
         {settings.digestTime !== "" ? (
           <label className={styles.field} htmlFor={`${idBase}-digest`}>
             <span className={styles.label}>{t("settings.digest.time")}</span>
@@ -196,6 +173,7 @@ export function NotificationSettings({
             />
           </label>
         ) : null}
+      </div>
       </div>
       <MoreInfo label={t("choice.advanced")} testId="notifications-advanced">
         <div className={styles.group}>

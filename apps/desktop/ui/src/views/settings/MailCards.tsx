@@ -1,8 +1,6 @@
 import type { TFunction } from "i18next";
-import { KeyRound } from "lucide-react";
-import { Button } from "ui";
-import { SettingRow } from "../../components/SettingsUi";
-import { openVault } from "../../lib/settingsLink";
+import { openSettingsTarget } from "../../lib/settingsLink";
+import { VaultManager } from "../VaultManager";
 import { ConnectMailCard } from "./ConnectMailCard";
 import { EmailCard } from "./EmailCard";
 import { EmailChannelCard } from "./EmailChannelCard";
@@ -25,23 +23,13 @@ export function mailCards(t: TFunction): CardDef[] {
     {
       id: "vault",
       section: "mail",
-      kind: "row",
+      kind: "block",
       title: t("vault.title"),
       description: t("vault.subtitle"),
       keywords: "vault kasa tresor boveda password login account secret sifre hesap",
-      node: (
-        <SettingRow title={t("vault.title")} description={t("vault.subtitle")}>
-          <Button
-            size="sm"
-            variant="secondary"
-            data-testid="settings-open-vault"
-            onClick={() => openVault()}
-          >
-            <KeyRound aria-hidden="true" />
-            {t("vault.openButton")}
-          </Button>
-        </SettingRow>
-      )
+      // The Vault is a page of its own; "Manage" on the bot e-mail strip goes to the mail settings.
+      fullPage: true,
+      node: <VaultManager onManageEmail={() => openSettingsTarget({ page: "connections", card: "email", field: "" })} />
     },
     {
       id: "email",

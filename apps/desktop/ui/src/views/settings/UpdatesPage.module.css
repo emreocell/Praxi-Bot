@@ -1,0 +1,226 @@
+/* Settings > Updates: a summary card, an "update available" card and the versions list (v6 tokens only). */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.summary,
+.available {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+}
+
+.summaryHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.versionBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.eyebrow {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.version {
+  margin: var(--space-0);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.badge svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.badge_upToDate {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.badge_available {
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.badge_notSetUp {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.note {
+  margin: var(--space-0);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-active);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--size-widget-width) * 0.6)), 1fr));
+  gap: var(--space-3);
+  margin: var(--space-0);
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.fact dt {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.fact dd {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.select {
+  min-height: var(--size-control-sm);
+  padding: var(--space-0) var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.select:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.select:disabled {
+  opacity: 0.6;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hint {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-muted);
+}
+
+.error {
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+}
+
+.available {
+  border-color: var(--color-accent);
+}
+
+.availableHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.availableIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-active);
+  color: var(--color-accent-text);
+}
+
+.availableIcon svg {
+  width: var(--size-icon);
+  height: var(--size-icon);
+}
+
+.availableTitle {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.notesTitle {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+/* Release notes are plain text: kept as typed, scrolling when long. */
+.notes {
+  max-height: calc(var(--size-control-lg) * 5);
+  padding: var(--space-3);
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-active);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.value {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

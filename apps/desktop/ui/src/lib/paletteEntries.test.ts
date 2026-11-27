@@ -43,7 +43,9 @@ test("recentChats does not reorder the caller's array", () => {
 test("settingsPageIds lists every settings page once", () => {
   const ids = settingsPageIds();
   assert.equal(new Set(ids).size, ids.length);
-  assert.ok(ids.length <= 7);
+  assert.ok(ids.length <= 8);
+  assert.ok(ids.includes("vault"));
+  assert.ok(ids.includes("updates"));
   assert.ok(ids.includes("general"));
   assert.ok(ids.includes("system"));
 });

@@ -8,6 +8,8 @@ import { VOICE_KEY_TARGET } from "./settingsLink.ts";
 import {
   CARD_META,
   canReset,
+  groupTextKey,
+  pageTextKey,
   highlightParts,
   isCardShown,
   metaOfCard,
@@ -82,11 +84,14 @@ const FROZEN_CARD_IDS = [
   "diagnostics",
   "data",
   "safe-mode",
-  "version"
+  "version",
+  "vault",
+  "spend-limits"
 ] as const;
 
-test("at most 7 pages and every page is in exactly one nav group", () => {
-  assert.ok(SETTINGS_PAGES.length <= 7, `expected <= 7 pages, got ${SETTINGS_PAGES.length}`);
+test("at most 8 pages and every page is in exactly one nav group", () => {
+  // Six topic pages plus two whole tools the owner asked to find in the left list: Vault and Updates.
+  assert.ok(SETTINGS_PAGES.length <= 8, `expected <= 8 pages, got ${SETTINGS_PAGES.length}`);
   const grouped = SETTINGS_PAGE_GROUPS.flatMap((g) => [...g.pages]);
   assert.equal(new Set(grouped).size, grouped.length);
   assert.deepEqual([...grouped].sort(), [...SETTINGS_PAGES].sort());
@@ -169,9 +174,12 @@ test("Advanced settings starts closed on every open; only a deep link to an adva
   assert.equal(initialDetailMode(true), "advanced");
 });
 
-test("six pages, each split into titled groups; every card sits in a group of its own page", () => {
-  assert.deepEqual([...SETTINGS_PAGES], ["general", "appearance", "models", "connections", "safety", "system"]);
-  for (const page of SETTINGS_PAGES) assert.ok(SETTINGS_GROUPS[page].length >= 2, page);
+test("topic pages are split into titled groups, whole tools are one group; every card sits in a group of its own page", () => {
+  assert.deepEqual([...SETTINGS_PAGES], ["general", "appearance", "models", "connections", "safety", "vault", "system", "updates"]);
+  const wholeTools = new Set(["vault", "updates"]);
+  for (const page of SETTINGS_PAGES) assert.ok(SETTINGS_GROUPS[page].length >= (wholeTools.has(page) ? 1 : 2), page);
+  assert.deepEqual([...SETTINGS_GROUPS.vault], ["vault"]);
+  assert.deepEqual([...SETTINGS_GROUPS.updates], ["updates"]);
   for (const [id, meta] of Object.entries(CARD_META)) {
     assert.ok(meta.group, `${id} has a group`);
     assert.ok((SETTINGS_GROUPS[meta.page] as readonly string[]).includes(meta.group as string), `${id}: ${meta.group} on ${meta.page}`);
@@ -195,6 +203,7 @@ test("cards are drawn group by group in the page's order; a card without a group
   const out = groupCards("general", cards, (c) => c.meta);
   assert.deepEqual(out.map((g) => [g.group, g.cards.map((c) => c.id)]), [["you", ["b", "c"]], ["voice", ["a", "d"]]]);
   assert.equal(groupOfCard({ page: "system", group: "voice" }), "usage");
+  assert.equal(groupOfCard({ page: "updates" }), "updates");
 });
 
 test("search forgives Turkish and German word endings, accents and case, but still needs every word", () => {
@@ -328,7 +337,9 @@ test("search finds every card by its English title and by en, tr and de synonyms
     ["diagnostics", "settingsModal.diagnostics.title", "settingsModal.diagnostics.description", "repair", "onar", "reparatur"],
     ["data", "settingsModal.data.title", "settingsModal.data.description", "backup", "yedek", "sichern"],
     ["safe-mode", "safeMode.settings.title", "safeMode.settings.description", "recovery", "kurtarma", "wiederherstellung"],
-    ["version", "settingsModal.updates.title", "settingsModal.updates.description", "update", "guncelleme", "aktualisierung"]
+    ["version", "settingsUi.updates.title", "settingsUi.updates.description", "update", "guncelleme", "aktualisierung"],
+    ["vault", "vault.title", "vault.subtitle", "password", "sifre", "tresor"],
+    ["spend-limits", "settingsUi.limits.title", "settingsUi.limits.description", "budget", "harcama", "ausgabenlimit"]
   ];
 
   assert.equal(cases.length, FROZEN_CARD_IDS.length);
@@ -342,4 +353,60 @@ test("search finds every card by its English title and by en, tr and de synonyms
     assert.ok(matchesQuery(trSyn, title, desc, keywords), `${id} matched by tr "${trSyn}"`);
     assert.ok(matchesQuery(deSyn, title, desc, keywords), `${id} matched by de "${deSyn}"`);
   }
+});
+
+test("Vault and Updates are pages of their own; old links to updates land on the Updates page", () => {
+  assert.equal(CARD_META.vault.page, "vault");
+  assert.equal(CARD_META.version.page, "updates");
+  assert.equal(parsePage("updates"), "updates");
+  assert.equal(parsePage("vault"), "vault");
+  assert.ok(SETTINGS_PAGE_GROUPS.find((g) => g.id === "bots")?.pages.includes("vault"));
+  assert.ok(SETTINGS_PAGE_GROUPS.find((g) => g.id === "app")?.pages.includes("updates"));
+  // Connections no longer lists a Vault group; System keeps usage and troubleshooting only.
+  assert.ok(!(SETTINGS_GROUPS.connections as readonly string[]).includes("vault"));
+  assert.deepEqual([...SETTINGS_GROUPS.system], ["usage", "troubleshooting"]);
+  // The Vault card is a whole page: a search result jumps to it instead of drawing it inline.
+  const mail = read("../views/settings/MailCards.tsx");
+  assert.match(mail, /id: "vault"[\s\S]*?fullPage: true[\s\S]*?<VaultManager /);
+  assert.match(read("../views/SettingsModal.tsx"), /p\.card\.fullPage \? null : renderCards/);
+});
+
+test("every page name, page description and group title has English and Turkish words", () => {
+  const en = JSON.parse(read("../i18n/locales/en.json")) as Record<string, unknown>;
+  const tr = JSON.parse(read("../i18n/locales/tr.json")) as Record<string, unknown>;
+  const get = (o: Record<string, unknown>, key: string) =>
+    key.split(".").reduce<unknown>((acc, part) => (acc as Record<string, unknown>)?.[part], o);
+  for (const page of SETTINGS_PAGES) {
+    for (const field of ["name", "description"] as const) {
+      const key = pageTextKey(page, field);
+      assert.equal(typeof get(en, key), "string", `en ${key}`);
+      assert.equal(typeof get(tr, key), "string", `tr ${key}`);
+    }
+    for (const group of SETTINGS_GROUPS[page]) {
+      const key = groupTextKey(group);
+      assert.equal(typeof get(en, key), "string", `en ${key}`);
+      assert.equal(typeof get(tr, key), "string", `tr ${key}`);
+    }
+  }
+  // System and Connections describe what they hold now (no updates, no passwords).
+  assert.ok(!/update/i.test(get(en, pageTextKey("system", "description")) as string));
+  assert.ok(!/password/i.test(get(en, pageTextKey("connections", "description")) as string));
+});
+
+test("the \"?\" of a card sits in its header and opens on hover and on click", () => {
+  const modal = read("../views/SettingsModal.tsx");
+  assert.match(modal, /<CardHelpContext\.Provider value=\{<LearnMore term=\{p\.learn\} \/>\}>/);
+  // The footer keeps only the consequence line; no "What is this?" link at the bottom of a card.
+  assert.doesNotMatch(modal, /action=\{p\.learn/);
+  const ui = read("../components/SettingsUi.tsx");
+  assert.match(ui, /<TitleLine className=\{styles\.cardTitle\}/);
+  assert.match(ui, /<TitleLine className=\{styles\.rowTitle\}/);
+  // A card's own "?" is not repeated by the rows inside it.
+  assert.match(ui, /<CardHelpContext\.Provider value=\{null\}>\{children\}<\/CardHelpContext\.Provider>/);
+  const learn = read("../components/LearnMore.tsx");
+  assert.match(learn, /onMouseEnter=\{hoverIn\}/);
+  assert.match(learn, /onClick=\{\(\) => \{/);
+  assert.match(learn, /aria-expanded=/);
+  // Hovering never moves the focus; a click (or Enter / Space) does, into the explanation.
+  assert.match(learn, /initialFocus=\{open === "pinned" \? "first" : "none"\}/);
 });

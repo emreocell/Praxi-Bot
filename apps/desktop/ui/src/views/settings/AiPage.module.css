@@ -87,3 +87,10 @@
 .cliCommand { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-1) var(--space-0); font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--color-text); }
 .cliOutput { max-height: var(--size-list-max); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-3); background: var(--color-surface-active); color: var(--color-text); font-size: var(--font-size-xs); border-radius: var(--radius-card); }
 .cliApproval { margin-top: var(--space-3); min-width: var(--space-0); }
+/* A server CLI's step inside its row details: the hint, the command with Copy / Run for me, the feedback. */
+.cliStep { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+.cliStep .ctl { flex-wrap: wrap; flex-shrink: 1; max-width: 100%; }
+.cliStep .code { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* What the server still needs from its owner: shown only while something is missing. */
+.hostAlert { display: flex; align-items: flex-start; gap: var(--space-2); margin-bottom: var(--space-2); padding: var(--space-3); border: var(--size-border) solid color-mix(in srgb, var(--color-warning) 40%, transparent); border-radius: var(--radius-md); color: var(--color-warning); }
+.hostAlert > svg { flex-shrink: 0; margin-top: var(--space-half); }

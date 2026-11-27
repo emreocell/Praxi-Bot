@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OwnerNotifySettings } from "../api/types";
 import form from "../components/Form.module.css";
+import { SwitchField, SwitchGrid } from "../components/SettingsUi";
 import { humanLine } from "../lib/humanError";
 import { isValidTimezone } from "../lib/quietHours";
 import { useDaemon } from "../state/DaemonContext";
@@ -81,39 +82,30 @@ export function ChannelNotifySettings() {
   return (
     <div className={styles.card} data-testid="channel-notify">
       <div className={styles.group}>
-        {EVENTS.map((key) => (
-          <label key={key} className={styles.row}>
-            <input
-              type="checkbox"
-              className={styles.check}
+        <SwitchGrid>
+          {EVENTS.map((key) => (
+            <SwitchField
+              key={key}
               checked={settings[key]}
               disabled={busy}
-              onChange={(e) => void save({ ...settings, [key]: e.target.checked })}
-              data-testid={`channel-notify-${key}`}
+              onChange={(on) => void save({ ...settings, [key]: on })}
+              label={t(`settings.channelNotify.${key}`)}
+              hint={t(`settings.channelNotify.${key}Hint`)}
+              testId={`channel-notify-${key}`}
             />
-            <span className={styles.text}>
-              <span className={styles.label}>{t(`settings.channelNotify.${key}`)}</span>
-              <span className={form.hint}>{t(`settings.channelNotify.${key}Hint`)}</span>
-            </span>
-          </label>
-        ))}
+          ))}
+        </SwitchGrid>
       </div>
       <div className={styles.group} data-testid="channel-notify-quiet">
         <h3 className={styles.subHeading}>{t("settings.channelNotify.quietTitle")}</h3>
-        <label className={styles.row}>
-          <input
-            type="checkbox"
-            className={styles.check}
-            checked={quiet !== null}
-            disabled={busy}
-            onChange={(e) => void save({ ...settings, quiet_hours: e.target.checked ? DEFAULT_WINDOW : null })}
-            data-testid="channel-notify-quiet-enabled"
-          />
-          <span className={styles.text}>
-            <span className={styles.label}>{t("settings.channelNotify.quietEnabled")}</span>
-            <span className={form.hint}>{t("settings.channelNotify.quietHint")}</span>
-          </span>
-        </label>
+        <SwitchField
+          checked={quiet !== null}
+          disabled={busy}
+          onChange={(on) => void save({ ...settings, quiet_hours: on ? DEFAULT_WINDOW : null })}
+          label={t("settings.channelNotify.quietEnabled")}
+          hint={t("settings.channelNotify.quietHint")}
+          testId="channel-notify-quiet-enabled"
+        />
         {quiet ? (
           <div className={styles.times}>
             <label className={styles.field} htmlFor={`${idBase}-from`}>

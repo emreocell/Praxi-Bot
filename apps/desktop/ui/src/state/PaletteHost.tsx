@@ -9,7 +9,7 @@ import { useToast } from "../components/Toast";
 import { botView } from "../lib/botProfile";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { recentChats, settingsPageIds } from "../lib/paletteEntries";
-import type { SettingsPageId } from "../lib/settingsPages";
+import { pageTextKey, type SettingsPageId } from "../lib/settingsPages";
 import { useDaemon } from "./DaemonContext";
 import { humanLine } from "../lib/humanError";
 
@@ -170,9 +170,9 @@ export function PaletteHost({
     for (const page of settingsPageIds()) {
       out.push({
         id: `settings-${page}`,
-        title: t("palette.settingsPage", { name: t(`settingsModal.pages.${page}.name`) }),
+        title: t("palette.settingsPage", { name: t(pageTextKey(page, "name")) }),
         group: t("palette.group.settings"),
-        keywords: [t(`settingsModal.pages.${page}.description`)],
+        keywords: [t(pageTextKey(page, "description"))],
         run: () => onSettingsPage(page)
       });
     }

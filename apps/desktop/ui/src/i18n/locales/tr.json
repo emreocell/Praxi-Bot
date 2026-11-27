@@ -8109,6 +8109,67 @@
       "toggleBackend": "{{name}} sağlayıcısını aç/kapat"
     }
   },
+  "settingsUi": {
+    "groups": {
+      "troubleshooting": "Sorun giderme",
+      "updates": "Güncellemeler ve sürüm"
+    },
+    "help": {
+      "label": "Bu ne demek? {{topic}}"
+    },
+    "limits": {
+      "description": "Bugünkü harcama, aylık limitin ve planlarında kalan kota.",
+      "title": "Limitler ve kota"
+    },
+    "pages": {
+      "connections": {
+        "description": "Botlarının çalıştığı bilgisayarlar ve bağlandıkları hizmetler: e-posta, takvim ve web araması."
+      },
+      "system": {
+        "description": "Kullanım, harcama limitleri, depolama alanı ve sağlık kontrolleri."
+      },
+      "updates": {
+        "description": "Sürümün, güncelleme kanalı ve yeni sürümler.",
+        "name": "Güncellemeler"
+      },
+      "vault": {
+        "description": "Botlarının kullanabileceği girişler ve sırlar; bu bilgisayarda saklanır.",
+        "name": "Kasa"
+      }
+    },
+    "serverCli": {
+      "repair": "Onar",
+      "signIn": "Giriş yap",
+      "unknown": "Giriş durumu bilinmiyor"
+    },
+    "updates": {
+      "description": "Yeni sürüm var mı bak, nelerin değiştiğini oku ve kur.",
+      "headline": {
+        "available": "Güncelleme var",
+        "notSetUp": "Ayarlanmamış",
+        "unchecked": "Henüz bakılmadı",
+        "upToDate": "Güncel"
+      },
+      "installed": "{{app}} sürümü",
+      "lastCheck": "Son kontrol",
+      "noNotes": "Bu sürüm için not yok.",
+      "notes": "Yenilikler",
+      "released": "Yayın tarihi: {{date}}",
+      "service": "Arka plan servisi",
+      "serviceDescription": "Botlarını arka planda çalıştırır.",
+      "title": "Güncellemeler ve sürüm",
+      "versions": "Sürümler",
+      "versionsDescription": "Şu an bu bilgisayarda çalışanlar."
+    },
+    "usage": {
+      "calls": "Çağrı: {{formatted}}",
+      "hideDetails": "Ayrıntıları gizle",
+      "moreModels": "Ayrıntılarda {{n}} model daha var",
+      "showDetails": "Ayrıntıları göster",
+      "topModels": "En çok kullanılan modeller",
+      "totalCost": "Toplam maliyet: {{cost}}"
+    }
+  },
   "setup": {
     "home": {
       "bot": "İlk botunu oluştur",

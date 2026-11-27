@@ -34,9 +34,9 @@ import type { EmailAccount, FillGrantInfo, FillSecretInfo, VaultKind } from "../
 import { BrandIcon } from "../components/BrandIcon";
 import { ConfirmDialog } from "../components/DialogParts";
 import formStyles from "../components/Form.module.css";
-import { Modal } from "../components/Modal";
 import { Popover } from "../components/Popover";
 import { Segmented, Switch } from "../components/SettingsUi";
+import { useFaviconUrl } from "../components/SiteFavicon";
 import { useToast } from "../components/Toast";
 import { botView } from "../lib/botProfile";
 import { brandIcon } from "../lib/brandIcons";
@@ -53,14 +53,29 @@ import {
   siteLabelOf,
   suggestSecretName,
   type VaultTab,
+  vaultFaviconDomain,
 } from "../lib/vault";
 import { useDaemon } from "../state/DaemonContext";
 import { VaultCsvImport } from "./VaultCsvImport";
 import { VaultGrantsPanel } from "./VaultGrantsPanel";
-import styles from "./VaultModal.module.css";
+import styles from "./VaultManager.module.css";
 
 const CLIPBOARD_CLEAR_SECS = 30;
 const REVEAL_HIDE_SECS = 30;
+
+/**
+ * The clipboard wipe outlives the Vault page: leaving Settings (which unmounts the page) right after
+ * copying a password must not keep the password on the clipboard. Only the countdown is per page.
+ * Each copy restarts the 30 s; like before, whatever is on the clipboard then is cleared.
+ */
+let clipboardClearTimer: number | undefined;
+
+function scheduleClipboardClear(): void {
+  window.clearTimeout(clipboardClearTimer);
+  clipboardClearTimer = window.setTimeout(() => {
+    void navigator.clipboard.writeText("").catch(() => undefined);
+  }, CLIPBOARD_CLEAR_SECS * 1000);
+}
 
 type DrawerMode =
   | { kind: "empty" }
@@ -70,23 +85,36 @@ type DrawerMode =
   | { kind: "import" }
   | { kind: "grants" };
 
+/**
+ * A login's tile: the app's own brand icon when we ship one, else the site's favicon (asked from the
+ * daemon's local cache by bare host name: no path, query or tracking parameters ever leave the app,
+ * and the daemon only goes to the network for a site a bot may already visit), else its initial.
+ */
 function SiteTile({ item }: { item: Pick<FillSecretInfo, "name" | "site_name" | "origins" | "kind"> }) {
   const brandKey = brandQueryOf(item);
   const brand = brandIcon(brandKey);
+  const domain = brand.known || item.kind === "other" ? null : vaultFaviconDomain(item.origins);
+  const favicon = useFaviconUrl(domain ?? "", domain !== null);
   if (brand.known) {
     return <BrandIcon name={brandKey} small />;
   }
-  const label = siteLabelOf(item);
-  const mono = label.replace(/^https?:\/\//i, "").slice(0, 2).toUpperCase();
+  if (favicon.src && !favicon.failed) {
+    return (
+      <span className={`${styles.rowTile} ${styles.rowTileIcon}`} aria-hidden="true">
+        <img src={favicon.src} alt="" draggable={false} onError={favicon.onError} data-testid="vault-favicon" />
+      </span>
+    );
+  }
+  const initial = siteLabelOf(item).replace(/^https?:\/\//i, "").replace(/^www\./i, "").trim().charAt(0).toLocaleUpperCase();
   return (
     <span className={styles.rowTile} aria-hidden="true">
-      {item.kind === "other" ? <KeyRound /> : mono || <Globe />}
+      {item.kind === "other" ? <KeyRound /> : /\p{L}|\p{N}/u.test(initial) ? initial : <Globe />}
     </span>
   );
 }
 
 /**
- * Vault ("Kasa") screen for bot-usable accounts and secrets.
+ * Vault ("Kasa"), its own page in Settings: bot-usable accounts and secrets.
  * - Pinned bot e-mail identity at the top with a Manage button
  * - Tabs (All / Logins / Other), search, New item menu (+ CSV import)
  * - Master-detail drawer to view, add, edit, delete, toggle per-bot access,
@@ -94,15 +122,7 @@ function SiteTile({ item }: { item: Pick<FillSecretInfo, "name" | "site_name" | 
  * - Passwords hidden by default; Reveal & Copy require owner confirmation,
  *   auto-hide and auto-clear the clipboard, and are never logged.
  */
-export function VaultModal({
-  open,
-  onClose,
-  onManageEmail,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onManageEmail: () => void;
-}) {
+export function VaultManager({ onManageEmail }: { onManageEmail: () => void }) {
   const { t } = useTranslation();
   const { client, bots } = useDaemon();
   const toast = useToast();
@@ -149,9 +169,7 @@ export function VaultModal({
   const secretInputRef = useRef<HTMLInputElement | null>(null);
 
   const revealTimer = useRef<number | undefined>(undefined);
-  const clipTimer = useRef<number | undefined>(undefined);
   const clipInterval = useRef<number | undefined>(undefined);
-  const copiedByVault = useRef(false);
 
   const clearRevealed = useCallback(() => {
     window.clearTimeout(revealTimer.current);
@@ -159,7 +177,6 @@ export function VaultModal({
   }, []);
 
   const clearClipboardCountdown = useCallback(() => {
-    window.clearTimeout(clipTimer.current);
     window.clearInterval(clipInterval.current);
     setClipSecs(null);
   }, []);
@@ -209,28 +226,20 @@ export function VaultModal({
     }
   }, [client]);
 
+  // The page opens fresh each time; leaving it drops every revealed value with the component state.
   useEffect(() => {
-    if (!open) {
-      clearRevealed();
-      wipeSecretInput();
-      setConfirmReveal(null);
-      setConfirmDelete(null);
-      setConfirmRevoke(null);
-      setNewMenuOpen(false);
-      setGrants([]);
-      setGrantsError(null);
-      return;
-    }
-    setTab("all");
-    setQuery("");
-    setMode({ kind: "empty" });
     void load();
-  }, [open, load, clearRevealed, wipeSecretInput]);
+  }, [load]);
 
-  useEffect(() => () => {
-    window.clearTimeout(revealTimer.current);
-    window.clearTimeout(clipTimer.current);
-    window.clearInterval(clipInterval.current);
+  // A copy that finishes after the page is gone still gets its clipboard wipe, but no countdown.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      window.clearTimeout(revealTimer.current);
+      window.clearInterval(clipInterval.current);
+    };
   }, []);
 
   const visibleItems = useMemo(() => filterVaultItems(items, tab, query), [items, tab, query]);
@@ -288,19 +297,17 @@ export function VaultModal({
   const copyWithAutoClear = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      copiedByVault.current = true;
+      scheduleClipboardClear();
+      if (!mounted.current) return;
       clearClipboardCountdown();
       setClipSecs(CLIPBOARD_CLEAR_SECS);
       clipInterval.current = window.setInterval(() => {
-        setClipSecs((s) => (s !== null && s > 1 ? s - 1 : null));
+        setClipSecs((s) => {
+          if (s !== null && s > 1) return s - 1;
+          window.clearInterval(clipInterval.current);
+          return null;
+        });
       }, 1000);
-      clipTimer.current = window.setTimeout(() => {
-        if (copiedByVault.current) {
-          void navigator.clipboard.writeText("").catch(() => undefined);
-          copiedByVault.current = false;
-        }
-        clearClipboardCountdown();
-      }, CLIPBOARD_CLEAR_SECS * 1000);
       toast.show(t("vault.detail.copiedCleared", { what: label, seconds: CLIPBOARD_CLEAR_SECS }), "success");
     } catch {
       toast.show(t("vault.detail.copyFailed"), "danger");
@@ -483,19 +490,78 @@ export function VaultModal({
   const primaryIdentity = pinnedIdentities[0] ?? null;
 
   return (
-    <Modal open={open} onClose={onClose} label={t("vault.title")} size="lg">
-      <div className={styles.shell} data-testid="vault-modal">
-        <header className={styles.header}>
-          <div className={styles.headerText}>
-            <span className={styles.headerIcon} aria-hidden="true">
-              <KeyRound />
+    <>
+      <div className={styles.shell} data-testid="vault-manager">
+        {/* Pinned bot e-mail identity */}
+        <div className={styles.identityStrip} data-testid="vault-bot-email-identity">
+          <div className={styles.identityLeft}>
+            <span className={styles.identityIcon} aria-hidden="true">
+              {primaryIdentity?.account.provider === "agentmail" ? <AtSign /> : <Mail />}
             </span>
-            <div>
-              <h2 className={styles.title}>{t("vault.title")}</h2>
-              <p className={styles.subtitle}>{t("vault.subtitle")}</p>
+            <div className={styles.identityMeta}>
+              <span className={styles.identityLabel}>{t("vault.identity.label")}</span>
+              {primaryIdentity ? (
+                <div className={styles.identityAddressRow}>
+                  <span className={styles.identityAddress} title={primaryIdentity.account.address}>
+                    {primaryIdentity.account.address}
+                  </span>
+                  {primaryIdentity.botName ? (
+                    <span className={styles.pill}>{primaryIdentity.botName}</span>
+                  ) : null}
+                  {pinnedIdentities.length > 1 ? (
+                    <span className={styles.pill}>+{pinnedIdentities.length - 1}</span>
+                  ) : null}
+                </div>
+              ) : (
+                <span className={styles.identityEmpty}>{t("vault.identity.none")}</span>
+              )}
             </div>
           </div>
-          <div className={styles.headerActions}>
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="vault-manage-email"
+            onClick={onManageEmail}
+          >
+            {t("vault.identity.manage")}
+          </Button>
+        </div>
+
+        <div className={styles.toolbar}>
+          <Segmented<VaultTab>
+            label={t("vault.tabs.label")}
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "all", label: `${t("vault.tabs.all")} (${items.length})`, testId: "vault-tab-all" },
+              { value: "login", label: `${t("vault.tabs.logins")} (${loginCount})`, testId: "vault-tab-login" },
+              { value: "other", label: `${t("vault.tabs.other")} (${otherCount})`, testId: "vault-tab-other" },
+            ]}
+          />
+          <div className={styles.searchWrap}>
+            <Search className={styles.searchIcon} aria-hidden="true" />
+            <input
+              className={styles.searchInput}
+              type="search"
+              data-testid="vault-search"
+              value={query}
+              placeholder={t("vault.searchPlaceholder")}
+              aria-label={t("vault.searchPlaceholder")}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query ? (
+              <button
+                type="button"
+                className={styles.searchClear}
+                aria-label={t("vault.actions.clear")}
+                title={t("vault.actions.clear")}
+                onClick={() => setQuery("")}
+              >
+                <X aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+          <div className={styles.toolbarActions}>
             <Button variant="secondary" size="sm" data-testid="vault-grants-open" onClick={openGrants}>
               <ShieldCheck aria-hidden="true" />
               {t("vault.grants.open")}
@@ -560,90 +626,6 @@ export function VaultModal({
                 </button>
               </div>
             </Popover>
-            <button
-              type="button"
-              className={styles.close}
-              title={t("common.close")}
-              aria-label={t("common.close")}
-              onClick={onClose}
-            >
-              <X aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-
-        {/* Pinned bot e-mail identity */}
-        <div className={styles.identityStrip} data-testid="vault-bot-email-identity">
-          <div className={styles.identityLeft}>
-            <span className={styles.identityIcon} aria-hidden="true">
-              {primaryIdentity?.account.provider === "agentmail" ? <AtSign /> : <Mail />}
-            </span>
-            <div className={styles.identityMeta}>
-              <span className={styles.identityLabel}>{t("vault.identity.label")}</span>
-              {primaryIdentity ? (
-                <div className={styles.identityAddressRow}>
-                  <span className={styles.identityAddress} title={primaryIdentity.account.address}>
-                    {primaryIdentity.account.address}
-                  </span>
-                  {primaryIdentity.botName ? (
-                    <span className={styles.pill}>{primaryIdentity.botName}</span>
-                  ) : null}
-                  {pinnedIdentities.length > 1 ? (
-                    <span className={styles.pill}>+{pinnedIdentities.length - 1}</span>
-                  ) : null}
-                </div>
-              ) : (
-                <span className={styles.identityEmpty}>{t("vault.identity.none")}</span>
-              )}
-            </div>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            data-testid="vault-manage-email"
-            onClick={() => {
-              onClose();
-              onManageEmail();
-            }}
-          >
-            {t("vault.identity.manage")}
-          </Button>
-        </div>
-
-        <div className={styles.toolbar}>
-          <Segmented<VaultTab>
-            label={t("vault.tabs.label")}
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: "all", label: `${t("vault.tabs.all")} (${items.length})`, testId: "vault-tab-all" },
-              { value: "login", label: `${t("vault.tabs.logins")} (${loginCount})`, testId: "vault-tab-login" },
-              { value: "other", label: `${t("vault.tabs.other")} (${otherCount})`, testId: "vault-tab-other" },
-            ]}
-          />
-          <div className={styles.searchWrap}>
-            <Search className={styles.searchIcon} aria-hidden="true" />
-            <input
-              className={styles.searchInput}
-              type="search"
-              data-autofocus
-              data-testid="vault-search"
-              value={query}
-              placeholder={t("vault.searchPlaceholder")}
-              aria-label={t("vault.searchPlaceholder")}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {query ? (
-              <button
-                type="button"
-                className={styles.searchClear}
-                aria-label={t("vault.actions.clear")}
-                title={t("vault.actions.clear")}
-                onClick={() => setQuery("")}
-              >
-                <X aria-hidden="true" />
-              </button>
-            ) : null}
           </div>
         </div>
 
@@ -689,10 +671,10 @@ export function VaultModal({
                 const title = siteLabelOf(item);
                 const sub = item.login_id?.trim() || item.origins[0] || item.name;
                 return (
+                  <div key={item.name} role="listitem">
                   <button
-                    key={item.name}
                     type="button"
-                    role="listitem"
+                    aria-current={active ? "true" : undefined}
                     data-vault-row={item.name}
                     data-testid={`vault-row-${item.name}`}
                     className={[styles.row, active ? styles.rowActive : ""].filter(Boolean).join(" ")}
@@ -704,6 +686,7 @@ export function VaultModal({
                         <span>{title}</span>
                         {item.bot_ids.length === 0 ? (
                           <span
+                            role="img"
                             className={styles.unscopedDot}
                             title={t("vault.noBotAssigned")}
                             aria-label={t("vault.noBotAssigned")}
@@ -714,6 +697,7 @@ export function VaultModal({
                     </span>
                     <ChevronRight className={styles.rowChevron} aria-hidden="true" />
                   </button>
+                  </div>
                 );
               })
             )}
@@ -1215,6 +1199,6 @@ export function VaultModal({
         onConfirm={() => void doRevoke()}
         onCancel={() => setConfirmRevoke(null)}
       />
-    </Modal>
+    </>
   );
 }

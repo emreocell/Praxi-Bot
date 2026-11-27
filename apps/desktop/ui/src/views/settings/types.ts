@@ -38,6 +38,11 @@ export interface CardDef {
    * group with a gap above and below instead of sharing one with the neighbouring cards.
    */
   standalone?: boolean;
+  /**
+   * A whole tool that is a page of its own (the Vault): it fills the settings pane, and a search
+   * result shows only its heading (a jump), not the tool itself.
+   */
+  fullPage?: boolean;
   node: ReactNode;
 }
 

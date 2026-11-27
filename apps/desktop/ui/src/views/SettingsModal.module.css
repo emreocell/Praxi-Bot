@@ -319,6 +319,20 @@
   gap: var(--space-5);
 }
 
+/* A whole tool on its own page (the Vault): no page scroll, the tool scrolls inside itself. */
+.scrollFull {
+  overflow: hidden;
+  padding: var(--space-4) var(--space-6) var(--space-6);
+}
+
+.fullPage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: var(--space-0);
+  min-height: var(--space-0);
+}
+
 .section {
   display: flex;
   flex-direction: column;

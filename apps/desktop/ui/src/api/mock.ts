@@ -1109,6 +1109,23 @@ export class MockApiClient extends ApiClient {
       value: "mock-linear-pass-42",
     },
     {
+      // A site without a bundled brand icon: the Vault list shows its favicon (mock: a letter tile).
+      info: {
+        name: "login/webioo-panel",
+        kind: "login",
+        site_name: "Webioo Panel",
+        login_id: "admin@webioo.com",
+        note: null,
+        origins: ["https://panel.webioo.com"],
+        programs: [],
+        bot_ids: [ATLAS],
+        ask_before_use: true,
+        has_value: true,
+        updated_at_ms: NOW - 20_000,
+      },
+      value: "mock-panel-pass-7",
+    },
+    {
       info: {
         name: "secret/stripe-test",
         kind: "other",

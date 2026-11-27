@@ -11,6 +11,7 @@ import {
   pinnedBotIdentities,
   siteLabelOf,
   suggestSecretName,
+  vaultFaviconDomain,
 } from "./vault.ts";
 
 function item(over: Partial<FillSecretInfo>): FillSecretInfo {
@@ -155,4 +156,17 @@ test("isLastGrant is true only for the sole grant of an entry", () => {
   assert.equal(isLastGrant([a, b, other], a), false);
   assert.equal(isLastGrant([a, other], a), true);
   assert.equal(isLastGrant([a], a), true);
+});
+
+test("a Vault row asks for the favicon of a bare public host only", () => {
+  assert.equal(vaultFaviconDomain(["https://github.com/login?utm_source=x#y"]), "github.com");
+  assert.equal(vaultFaviconDomain(["www.Example.COM:8443/path"]), "www.example.com");
+  assert.equal(vaultFaviconDomain(["", "https://linear.app"]), "linear.app");
+  assert.equal(vaultFaviconDomain([]), null);
+  assert.equal(vaultFaviconDomain(["http://192.168.1.1"]), null);
+  assert.equal(vaultFaviconDomain(["https://[::1]"]), null);
+  assert.equal(vaultFaviconDomain(["http://localhost:3000"]), null);
+  assert.equal(vaultFaviconDomain(["https://nas.local"]), null);
+  assert.equal(vaultFaviconDomain(["https://user:pw@github.com"]), null);
+  assert.equal(vaultFaviconDomain(["ftp://files.example.com"]), null);
 });

@@ -1,5 +1,5 @@
 import { ChevronDown, TriangleAlert } from "lucide-react";
-import type { KeyboardEvent, ReactNode } from "react";
+import { createContext, type KeyboardEvent, type ReactNode, useContext } from "react";
 import { splitInlineCode } from "../lib/inlineCode";
 import styles from "./SettingsUi.module.css";
 
@@ -11,6 +11,25 @@ function Description({ text }: { text: string }) {
         part.code ? <code key={i} className={styles.inlineCode}>{part.text}</code> : part.text
       )}
     </p>
+  );
+}
+
+/**
+ * The small "?" of a settings card (see `LearnMore`): Settings provides it per card and the card's
+ * own header draws it next to its title. A `SettingsCard` takes it and hides it from the rows inside.
+ */
+export const CardHelpContext = createContext<ReactNode>(null);
+
+/** A title with the card's "?" (if any) right after it. */
+function TitleLine({ className, title }: { className: string; title: string }) {
+  const help = useContext(CardHelpContext);
+  return help ? (
+    <div className={styles.titleLine}>
+      <h3 className={className}>{title}</h3>
+      {help}
+    </div>
+  ) : (
+    <h3 className={className}>{title}</h3>
   );
 }
 
@@ -30,7 +49,7 @@ export function SettingRow({
   return (
     <div className={[styles.row, stacked ? styles.stacked : ""].filter(Boolean).join(" ")}>
       <div className={styles.rowText}>
-        <h3 className={styles.rowTitle}>{title}</h3>
+        <TitleLine className={styles.rowTitle} title={title} />
         {description ? <Description text={description} /> : null}
       </div>
       {children ? <div className={styles.rowControl}>{children}</div> : null}
@@ -136,6 +155,49 @@ export function Switch({
 }
 
 /**
+ * An on / off choice with a title and a one-line hint, drawn as a switch. It stays a native
+ * checkbox (`role="switch"`), so the whole tile is clickable and keyboard and tests see a checkbox.
+ */
+export function SwitchField({
+  checked,
+  onChange,
+  label,
+  hint,
+  testId,
+  disabled = false
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  hint?: string;
+  testId?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label className={[styles.switchField, disabled ? styles.switchFieldDisabled : ""].filter(Boolean).join(" ")}>
+      <span className={styles.switchFieldText}>
+        <span className={styles.switchFieldLabel}>{label}</span>
+        {hint ? <span className={styles.switchFieldHint}>{hint}</span> : null}
+      </span>
+      <input
+        type="checkbox"
+        role="switch"
+        className={styles.switchInput}
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        data-testid={testId}
+      />
+    </label>
+  );
+}
+
+/** Lays `SwitchField`s out in two columns (one on narrow windows). */
+export function SwitchGrid({ children }: { children: ReactNode }) {
+  return <div className={styles.switchGrid}>{children}</div>;
+}
+
+/**
  * A titled card for settings blocks that bring their own body (lists, forms).
  * Icon-less title, one-line plain description, unified surface and spacing.
  * `tone="danger"` marks a danger zone: destructive actions live apart, with a red edge.
@@ -159,10 +221,10 @@ export function SettingsCard({
       data-testid={testId}
     >
       <header className={styles.cardHead}>
-        <h3 className={styles.cardTitle}>{title}</h3>
+        <TitleLine className={styles.cardTitle} title={title} />
         {description ? <Description text={description} /> : null}
       </header>
-      {children}
+      <CardHelpContext.Provider value={null}>{children}</CardHelpContext.Provider>
     </section>
   );
 }

@@ -12,7 +12,9 @@ export function useActiveHost() {
   const { client, activeComputerId, activeHostName, home, workLocalNow, setWorkLocalNow, selectComputer } =
     useDaemon();
   const mock = client?.baseUrl === MOCK_BASE_URL;
-  const isHost = !mock && activeComputerId !== LOCAL_COMPUTER;
+  // Mock mode reviews the server administration screens with `?host=bots&admin=ok|needs`.
+  const mockAdmin = mock && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("admin");
+  const isHost = (!mock || mockAdmin) && activeComputerId !== LOCAL_COMPUTER;
   const name = activeHostName || (home.kind === "host" ? home.name : "") || "";
   /** Leave the server and work on this computer (the app would otherwise follow the home back). */
   const switchToThisComputer = useCallback(() => {

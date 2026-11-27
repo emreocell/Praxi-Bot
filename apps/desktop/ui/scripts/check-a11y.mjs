@@ -26,7 +26,7 @@ const chromePath = CHROMES.find((p) => existsSync(p));
 if (!chromePath) { process.stdout.write('check:a11y needs Chrome (set CHROME_BIN)\n'); process.exit(1); }
 
 // Screens (mock review states, see README "Mock mode").  Settings sections are separate screens.
-const SETTINGS = ['general', 'appearance', 'models', 'connections', 'safety', 'system'];
+const SETTINGS = ['general', 'appearance', 'models', 'connections', 'safety', 'vault', 'system', 'updates'];
 const screens = [
   { name: 'home', query: 'screen=home' },
   { name: 'home-no-bots', query: 'screen=nobots', expect: '[data-testid=home-first-steps]' },
@@ -59,6 +59,10 @@ const screens = [
   { name: 'settings-search-empty', query: 'screen=settings&section=general', act: [{ type: ['[data-autofocus]', 'zzzqqq'] }] },
   { name: 'vault-grants', expect: '[data-testid=vault-grants-panel]', scope: '[data-testid=vault-grants-panel]', query: 'screen=vault', act: [{ click: '[data-testid=vault-grants-open]' }] },
   { name: 'vault-grants-revoke', expect: '[data-testid=confirm-dialog]', scope: '[data-testid=confirm-dialog]', query: 'screen=vault', act: [{ click: '[data-testid=vault-grants-open]' }, { click: '[data-testid^=vault-grant-revoke-]' }] },
+  { name: 'settings-updates-available', expect: '[data-testid=updates-available]', query: 'screen=settings&section=updates&update=available', act: [{ click: '[data-testid=updates-check]' }] },
+  { name: 'settings-usage-details', expect: '#usage-details', query: 'screen=settings&section=system', act: [{ click: '[data-testid=usage-details-toggle]' }] },
+  { name: 'settings-server-clis', expect: '[data-testid=host-engines]', query: 'screen=settings&section=models&host=bots&admin=needs', act: [{ click: '[data-testid=host-engine-codex] button[aria-expanded]' }] },
+  { name: 'settings-help-popover', expect: '[role=dialog] h4', query: 'screen=settings&section=models', act: [{ click: '[data-testid=learn-provider]' }] },
   { name: 'help-dialog', expect: '[data-testid=help-center]', query: 'screen=home', act: [{ press: 'Shift+?' }] },
   { name: 'run-location-popover', expect: '[data-testid=home-status]', query: 'screen=home&menu=1' },
   { name: 'add-server-wizard', expect: '[data-testid=add-server-live]', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }] },

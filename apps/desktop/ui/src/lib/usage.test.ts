@@ -10,7 +10,8 @@ import {
   shortDayLabel,
   sortModelUsage,
   totalTokens,
-  usageQueryForRange
+  usageQueryForRange,
+  topModelsSummary
 } from "./usage.ts";
 
 test("usageQueryForRange maps 7/30/90/all presets with time zone", () => {
@@ -87,4 +88,20 @@ test("buildDailyBars handles empty series, known peaks, and unknown-only days", 
   assert.deepEqual(pickLabelIndices(7, 5), [0, 2, 3, 5, 6]);
   assert.deepEqual(pickLabelIndices(30, 5), [0, 7, 15, 22, 29]);
   assert.equal(shortDayLabel("2026-11-21", "en-US"), "Nov 21");
+});
+
+test("the usage summary keeps the top models by cost and says how many more there are", () => {
+  const row = (model: string, calls: number, cost: number | null) => ({
+    model, model_calls: calls, prompt_tokens: calls * 10, completion_tokens: calls, cached_tokens: 0, cost_usd: cost
+  });
+  const out = topModelsSummary([row("a", 5, 0.5), row("b", 50, 2), row("c", 9, null), row("d", 0, null), row("e", 3, 1)], 3);
+  assert.deepEqual(out.rows.map((r) => r.model), ["b", "e", "a"]);
+  assert.equal(out.rows[0].share, 1);
+  assert.equal(out.rows[1].share, 0.5);
+  // "d" had no calls in the range: it is not "one more model".
+  assert.equal(out.more, 1);
+  // Nothing priced: the bars compare calls.
+  const unpriced = topModelsSummary([row("x", 10, null), row("y", 5, null)], 3);
+  assert.deepEqual(unpriced.rows.map((r) => r.share), [1, 0.5]);
+  assert.equal(unpriced.more, 0);
 });

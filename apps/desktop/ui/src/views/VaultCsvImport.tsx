@@ -10,7 +10,7 @@ import { botView } from "../lib/botProfile";
 import { humanLine } from "../lib/humanError";
 import { parseVaultCsv, suggestSecretName, type VaultCsvParseResult } from "../lib/vault";
 import { useDaemon } from "../state/DaemonContext";
-import styles from "./VaultModal.module.css";
+import styles from "./VaultManager.module.css";
 
 /**
  * CSV importer for Chrome and Bitwarden exports.

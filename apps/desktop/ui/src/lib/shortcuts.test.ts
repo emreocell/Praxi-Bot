@@ -51,7 +51,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "views/NotificationHistoryView.tsx": "Up/Down (or j/k) moves between inbox entries; the buttons keep Enter and Space",
   "views/SchedulesView.tsx": "arrow, Home, and End navigation inside the schedule calendar grid",
   "views/SettingsModal.tsx": "arrow, Home, and End navigation across settings section tabs",
-  "views/VaultModal.tsx": "arrow keys to move between Vault items in the list",
+  "views/VaultManager.tsx": "arrow keys to move between Vault items in the list",
   "views/firstrun/BrainStep.tsx": "Enter inside a single field",
   "views/firstrun/FreedomStep.tsx": "arrow keys on a segmented control",
   "views/settings/ComputerCards.tsx": "arrow keys on computer target radio cards"

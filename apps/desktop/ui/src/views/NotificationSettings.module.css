@@ -32,6 +32,14 @@
   border-top: var(--size-border) solid var(--color-border);
 }
 
+/* Quiet hours and the daily summary side by side; one column in a narrow pane. */
+.pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--size-widget-width) * 0.8)), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
 .row {
   display: flex;
   align-items: flex-start;

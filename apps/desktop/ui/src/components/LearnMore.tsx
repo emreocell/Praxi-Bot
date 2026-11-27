@@ -1,5 +1,5 @@
 import { CircleHelp } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LearnTerm } from "../lib/settingsPages";
 import { openExternal } from "../lib/externalLink";
@@ -18,36 +18,70 @@ export const LEARN_DOCS: Record<LearnTerm, string> = {
   safeMode: "troubleshooting.md"
 };
 
-/** A small "?" button: a plain-words explanation in a popover, with a link to the guide. */
+/** Hover: a short wait before it opens, and a grace period so the pointer can move into the popover. */
+const HOVER_OPEN_MS = 150;
+const HOVER_CLOSE_MS = 250;
+
+/**
+ * A small "?" icon in a card header. Its plain-words explanation opens as a popover on hover and on
+ * click (Enter / Space from the keyboard); a click keeps it open until Escape, a click outside, or
+ * another click on the "?". A hover-open never moves the focus.
+ */
 export function LearnMore({ term }: { term: LearnTerm }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  // `pinned`: opened by a click or the keyboard; `hover`: opened by the pointer only.
+  const [open, setOpen] = useState<"closed" | "hover" | "pinned">("closed");
   const anchor = useRef<HTMLButtonElement | null>(null);
+  const timer = useRef<number | undefined>(undefined);
   const id = useId();
+  const title = t(`settingsModal.learn.terms.${term}.title`);
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const close = useCallback(() => {
+    window.clearTimeout(timer.current);
+    setOpen("closed");
+  }, []);
+  const hoverIn = () => {
+    window.clearTimeout(timer.current);
+    if (open === "closed") timer.current = window.setTimeout(() => setOpen("hover"), HOVER_OPEN_MS);
+  };
+  const hoverOut = () => {
+    window.clearTimeout(timer.current);
+    if (open === "hover" || open === "closed") timer.current = window.setTimeout(() => setOpen((o) => (o === "hover" ? "closed" : o)), HOVER_CLOSE_MS);
+  };
+
   return (
     <>
       <button
         ref={anchor}
         type="button"
         className={styles.trigger}
-        aria-expanded={open}
-        aria-controls={open ? id : undefined}
+        aria-expanded={open !== "closed"}
+        aria-controls={open !== "closed" ? id : undefined}
+        aria-label={t("settingsUi.help.label", { topic: title })}
+        title={t("settingsModal.learn.open")}
         data-testid={`learn-${term}`}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          window.clearTimeout(timer.current);
+          setOpen((o) => (o === "pinned" ? "closed" : "pinned"));
+        }}
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
       >
         <CircleHelp aria-hidden="true" />
-        <span>{t("settingsModal.learn.open")}</span>
       </button>
       <Popover
-        open={open}
+        open={open !== "closed"}
         anchor={anchor}
-        onClose={() => setOpen(false)}
+        onClose={close}
+        placement="bottom-start"
         role="dialog"
-        label={t(`settingsModal.learn.terms.${term}.title`)}
+        label={title}
         width={320}
+        initialFocus={open === "pinned" ? "first" : "none"}
       >
-        <div id={id} className={styles.body}>
-          <h4 className={styles.title}>{t(`settingsModal.learn.terms.${term}.title`)}</h4>
+        <div id={id} className={styles.body} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+          <h4 className={styles.title}>{title}</h4>
           <p className={styles.text}>{t(`settingsModal.learn.terms.${term}.body`)}</p>
           <button
             type="button"

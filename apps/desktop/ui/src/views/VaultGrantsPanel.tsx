@@ -5,7 +5,7 @@ import type { FillGrantInfo } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { formatDay } from "../lib/dateFormat";
 import type { GrantGroup } from "../lib/vault";
-import styles from "./VaultModal.module.css";
+import styles from "./VaultManager.module.css";
 
 export interface VaultGrantsPanelProps {
   groups: GrantGroup[];
@@ -18,7 +18,7 @@ export interface VaultGrantsPanelProps {
   onBack: () => void;
 }
 
-/** Standing grants of the vault: what they cover, one row per grant, and a Revoke action. State lives in VaultModal. */
+/** Standing grants of the vault: what they cover, one row per grant, and a Revoke action. State lives in VaultManager. */
 export function VaultGrantsPanel({ groups, loading, error, busyId, onRetry, onRevoke, onBack }: VaultGrantsPanelProps) {
   const { t, i18n } = useTranslation();
   return (

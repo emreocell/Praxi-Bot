@@ -59,9 +59,10 @@ test("the popover never touches #root inertness: any open/close order with a Mod
 test("a dialog opened while the message search is open closes it (App wiring)", () => {
   const app = read("../App.tsx");
   // Every dialog the shell can open, including the bot dialogs (edit, profile, skills, add skill).
+  // The Vault is a page of Settings, so `settingsOpen` covers it.
   assert.match(
     app,
-    /const dialogOpen = settingsOpen !== null \|\| appsOpen \|\| newBotOpen \|\| recipeOpen \|\| helpOpen \|\| botEditOpen \|\| botProfileOpen \|\| skillsOpen \|\| addSkillOpen \|\| marketOpen \|\| vaultOpen;/
+    /const dialogOpen = settingsOpen !== null \|\| appsOpen \|\| newBotOpen \|\| recipeOpen \|\| helpOpen \|\| botEditOpen \|\| botProfileOpen \|\| skillsOpen \|\| addSkillOpen \|\| marketOpen;/
   );
   assert.match(app, /if \(dialogOpen\) setSearchOpen\(false\);/);
   const popover = read("../components/Popover.tsx");

@@ -1,57 +1,12 @@
-import { getVersion } from "@tauri-apps/api/app";
 import type { TFunction } from "i18next";
-import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { SettingGroup, SettingRow, SettingsCard } from "../../components/SettingsUi";
-import { PRODUCT_CONFIG } from "../../config/product";
-import { isTauriRuntime } from "../../overlay/events";
-import { useDaemon } from "../../state/DaemonContext";
-import { UsageView } from "../UsageView";
+import { SettingRow, SettingsCard } from "../../components/SettingsUi";
+import { UsageView, UsageLimitsCard } from "../UsageView";
 import { DataCard } from "./DataCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
 import { RecentLogs } from "../../components/RecentLogs";
 import { SafeModeCard } from "./SafeModeCard";
-import { UpdatePanel } from "./UpdatePanel";
+import { UpdatesPage } from "./UpdatesPage";
 import type { CardDef } from "./types";
-
-function VersionBlock() {
-  const { t } = useTranslation();
-  const { health } = useDaemon();
-  const [app, setApp] = useState<string>("");
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-    void getVersion()
-      .then(setApp)
-      .catch(() => undefined);
-  }, []);
-
-  return (
-    <SettingsCard title={t("settingsModal.updates.title")} description={t("settingsModal.updates.description")}>
-      <SettingGroup>
-        <SettingRow
-          title={PRODUCT_CONFIG.appName}
-          description={t("settingsModal.updates.appVersion")}
-        >
-          <span data-testid="app-version">
-            {app || t("settingsModal.updates.devBuild")}
-          </span>
-        </SettingRow>
-        <SettingRow
-          title={t("settingsModal.updates.daemon")}
-          description={t("settingsModal.updates.daemonDescription")}
-        >
-          <span data-testid="daemon-version">
-            {health?.version ?? t("settingsModal.updates.unknown")}
-          </span>
-        </SettingRow>
-        <UpdatePanel />
-      </SettingGroup>
-    </SettingsCard>
-  );
-}
 
 /** Cards of the "Usage", "Diagnostics" and "Updates" sections. */
 export function otherCards(t: TFunction): CardDef[] {
@@ -79,6 +34,19 @@ export function otherCards(t: TFunction): CardDef[] {
       node: (
         <SettingsCard title={t("usage.title")} description={t("usage.subtitle")}>
           <UsageView embedded />
+        </SettingsCard>
+      )
+    },
+    {
+      id: "spend-limits",
+      section: "usage",
+      kind: "block",
+      title: t("settingsUi.limits.title"),
+      description: t("settingsUi.limits.description"),
+      keywords: "spending limit budget monthly forecast quota remaining today daily digest harcama limit butce aylik tahmin kota kalan bugun ausgabenlimit budget monatlich prognose kontingent heute",
+      node: (
+        <SettingsCard title={t("settingsUi.limits.title")} description={t("settingsUi.limits.description")}>
+          <UsageLimitsCard />
         </SettingsCard>
       )
     },
@@ -117,10 +85,10 @@ export function otherCards(t: TFunction): CardDef[] {
       id: "version",
       section: "updates",
       kind: "block",
-      title: t("settingsModal.updates.title"),
-      description: t("settingsModal.updates.description"),
+      title: t("settingsUi.updates.title"),
+      description: t("settingsUi.updates.description"),
       keywords: "about version build stable preview surum hakkinda kararlı önizleme update upgrade rollback guncelleme yukselt aktualisierung über stabil vorschau",
-      node: <VersionBlock />
+      node: <UpdatesPage />
     }
   ];
 }

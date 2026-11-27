@@ -1,6 +1,8 @@
 import {
   BrainCircuit,
   Check,
+  CloudDownload,
+  KeyRound,
   LoaderCircle,
   Palette,
   Plug,
@@ -25,6 +27,7 @@ import { ConfirmDialog } from "../components/DialogParts";
 import { LearnMore } from "../components/LearnMore";
 import { Modal } from "../components/Modal";
 import {
+  CardHelpContext,
   SettingGroup,
   SettingsCardFooter,
   SettingsDisclosure
@@ -37,13 +40,16 @@ import {
   type DetailMode,
   groupCards,
   groupOfCard,
+  groupTextKey,
   highlightParts,
   initialDetailMode,
   metaOfCard,
+  pageTextKey,
   parsePage,
   queryWords,
   RECOMMENDED_SAFETY_PRESET,
   resetPatch,
+  SETTINGS_GROUPS,
   SETTINGS_PAGE_GROUPS,
   type SettingsGroupId,
   type SettingsPageId,
@@ -68,7 +74,9 @@ const PAGE_ICONS: Record<SettingsPageId, typeof Settings2> = {
   models: BrainCircuit,
   connections: Plug,
   safety: ShieldCheck,
-  system: SlidersHorizontal
+  vault: KeyRound,
+  system: SlidersHorizontal,
+  updates: CloudDownload
 };
 
 const CARD_ORDER = new Map(Object.keys(CARD_META).map((id, i) => [id, i]));
@@ -102,6 +110,15 @@ function Marked({ text, query }: { text: string; query: string }) {
   );
 }
 
+/** The card, with its "?" (if it has one) handed to its own header. */
+function withHelp(p: PlacedCard): ReactNode {
+  return p.learn ? (
+    <CardHelpContext.Provider value={<LearnMore term={p.learn} />}>{p.card.node}</CardHelpContext.Provider>
+  ) : (
+    p.card.node
+  );
+}
+
 /**
  * Consecutive one-line `row` cards share one rounded group; a `standalone` row card (its own
  * topic, e.g. Theme or Backdrop) and every `block` card get a frame of their own, so unrelated
@@ -121,7 +138,7 @@ function renderCards(
       data-card={p.card.id}
       data-flash={flashCard === p.card.id ? "true" : undefined}
     >
-      {p.card.node}
+      {withHelp(p)}
       {extras(p)}
     </div>
   );
@@ -147,7 +164,7 @@ function renderCards(
           data-card={p.card.id}
           data-flash={flashCard === p.card.id ? "true" : undefined}
         >
-          {p.card.node}
+          {withHelp(p)}
           {extras(p)}
         </div>
       );
@@ -329,8 +346,8 @@ export function SettingsModal({
         p.card.title,
         p.card.description,
         p.card.keywords,
-        t(`settingsModal.pages.${p.page}.name`),
-        t(`settingsModal.groups.${p.group}`)
+        t(pageTextKey(p.page, "name")),
+        t(groupTextKey(p.group))
       ),
     [query, t]
   );
@@ -486,30 +503,31 @@ export function SettingsModal({
     }
   };
 
-  const extras = (p: PlacedCard): ReactNode => {
-    if (!p.risk && !p.learn) return null;
-    return (
-      <SettingsCardFooter
-        risk={p.risk ? t(`settingsModal.risk.${p.risk}`) : undefined}
-        action={p.learn ? <LearnMore term={p.learn} /> : undefined}
-      />
-    );
-  };
+  // The "?" sits in each card's header (withHelp); the footer keeps only the consequence line.
+  const extras = (p: PlacedCard): ReactNode =>
+    p.risk ? <SettingsCardFooter risk={t(`settingsModal.risk.${p.risk}`)} /> : null;
 
-  const pageName = (id: SettingsPageId) => t(`settingsModal.pages.${id}.name`);
-  const groupName = (id: SettingsGroupId) => t(`settingsModal.groups.${id}`);
+  const pageName = (id: SettingsPageId) => t(pageTextKey(id, "name"));
+  const groupName = (id: SettingsGroupId) => t(groupTextKey(id));
+  // A page of one group (Vault, Updates) needs no group heading under the page title.
+  const singleGroup = SETTINGS_GROUPS[page].length === 1;
+  // A whole tool on its own page (the Vault) fills the pane and scrolls inside itself.
+  const fullPageCard = !searching && onPage.length === 1 && onPage[0].card.fullPage ? onPage[0] : null;
   // A page reads as a few titled groups; the cards of a group keep the usual row / block framing.
   const renderGroups = (cards: PlacedCard[], scope: "basic" | "advanced") =>
     groupCards(page, cards, (p) => ({ page: p.page, group: p.group })).map((g) => (
       <section
         key={`${scope}-${g.group}`}
         className={styles.group}
-        aria-labelledby={`settings-group-${scope}-${g.group}`}
+        aria-labelledby={singleGroup ? undefined : `settings-group-${scope}-${g.group}`}
+        aria-label={singleGroup ? groupName(g.group) : undefined}
         data-testid={`settings-group-${g.group}`}
       >
-        <h3 id={`settings-group-${scope}-${g.group}`} className={styles.groupTitle}>
-          {groupName(g.group)}
-        </h3>
+        {singleGroup ? null : (
+          <h3 id={`settings-group-${scope}-${g.group}`} className={styles.groupTitle}>
+            {groupName(g.group)}
+          </h3>
+        )}
         {renderCards(g.cards, extras, flashCard)}
       </section>
     ));
@@ -565,7 +583,7 @@ export function SettingsModal({
                       key={s}
                       type="button"
                       data-testid={`settings-nav-${s}`}
-                      title={t(`settingsModal.pages.${s}.description`)}
+                      title={t(pageTextKey(s, "description"))}
                       disabled={dim}
                       aria-current={!searching && s === page ? "page" : undefined}
                       className={[styles.navItem, !searching && s === page ? styles.navActive : ""].filter(Boolean).join(" ")}
@@ -593,7 +611,7 @@ export function SettingsModal({
               <p className={styles.subtitle}>
                 {searching
                   ? t("settingsModal.resultsCount", { count: searchHits.length })
-                  : t(`settingsModal.pages.${page}.description`)}
+                  : t(pageTextKey(page, "description"))}
               </p>
             </div>
             <div className={styles.headerTools}>
@@ -636,7 +654,10 @@ export function SettingsModal({
             </div>
           </header>
 
-          <div className={styles.scroll} ref={scrollRef}>
+          <div
+            className={[styles.scroll, fullPageCard ? styles.scrollFull : ""].filter(Boolean).join(" ")}
+            ref={scrollRef}
+          >
             {searching ? (
               searchHits.length === 0 ? (
                 <p className={styles.empty}>
@@ -669,11 +690,20 @@ export function SettingsModal({
                           ) : null}
                         </span>
                       </button>
-                      {renderCards([p], extras, flashCard)}
+                      {/* A whole tool (the Vault) is not drawn inside the results: its heading jumps to it. */}
+                      {p.card.fullPage ? null : renderCards([p], extras, flashCard)}
                     </div>
                   ))}
                 </div>
               )
+            ) : fullPageCard ? (
+              <div
+                className={styles.fullPage}
+                data-card={fullPageCard.card.id}
+                data-testid={`settings-group-${fullPageCard.group}`}
+              >
+                {withHelp(fullPageCard)}
+              </div>
             ) : (
               <div className={styles.section}>
                 {renderGroups(basicOnPage, "basic")}

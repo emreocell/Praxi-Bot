@@ -1,94 +1,23 @@
+/* The Vault fills its Settings page: a framed tool whose list and detail panes scroll on their own. */
 .shell {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  height: min(var(--size-modal-height), 86vh);
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
   background-color: var(--color-surface);
   color: var(--color-text);
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: var(--size-border) solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.headerText {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.headerIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-8);
-  height: var(--space-8);
-  border-radius: var(--radius-md);
-  background-color: var(--color-accent-subtle);
-  color: var(--color-accent-text);
-  flex-shrink: 0;
-}
-
-.headerIcon svg {
-  width: var(--size-icon);
-  height: var(--size-icon);
-}
-
-.title {
-  margin: 0;
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-tight);
+  container-type: inline-size;
 }
 
 .subtitle {
   margin: 0;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-}
-
-.headerActions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
-}
-
-.close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-8);
-  height: var(--space-8);
-  border: none;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard),
-    color var(--motion-duration-fast) var(--motion-easing-standard);
-}
-
-.close:hover {
-  background-color: var(--color-surface-elevated);
-  color: var(--color-text);
-}
-
-.close:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
-
-.close svg {
-  width: var(--size-icon);
-  height: var(--size-icon);
 }
 
 .menuList {
@@ -144,7 +73,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--space-4);
   background-color: var(--color-background);
   border-bottom: var(--size-border) solid var(--color-border);
   flex-shrink: 0;
@@ -233,17 +162,26 @@
 /* Filter + search bar */
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border-bottom: var(--size-border) solid var(--color-border);
   flex-shrink: 0;
+}
+
+/* Permanent permissions and the one primary action (New item) sit at the end of the toolbar. */
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
 }
 
 .searchWrap {
   position: relative;
   flex: 1;
+  min-width: calc(var(--size-widget-width) * 0.5);
   max-width: var(--size-widget-width);
 }
 
@@ -314,7 +252,25 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(var(--size-sidebar-width), 1fr) minmax(var(--size-widget-width), 1.15fr);
+  /* minmax(0, ...): the form never pushes the pane wider than the page (it used to be cut off). */
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr);
+}
+
+/* Narrow pages: the list on top (short), the selected item or form below. */
+@container (width < 560px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 0.8fr) minmax(0, 1.6fr);
+  }
+
+  .listPane {
+    border-right: none;
+    border-bottom: var(--size-border) solid var(--color-border);
+  }
+
+  .toolbarActions {
+    margin-left: 0;
+  }
 }
 
 .listPane {
@@ -378,6 +334,23 @@
 .rowTile svg {
   width: var(--size-icon-sm);
   height: var(--size-icon-sm);
+}
+
+.rowTile {
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* A site's favicon on a light tile, so dark icons stay visible in the dark theme. */
+.rowTileIcon {
+  background-color: var(--color-surface-elevated);
+}
+
+.rowTileIcon img {
+  width: var(--size-icon);
+  height: var(--size-icon);
+  object-fit: contain;
 }
 
 .rowText {
@@ -556,6 +529,12 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   color: var(--color-text);
+}
+
+/* The hint text reads like the other fields; only a typed secret is monospaced. */
+.monoInput::placeholder {
+  font-family: var(--font-sans, inherit);
+  color: var(--color-text-muted);
 }
 
 .inlineBtns {

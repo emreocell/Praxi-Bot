@@ -8109,6 +8109,67 @@
       "toggleBackend": "Toggle {{name}}"
     }
   },
+  "settingsUi": {
+    "groups": {
+      "troubleshooting": "Troubleshooting",
+      "updates": "Updates and version"
+    },
+    "help": {
+      "label": "What is this? {{topic}}"
+    },
+    "limits": {
+      "description": "Today's spending, your monthly limit and the quota left on your plans.",
+      "title": "Limits and quota"
+    },
+    "pages": {
+      "connections": {
+        "description": "Where your bots work and what they connect to: computers, mail, calendars and web search."
+      },
+      "system": {
+        "description": "Usage, spending limits, storage space and health checks."
+      },
+      "updates": {
+        "description": "Your version, the update channel and new releases.",
+        "name": "Updates"
+      },
+      "vault": {
+        "description": "Logins and secrets your bots may use, kept on this computer.",
+        "name": "Vault"
+      }
+    },
+    "serverCli": {
+      "repair": "Repair",
+      "signIn": "Sign in",
+      "unknown": "Sign-in unknown"
+    },
+    "updates": {
+      "description": "Check for a new version, read what changed and install it.",
+      "headline": {
+        "available": "Update available",
+        "notSetUp": "Not set up",
+        "unchecked": "Not checked yet",
+        "upToDate": "Up to date"
+      },
+      "installed": "{{app}} version",
+      "lastCheck": "Last check",
+      "noNotes": "This release has no notes.",
+      "notes": "What's new",
+      "released": "Released {{date}}",
+      "service": "Background service",
+      "serviceDescription": "Runs your bots in the background.",
+      "title": "Updates and version",
+      "versions": "Versions",
+      "versionsDescription": "What runs on this computer right now."
+    },
+    "usage": {
+      "calls": "Calls: {{formatted}}",
+      "hideDetails": "Hide details",
+      "moreModels": "{{n}} more in the details",
+      "showDetails": "Show details",
+      "topModels": "Top models",
+      "totalCost": "Total cost: {{cost}}"
+    }
+  },
   "setup": {
     "home": {
       "bot": "Create your first bot",
