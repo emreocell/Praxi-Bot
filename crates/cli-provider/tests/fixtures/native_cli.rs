@@ -111,6 +111,7 @@ fn claude(args: &[String]) {
     );
 }
 
+#[allow(clippy::too_many_lines)] // the whole scripted ACP conversation of the fixture
 fn acp(args: &[String]) {
     record_launch(args);
     let mut stdin = std::io::stdin().lock();
