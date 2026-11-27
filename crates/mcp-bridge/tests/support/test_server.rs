@@ -120,7 +120,7 @@ async fn elicitation_call(
         return answer_result(
             serde_json::from_value(answer).unwrap(),
             &context,
-            &request.arguments,
+            request.arguments.as_ref(),
         )
         .await;
     }
@@ -160,17 +160,16 @@ async fn elicitation_call(
                 None,
             ));
         };
-        answer_result(answer, &context, &request.arguments).await
+        answer_result(answer, &context, request.arguments.as_ref()).await
     }
 }
 
 async fn answer_result(
     answer: ElicitResult,
     context: &RequestContext<RoleServer>,
-    arguments: &Option<JsonObject>,
+    arguments: Option<&JsonObject>,
 ) -> Result<CallToolResponse, ErrorData> {
     let expected = arguments
-        .as_ref()
         .and_then(|args| args.get("expect"))
         .and_then(serde_json::Value::as_str);
     let json = serde_json::to_value(&answer).unwrap();
@@ -326,9 +325,7 @@ impl ServerHandler for TestServer {
             let duplicate = Tool::new(secret, "duplicate diagnostic test", Arc::default());
             tools.extend([duplicate.clone(), duplicate]);
         }
-        if elicitation() {
-            tools.push(tool("elicit", "Asks for owner input", true));
-        }
+        tools.extend(elicitation().then(|| tool("elicit", "Asks for owner input", true)));
         if features() {
             tools.push(tool("grow", "Adds the `extra` tool", false));
             tools.push(tool("structured", "Returns structured content", true));

@@ -674,6 +674,7 @@ mod tests {
             payment: tool_registry::PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
+            ..ToolContext::default()
         };
         let out = t
             .call(

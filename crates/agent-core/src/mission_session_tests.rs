@@ -789,7 +789,7 @@ async fn a_mission_form_expires_by_itself_and_leaves_the_item_parked() {
 
 #[tokio::test]
 async fn elicitation_parks_the_active_mission_item_without_opening_a_form() {
-    use crate::tests::elicitation::{NAME, register_form};
+    use crate::tests::elicitation::{form_call, register_form};
 
     let w = world(&["a.example", "b.example"]);
     let fake = Fake::new(vec![
@@ -798,7 +798,7 @@ async fn elicitation_parks_the_active_mission_item_without_opening_a_form() {
             "mission_item",
             json!({"key": "a.example", "status": "doing"}),
         )]),
-        calls(&[("c1", NAME, json!({}))]),
+        form_call("c1"),
         text("I continued with the other item."),
     ]);
     let lp = lp_with(&w, &fake, |_| {});

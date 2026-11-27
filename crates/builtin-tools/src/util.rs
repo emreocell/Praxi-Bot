@@ -235,6 +235,7 @@ mod tests {
             payment: tool_registry::PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
+            ..ToolContext::default()
         };
         let text = "é".repeat(2000);
         let out = finish_text(&ctx, dir.path(), text.clone());
@@ -276,6 +277,7 @@ mod tests {
                     payment: tool_registry::PaymentApproval::Unchecked,
                     control_guard: None,
                     lane: None,
+                    ..ToolContext::default()
                 };
                 let out = finish_text(&ctx, dir.path(), text.clone());
                 assert!(out.spill.is_some());
@@ -303,6 +305,7 @@ mod tests {
             payment: tool_registry::PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
+            ..ToolContext::default()
         };
         let out = finish_text(&ctx, &blocker.join("sub"), "é".repeat(500));
         assert!(out.spill.is_none());
