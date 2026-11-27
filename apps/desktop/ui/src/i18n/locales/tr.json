@@ -1659,7 +1659,7 @@
     "needsAttention": "Düzeltilmesi gerekiyor",
     "noProvidersBody": "Burada model seçebilmek için Ayarlar → Yapay zekâ bölümünden bir sağlayıcı bağla.",
     "noProvidersTitle": "Bağlı bir yapay zekâ sağlayıcısı yok",
-    "pageHint": "Bu botla ilgili her şey tek sayfada. Bellek değiştirince hemen kaydedilir, harcama limitlerinin kendi Kaydet düğmesi var; gerisi aşağıdaki Kaydet ile kaydedilir.",
+    "pageHint": "Bu botla ilgili her şey. Hafıza ve harcama sınırları kendiliğinden kaydedilir; gerisi Kaydet ile.",
     "pickModel": "Model seç",
     "placeBrowserHint": "Web sayfalarını açtığı yer.",
     "placeComputerHint": "Komut çalıştırdığı ve dosya açtığı yer.",
@@ -5974,24 +5974,38 @@
     "title": "Senden bekleyenler"
   },
   "newBot": {
-    "advanced": "Gelişmiş ayarlar",
-    "advancedHint": "Talimatlar, resim, modeller, ayrıntılı izinler, uygulamalar",
-    "blankHint": "Sıfırdan başla: adını, görünümünü ve neler yapabileceğini sen seçersin.",
-    "blankTitle": "Boş bot",
     "brain": "Yapay zekâ",
     "brainAuto": "Otomatik",
     "brainHint": "Sonradan sohbetten değiştirebilirsin",
-    "changeLook": "Adı ya da görünümü değiştir",
     "create": "Oluştur",
     "creating": "Oluşturuluyor…",
-    "importHint": "Biri seninle bir bot profili dosyası paylaştıysa. Bir şey oluşturulmadan önce gözden geçirirsin.",
-    "importTitle": "Paylaşılan bir botu içe aktar",
     "nameNeeded": "Oluşturmak için botuna bir ad ver.",
     "namePlaceholder": "Bot adı",
-    "next": "İleri",
-    "quickLooks": "Hazır görünümler:",
-    "readyHint": "Talimatları ve dikkatli izinleriyle gelir. Bot oluşturulmadan önce her şeyi gözden geçirirsin.",
-    "readyTitle": "Hazır botlar",
+    "quick": {
+      "accessHelp": "Bu seviye ne demek?",
+      "brainDefault": "Varsayılanın: {{model}}",
+      "fromFile": "Dosyadan içe aktar",
+      "general": "Genel yardımcı",
+      "more": "Diğer seçenekler",
+      "moreHint": "Yapay zekâ, talimatlar, resim, uygulamalar, izinler",
+      "moreHintTemplate": "Yapay zekâ, neyle geldiği",
+      "namePlaceholder": "Botuna bir ad ver",
+      "purpose": {
+        "coder": "Kodunu okur ve düzenler",
+        "daily-briefing": "Her sabah haber ve görevler",
+        "family-helper": "Günlük işlerde sade yardım",
+        "general": "Ne istersen yardım eder",
+        "inbox-triage": "Postayı ayıklar, taslak yazar",
+        "researcher": "Araştırır, kaynak gösterir"
+      },
+      "review": "Neyle geldiğini gör",
+      "subtitle": "Adını koy, ne yapacağını seç, oluştur.",
+      "surprise": "Şaşırt beni: başka bir şekil ve renk",
+      "templateCap": "{{name}} en çok {{level}} düzeyine çıkar.",
+      "templateCli": "Hazır bir bot komut satırı motoruyla çalışamaz. Diğer seçenekler'den başka bir yapay zekâ seç.",
+      "templateNote": "{{name}} kendi talimatları ve izinleriyle gelir. Oluşturduktan sonra değiştirebilirsin.",
+      "what": "Ne yapsın?"
+    },
     "shapeGroup": "Karakter şekli",
     "shapes": {
       "boulder": "Fasulye",
@@ -6011,25 +6025,6 @@
       "star": "Yıldız",
       "tri": "Üçgen"
     },
-    "stepHints": {
-      "access": "Yapay zekasını ve ne kadar serbest çalışacağını seç, sonra oluştur.",
-      "identity": "Bir ad ve görünüm ver. İkisini de sonra değiştirebilirsin.",
-      "start": "Sıfırdan, hazır bir botla ya da paylaşılan bir dosyadan başla."
-    },
-    "steps": {
-      "access": "Neler yapabilir",
-      "identity": "Ad ve görünüm",
-      "start": "Başlangıç"
-    },
-    "stepsLabel": "Adımlar",
-    "templates": {
-      "assistant": "Asistan",
-      "blank": "Boş",
-      "coder": "Kodcu",
-      "researcher": "Araştırmacı",
-      "social": "Sosyal"
-    },
-    "templatesLabel": "Şablonlar",
     "title": "Yeni bot"
   },
   "notify": {

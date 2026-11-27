@@ -4544,7 +4544,6 @@
     "title": "Needs you"
   },
   "newBot": {
-    "advanced": "Advanced settings",
     "brain": "IA",
     "brainAuto": "Automático",
     "brainHint": "Você pode mudar isso depois no chat",
@@ -4571,14 +4570,6 @@
       "star": "Star",
       "tri": "Triangle"
     },
-    "templates": {
-      "assistant": "Assistant",
-      "blank": "Blank",
-      "coder": "Coder",
-      "researcher": "Researcher",
-      "social": "Social"
-    },
-    "templatesLabel": "Templates",
     "title": "New bot"
   },
   "notify": {

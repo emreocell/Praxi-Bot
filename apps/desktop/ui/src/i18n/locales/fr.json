@@ -4656,7 +4656,6 @@
     "title": "Besoin de vous"
   },
   "newBot": {
-    "advanced": "Réglages avancés",
     "brain": "IA",
     "brainAuto": "Automatique",
     "brainHint": "Vous pourrez le changer plus tard dans la conversation",
@@ -4683,14 +4682,6 @@
       "star": "Étoile",
       "tri": "Triangle"
     },
-    "templates": {
-      "assistant": "Assistant",
-      "blank": "Vierge",
-      "coder": "Développeur",
-      "researcher": "Chercheur",
-      "social": "Social"
-    },
-    "templatesLabel": "Modèles",
     "title": "Nouveau bot"
   },
   "notify": {

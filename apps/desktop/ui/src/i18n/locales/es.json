@@ -5617,24 +5617,13 @@
     "title": "Requiere tu atención"
   },
   "newBot": {
-    "advanced": "Ajustes avanzados",
-    "advancedHint": "Instrucciones, imagen, modelos, permisos en detalle, apps",
-    "blankHint": "Empieza desde cero: tú eliges el nombre, el aspecto y lo que puede hacer.",
-    "blankTitle": "Bot en blanco",
     "brain": "IA",
     "brainAuto": "Automático",
     "brainHint": "Puedes cambiarlo más tarde en el chat",
-    "changeLook": "Cambiar nombre o aspecto",
     "create": "Crear",
     "creating": "Creando…",
-    "importHint": "Un archivo de perfil de bot que alguien compartió contigo. Lo revisas antes de crear nada.",
-    "importTitle": "Importar un bot compartido",
     "nameNeeded": "Ponle un nombre al bot para crearlo.",
     "namePlaceholder": "Nombre del bot",
-    "next": "Siguiente",
-    "quickLooks": "Aspectos rápidos:",
-    "readyHint": "Vienen con sus instrucciones y permisos prudentes. Revisas todo antes de crear el bot.",
-    "readyTitle": "Bots listos",
     "shapeGroup": "Forma del personaje",
     "shapes": {
       "boulder": "Frijol",
@@ -5654,25 +5643,6 @@
       "star": "Estrella",
       "tri": "Triángulo"
     },
-    "stepHints": {
-      "access": "Elige su IA y con cuánta libertad puede trabajar, y créalo.",
-      "identity": "Dale un nombre y un aspecto. Puedes cambiar ambos más tarde.",
-      "start": "Empieza desde cero, con un bot listo o con un archivo compartido."
-    },
-    "steps": {
-      "access": "Qué puede hacer",
-      "identity": "Nombre y aspecto",
-      "start": "Inicio"
-    },
-    "stepsLabel": "Pasos",
-    "templates": {
-      "assistant": "Asistente",
-      "blank": "En blanco",
-      "coder": "Programador",
-      "researcher": "Investigador",
-      "social": "Redes sociales"
-    },
-    "templatesLabel": "Plantillas",
     "title": "Nuevo bot"
   },
   "notify": {

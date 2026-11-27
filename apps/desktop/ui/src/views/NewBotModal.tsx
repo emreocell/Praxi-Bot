@@ -1,36 +1,39 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, FileUp, Plus, ShieldCheck, Target } from "lucide-react";
-import { BotAvatar, Button } from "ui";
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  CircleHelp,
+  CodeXml,
+  Dices,
+  FileUp,
+  HeartHandshake,
+  Inbox,
+  MessageCircle,
+  Search,
+  Sparkles,
+  Sunrise,
+  Target
+} from "lucide-react";
+import { BOT_SHAPE_IDS, BotAvatar, Button } from "ui";
 import { ProfileImportView, type ProfileSource } from "../components/ProfileImportView";
-import {
-  type SharedProfile,
-  templateDescription,
-  templateName
-} from "../lib/profileShare";
-import type { Bot } from "../api/types";
+import { type SharedProfile, templateDescription, templateName } from "../lib/profileShare";
+import type { Bot, PermissionPreset } from "../api/types";
 import { BotAvatarUploadField, useBotFormDeps } from "../components/BotAdvancedFields";
-import {
-  AdvancedFields,
-  AppFields,
-  ModelFields,
-  PermissionFields
-} from "../components/BotEditorFields";
-import { BotIdentityPicker } from "../components/BotIdentityPicker";
+import { AdvancedFields, AppFields, ModelFields, PermissionFields } from "../components/BotEditorFields";
+import { BotInstructionsField } from "../components/BotInstructionsField";
+import { CharacterColorRow, CharacterShapeGrid } from "../components/CharacterPicker";
 import { Callout, DialogBody, DialogFooter, DialogHeader } from "../components/DialogParts";
-import formStyles from "../components/Form.module.css";
 import { Modal } from "../components/Modal";
 import { ModelPicker } from "../components/ModelPicker";
-import { SettingGroup, SettingRow } from "../components/SettingsUi";
-import { AccessLevelPicker } from "../components/AccessLevelPicker";
+import { Popover } from "../components/Popover";
+import { Segmented } from "../components/SettingsUi";
 import { accessLevelKey } from "../lib/accessLevels";
 import { RECOMMENDED_SAFETY_PRESET } from "../lib/settingsPages";
 import {
-  autonomyToPreset,
-  BOT_TEMPLATES,
+  BOT_COLORS,
   type BotDraft,
-  type BotTemplate,
-  type BotTemplateId,
   configFromDraft,
   DEFAULT_NEW_BOT_COLOR,
   draftFromBot,
@@ -41,14 +44,35 @@ import { invalidCustomRoles } from "../lib/botEditor";
 import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
 import { botWriteMessage } from "../lib/botWrite";
 import { modelGroups } from "../lib/modelPicker";
+import {
+  createFromTemplate,
+  GENERAL_CHOICE,
+  levelAfterPick,
+  levelsFor,
+  nameAfterPick,
+  purposeKey,
+  shuffleLook,
+  templateNeedsOtherModel
+} from "../lib/newBotForm";
 import { LOCAL_COMPUTER, useDaemon } from "../state/DaemonContext";
 import { useEngineConsent } from "../state/EngineConsent";
 import { useCustomText } from "../state/useCustomText";
 import styles from "./NewBotModal.module.css";
 import { HomeHint } from "../components/HomeHint";
-import { canGoTo, galleryLevel, NEW_BOT_STEPS, type NewBotStep, nextStep, prevStep, stepNumber } from "../lib/newBotSteps";
 
 const NEW_BOT_SUBTITLE_ID = "new-bot-subtitle";
+
+/** A small picture per choice; a template this app does not know yet gets the sparkles. */
+const CHOICE_ICONS: Record<string, typeof Search> = {
+  [GENERAL_CHOICE]: MessageCircle,
+  researcher: Search,
+  "inbox-triage": Inbox,
+  "daily-briefing": Sunrise,
+  coder: CodeXml,
+  "family-helper": HeartHandshake
+};
+
+const templateKey = (p: SharedProfile) => p.meta?.id ?? p.bot.name;
 
 function NewBotDialogContent({
   onDone,
@@ -63,18 +87,11 @@ function NewBotDialogContent({
   const { client, bots, conn, refreshBots, activeComputerId, activeHostName } = useDaemon();
   const { askEngine, applyEngine } = useEngineConsent();
   const host = activeComputerId === LOCAL_COMPUTER ? null : { name: activeHostName ?? t("computerPicker.host") };
-  const {
-    providersDto,
-    servers,
-    setServers,
-    allowed,
-    setAllowed,
-    initialApps,
-    setInitialApps
-  } = useBotFormDeps(client, undefined, true);
+  const { providersDto, servers, setServers, allowed, setAllowed, initialApps, setInitialApps } =
+    useBotFormDeps(client, undefined, true);
 
   const [createdBot, setCreatedBot] = useState<Bot | null>(null);
-  // Gallery templates and "Import from file" open the preview view instead of this form.
+  // "Import from a file" and "See what it comes with" open the review view instead of this page.
   const [importSource, setImportSource] = useState<ProfileSource | null>(null);
   const [gallery, setGallery] = useState<SharedProfile[]>([]);
   useEffect(() => {
@@ -90,14 +107,23 @@ function NewBotDialogContent({
       cancelled = true;
     };
   }, [client]);
-  const [templateId, setTemplateId] = useState<BotTemplateId | null>("blank");
+
   const [draft, setDraft] = useState<BotDraft>(() => ({
     ...draftFromBot(undefined),
     shape: "pebble",
-    color: DEFAULT_NEW_BOT_COLOR
+    color: DEFAULT_NEW_BOT_COLOR,
+    preset: RECOMMENDED_SAFETY_PRESET
   }));
+  // What it should do: the general helper, or a gallery template (its meta id).
+  const [choice, setChoice] = useState<string>(GENERAL_CHOICE);
+  // The name the last pick filled in: replaced by the next pick, unlike a typed one.
+  const [filledName, setFilledName] = useState("");
+  // The owner picked a level themselves: another pick keeps it (lowered if that pick cannot get it).
+  const [levelChosen, setLevelChosen] = useState(false);
   const [brainMode, setBrainMode] = useState<"auto" | "manual">("auto");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpAnchor = useRef<HTMLButtonElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,109 +137,141 @@ function NewBotDialogContent({
     () => resolveAutoExecutorRef(providersDto, Boolean(conn?.fake_provider)),
     [providersDto, conn?.fake_provider]
   );
-
   const effectiveExecutor = brainMode === "auto" ? autoExecutor : draft.executor;
   const effectiveDraft = useMemo(
     () => (brainMode === "auto" ? { ...draft, executor: autoExecutor } : draft),
     [brainMode, draft, autoExecutor]
   );
-
   const groups = useMemo(
-    () =>
-      modelGroups(
-        providersDto,
-        brainMode === "manual" ? formatModelRef(draft.executor) : undefined
-      ),
+    () => modelGroups(providersDto, brainMode === "manual" ? formatModelRef(draft.executor) : undefined),
     [providersDto, brainMode, draft.executor]
   );
 
-  const applyTemplate = (tpl: BotTemplate) => {
-    setTemplateId(tpl.id);
+  // Once a general bot exists (its apps failed to apply), Create only retries those: no switching to a template.
+  const templates = createdBot ? [] : gallery;
+  const template = choice === GENERAL_CHOICE ? null : (templates.find((p) => templateKey(p) === choice) ?? null);
+  const choices = [
+    {
+      id: GENERAL_CHOICE,
+      name: t("newBot.quick.general"),
+      line: t("newBot.quick.purpose.general"),
+      full: t("newBot.quick.purpose.general")
+    },
+    ...templates.map((p) => {
+      const id = templateKey(p);
+      const key = purposeKey(id);
+      const full = templateDescription(p, i18n.language);
+      return { id, name: templateName(p, i18n.language), line: key ? t(key) : full, full };
+    })
+  ];
+
+  const pick = (next: string) => {
+    if (next === choice || saving) return;
+    const tpl = next === GENERAL_CHOICE ? null : templates.find((p) => templateKey(p) === next);
+    const nextName = tpl ? templateName(tpl, i18n.language) : "";
     patch({
-      name: tpl.defaultName,
-      shape: tpl.shape,
-      color: tpl.color
+      name: nameAfterPick(draft.name, filledName, nextName),
+      preset: levelAfterPick(draft.preset, levelChosen, next, tpl?.permissions?.preset, RECOMMENDED_SAFETY_PRESET)
     });
+    setFilledName(nextName);
+    setChoice(next);
+  };
+
+  // The cards are one radio group: arrows move the choice (and the focus), Tab leaves the group.
+  const onChoiceKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const at = Math.max(0, choices.findIndex((c) => c.id === choice));
+    const next = choices[(at + step + choices.length) % choices.length];
+    if (!next) return;
+    pick(next.id);
+    e.currentTarget.querySelector<HTMLElement>(`[data-choice="${CSS.escape(next.id)}"]`)?.focus();
+  };
+
+  const surprise = () => {
+    const next = shuffleLook({ shape: draft.shape, color: draft.color }, BOT_SHAPE_IDS, BOT_COLORS);
+    patch({ shape: next.shape, color: next.color });
   };
 
   const nameMissing = draft.name.trim() === "";
   const executorMissing = effectiveExecutor.model.trim() === "";
   // An unusable hand-typed id blocks creating the bot, as it blocks saving an edit.
   const [pendingFallback, setPendingFallback] = useState("");
-  const customInvalid =
-    invalidCustomRoles(customText).length > 0 || pendingFallback.trim() !== "";
+  const customInvalid = !template && (invalidCustomRoles(customText).length > 0 || pendingFallback.trim() !== "");
+  // A ready-made bot cannot run on a command-line engine (the import refuses one): say so before Create.
+  const needsOtherModel = templateNeedsOtherModel(choice, formatModelRef(effectiveExecutor));
+  const blocked = nameMissing || executorMissing || customInvalid || needsOtherModel;
 
-  const save = async () => {
-    if (!client || nameMissing || executorMissing || customInvalid || saving) {
+  /** A general bot: the form's profile and the chosen apps (a retry after a partial failure updates it). */
+  const saveGeneral = async () => {
+    if (!client) return;
+    // A CLI model that only works with its own tools: the one consent step, before creating.
+    const answer = await askEngine(formatModelRef(effectiveDraft.executor), createdBot?.config);
+    if (answer === null) return;
+    const target = createdBot ?? undefined;
+    const config = configFromDraft(effectiveDraft, target);
+    const input = { name: effectiveDraft.name.trim(), config };
+    const { bot, failed, notApplied } = await saveBotAndApps(client, target, input, initialApps, allowed, bots.map((b) => b.id));
+    if (!target) setCreatedBot(bot);
+    await applyEngine(bot.id, answer);
+    await refreshBots().catch(() => {});
+    if (failed.length > 0 || notApplied.length > 0) {
+      const fresh = await client.listMcpServers().catch(() => null);
+      const problem = new Set([...failed, ...notApplied]);
+      const actual = (name: string): boolean | undefined => {
+        const srv = fresh?.find((x) => x.name === name);
+        return srv ? botHasAccess(srv, bot.id) : undefined;
+      };
+      if (fresh) setServers(fresh);
+      setAllowed((prev) => {
+        const next = { ...prev };
+        for (const name of notApplied) next[name] = actual(name) ?? prev[name];
+        return next;
+      });
+      setInitialApps((prev) => {
+        const next = { ...prev };
+        for (const name of changedApps(prev, allowed)) {
+          if (notApplied.includes(name)) next[name] = actual(name) ?? prev[name];
+          else if (!problem.has(name)) next[name] = allowed[name];
+        }
+        return next;
+      });
+      setError(
+        [
+          failed.length > 0 ? t("botForm.apps.partialFail", { names: failed.join(", ") }) : "",
+          notApplied.length > 0 ? t("botForm.apps.notApplied", { names: notApplied.join(", ") }) : ""
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
       return;
     }
+    onDone(bot.id);
+  };
+
+  /**
+   * A ready-made bot: imported like the review view does (the daemon clamps every rule to the level
+   * chosen here), with the owner's model and name, then given the look picked on this page.
+   */
+  const saveTemplate = async (tpl: SharedProfile) => {
+    if (!client) return;
+    const model = formatModelRef(effectiveExecutor);
+    const answer = await askEngine(model);
+    if (answer === null) return;
+    const bot = await createFromTemplate(client, { template: tpl, preset: draft.preset, model, name: draft.name, look: draft });
+    await applyEngine(bot.id, answer);
+    await refreshBots().catch(() => {});
+    onDone(bot.id);
+  };
+
+  const save = async () => {
+    if (!client || blocked || saving) return;
     setSaving(true);
     setError(null);
     try {
-      // A CLI model that only works with its own tools: the one consent step, before creating.
-      const answer = await askEngine(formatModelRef(effectiveDraft.executor), createdBot?.config);
-      if (answer === null) {
-        return;
-      }
-      const target = createdBot ?? undefined;
-      const config = configFromDraft(effectiveDraft, target);
-      const input = { name: effectiveDraft.name.trim(), config };
-      const { bot, failed, notApplied } = await saveBotAndApps(
-        client,
-        target,
-        input,
-        initialApps,
-        allowed,
-        bots.map((b) => b.id)
-      );
-      if (!target) {
-        setCreatedBot(bot);
-      }
-      await applyEngine(bot.id, answer);
-      await refreshBots().catch(() => {});
-      if (failed.length > 0 || notApplied.length > 0) {
-        const fresh = await client.listMcpServers().catch(() => null);
-        const problem = new Set([...failed, ...notApplied]);
-        const actual = (name: string): boolean | undefined => {
-          const srv = fresh?.find((x) => x.name === name);
-          return srv ? botHasAccess(srv, bot.id) : undefined;
-        };
-        if (fresh) {
-          setServers(fresh);
-        }
-        setAllowed((prev) => {
-          const next = { ...prev };
-          for (const name of notApplied) {
-            next[name] = actual(name) ?? prev[name];
-          }
-          return next;
-        });
-        setInitialApps((prev) => {
-          const next = { ...prev };
-          for (const name of changedApps(prev, allowed)) {
-            if (notApplied.includes(name)) {
-              next[name] = actual(name) ?? prev[name];
-            } else if (!problem.has(name)) {
-              next[name] = allowed[name];
-            }
-          }
-          return next;
-        });
-        setError(
-          [
-            failed.length > 0
-              ? t("botForm.apps.partialFail", { names: failed.join(", ") })
-              : "",
-            notApplied.length > 0
-              ? t("botForm.apps.notApplied", { names: notApplied.join(", ") })
-              : ""
-          ]
-            .filter(Boolean)
-            .join(" ")
-        );
-        return;
-      }
-      onDone(bot.id);
+      if (template) await saveTemplate(template);
+      else await saveGeneral();
     } catch (err) {
       setError(botWriteMessage(err, t));
     } finally {
@@ -221,23 +279,9 @@ function NewBotDialogContent({
     }
   };
 
-  const [step, setStep] = useState<NewBotStep>("start");
-  const goNext = () => {
-    const next = nextStep(step);
-    if (next && canGoTo(step, next, { nameMissing })) setStep(next);
-  };
-  const goBack = () => {
-    const prev = prevStep(step);
-    if (prev) setStep(prev);
-  };
-
-  const footerNote = step === "identity" && nameMissing && !saving ? t("newBot.nameNeeded") : undefined;
-
-  // Enter in the name field moves on; only the last step creates the bot.
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (step === "access") void save();
-    else if (step === "identity") goNext();
+    void save();
   };
 
   if (importSource) {
@@ -251,362 +295,345 @@ function NewBotDialogContent({
     );
   }
 
-  const levelLabel = (preset: string | undefined) => {
-    const level = galleryLevel(preset);
-    if (!level) return null;
-    return t(`${accessLevelKey(level.kind === "autonomy" ? autonomyToPreset(level.level) : level.preset)}.name`);
+  // The levels this choice can really get (a template never above what it asks for).
+  const levels = levelsFor(choice, template?.permissions?.preset);
+  const level: PermissionPreset = levels.includes(draft.preset as PermissionPreset)
+    ? (draft.preset as PermissionPreset)
+    : (levels[0] ?? RECOMMENDED_SAFETY_PRESET);
+  const capped = template !== null && levels.length < 4;
+  const list = (key: string) => {
+    const items = t(key, { returnObjects: true, defaultValue: [] });
+    return Array.isArray(items) ? (items as string[]) : [];
   };
+  const autoLabel = formatModelRef(autoExecutor);
+  // The owner's default model by its readable name ("Claude Sonnet 5.5"), the id when the catalog has none.
+  const autoName = groups.flatMap((g) => g.models).find((m) => m.ref === autoLabel)?.displayName || autoLabel;
+  const footerNote = saving ? undefined : nameMissing ? t("newBot.nameNeeded") : undefined;
 
   return (
-    <form className={styles.modalForm} onSubmit={handleSubmit} noValidate data-step={step}>
+    <form className={styles.modalForm} onSubmit={handleSubmit} noValidate>
       <DialogHeader
         title={t("newBot.title")}
-        subtitle={t(`newBot.stepHints.${step}`)}
+        subtitle={t("newBot.quick.subtitle")}
         subtitleId={NEW_BOT_SUBTITLE_ID}
         actions={<HomeHint />}
         closeDisabled={saving}
         onClose={onClose}
       />
 
-      <nav className={styles.stepperWrap} aria-label={t("newBot.stepsLabel")}>
-        <ol className={styles.stepper} data-testid="new-bot-steps">
-          {NEW_BOT_STEPS.map((s) => {
-            const current = s === step;
-            const done = stepNumber(s) < stepNumber(step);
-            const reachable = !current && canGoTo(step, s, { nameMissing });
-            const inner = (
-              <>
-                <span className={styles.stepDot} aria-hidden="true">
-                  {done ? <Check /> : stepNumber(s)}
-                </span>
-                <span className={styles.stepLabel}>{t(`newBot.steps.${s}`)}</span>
-              </>
-            );
-            return (
-              <li
-                key={s}
-                className={styles.stepItem}
-                data-state={current ? "current" : done ? "done" : "todo"}
-                aria-current={current ? "step" : undefined}
-              >
-                {reachable && !saving ? (
-                  <button type="button" className={styles.stepButton} data-testid={`new-bot-step-${s}`} onClick={() => setStep(s)}>
-                    {inner}
-                  </button>
-                ) : (
-                  <span className={styles.stepButton}>{inner}</span>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      </nav>
-
       <DialogBody className={styles.body} testId="new-bot-body">
-        {step === "start" ? (
-          <>
-            <div className={styles.startGrid}>
-              <button
-                type="button"
-                className={[styles.card, styles.cardPrimary].join(" ")}
-                data-testid="new-bot-start-blank"
-                onClick={() => setStep("identity")}
-              >
-                <span className={styles.cardIcon} aria-hidden="true">
-                  <Plus />
-                </span>
-                <span className={styles.cardText}>
-                  <span className={styles.cardName}>{t("newBot.blankTitle")}</span>
-                  <span className={styles.cardDesc}>{t("newBot.blankHint")}</span>
-                </span>
-                <ChevronRight className={styles.cardChevron} aria-hidden="true" />
-              </button>
-              {onStartFromGoal && !createdBot ? (
-                <button
-                  type="button"
-                  className={styles.card}
-                  data-testid="new-bot-start-goal"
-                  onClick={onStartFromGoal}
-                >
-                  <span className={styles.cardIcon} aria-hidden="true">
-                    <Target />
-                  </span>
-                  <span className={styles.cardText}>
-                    <span className={styles.cardName}>{t("recipes.entry")}</span>
-                    <span className={styles.cardDesc}>{t("recipes.entryHint")}</span>
-                  </span>
-                  <ChevronRight className={styles.cardChevron} aria-hidden="true" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={styles.card}
-                data-testid="profile-import-open"
-                onClick={() => setImportSource({ kind: "file" })}
-              >
-                <span className={styles.cardIcon} aria-hidden="true">
-                  <FileUp />
-                </span>
-                <span className={styles.cardText}>
-                  <span className={styles.cardName}>{t("newBot.importTitle")}</span>
-                  <span className={styles.cardDesc}>{t("newBot.importHint")}</span>
-                </span>
-                <ChevronRight className={styles.cardChevron} aria-hidden="true" />
-              </button>
-            </div>
-
-            {!createdBot && gallery.length > 0 ? (
-              <section
-                className={styles.ready}
-                aria-labelledby="new-bot-ready-title"
-                data-testid="profile-gallery"
-              >
-                <div className={styles.readyHead}>
-                  <h3 id="new-bot-ready-title" className={styles.sectionTitle}>{t("newBot.readyTitle")}</h3>
-                  <p className={styles.sectionHint}>{t("newBot.readyHint")}</p>
-                </div>
-                <div className={styles.readyGrid}>
-                  {gallery.map((p) => {
-                    const level = levelLabel(p.permissions?.preset ?? undefined);
-                    return (
-                      <button
-                        key={p.meta?.id ?? p.bot.name}
-                        type="button"
-                        className={styles.card}
-                        data-testid={`gallery-${p.meta?.id ?? ""}`}
-                        onClick={() =>
-                          setImportSource({
-                            kind: "template",
-                            contents: JSON.stringify(p),
-                            requested: p.permissions?.preset ?? undefined
-                          })
-                        }
-                      >
-                        <span className={styles.cardText}>
-                          <span className={styles.cardName}>{templateName(p, i18n.language)}</span>
-                          <span className={styles.cardDesc}>{templateDescription(p, i18n.language)}</span>
-                          {level ? (
-                            <span className={styles.cardTag}>
-                              <ShieldCheck aria-hidden="true" />
-                              {level}
-                            </span>
-                          ) : null}
-                        </span>
-                        <ChevronRight className={styles.cardChevron} aria-hidden="true" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            ) : null}
-          </>
-        ) : null}
-
-        {step === "identity" ? (
-          <>
-            <div className={styles.looks} role="group" aria-label={t("newBot.templatesLabel")}>
-              <span className={styles.looksLabel} aria-hidden="true">{t("newBot.quickLooks")}</span>
-              {BOT_TEMPLATES.filter((tpl) => tpl.id !== "blank").map((tpl) => {
-                const active = templateId === tpl.id;
-                return (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    className={[styles.tplChip, active ? styles.tplChipActive : ""].filter(Boolean).join(" ")}
-                    aria-pressed={active}
-                    data-testid={`template-${tpl.id}`}
-                    onClick={() => applyTemplate(tpl)}
-                  >
-                    {t(`newBot.templates.${tpl.id}`)}
-                  </button>
-                );
-              })}
-            </div>
-            <BotIdentityPicker
-              previewId={createdBot?.id ?? "new-bot-preview"}
-              name={draft.name}
-              shape={draft.shape}
-              color={draft.color}
-              avatar={draft.avatar}
-              onName={(name) => {
-                setTemplateId(null);
-                patch({ name });
+        <div className={styles.identity} inert={saving}>
+          <div className={styles.preview}>
+            <BotAvatar
+              bot={{
+                id: createdBot?.id ?? "new-bot-preview",
+                name: draft.name.trim() || t("newBot.title"),
+                shape: draft.shape,
+                color: draft.color,
+                avatar: draft.avatar ?? undefined
               }}
-              onShape={(shape) => {
-                setTemplateId(null);
-                patch({ shape });
-              }}
-              onColor={(color) => {
-                setTemplateId(null);
-                patch({ color });
-              }}
+              size="hero"
+              live
+              decorative
             />
-          </>
-        ) : null}
-
-        {step === "access" ? (
-          <>
-            <div className={styles.who} data-testid="new-bot-summary">
-              <BotAvatar
-                bot={{
-                  id: createdBot?.id ?? "new-bot-preview",
-                  name: draft.name.trim() || t("newBot.title"),
-                  shape: draft.shape,
-                  color: draft.color,
-                  avatar: draft.avatar ?? undefined
-                }}
-                size="md"
-                decorative
-              />
-              <span className={styles.whoName}>{draft.name.trim()}</span>
-              <Button variant="ghost" size="sm" disabled={saving} onClick={() => setStep("identity")}>
-                {t("newBot.changeLook")}
-              </Button>
-            </div>
-
-            <div className={styles.settingsGroup}>
-              <SettingGroup>
-                <SettingRow
-                  title={t("newBot.brain")}
-                  description={t("newBot.brainHint")}
-                >
-                  <ModelPicker
-                    groups={groups}
-                    value={brainMode === "auto" ? "" : formatModelRef(draft.executor)}
-                    autoOption={{
-                      label: t("newBot.brainAuto"),
-                      sub: formatModelRef(autoExecutor) || undefined,
-                      selected: brainMode === "auto",
-                      onPick: () => setBrainMode("auto")
-                    }}
-                    reviewOpen={false}
-                    placement="bottom-end"
-                    engines
-                    testId="new-bot-brain"
-                    onPick={(ref) => {
-                      const i = ref.indexOf("/");
-                      setBrainMode("manual");
-                      patch({
-                        executor:
-                          i < 0
-                            ? { provider: "", model: ref }
-                            : { provider: ref.slice(0, i), model: ref.slice(i + 1) }
-                      });
-                    }}
-                  />
-                </SettingRow>
-              </SettingGroup>
-            </div>
-
-            <section className={styles.access} aria-labelledby="new-bot-access-title">
-              <div>
-                <h3 id="new-bot-access-title" className={styles.accessTitle}>
-                  {t("accessLevel.title")}
-                </h3>
-                <p className={styles.accessLead}>{t("accessLevel.lead")}</p>
-              </div>
-              <AccessLevelPicker
-                value={draft.preset}
-                label={t("accessLevel.title")}
-                allowCustom={draft.preset === "custom"}
-                recommended={RECOMMENDED_SAFETY_PRESET}
-                testIdPrefix="new-bot-access"
-                onChange={(preset) => patch({ preset })}
-              />
-            </section>
-
             <button
               type="button"
-              className={styles.advancedToggle}
-              aria-expanded={advancedOpen}
-              data-testid="new-bot-advanced-toggle"
-              onClick={() => setAdvancedOpen((v) => !v)}
+              className={styles.surprise}
+              title={t("newBot.quick.surprise")}
+              aria-label={t("newBot.quick.surprise")}
+              data-testid="new-bot-surprise"
+              onClick={surprise}
             >
-              <span className={styles.advancedText}>
-                <span className={styles.advancedName}>{t("newBot.advanced")}</span>
-                <span className={styles.advancedHint}>{t("newBot.advancedHint")}</span>
-              </span>
-              <ChevronDown
-                className={[styles.chevron, advancedOpen ? styles.chevronOpen : ""].filter(Boolean).join(" ")}
-                aria-hidden="true"
-              />
+              <Dices aria-hidden="true" />
             </button>
+          </div>
+          <div className={styles.identityFields}>
+            <input
+              type="text"
+              className={styles.nameInput}
+              data-autofocus
+              data-testid="new-bot-name"
+              maxLength={60}
+              value={draft.name}
+              placeholder={t("newBot.quick.namePlaceholder")}
+              aria-label={t("botForm.name")}
+              onChange={(e) => patch({ name: e.target.value })}
+            />
+            <CharacterShapeGrid compact value={draft.shape} color={draft.color} onChange={(shape) => patch({ shape })} />
+            <CharacterColorRow compact centered={false} value={draft.color} onChange={(color) => patch({ color })} />
+          </div>
+        </div>
 
-            {advancedOpen ? (
-              <div className={styles.advancedPanel} data-testid="new-bot-advanced-panel">
-                <div className={formStyles.field}>
-                  <label className={formStyles.label} htmlFor="new-bot-persona">
-                    {t("botForm.persona")}
-                  </label>
-                  <textarea
-                    id="new-bot-persona"
-                    className={formStyles.textarea}
-                    value={draft.persona}
-                    placeholder={t("botForm.personaPlaceholder")}
-                    onChange={(e) => patch({ persona: e.target.value })}
-                  />
+        <section className={styles.section} aria-labelledby="new-bot-what-title" inert={saving}>
+          <h3 id="new-bot-what-title" className={styles.label}>
+            {t("newBot.quick.what")}
+          </h3>
+          <div
+            className={styles.choices}
+            role="radiogroup"
+            aria-labelledby="new-bot-what-title"
+            data-testid="new-bot-choices"
+            onKeyDown={onChoiceKey}
+          >
+            {choices.map((c, i) => {
+              const active = c.id === choice;
+              // The group stays reachable with Tab even if the checked card disappeared.
+              const tabStop = active || (i === 0 && !choices.some((x) => x.id === choice));
+              const Icon = CHOICE_ICONS[c.id] ?? Sparkles;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  tabIndex={tabStop ? 0 : -1}
+                  className={[styles.choice, active ? styles.choiceActive : ""].filter(Boolean).join(" ")}
+                  title={c.full}
+                  data-choice={c.id}
+                  data-testid={`new-bot-choice-${c.id}`}
+                  onClick={() => pick(c.id)}
+                >
+                  <span className={styles.choiceIcon} aria-hidden="true">
+                    <Icon />
+                  </span>
+                  <span className={styles.choiceText}>
+                    <span className={styles.choiceName}>{c.name}</span>
+                    <span className={styles.choiceLine}>{c.line}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className={styles.otherWays}>
+            {onStartFromGoal && !createdBot ? (
+              <button type="button" className={styles.link} data-testid="new-bot-start-goal" onClick={onStartFromGoal}>
+                <Target aria-hidden="true" />
+                {t("recipes.entry")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={styles.link}
+              data-testid="profile-import-open"
+              onClick={() => setImportSource({ kind: "file" })}
+            >
+              <FileUp aria-hidden="true" />
+              {t("newBot.quick.fromFile")}
+            </button>
+          </div>
+        </section>
+
+        <section className={styles.section} aria-labelledby="new-bot-access-title" inert={saving}>
+          <div className={styles.accessHead}>
+            <h3 id="new-bot-access-title" className={styles.label}>
+              {t("accessLevel.title")}
+            </h3>
+            <button
+              ref={helpAnchor}
+              type="button"
+              className={styles.help}
+              aria-label={t("newBot.quick.accessHelp")}
+              title={t("newBot.quick.accessHelp")}
+              aria-haspopup="dialog"
+              aria-expanded={helpOpen}
+              aria-controls={helpOpen ? "new-bot-access-popover" : undefined}
+              data-testid="new-bot-access-help"
+              onClick={() => setHelpOpen((v) => !v)}
+            >
+              <CircleHelp aria-hidden="true" />
+            </button>
+            <div className={styles.accessControl}>
+              <Segmented
+                label={t("accessLevel.title")}
+                value={level}
+                options={levels.map((p) => ({
+                  value: p,
+                  label: t(`${accessLevelKey(p)}.name`),
+                  testId: `new-bot-access-${p}`
+                }))}
+                onChange={(preset) => {
+                  setLevelChosen(true);
+                  patch({ preset });
+                }}
+              />
+            </div>
+          </div>
+          <p className={styles.accessLine} data-testid="new-bot-access-line">
+            {t(`${accessLevelKey(level)}.line`)}
+            {capped && template ? (
+              <span className={styles.accessCap} data-testid="new-bot-access-cap">
+                {" "}
+                {t("newBot.quick.templateCap", {
+                  name: templateName(template, i18n.language),
+                  level: t(`${accessLevelKey(levels[0] ?? level)}.name`)
+                })}
+              </span>
+            ) : null}
+          </p>
+        </section>
+
+        <Popover
+          open={helpOpen}
+          anchor={helpAnchor}
+          onClose={() => setHelpOpen(false)}
+          role="dialog"
+          placement="top-start"
+          label={t(`${accessLevelKey(level)}.name`)}
+          width={360}
+        >
+          <div id="new-bot-access-popover" className={styles.helpBody} data-testid="new-bot-access-popover">
+            <p className={styles.helpTitle}>
+              {t(`${accessLevelKey(level)}.name`)}
+              {level === RECOMMENDED_SAFETY_PRESET ? <span className={styles.tag}>{t("accessLevel.recommended")}</span> : null}
+            </p>
+            <p className={styles.helpLead}>{t("accessLevel.lead")}</p>
+            <p className={styles.helpHeading}>{t("accessLevel.canTitle")}</p>
+            <ul className={styles.helpList}>
+              {list(`${accessLevelKey(level)}.can`).map((line) => (
+                <li key={line}>
+                  <Check className={styles.can} aria-hidden="true" />
+                  {line}
+                </li>
+              ))}
+            </ul>
+            <p className={styles.helpHeading}>{t("accessLevel.stopsTitle")}</p>
+            <ul className={styles.helpList}>
+              {list(`${accessLevelKey(level)}.stops`).map((line) => (
+                <li key={line}>
+                  <Ban className={styles.stops} aria-hidden="true" />
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Popover>
+
+        <div className={styles.more}>
+          <button
+            type="button"
+            className={styles.moreToggle}
+            aria-expanded={moreOpen}
+            aria-controls={moreOpen ? "new-bot-more-panel" : undefined}
+            data-testid="new-bot-more"
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            <ChevronDown
+              className={[styles.chevron, moreOpen ? styles.chevronOpen : ""].filter(Boolean).join(" ")}
+              aria-hidden="true"
+            />
+            <span className={styles.moreName}>{t("newBot.quick.more")}</span>
+            <span className={styles.moreHint}>
+              {template ? t("newBot.quick.moreHintTemplate") : t("newBot.quick.moreHint")}
+            </span>
+          </button>
+
+          {moreOpen ? (
+            <div id="new-bot-more-panel" className={styles.morePanel} data-testid="new-bot-more-panel" inert={saving}>
+              <div className={styles.brainRow}>
+                <div className={styles.brainText}>
+                  <span className={styles.brainName}>{t("newBot.brain")}</span>
+                  <span className={styles.brainHint}>
+                    {autoLabel ? t("newBot.quick.brainDefault", { model: autoName }) : t("newBot.brainHint")}
+                  </span>
                 </div>
-
-                <BotAvatarUploadField
-                  avatar={draft.avatar}
-                  onChange={(avatar) => patch({ avatar })}
-                />
-
-                <div>
-                  <h3 className={styles.advancedHeading}>{t("botForm.models")}</h3>
-                  <ModelFields
-                    draft={effectiveDraft}
-                    providersDto={providersDto}
-                    executorMissing={executorMissing}
-                    pendingFallback={pendingFallback}
-                    onPendingFallback={setPendingFallback}
-                    patch={(next) => {
-                      if (next.executor) {
-                        setBrainMode("manual");
-                      }
-                      patch(next);
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <h3 className={styles.advancedHeading}>{t("botForm.permissions")}</h3>
-                  <PermissionFields draft={draft} patch={patch} />
-                </div>
-
-                <div>
-                  <h3 className={styles.advancedHeading}>{t("botForm.apps.title")}</h3>
-                  <AppFields
-                    servers={servers}
-                    allowed={allowed}
-                    onToggle={(name, checked) =>
-                      setAllowed((prev) => ({ ...prev, [name]: checked }))
-                    }
-                  />
-                </div>
-
-                <AdvancedFields
-                  draft={effectiveDraft}
-                  customText={customText}
-                  onCustomText={(role, text) => {
-                    if (role === "executor") setBrainMode("manual");
-                    setCustom(role, text);
+                <ModelPicker
+                  groups={groups}
+                  value={brainMode === "auto" ? "" : formatModelRef(draft.executor)}
+                  autoOption={{
+                    label: t("newBot.brainAuto"),
+                    sub: autoLabel || undefined,
+                    selected: brainMode === "auto",
+                    onPick: () => setBrainMode("auto")
                   }}
-                  deleteBlocked={null}
-                  chatCount={0}
-                  runCount={0}
+                  reviewOpen={false}
+                  placement="bottom-end"
+                  engines={!template}
+                  testId="new-bot-brain"
+                  onPick={(ref) => {
+                    const i = ref.indexOf("/");
+                    setBrainMode("manual");
+                    patch({
+                      executor: i < 0 ? { provider: "", model: ref } : { provider: ref.slice(0, i), model: ref.slice(i + 1) }
+                    });
+                  }}
                 />
               </div>
-            ) : null}
 
-            {host && executorMissing ? (
-              <Callout tone="warning" role="status">
-                <span data-testid="new-bot-host-needs-model">
-                  {t("hostMode.newBotNeedsModel", { name: host.name })}
-                </span>
-              </Callout>
-            ) : null}
-          </>
+              {template ? (
+                <div className={styles.templateNote}>
+                  <p>{t("newBot.quick.templateNote", { name: templateName(template, i18n.language) })}</p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    data-testid="new-bot-template-review"
+                    onClick={() =>
+                      setImportSource({
+                        kind: "template",
+                        contents: JSON.stringify(template),
+                        requested: template.permissions?.preset ?? undefined
+                      })
+                    }
+                  >
+                    {t("newBot.quick.review")}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <BotInstructionsField value={draft.persona} onChange={(persona) => patch({ persona })} />
+                  <BotAvatarUploadField avatar={draft.avatar} onChange={(avatar) => patch({ avatar })} />
+                  <div>
+                    <h3 className={styles.moreHeading}>{t("botForm.apps.title")}</h3>
+                    <AppFields
+                      servers={servers}
+                      allowed={allowed}
+                      onToggle={(name, checked) => setAllowed((prev) => ({ ...prev, [name]: checked }))}
+                    />
+                  </div>
+                  <div>
+                    <h3 className={styles.moreHeading}>{t("botForm.permissions")}</h3>
+                    <PermissionFields draft={draft} patch={patch} showLevel={false} />
+                  </div>
+                  <div>
+                    <h3 className={styles.moreHeading}>{t("botForm.models")}</h3>
+                    <ModelFields
+                      draft={effectiveDraft}
+                      providersDto={providersDto}
+                      executorMissing={executorMissing}
+                      pendingFallback={pendingFallback}
+                      onPendingFallback={setPendingFallback}
+                      patch={(next) => {
+                        if (next.executor) setBrainMode("manual");
+                        patch(next);
+                      }}
+                    />
+                  </div>
+                  <AdvancedFields
+                    draft={effectiveDraft}
+                    customText={customText}
+                    onCustomText={(role, text) => {
+                      if (role === "executor") setBrainMode("manual");
+                      setCustom(role, text);
+                    }}
+                    deleteBlocked={null}
+                    chatCount={0}
+                    runCount={0}
+                  />
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {needsOtherModel ? (
+          <Callout tone="warning" role="status">
+            <span data-testid="new-bot-template-cli">{t("newBot.quick.templateCli")}</span>
+          </Callout>
+        ) : null}
+
+        {host && executorMissing ? (
+          <Callout tone="warning" role="status">
+            <span data-testid="new-bot-host-needs-model">{t("hostMode.newBotNeedsModel", { name: host.name })}</span>
+          </Callout>
         ) : null}
 
         {error ? (
@@ -617,39 +644,24 @@ function NewBotDialogContent({
       </DialogBody>
 
       <DialogFooter note={footerNote}>
-        {step === "start" ? (
-          <Button variant="ghost" disabled={saving} onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-        ) : (
-          <Button variant="ghost" disabled={saving} onClick={goBack} data-testid="new-bot-back">
-            <ArrowLeft aria-hidden="true" />
-            {t("common.back")}
-          </Button>
-        )}
-        {step === "identity" ? (
-          <Button type="submit" variant="primary" disabled={nameMissing} data-testid="new-bot-next">
-            {t("newBot.next")}
-            <ArrowRight aria-hidden="true" />
-          </Button>
-        ) : null}
-        {step === "access" ? (
-          <Button
-            type="submit"
-            variant="primary"
-            aria-busy={saving}
-            disabled={saving || nameMissing || executorMissing || customInvalid}
-            data-testid="new-bot-submit"
-          >
-            {saving ? t("newBot.creating") : t("newBot.create")}
-          </Button>
-        ) : null}
+        <Button variant="ghost" disabled={saving} onClick={onClose}>
+          {t("common.cancel")}
+        </Button>
+        <Button
+          type="submit"
+          variant="primary"
+          aria-busy={saving}
+          disabled={saving || blocked}
+          data-testid="new-bot-submit"
+        >
+          {saving ? t("newBot.creating") : t("newBot.create")}
+        </Button>
       </DialogFooter>
     </form>
   );
 }
 
-/** New-bot dialog in three steps: how to start, name and look, what it can do (then Create). */
+/** New-bot dialog on one page: name and look, what it should do, how freely it works, Create. */
 export function NewBotModal({
   open,
   onDone,

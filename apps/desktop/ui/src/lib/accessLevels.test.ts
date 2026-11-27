@@ -46,9 +46,18 @@ test("Full access says it asks only before spending money and finishes tasks on 
 // shows one uses the same names, and the old per-screen wordings are gone from the code.
 test("the bot editor, the new-bot dialog and Settings choose with the same picker", () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
-  for (const file of ["../components/BotEditorFields.tsx", "../views/NewBotModal.tsx", "../views/settings/SafetyLevelsCard.tsx"]) {
+  for (const file of ["../components/BotEditorFields.tsx", "../views/settings/SafetyLevelsCard.tsx"]) {
     assert.match(read(file), /<AccessLevelPicker/, file);
   }
+  // The New-bot dialog offers the same four levels in a compact control: one line and a "?" with the details.
+  const newBot = read("../views/NewBotModal.tsx");
+  // The same list (ACCESS_LEVELS, through levelsFor: a template never above what it asks for).
+  assert.match(newBot, /const levels = levelsFor\(/);
+  assert.match(newBot, /options=\{levels\.map\(/);
+  assert.match(readFileSync(new URL("./newBotForm.ts", import.meta.url), "utf8"), /ACCESS_LEVELS\.filter\(/);
+  assert.match(newBot, /\.line`\)/);
+  assert.match(newBot, /\.can`\)/);
+  assert.match(newBot, /\.stops`\)/);
   for (const file of [
     "../components/BotPanel.tsx",
     "../views/BotProfileModal.tsx",

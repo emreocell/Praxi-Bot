@@ -328,8 +328,9 @@ taşıyor gibi görünüyorsa dışa aktarma reddedilir.
 - **Şablon galerisi.** Yeni bot penceresi yerleşik şablonlar sunar (Araştırmacı, Gelen kutusu
   ayıklama, Günlük özet, Yazılımcı, Aile yardımcısı); adları İngilizce, Türkçe ve Almancadır.
   Bunlar `crates/daemon-api/templates/` içinde aynı biçimde veri dosyalarıdır; bir test her
-  şablonun ayrıştığını ve bir üst sınır altında içe aktarıldığını denetler. Aynı önizlemeden
-  geçerler.
+  şablonun ayrıştığını ve bir üst sınır altında içe aktarıldığını denetler. Birini seçip
+  **Oluştur**'a basınca pencerede gösterilen erişim düzeyiyle içe aktarılır (bir şablon
+  istediğinden fazlasını asla almaz); **Neyle geldiğini gör** önce aynı önizlemeyi açar.
 
 Dışa ve içe aktarma denetim kaydına yazılır (`profile.export`, `profile.import`). Eşleşmiş
 cihazlar bu yollara ulaşamaz.

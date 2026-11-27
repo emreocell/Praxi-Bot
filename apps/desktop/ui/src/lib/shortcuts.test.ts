@@ -29,6 +29,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "components/BotPanelAutomation.tsx": "Enter creates the schedule from the one-sentence box (Shift+Enter is a new line); the Create button sits under it",
   "components/BotPanelWorkspace.tsx": "Enter commits and Escape cancels inline rename and closes preview modal",
   "components/CharacterPicker.tsx": "arrow keys inside the bot shape and color pickers",
+  "views/NewBotModal.tsx": "arrow keys between the what-it-should-do radio cards",
   "components/ChatList.tsx": "Enter/Escape in inline rename and arrow keys on chat menu trigger",
   "components/ElicitationCard.tsx": "Escape cancels the MCP server's form it is typed in (the card shows a Cancel button)",
   "components/HandoverCard.tsx": "Esc cancels the one-time code card (the card shows a Cancel button)",

@@ -57,8 +57,9 @@ const screens = [
   { name: 'first-run-bot', query: 'screen=onboarding&frstep=bot' },
   // Views opened by a few clicks/keys (act: click a selector, type into one, or press a key).
   { name: 'settings-search', expect: '[data-autofocus]', query: 'screen=settings&section=general', act: [{ type: ['[data-autofocus]', 'theme'] }] },
-  { name: 'new-bot-identity', expect: '[data-testid=new-bot-name]', query: 'screen=newbot', act: [{ click: '[data-testid=new-bot-start-blank]' }] },
-  { name: 'new-bot-access', expect: '[data-testid=new-bot-summary]', query: 'screen=newbot', act: [{ click: '[data-testid=new-bot-start-blank]' }, { type: ['[data-testid=new-bot-name]', 'Nova'] }, { click: '[data-testid=new-bot-next]' }] },
+  { name: 'new-bot-template', expect: '[data-testid=new-bot-more-panel]', query: 'screen=newbot', act: [{ click: '[data-testid=new-bot-choice-inbox-triage]' }, { click: '[data-testid=new-bot-more]' }] },
+  { name: 'new-bot-more', expect: '[data-testid=new-bot-more-panel]', query: 'screen=newbot', act: [{ type: ['[data-testid=new-bot-name]', 'Nova'] }, { click: '[data-testid=new-bot-more]' }] },
+  { name: 'new-bot-access-help', expect: '[data-testid=new-bot-access-popover]', query: 'screen=newbot', act: [{ click: '[data-testid=new-bot-access-help]' }] },
   { name: 'settings-search-empty', query: 'screen=settings&section=general', act: [{ type: ['[data-autofocus]', 'zzzqqq'] }] },
   { name: 'vault-grants', expect: '[data-testid=vault-grants-panel]', scope: '[data-testid=vault-grants-panel]', query: 'screen=vault', act: [{ click: '[data-testid=vault-grants-open]' }] },
   { name: 'vault-grants-revoke', expect: '[data-testid=confirm-dialog]', scope: '[data-testid=confirm-dialog]', query: 'screen=vault', act: [{ click: '[data-testid=vault-grants-open]' }, { click: '[data-testid^=vault-grant-revoke-]' }] },

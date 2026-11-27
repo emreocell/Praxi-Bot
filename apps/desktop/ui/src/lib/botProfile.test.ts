@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { BOT_SHAPE_IDS, botShape, fallbackBotShape } from "ui/bot-shape";
+import { botShape, fallbackBotShape } from "ui/bot-shape";
 import type { Bot, ProvidersDto } from "../api/types.ts";
 import {
   AUTONOMY_LEVELS,
   autonomyToPreset,
-  BOT_TEMPLATES,
   botHasFullAccess,
   botView,
   configFromDraft,
@@ -201,14 +200,6 @@ test("draftFromBot and configFromDraft round-trip shape and color with legacy fa
   const stored: Bot = { ...legacy, config: edited };
   assert.equal(botView(stored).shape, "ears");
   assert.equal(botView(stored).color, "#4c8dff");
-});
-
-test("BOT_TEMPLATES use valid 16-set character shapes and valid hex colors", () => {
-  assert.equal(BOT_TEMPLATES.length, 5);
-  for (const tpl of BOT_TEMPLATES) {
-    assert.ok(BOT_SHAPE_IDS.includes(tpl.shape));
-    assert.match(tpl.color, /^#[0-9a-f]{6}$/i);
-  }
 });
 
 test("autonomy maps cleanly onto existing permission presets without overwriting read-only or custom", () => {

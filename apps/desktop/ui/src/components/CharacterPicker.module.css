@@ -122,3 +122,52 @@
   opacity: 0;
   cursor: pointer;
 }
+
+/* Compact: small tiles that fill the row (16 in one row in a wide dialog, two rows when narrow). */
+.shapeGridCompact {
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: var(--space-half);
+  max-width: calc(var(--space-10) * 16);
+}
+
+/* stylelint-disable-next-line unit-disallowed-list -- small window: two even rows of eight */
+@media (width <= 40em) {
+  .shapeGridCompact { grid-template-columns: repeat(8, minmax(0, 1fr)); max-width: calc(var(--space-10) * 8); }
+}
+
+.shapeGridCompact .shapeButton {
+  padding: var(--space-0);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.shapeGridCompact .shapeButton:hover {
+  background-color: var(--state-hover);
+  transform: translateY(calc(var(--space-half) * -1));
+}
+
+.shapeGridCompact .shapeActive,
+.shapeGridCompact .shapeActive:hover {
+  background-color: var(--color-accent-subtle);
+}
+
+.swatchRowCompact {
+  gap: calc(var(--space-1) + var(--space-half));
+}
+
+.swatchRowCompact .swatch,
+.swatchRowCompact .customLabel {
+  width: calc(var(--size-swatch) * 0.78);
+  height: calc(var(--size-swatch) * 0.78);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shapeGridCompact .shapeButton,
+  .swatch,
+  .customLabel { transition: none; }
+  .shapeGridCompact .shapeButton:hover { transform: none; }
+}

@@ -322,7 +322,10 @@ an export is refused when the persona looks like it holds a secret.
   (Researcher, Inbox triage, Daily briefing, Coder, Family helper) with English,
   Turkish and German names. They are data files in
   `crates/daemon-api/templates/` in the same format; a test checks that every
-  template parses and imports under a ceiling. They go through the same preview.
+  template parses and imports under a ceiling. Picking one and pressing
+  **Create** imports it under the access level shown in the dialog (a template
+  never gets more than it asks for); **See what it comes with** opens the same
+  preview first.
 
 Export and import are written to the audit log (`profile.export`,
 `profile.import`). Paired devices cannot reach these routes.
