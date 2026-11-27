@@ -267,16 +267,22 @@ fn signed_server(version: &'static str, signature: String, installer: Vec<u8>) -
             let (ctype, body) = if request.starts_with("GET /setup.exe") {
                 ("application/octet-stream", installer.clone())
             } else {
+                // Every target the updater may name, so the test runs on any OS (not only Windows).
+                let entry = serde_json::json!({
+                    "url": format!("http://127.0.0.1:{port}/setup.exe"),
+                    "signature": signature,
+                });
+                let mut platforms = serde_json::Map::new();
+                for os in ["windows", "linux", "darwin"] {
+                    for arch in ["x86_64", "aarch64", "i686", "armv7"] {
+                        platforms.insert(format!("{os}-{arch}"), entry.clone());
+                    }
+                }
                 let manifest = serde_json::json!({
                     "version": version,
                     "notes": BODY,
                     "pub_date": "2026-11-27T08:15:00Z",
-                    "platforms": {
-                        "windows-x86_64": {
-                            "url": format!("http://127.0.0.1:{port}/setup.exe"),
-                            "signature": signature,
-                        }
-                    },
+                    "platforms": platforms,
                 });
                 ("application/json", manifest.to_string().into_bytes())
             };
