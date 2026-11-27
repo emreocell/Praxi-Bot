@@ -4,7 +4,10 @@
 //! that declares [`PermissionCategory::Money`] is a floor in the resolver already. The rest of
 //! the surfaces cannot declare it, so they are recognised here from facts the daemon holds:
 //!
-//! * a shell command that starts a known payment program or contacts a known payment API;
+//! * a shell command that starts a known payment program or contacts a known payment API, however
+//!   it is nested (a command substitution, an interpreter's code argument, `ssh host ...`,
+//!   `docker exec ...`, a PowerShell cmdlet);
+//! * a page script (`browser_eval`) that names a known payment API;
 //! * a connector action (Composio `app:<app>/<action>` and `apps_run_action`, MCP
 //!   `mcp:<server>/<tool>`) of a payment app, or whose action name is a payment verb;
 //! * a page in the managed browser that shows checkout (decided by the browser tool, which
@@ -21,6 +24,7 @@ use tool_registry::Effect;
 /// word, lower case, without a `.exe`/`.cmd` suffix.
 const PAYMENT_PROGRAMS: &[&str] = &[
     "stripe",
+    "stripe-cli",
     "paypal",
     "braintree",
     "adyen",
@@ -43,46 +47,6 @@ const PAYMENT_SUBCOMMANDS: &[(&str, &str)] = &[
     ("solana", "transfer"),
     ("near", "send"),
     ("xrpl", "payment"),
-];
-
-/// Hosts of payment, banking, crypto-exchange and domain-purchase APIs. A command that names one
-/// of them (`curl`, `wget`, `python -c`, `node -e`, `httpie`) is treated as a payment call even
-/// when it only reads: when unsure, ask.
-const PAYMENT_HOSTS: &[&str] = &[
-    "api.stripe.com",
-    "checkout.stripe.com",
-    "buy.stripe.com",
-    "api.paypal.com",
-    "api-m.paypal.com",
-    "paypal.com/v1/payments",
-    "connect.squareup.com",
-    "api.squareup.com",
-    "api.braintreegateway.com",
-    "payments.braintree-api.com",
-    "checkout-live.adyen.com",
-    "api.mollie.com",
-    "api.razorpay.com",
-    "api.paddle.com",
-    "vendors.paddle.com",
-    "api.lemonsqueezy.com",
-    "api.gumroad.com",
-    "api.wise.com",
-    "api.transferwise.com",
-    "api.revolut.com",
-    "b2b.revolut.com",
-    "api.gocardless.com",
-    "api.klarna.com",
-    "api.plaid.com",
-    "api.coinbase.com",
-    "api.exchange.coinbase.com",
-    "api.binance.com",
-    "api.kraken.com",
-    "api.godaddy.com/v1/domains/purchase",
-    "api.namecheap.com",
-    "api.iyzipay.com",
-    "api.iyzico.com",
-    "pay.google.com",
-    "payments.google.com",
 ];
 
 /// Payment apps (Composio app slugs, MCP server ids): every write action of one is a payment.
@@ -256,21 +220,244 @@ fn skip_wrapper_arguments(wrapper: &str, words: &[&str], mut i: usize) -> usize 
     i
 }
 
-/// Shells whose `-c` payload is a command line of its own.
+/// Programs that run the text they are given as a command line: a payment program after one of
+/// them is a payment (`bash -lc "..."`, `bash <<< "..."`, `cmd /c ...`, `eval ...`).
 const SHELLS: &[&str] = &[
     "sh",
     "bash",
     "zsh",
     "dash",
     "fish",
+    "ksh",
+    "csh",
+    "tcsh",
+    "busybox",
     "cmd",
     "powershell",
     "pwsh",
+    "eval",
 ];
+
+/// Programs that run another command given among their arguments, at a position this scanner
+/// does not model (after options with values, a host, a container name): `ssh host stripe ...`,
+/// `docker exec c stripe ...`, `kubectl exec pod -- stripe ...`, `Start-Process stripe`,
+/// `find . -exec stripe {} \;`. A payment program anywhere after one of them is a payment.
+const CARRIERS: &[&str] = &[
+    "ssh",
+    "sshpass",
+    "mosh",
+    "docker",
+    "podman",
+    "nerdctl",
+    "kubectl",
+    "oc",
+    "lxc",
+    "incus",
+    "nsenter",
+    "chroot",
+    "su",
+    "runuser",
+    "setpriv",
+    "doas",
+    "pkexec",
+    "watch",
+    "find",
+    "parallel",
+    "flatpak",
+    "distrobox",
+    "toolbox",
+    "wsl",
+    "screen",
+    "tmux",
+    "systemd-run",
+    "script",
+    "strace",
+    "ltrace",
+    "gdb",
+    "valgrind",
+    "at",
+    "batch",
+    // PowerShell cmdlets and their aliases that start a program or run a string as code.
+    "invoke-expression",
+    "iex",
+    "start-process",
+    "saps",
+    "invoke-command",
+    "icm",
+    "invoke-item",
+    "ii",
+    "start",
+    "call",
+];
+
+/// Language runtimes that run the code in an argument (`python -c`, `node -e`, `perl -e`).
+const INTERPRETERS: &[&str] = &[
+    "python",
+    "py",
+    "pypy",
+    "node",
+    "nodejs",
+    "bun",
+    "deno",
+    "ruby",
+    "perl",
+    "php",
+    "lua",
+    "rscript",
+    "osascript",
+];
+
+/// A program name without a version suffix (`python3.12` is `python`, `perl5` is `perl`).
+fn interpreter_name(prog: &str) -> &str {
+    prog.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.')
+}
+
+fn is_interpreter(prog: &str) -> bool {
+    INTERPRETERS.contains(&interpreter_name(prog))
+}
+
+/// Words that are the name of a person or a thing as often as a program: only a program at the
+/// start of a command counts, never a word somewhere in a script's text.
+const AMBIGUOUS_WORDS: &[&str] = &["wise"];
+
+/// Whether a command starting at `prog` (with the words after it) is a payment program, or a
+/// program with the subcommand that sends funds.
+fn is_payment_start(prog: &str, rest: &[&str]) -> bool {
+    PAYMENT_PROGRAMS.contains(&prog)
+        || PAYMENT_SUBCOMMANDS.iter().any(|(p, sub)| {
+            prog == *p
+                && rest
+                    .iter()
+                    .take(3)
+                    .any(|next| next.eq_ignore_ascii_case(sub))
+        })
+}
+
+/// Whether the text of a script (the code argument of an interpreter) names a payment program
+/// or a payment subcommand as a word: `subprocess.run(['stripe', ...])`, `require('stripe')`,
+/// `import stripe`, `os.system("lncli payinvoice ...")`.
+fn code_moves_money(code: &str) -> bool {
+    let words: Vec<String> = code
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .filter(|w| !w.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    words
+        .iter()
+        .any(|w| PAYMENT_PROGRAMS.contains(&w.as_str()) && !AMBIGUOUS_WORDS.contains(&w.as_str()))
+        || words
+            .windows(2)
+            .any(|p| PAYMENT_SUBCOMMANDS.contains(&(p[0].as_str(), p[1].as_str())))
+}
+
+/// Whether `word` is the flag that hands an interpreter its code (`-c`, `-e`, `-E`, `-p`, `-r`,
+/// `-pe`, `--eval`, `--eval=...`, `deno eval`). `Some(inline)` is the code written in the same
+/// word (`--eval=...`), empty otherwise.
+fn code_flag<'a>(interpreter: &str, word: &'a str) -> Option<&'a str> {
+    if let Some(long) = word.strip_prefix("--") {
+        let (name, value) = long.split_once('=').unwrap_or((long, ""));
+        return matches!(name, "eval" | "print" | "command").then_some(value);
+    }
+    if interpreter == "deno" && word == "eval" {
+        return Some("");
+    }
+    word.strip_prefix('-')
+        .filter(|flags| {
+            !flags.is_empty()
+                && flags.chars().all(|c| c.is_ascii_alphabetic())
+                && flags.ends_with(['c', 'e', 'E', 'p', 'r'])
+        })
+        .map(|_| "")
+}
+
+/// The code an interpreter is told to run, as far as the words (quotes already gone) show it:
+/// everything from its code flag on.
+fn interpreter_code(prog: &str, rest: &[&str]) -> Option<String> {
+    let name = interpreter_name(prog);
+    let at = rest.iter().position(|w| code_flag(name, w).is_some())?;
+    Some(rest[at..].join(" "))
+}
+
+/// The command's words with the shell's quoting applied: a quoted span is part of one word, and
+/// its quotes are gone. The code of `python -c "a; b"` is one word here, where the flattened
+/// reading above would have cut it at the `;`.
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let (mut cur, mut in_word, mut quote) = (String::new(), false, None::<char>);
+    let mut chars = command.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (None, '\'' | '"') => {
+                quote = Some(c);
+                in_word = true;
+            }
+            (Some(q), c) if c == q => quote = None,
+            (None | Some('"'), '\\') if matches!(chars.clone().next(), Some('"' | '\'' | '\\')) => {
+                cur.extend(chars.next());
+            }
+            (None, c) if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut cur));
+                    in_word = false;
+                }
+            }
+            (_, c) => {
+                cur.push(c);
+                in_word = true;
+            }
+        }
+    }
+    if in_word {
+        words.push(cur);
+    }
+    words
+}
+
+/// An interpreter whose code argument (read with its quoting intact) names a payment program.
+fn quoted_code_moves_money(command: &str) -> bool {
+    let words = shell_words(command);
+    words.iter().enumerate().any(|(at, w)| {
+        let prog = program_of(w).to_ascii_lowercase();
+        let name = interpreter_name(&prog);
+        is_interpreter(&prog)
+            && words[at + 1..].iter().enumerate().any(|(i, word)| {
+                code_flag(name, word).is_some_and(|inline| {
+                    code_moves_money(inline)
+                        || words
+                            .get(at + 2 + i)
+                            .is_some_and(|code| code_moves_money(code))
+                })
+            })
+    })
+}
+
+/// The base64 payload of a PowerShell `-EncodedCommand` (or a prefix of it: `-e`, `-enc`), as the
+/// text it decodes to. `Err` when the payload cannot be read: an opaque command is not trusted.
+fn powershell_encoded(rest: &[&str]) -> Option<Result<String, ()>> {
+    use base64::Engine as _;
+    let at = rest.iter().position(|w| {
+        let w = w.to_ascii_lowercase();
+        w.strip_prefix('-')
+            .is_some_and(|f| f.starts_with('e') && "encodedcommand".starts_with(f))
+    })?;
+    let decoded = rest
+        .get(at + 1)
+        .and_then(|b64| base64::engine::general_purpose::STANDARD.decode(b64).ok())
+        .map(|bytes| {
+            let units: Vec<u16> = bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c))
+                .collect();
+            String::from_utf16_lossy(&units)
+        });
+    Some(decoded.ok_or(()))
+}
 
 /// The program a command segment starts, after wrappers (and their options) and `VAR=value`
 /// words, with the words that follow it.
-fn segment_program<'a>(words: &[&'a str]) -> Option<(String, Vec<&'a str>)> {
+fn segment_program<'w, 'a>(words: &'w [&'a str]) -> Option<(String, &'w [&'a str])> {
     let mut i = 0;
     while i < words.len() {
         let w = words[i];
@@ -280,45 +467,124 @@ fn segment_program<'a>(words: &[&'a str]) -> Option<(String, Vec<&'a str>)> {
         } else if WRAPPERS.contains(&prog.as_str()) {
             i = skip_wrapper_arguments(&prog, words, i + 1);
         } else {
-            return Some((prog, words[i + 1..].to_vec()));
+            return Some((prog, &words[i + 1..]));
         }
     }
     None
 }
 
+/// One command of a command line, and whether it reads what the one before it printed (`a | b`).
+struct Segment {
+    text: String,
+    piped: bool,
+}
+
+/// The command line cut at everything that starts another command: a new line, `;`, `&`, `&&`,
+/// `||`, `|`, a subshell or command substitution (`(`, `)`, `$(`, a backtick).
+fn segments(command: &str) -> Vec<Segment> {
+    fn end(out: &mut Vec<Segment>, cur: &mut String, piped: &mut bool) {
+        let text = cur.trim().trim_matches(['(', ')', '{', '}', '`']).trim();
+        if !text.is_empty() {
+            out.push(Segment {
+                text: text.to_owned(),
+                piped: *piped,
+            });
+            *piped = false;
+        }
+        cur.clear();
+    }
+    let chars: Vec<char> = command.chars().collect();
+    let (mut out, mut cur, mut piped) = (Vec::new(), String::new(), false);
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '|' => {
+                end(&mut out, &mut cur, &mut piped);
+                let or = chars.get(i + 1) == Some(&'|');
+                piped = !or;
+                i += if or || chars.get(i + 1) == Some(&'&') {
+                    2
+                } else {
+                    1
+                };
+            }
+            '\n' | ';' | '&' | '(' | ')' | '`' => {
+                end(&mut out, &mut cur, &mut piped);
+                i += 1;
+            }
+            c => {
+                cur.push(c);
+                i += 1;
+            }
+        }
+    }
+    end(&mut out, &mut cur, &mut piped);
+    out
+}
+
+/// A segment that runs what it is fed on its standard input as code: a shell or an interpreter
+/// with no code argument or script of its own, a remote shell, a container's shell.
+fn reads_code_from_stdin(prog: &str, rest: &[&str]) -> bool {
+    let runs_code = |p: &str| SHELLS.contains(&p) || is_interpreter(p);
+    (runs_code(prog) || CARRIERS.contains(&prog))
+        && (matches!(prog, "ssh" | "sshpass" | "mosh" | "at" | "batch")
+            || rest.iter().all(|w| w.starts_with(['-', '<']))
+            || rest
+                .iter()
+                .any(|w| runs_code(&program_of(w).to_ascii_lowercase())))
+}
+
+/// How deep a PowerShell `-EncodedCommand` may hide another one.
+const MAX_ENCODED_DEPTH: u8 = 3;
+
 fn segments_move_money(command: &str, depth: u8) -> bool {
-    command
-        .split(['\n', ';', '&', '|'])
-        .map(|seg| seg.trim().trim_matches(['(', ')', '{', '}', '`']).trim())
-        .filter(|seg| !seg.is_empty())
-        .any(|seg| {
-            let words: Vec<&str> = seg.split_whitespace().collect();
-            let Some((prog, rest)) = segment_program(&words) else {
-                return false;
-            };
-            if PAYMENT_PROGRAMS.contains(&prog.as_str()) {
+    let segments = segments(command);
+    let mut feeds_code = false;
+    for seg in &segments {
+        let words: Vec<&str> = seg.text.split_whitespace().collect();
+        let Some((prog, rest)) = segment_program(&words) else {
+            continue;
+        };
+        if is_payment_start(&prog, rest) {
+            return true;
+        }
+        if SHELLS.contains(&prog.as_str()) || CARRIERS.contains(&prog.as_str()) {
+            // Any word after it may be the command it runs.
+            let from_here = (0..rest.len()).any(|at| {
+                segment_program(&rest[at..]).is_some_and(|(inner, after)| {
+                    is_payment_start(&inner, after)
+                        || (is_interpreter(&inner)
+                            && interpreter_code(&inner, after)
+                                .is_some_and(|code| code_moves_money(&code)))
+                })
+            });
+            if from_here {
                 return true;
             }
-            if PAYMENT_SUBCOMMANDS.iter().any(|(p, sub)| {
-                prog == *p
-                    && rest
-                        .iter()
-                        .take(3)
-                        .any(|next| next.eq_ignore_ascii_case(sub))
-            }) {
-                return true;
+        }
+        if matches!(prog.as_str(), "powershell" | "pwsh")
+            && let Some(encoded) = powershell_encoded(rest)
+        {
+            match encoded {
+                Ok(text) if depth < MAX_ENCODED_DEPTH => {
+                    if command_moves_money_at(&text, depth + 1) {
+                        return true;
+                    }
+                }
+                // Unreadable, or too deeply nested to read: an opaque command is asked about.
+                _ => return true,
             }
-            // `sh -c "stripe ..."`: the payload is a command line of its own.
-            depth < 4
-                && SHELLS.contains(&prog.as_str())
-                && rest
-                    .iter()
-                    .position(|w| !w.starts_with('-') && !w.starts_with('/'))
-                    .is_some_and(|at| {
-                        let payload = rest[at..].join(" ");
-                        segments_move_money(&payload, depth + 1)
-                    })
-        })
+        }
+        if is_interpreter(&prog)
+            && interpreter_code(&prog, rest).is_some_and(|code| code_moves_money(&code))
+        {
+            return true;
+        }
+        // A pipe or a here-document / here-string hands it its code.
+        feeds_code |= (seg.piped || seg.text.contains("<<")) && reads_code_from_stdin(&prog, rest);
+    }
+    // `echo stripe charges create | sh`: the text on the left is the code on the right.
+    feeds_code && code_moves_money(command)
 }
 
 /// What the shell would read once its quoting is gone, in two spellings: a backslash escapes
@@ -333,14 +599,136 @@ fn unquoted(command: &str) -> [String; 2] {
     [without_quotes, escapes_removed]
 }
 
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// The longest `${...}` body that is read as a variable name and its default.
+const MAX_EXPANSION_NAME: usize = 256;
+
+/// The name a `$` at `chars[at]` introduces (`$name`, `${name}`) and how many characters the
+/// expansion spans, or `None` for a `$` that starts something else (`$(`, `$'`, a lone `$`).
+fn expansion_at(chars: &[char], at: usize) -> Option<(String, usize)> {
+    match chars.get(at + 1)? {
+        '{' => {
+            // A name is short; a `${` with no `}` near it is not an expansion worth reading.
+            let close = chars[at + 2..]
+                .iter()
+                .take(MAX_EXPANSION_NAME)
+                .position(|&c| c == '}')?;
+            let body: String = chars[at + 2..at + 2 + close].iter().collect();
+            Some((body, close + 3))
+        }
+        c if is_name_char(*c) => {
+            let len = chars[at + 1..]
+                .iter()
+                .take_while(|c| is_name_char(**c))
+                .count();
+            Some((chars[at + 1..at + 1 + len].iter().collect(), len + 1))
+        }
+        _ => None,
+    }
+}
+
+/// `NAME=value` words of the command line, in order.
+fn assignments(text: &str) -> Vec<(String, String)> {
+    text.split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')'))
+        .filter_map(|w| w.split_once('='))
+        .filter(|(name, _)| {
+            !name.is_empty()
+                && !name.starts_with(|c: char| c.is_ascii_digit())
+                && name.chars().all(is_name_char)
+        })
+        .map(|(n, v)| (n.to_owned(), v.to_owned()))
+        .collect()
+}
+
+/// The text with every `$name` / `${name}` replaced: by the value the same command line
+/// assigned to it (`p=stripe; $p charges create`), or, with `known` off, by nothing (an unset
+/// variable: `s${x}tripe`).
+fn expand_variables(text: &str, vars: &[(String, String)], known: bool) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '$'
+            && let Some((body, span)) = expansion_at(&chars, i)
+        {
+            // `${NAME:-default}`: the default is what an unset variable becomes.
+            let (name, default) = body.split_once(":-").unwrap_or((body.as_str(), ""));
+            let value = known
+                .then(|| vars.iter().rev().find(|(n, _)| n == name))
+                .flatten()
+                .map_or(default, |(_, v)| v.as_str());
+            out.push_str(value);
+            i += span;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The text with every `+` closed up with the white space around it: `"stri" + "pe"` is
+/// `stripe` once the quotes are gone.
+fn join_plus(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut skip_space = false;
+    for c in text.chars() {
+        if c == '+' {
+            out.truncate(out.trim_end().len());
+            skip_space = true;
+        } else if !(skip_space && c.is_whitespace()) {
+            skip_space = false;
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Every spelling of the command a shell could read it as: unquoted two ways, `${IFS}` as the
+/// space it stands for, the command line's own assignments filled in, variables read as empty
+/// (`s${x}tripe`) and `+` joins closed.
+fn spellings(command: &str) -> Vec<String> {
+    let [without_quotes, escapes_removed] = unquoted(command);
+    let mut out = vec![command.to_owned()];
+    for base in [without_quotes, escapes_removed] {
+        let spaced = base.replace("${IFS}", " ").replace("$IFS", " ");
+        let vars = assignments(&spaced);
+        let filled = expand_variables(&expand_variables(&spaced, &vars, true), &vars, true);
+        out.push(expand_variables(&spaced, &vars, false));
+        out.push(filled);
+        // PowerShell and JavaScript join a program name out of pieces with `+`.
+        out.push(join_plus(&spaced));
+        out.push(spaced);
+        out.push(base);
+    }
+    out
+}
+
+fn command_moves_money_at(command: &str, depth: u8) -> bool {
+    quoted_code_moves_money(command)
+        || spellings(command).iter().any(|s| {
+            tool_registry::payment::text_names_payment_host(s) || segments_move_money(s, depth)
+        })
+}
+
 /// A shell command that starts a payment program or names a payment API.
 #[must_use]
 pub(crate) fn command_moves_money(command: &str) -> bool {
-    let spellings = unquoted(command);
-    PAYMENT_HOSTS.iter().any(|h| {
-        command.to_ascii_lowercase().contains(h)
-            || spellings.iter().any(|s| s.to_ascii_lowercase().contains(h))
-    }) || spellings.iter().any(|s| segments_move_money(s, 0))
+    command_moves_money_at(command, 0)
+}
+
+/// A page script (`browser_eval`, also under the owner's computer's `pc_` prefix) that names a
+/// payment API.
+#[must_use]
+pub(crate) fn script_moves_money(name: &str, input: &Value) -> bool {
+    name.strip_prefix("pc_").unwrap_or(name) == "browser_eval"
+        && input
+            .get("js")
+            .and_then(Value::as_str)
+            .is_some_and(tool_registry::payment::script_names_payment_host)
 }
 
 /// A connector action that pays: the app is a payment app, or the action name has a payment verb.
@@ -401,6 +789,7 @@ pub(crate) fn call_moves_money(
     input: &Value,
 ) -> bool {
     (!raw_command.is_empty() && command_moves_money(raw_command))
+        || script_moves_money(name, input)
         || connector_moves_money(name, effect, input)
 }
 
@@ -482,6 +871,138 @@ mod tests {
         ] {
             assert!(!command_moves_money(cmd), "{cmd}");
         }
+    }
+
+    /// Second review, finding 2: a payment program nested in a command substitution, a variable,
+    /// an interpreter's code argument, a PowerShell cmdlet, a remote or container command or a
+    /// pipe into a shell is still a payment.
+    #[test]
+    fn nested_payment_programs_are_recognised() {
+        use base64::Engine as _;
+        let utf16: Vec<u8> = "stripe charges create"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let encoded = format!(
+            "powershell -NoProfile -EncodedCommand {}",
+            base64::engine::general_purpose::STANDARD.encode(utf16)
+        );
+        for cmd in [
+            // command substitution, backticks, parameter expansion, variables
+            "echo $(stripe charges create)",
+            "echo \"done: $(stripe charges create --amount 5)\"",
+            "echo `stripe charges create`",
+            "x=$(stripe charges create); echo $x",
+            "cat <(stripe charges list)",
+            "echo ${P:-stripe} && ${P:-stripe} charges create",
+            "s${x}tripe charges create",
+            "p=stripe; $p charges create",
+            "a=stri; b=pe; $a$b charges create",
+            "export P=stripe && $P refunds create",
+            "stripe${IFS}charges${IFS}create",
+            // interpreters
+            "python3 -c \"import subprocess; subprocess.run(['stripe','charges','create'])\"",
+            "python3.12 -c 'import stripe; stripe.Charge.create(amount=5)'",
+            "python -c 'import os; os.system(\"lncli payinvoice lnbc1\")'",
+            "env -i /usr/bin/python3 -c \"import stripe\"",
+            "node -e \"require('stripe')('sk').charges.create({})\"",
+            "node --eval=\"require('stripe')\"",
+            "bun -e \"await Bun.spawn(['stripe','charges','create'])\"",
+            "deno eval \"new Deno.Command('stripe')\"",
+            "ruby -e 'system(\"stripe charges create\")'",
+            "perl -e 'exec \"stripe\", \"charges\"'",
+            "perl -pe 's/x/y/' -e 'system(q(stripe))'",
+            "php -r \"passthru('stripe charges create');\"",
+            "python3 -c \"import subprocess; subprocess.run(['cast','send','0xabc'])\"",
+            // shells and PowerShell
+            "pwsh -c \"stripe charges create\"",
+            "powershell -NoProfile -Command stripe charges create",
+            encoded.as_str(),
+            "powershell -enc not-base64!",
+            "Invoke-Expression 'stripe charges create'",
+            "iex \"stripe charges create\"",
+            "iex (\"stri\" + \"pe charges create\")",
+            "Start-Process stripe -ArgumentList 'charges create'",
+            "Start-Process -FilePath \"C:\\tools\\stripe.exe\"",
+            "bash <<< \"stripe charges create\"",
+            "eval \"stripe charges create\"",
+            "bash -lc 'stripe charges create'",
+            "ksh -c 'stripe charges create'",
+            // remote and container commands
+            "ssh host stripe charges create",
+            "ssh -p 2222 -i key user@host 'cd /srv && stripe charges create'",
+            "docker exec -it web stripe charges create",
+            "docker run --rm stripe/stripe-cli charges create",
+            "kubectl exec pod -c app -- stripe refunds create",
+            "tmux new -d 'stripe charges create'",
+            "watch -n 5 stripe balance",
+            "find . -name x -exec stripe charges create {} \\;",
+            "timeout 5 ssh host stripe x",
+            // a pipe into something that runs what it reads
+            "echo 'stripe charges create' | sh",
+            "printf stripe charges create | bash -s",
+            "echo 'stripe charges create' | ssh host",
+            "echo 'stripe charges create' | python3",
+            "echo stripe charges create | docker exec -i web sh",
+        ] {
+            assert!(command_moves_money(cmd), "{cmd}");
+        }
+        // The same constructs around ordinary commands, and payment words that are only data.
+        for cmd in [
+            "echo $(date)",
+            "echo $(git rev-parse HEAD) > rev.txt",
+            "x=$(ls); echo $x",
+            "echo `whoami`",
+            "echo ${HOME}",
+            "python3 manage.py migrate",
+            "python -m pip install stripe",
+            "python3 -c \"print('be wise')\"",
+            "python3 -c \"print(1 + 1)\"",
+            "node app.js --port 3000 --print-config",
+            "node -r dotenv/config app.js",
+            "perl -pi -e 's/a/b/' file.txt",
+            "ssh host ls -la /srv",
+            "ssh-keygen -t ed25519",
+            "docker build -t shop .",
+            "docker run --rm node:20 node build.js",
+            "kubectl get pods -n stripe-prod",
+            "tmux new -d 'npm run dev'",
+            "find . -name '*.rs' -exec grep -l todo {} \\;",
+            "cat notes.txt | sh",
+            "curl -fsSL https://get.docker.com | sh",
+            "echo hello | tee out.txt | wc -l",
+            "name=stripe; npm install $name",
+            "powershell -Command Get-ChildItem",
+            "Start-Process notepad",
+        ] {
+            assert!(!command_moves_money(cmd), "{cmd}");
+        }
+    }
+
+    /// Second review, finding 1: a page script that names a payment API is money on any page.
+    #[test]
+    fn a_page_script_that_names_a_payment_api_is_money() {
+        let call =
+            |name: &str, js: &str| call_moves_money(name, Effect::Write, "", &json!({ "js": js }));
+        for js in [
+            "fetch('https://api.stripe.com/v1/charges', {method:'POST', body:'amount=500'})",
+            "const x = new XMLHttpRequest(); x.open('POST', 'https://api-m.paypal.com/v2/checkout/orders');",
+            "navigator.sendBeacon('https://api.revolut.com/api/1.0/transfer', body)",
+            "fetch('https://api.' + 'stripe' + '.com/v1/charges')",
+        ] {
+            assert!(call("browser_eval", js), "{js}");
+            assert!(call("pc_browser_eval", js), "{js}");
+        }
+        assert!(!call("browser_eval", "document.title"));
+        assert!(!call(
+            "browser_eval",
+            "fetch('https://example.com/api/charges')"
+        ));
+        // Only a script tool carries a script: the same text typed into a field is data.
+        assert!(!call(
+            "browser_fill",
+            "fetch('https://api.stripe.com/v1/charges')"
+        ));
     }
 
     #[test]

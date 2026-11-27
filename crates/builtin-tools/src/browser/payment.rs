@@ -76,8 +76,13 @@ impl BrowserTool {
             return None;
         }
         let url = driver.current_url().await;
-        let mut detected =
-            url.as_deref().is_some_and(payment_url) || driver.has_payment_form().await;
+        // A script that names a payment API is a payment on any page, not only on a checkout.
+        let mut detected = self.op == Op::Eval
+            && input["js"]
+                .as_str()
+                .is_some_and(tool_registry::payment::script_names_payment_host);
+        detected =
+            detected || url.as_deref().is_some_and(payment_url) || driver.has_payment_form().await;
         if !detected {
             let refs = if self.op == Op::Act {
                 act::parse_steps(input)
@@ -121,6 +126,31 @@ impl BrowserTool {
         )
     }
 
+    /// Before a script of the model's own runs: unless the owner approved a payment on this
+    /// page, requests to a payment API are refused at the network until the document changes.
+    /// The script text is checked by name ([`payment_page_with`](Self::payment_page_with)); this
+    /// catches a host the script only spells out at run time, and a timer it leaves behind.
+    pub(super) async fn arm_payment_block(&self) -> Result<(), ToolError> {
+        let armed = matches!(
+            PAYMENT_APPROVAL.try_with(Clone::clone).unwrap_or_default(),
+            PaymentApproval::Check
+        );
+        self.shared
+            .driver
+            .set_payment_block(armed)
+            .await
+            .or_else(|e| {
+                // Lifting a block that did not go on is harmless; failing to put it on is not.
+                if armed {
+                    Err(ToolError::PermissionDenied(format!(
+                        "Script withheld: the guard against payment requests could not be put on the page ({e})."
+                    )))
+                } else {
+                    Ok(())
+                }
+            })
+    }
+
     // Each batch step goes through its single tool here, after taking
     // control. A page can enter checkout while an earlier step runs.
     pub(super) async fn check_payment_approval(
@@ -137,7 +167,13 @@ impl BrowserTool {
             }
             PaymentApproval::Approved(approved) => {
                 let url = driver.current_url().await;
-                document_token(driver, url.as_deref()).await == Some(approved)
+                let same = document_token(driver, url.as_deref()).await == Some(approved);
+                if same {
+                    // The owner approved a payment on this document: its own requests to a payment
+                    // API (a checkout tokenising a card) must go through.
+                    let _ = driver.set_payment_block(false).await;
+                }
+                same
             }
         };
         if !valid {

@@ -2631,7 +2631,14 @@ impl TurnExecutor {
                 );
                 (texts(), false)
             }
-            Some((QUESTION_CARD_KIND, _))
+            // Nobody is at the screen of an unattended Full run (a schedule, a trigger, a mail), and
+            // the model must not invent the answer: the question is parked for the owner.
+            Some((QUESTION_CARD_KIND, data)) if self.sh.nobody_answers(ctx) => (
+                self.sh
+                    .park_unattended_question(ctx, data["question"].as_str().unwrap_or_default()),
+                true,
+            ),
+            Some((QUESTION_CARD_KIND, data))
                 if ctx.mission.as_deref().is_some_and(|m| {
                     // A mission asks its questions once, in one batch. Later questions
                     // would park the whole mission, so they become blocked items.
@@ -2642,10 +2649,9 @@ impl TurnExecutor {
                         .is_some_and(|s| !s.take_question_slot(m).unwrap_or(true))
                 }) =>
             {
-                (
-                    "You already used the one batch of questions this mission allows. Do not ask again: decide yourself and write the decision down with mission_note, or mark the item that depends on the answer as blocked (the question is the reason) and carry on with the next item.".to_owned(),
-                    true,
-                )
+                let question = data["question"].as_str().unwrap_or_default();
+                let mission = ctx.mission.as_deref().unwrap_or_default();
+                (self.sh.park_item_for_question(ctx, mission, question), true)
             }
             Some((QUESTION_CARD_KIND, data)) => {
                 let question = data["question"].as_str().unwrap_or_default();

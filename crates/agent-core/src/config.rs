@@ -430,11 +430,71 @@ pub struct LoopConfig {
     /// runs allow-listed shell commands, everything else asks). A rollback switch for the
     /// operator; on by default.
     pub full_access_lane: bool,
+    /// Why [`Self::full_access_lane`] is off although the operator did not ask for it: the
+    /// setting could not be read ([`FullLaneSwitch::problem`]). Shown by the doctor.
+    pub full_access_lane_problem: Option<String>,
     /// Where events are journaled.  Empty by default: the loop then creates a
     /// background writer over its own storage on first use.
     pub journal: JournalSlot,
     /// Shared root folder holding per-bot persistent workspaces (`None` = disabled).
     pub workspaces_root: Option<std::path::PathBuf>,
+}
+
+/// What the operator's switch for the Full access lane resolved to for one run of the daemon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullLaneSwitch {
+    /// Whether the lane is on.
+    pub enabled: bool,
+    /// Why the lane is off although nobody switched it off: the setting could not be read.
+    /// A switch that cannot be read is never read as "on", because the switch exists to turn the
+    /// lane off.
+    pub problem: Option<String>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct SecurityFile {
+    #[serde(default)]
+    security: SecuritySection,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct SecuritySection {
+    full_access_lane: Option<bool>,
+}
+
+/// The operator's switch for the Full access lane: `host.toml` `[security] full_access_lane =
+/// false`, overridden by `BOT_FULL_ACCESS_LANE` (`on`/`1`/`true`/`yes` or `off`/`0`/`false`/`no`;
+/// anything else is ignored). On when neither says otherwise, including when there is no
+/// `host.toml`. A `host.toml` that exists but cannot be read or parsed (or has a wrong type
+/// there) turns the lane **off** and says why in [`FullLaneSwitch::problem`]: the operator's
+/// intent is unknown, and the safe reading of an unknown kill switch is "killed". Off: a bot at
+/// the Full level falls back to the older, narrower waivers and everything else asks.
+#[must_use]
+pub fn full_access_lane_switch(
+    host_file: std::io::Result<String>,
+    env: Option<&str>,
+) -> FullLaneSwitch {
+    let on = |enabled| FullLaneSwitch {
+        enabled,
+        problem: None,
+    };
+    match env.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Some("on" | "1" | "true" | "yes") => return on(true),
+        Some("off" | "0" | "false" | "no") => return on(false),
+        _ => {}
+    }
+    let problem = match host_file {
+        Ok(text) => match toml::from_str::<SecurityFile>(&text) {
+            Ok(file) => return on(file.security.full_access_lane.unwrap_or(true)),
+            Err(e) => format!("host.toml is not valid: {}", e.message()),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return on(true),
+        Err(e) => format!("host.toml could not be read: {e}"),
+    };
+    FullLaneSwitch {
+        enabled: false,
+        problem: Some(problem),
+    }
 }
 
 impl Default for LoopConfig {
@@ -472,6 +532,7 @@ impl Default for LoopConfig {
             wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,
             safe_mode: false,
             full_access_lane: true,
+            full_access_lane_problem: None,
             journal: JournalSlot::default(),
             workspaces_root: None,
         }
@@ -539,5 +600,59 @@ mod tests {
         };
         let c = p.cost(1_000_000, 100_000, Some(400_000));
         assert!((c - (1.2 + 0.2 + 1.0)).abs() < 1e-9);
+    }
+    /// The operator's kill switch: on by default, read from `host.toml` and the environment, and
+    /// never read as "on" when it cannot be read (second review, finding 3).
+    #[test]
+    fn the_full_lane_switch_fails_closed_when_host_toml_cannot_be_read() {
+        let file = |text: &str| -> std::io::Result<String> { Ok(text.to_owned()) };
+        // On by default: no file, an empty file, or a file with no such setting.
+        let missing = Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(full_access_lane_switch(missing, None).enabled);
+        assert!(full_access_lane_switch(file(""), None).enabled);
+        assert!(full_access_lane_switch(file("[browser]\nhuman_like=true"), None).enabled);
+        assert_eq!(
+            full_access_lane_switch(file("[security]\nfull_access_lane=true"), None),
+            FullLaneSwitch {
+                enabled: true,
+                problem: None
+            }
+        );
+        // Switched off by the operator: not a problem, a choice.
+        let off = full_access_lane_switch(file("[security]\nfull_access_lane=false"), None);
+        assert!(!off.enabled && off.problem.is_none());
+        assert!(!full_access_lane_switch(file(""), Some(" OFF ")).enabled);
+        assert!(!full_access_lane_switch(file(""), Some("0")).enabled);
+        // The environment is the explicit word and wins; anything else in it is ignored.
+        assert!(
+            full_access_lane_switch(file("[security]\nfull_access_lane=false"), Some("on")).enabled
+        );
+        assert!(
+            !full_access_lane_switch(file("[security]\nfull_access_lane=false"), Some("garbage"))
+                .enabled
+        );
+
+        // A file that cannot be read or parsed turns the lane OFF and says why.
+        for broken in [
+            "not toml [",
+            "[security]\nfull_access_lane = \"false\"",
+            "[security\nfull_access_lane = false",
+            "[security]\nfull_access_lane = false\nfull_access_lane = true",
+        ] {
+            let got = full_access_lane_switch(file(broken), None);
+            assert!(!got.enabled, "{broken}");
+            assert!(
+                got.problem
+                    .as_deref()
+                    .is_some_and(|p| p.contains("host.toml")),
+                "{broken}: {got:?}"
+            );
+        }
+        let denied = Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        let got = full_access_lane_switch(denied, None);
+        assert!(!got.enabled && got.problem.is_some());
+        // An explicit environment word is the operator's, even next to a broken file.
+        let got = full_access_lane_switch(file("not toml ["), Some("on"));
+        assert!(got.enabled && got.problem.is_none());
     }
 }

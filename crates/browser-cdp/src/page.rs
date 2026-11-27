@@ -121,6 +121,9 @@ pub(crate) struct Shared {
     pub oopif: StdMutex<HashMap<String, String>>,
     /// Sessions whose domains are already enabled.
     pub ready: StdMutex<HashSet<String>>,
+    /// URL patterns the page and its out-of-process frames may not request while armed (see
+    /// [`Page::set_url_block`]). Lifted by the next main-frame navigation.
+    pub url_block: StdMutex<Option<Vec<String>>>,
     /// In-flight network requests of the main session, id -> first seen (a redirect chain reuses
     /// one id, so inserts are idempotent). Entries older than [`INFLIGHT_CAP`] are pruned.
     pub inflight: StdMutex<HashMap<String, Instant>>,
@@ -199,6 +202,7 @@ impl Default for Shared {
         Self {
             oopif: StdMutex::default(),
             ready: StdMutex::default(),
+            url_block: StdMutex::default(),
             inflight: StdMutex::default(),
             dialogs: StdMutex::default(),
             dialog_policy: StdMutex::default(),
@@ -499,7 +503,63 @@ impl Page {
         if let Ok(mut r) = self.shared.ready.lock() {
             r.insert(session.to_string());
         }
+        // A frame or popup that appears while the block is armed is covered from its first request.
+        let armed = lock_or_recover(&self.shared.url_block).clone();
+        if let Some(patterns) = armed {
+            self.apply_url_block(session, &patterns).await?;
+        }
         Ok(())
+    }
+
+    /// Refuse (`Some(patterns)`, `*` matches anything) or allow again (`None`) every request
+    /// whose URL matches, for this tab and the out-of-process frames it holds. A navigation of
+    /// the main frame lifts the block (the script it guarded lived in the old document).
+    ///
+    /// # Errors
+    /// The block could not be put on a session; nothing is armed then.
+    pub async fn set_url_block(&self, patterns: Option<&[String]>) -> Result<()> {
+        let wanted = patterns.filter(|p| !p.is_empty()).map(<[String]>::to_vec);
+        let previous = std::mem::replace(
+            &mut *lock_or_recover(&self.shared.url_block),
+            wanted.clone(),
+        );
+        if previous == wanted {
+            return Ok(());
+        }
+        let list = wanted.unwrap_or_default();
+        let sessions: Vec<String> = lock_or_recover(&self.shared.ready)
+            .iter()
+            .filter(|s| **s != self.session)
+            .cloned()
+            .collect();
+        let result = async {
+            self.apply_url_block(&self.session, &list).await?;
+            for session in &sessions {
+                self.apply_url_block(session, &list).await?;
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            // Never leave the page half-armed and reported as armed.
+            *lock_or_recover(&self.shared.url_block) = previous;
+        }
+        result
+    }
+
+    async fn apply_url_block(&self, session: &str, patterns: &[String]) -> Result<()> {
+        // The main session has the domain on already; a frame's session may not.
+        self.client
+            .send_on(Some(session), "Network.enable", json!({}))
+            .await?;
+        self.client
+            .send_on(
+                Some(session),
+                "Network.setBlockedURLs",
+                json!({ "urls": patterns }),
+            )
+            .await
+            .map(|_| ())
     }
 
     async fn ensure_ready(&self, session: &str) {
@@ -1409,6 +1469,9 @@ async fn watch(
             {
                 shared.nav_gen.fetch_add(1, Ordering::SeqCst);
                 shared.dom_gen.fetch_add(1, Ordering::SeqCst);
+                if let Some(c) = &client {
+                    release_url_block(&shared, c);
+                }
                 if let Ok(mut set) = shared.inflight.lock() {
                     set.clear();
                 }
@@ -1476,6 +1539,31 @@ async fn verify_target_attached(client: Option<&CdpClient>, target_id: &str) -> 
     };
     let info = &res["targetInfo"];
     info["targetId"].as_str() == Some(target_id) && info["attached"].as_bool() != Some(false)
+}
+
+fn lock_or_recover<T>(m: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A main-frame navigation ends the document a guarded script ran in: lift the block armed for
+/// it ([`Page::set_url_block`]) on every session that has it.
+fn release_url_block(shared: &Shared, client: &Arc<CdpClient>) {
+    if lock_or_recover(&shared.url_block).take().is_none() {
+        return;
+    }
+    let sessions: Vec<String> = lock_or_recover(&shared.ready).iter().cloned().collect();
+    let client = Arc::clone(client);
+    tokio::spawn(async move {
+        for session in sessions {
+            let _ = client
+                .send_on(
+                    Some(&session),
+                    "Network.setBlockedURLs",
+                    json!({ "urls": [] }),
+                )
+                .await;
+        }
+    });
 }
 
 fn mark_target_closed(shared: &Shared) {
@@ -1955,5 +2043,109 @@ mod tests {
             .unwrap()
             .insert("fetch".into(), Instant::now());
         assert_eq!(busy_count_younger_than(&shared, None, LONG_LIVED_AGE), 1);
+    }
+    type CommandLog = Arc<StdMutex<Vec<(String, Option<String>, Value)>>>;
+
+    /// A fake browser: answers every command, logs it, and attaches the one page as session `S`.
+    async fn fake_browser() -> (
+        Arc<CdpClient>,
+        CommandLog,
+        tokio::sync::mpsc::UnboundedSender<Value>,
+    ) {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let log: CommandLog = Arc::default();
+        let (tx, mut events) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let seen = Arc::clone(&log);
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            loop {
+                tokio::select! {
+                    msg = ws.next() => {
+                        let Some(Ok(Message::Text(t))) = msg else { break };
+                        let req: Value = serde_json::from_str(t.as_str()).unwrap();
+                        let method = req["method"].as_str().unwrap_or_default().to_owned();
+                        seen.lock().unwrap().push((
+                            method.clone(),
+                            req["sessionId"].as_str().map(str::to_owned),
+                            req["params"].clone(),
+                        ));
+                        let result = if method == "Target.attachToTarget" {
+                            json!({"sessionId": "S"})
+                        } else {
+                            json!({})
+                        };
+                        ws.send(Message::text(json!({"id": req["id"], "result": result}).to_string()))
+                            .await
+                            .unwrap();
+                    }
+                    Some(event) = events.recv() => {
+                        ws.send(Message::text(event.to_string())).await.unwrap();
+                    }
+                }
+            }
+        });
+        (CdpClient::connect(&url).await.unwrap(), log, tx)
+    }
+
+    fn blocks(log: &CommandLog) -> Vec<Value> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, _, _)| m == "Network.setBlockedURLs")
+            .map(|(_, _, p)| p["urls"].clone())
+            .collect()
+    }
+
+    /// The network block of payment APIs: armed on the page's session, a no-op when nothing
+    /// changes, put on a frame that appears while armed, and lifted by the next navigation of the
+    /// main frame (the guarded script lived in the old document).
+    #[tokio::test]
+    async fn the_url_block_is_armed_inherited_by_new_frames_and_lifted_by_navigation() {
+        let (client, log, events) = fake_browser().await;
+        let page = Page::attach(client, "T").await.unwrap();
+        let patterns = vec!["*api.stripe.com*".to_owned()];
+
+        page.set_url_block(None).await.unwrap();
+        assert!(blocks(&log).is_empty(), "nothing armed, nothing sent");
+
+        page.set_url_block(Some(&patterns)).await.unwrap();
+        assert_eq!(blocks(&log), [json!(["*api.stripe.com*"])]);
+        page.set_url_block(Some(&patterns)).await.unwrap();
+        assert_eq!(blocks(&log).len(), 1, "arming twice sends once");
+
+        // An out-of-process frame that is set up while the block is armed gets it at once.
+        page.enable_domains("FRAME", false).await.unwrap();
+        assert_eq!(blocks(&log).len(), 2);
+        assert!(
+            log.lock()
+                .unwrap()
+                .iter()
+                .any(|(m, s, _)| m == "Network.setBlockedURLs" && s.as_deref() == Some("FRAME"))
+        );
+
+        // The main frame navigates: the block is lifted on both sessions.
+        events
+            .send(json!({
+                "method": "Page.frameNavigated",
+                "sessionId": "S",
+                "params": {"frame": {"id": "F", "url": "https://example.com/"}}
+            }))
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while blocks(&log).len() < 4 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let lifted = blocks(&log);
+        assert_eq!(&lifted[2..], [json!([]), json!([])], "{lifted:?}");
+        assert!(page.shared.url_block.lock().unwrap().is_none());
+
+        // Armed again, then lifted by the caller.
+        page.set_url_block(Some(&patterns)).await.unwrap();
+        page.set_url_block(None).await.unwrap();
+        assert_eq!(blocks(&log).last(), Some(&json!([])));
     }
 }

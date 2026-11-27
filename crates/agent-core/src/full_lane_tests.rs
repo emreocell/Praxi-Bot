@@ -283,6 +283,34 @@ async fn full_still_asks_for_the_never_list_and_for_payments() {
                 &run_action,
                 json!({"app": "paypal", "action": "send_payment", "arguments": {}}),
             ),
+            // Second review: a payment program nested in another command still asks.
+            (&money, json!({"command": "echo $(stripe charges create)"})),
+            (&money, json!({"command": "echo `stripe charges create`"})),
+            (
+                &money,
+                json!({"command": "python3 -c \"import subprocess; subprocess.run(['stripe','charges','create'])\""}),
+            ),
+            (
+                &money,
+                json!({"command": "node -e \"require('stripe')(k).charges.create({})\""}),
+            ),
+            (
+                &money,
+                json!({"command": "pwsh -c \"Invoke-Expression 'stripe charges create'\""}),
+            ),
+            (&money, json!({"command": "ssh host stripe charges create"})),
+            (
+                &money,
+                json!({"command": "docker exec -it web stripe charges create"}),
+            ),
+            (
+                &money,
+                json!({"command": "kubectl exec pod -- stripe refunds create"}),
+            ),
+            (
+                &money,
+                json!({"command": "echo 'stripe charges create' | sh"}),
+            ),
         ] {
             let (decision, reason) = decide(&lp, &ctx, tool, &input);
             assert!(decision.is_ask(), "{start:?} {input}: {decision:?}");
@@ -290,6 +318,8 @@ async fn full_still_asks_for_the_never_list_and_for_payments() {
         }
         // The same tools are fine when the call is not a payment.
         for (tool, input) in [
+            (&money, json!({"command": "echo $(date) && ssh host ls"})),
+            (&money, json!({"command": "python3 -c \"print(1 + 1)\""})),
             (&money, json!({"command": "npm install -g typescript"})),
             (
                 &run_action,
@@ -308,6 +338,47 @@ async fn full_still_asks_for_the_never_list_and_for_payments() {
         decide(&lp, &ctx, &money, &json!({"command": "ls"})).0,
         Decision::Deny
     );
+}
+
+/// A page script that names a payment API is money on any page, for a live call and for a
+/// replayed workflow's CSS fallback alike (both reach the gate as `browser_eval`): it asks, and
+/// is never covered by a grant. A script that does not name one runs as before.
+#[tokio::test]
+async fn a_page_script_that_calls_a_payment_api_asks_on_any_page() {
+    let eval = Asks::new(
+        "browser_eval",
+        PermissionCategory::Script,
+        ContentClass::none(),
+    );
+    let tools = [eval.clone()];
+    let paying = [
+        "fetch('https://api.stripe.com/v1/charges', {method:'POST', body:'amount=500'})",
+        "const x = new XMLHttpRequest(); x.open('POST', 'https://api-m.paypal.com/v2/checkout/orders'); x.send()",
+        "navigator.sendBeacon('https://api.revolut.com/api/1.0/transfer', JSON.stringify(d))",
+        "fetch('https://api.' + 'stripe' + '.com/v1/charges', {method:'POST'})",
+    ];
+    for start in TRUSTED {
+        let (_env, lp, ctx) = ctx_of(start, FULL, lane_cfg(Policy::full()), &tools).await;
+        for js in paying {
+            let (decision, reason) = decide(&lp, &ctx, &eval, &json!({"js": js}));
+            assert!(decision.is_ask(), "{start:?} {js}: {decision:?}");
+            assert_eq!(reason, None, "{start:?} {js}");
+            // The category the gate judged it under, whoever asks (the replayer included).
+            assert_eq!(
+                crate::shared::Shared::money_category(
+                    "browser_eval",
+                    Effect::Write,
+                    PermissionCategory::Script,
+                    &json!({"js": js}),
+                ),
+                PermissionCategory::Money,
+                "{js}"
+            );
+        }
+        let (decision, reason) = decide(&lp, &ctx, &eval, &json!({"js": "document.title"}));
+        assert_eq!(decision, Decision::Allow, "{start:?}");
+        assert_eq!(reason, Some("mode.full.policy"), "{start:?}");
+    }
 }
 
 /// A run that read untrusted content cannot mint a durable permission without the owner: the
@@ -712,15 +783,17 @@ async fn a_checkout_page_asks_for_each_trusted_initiator_and_each_call() {
     }
 }
 
-/// Nobody is at the screen of an unattended Full run, so a question is answered at once with a
-/// plain instruction to carry on. The owner who typed the run is still asked.
+/// Nobody is at the screen of an unattended Full run: its question is parked, not answered. The
+/// model is told not to pick an answer (a default it chose may be text a page, a mail or the
+/// trigger's payload planted) and to end its turn with the question, so the owner reads it in the
+/// run's report. The owner who typed the run is still asked on a card.
 #[tokio::test]
-async fn an_unattended_full_run_is_not_parked_on_a_question_but_the_owner_is_asked() {
+async fn an_unattended_full_run_parks_its_question_and_the_owner_is_still_asked() {
     for start in [Start::Schedule, Start::Trigger, Start::Owner] {
         let env = setup();
         let fake = Fake::new(vec![
-            calls(&[("q", "ask_user", json!({"question": "Which one?"}))]),
-            text("Done with a default."),
+            calls(&[("q", "ask_user", json!({"question": "Which address?"}))]),
+            text("Which address should I use?"),
         ]);
         let lp = make_loop(
             &env.storage,
@@ -742,14 +815,34 @@ async fn an_unattended_full_run_is_not_parked_on_a_question_but_the_owner_is_ask
         if matches!(start, Start::Owner) {
             assert!(matches!(event, Event::QuestionAsked(_)), "{event:?}");
             lp.cancel(run).unwrap();
-        } else {
-            assert!(
-                matches!(event, Event::RunFinished(_)),
-                "{start:?}: {event:?}"
-            );
-            let told = serde_json::to_string(&fake.request(1).messages).unwrap();
-            assert!(told.contains("Nobody is available to answer"), "{told}");
+            continue;
         }
+        assert!(
+            matches!(event, Event::RunFinished(_)),
+            "{start:?}: {event:?}"
+        );
+        // What the model read as the tool's result (the system prompt has its own wording).
+        let told =
+            crate::tests::tool_messages(&crate::tests::without_ledger(fake.request(1))).join("\n");
+        // It says why nothing was asked and what to do instead ...
+        assert!(
+            told.contains("nobody is at the screen"),
+            "{start:?}: {told}"
+        );
+        assert!(
+            told.contains("end your turn with this question"),
+            "{start:?}: {told}"
+        );
+        assert!(told.contains("Which address?"), "{start:?}: {told}");
+        // ... and never hands the model the job of inventing the answer.
+        for invented in ["sensible default", "Choose a", "decide yourself"] {
+            assert!(!told.contains(invented), "{start:?}: {told}");
+        }
+        let audit = env.storage.list_audit(env.user).unwrap();
+        assert!(
+            audit.iter().any(|a| a.action == "question.parked"),
+            "{start:?}"
+        );
     }
 }
 

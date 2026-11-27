@@ -5,6 +5,7 @@
 
 pub mod browser_mcp;
 pub mod error;
+pub mod payment;
 pub mod registry;
 pub mod spec;
 pub mod tool;

@@ -298,7 +298,14 @@ What still asks, and why:
   field in the page or in any frame of it, a frame of a payment provider such as Stripe,
   PayPal, Adyen, Braintree, Square or Klarna, or a payment button). A quoted, escaped or
   wrapped program name (`"stripe"`, `\stripe`, `sudo -u root stripe`, `timeout 10 stripe`)
-  counts like the plain one. The page is checked for every browser tool, including
+  counts like the plain one, and so does one nested in another command: a command
+  substitution (`$(...)`, backticks, `${...}`), the code argument of `python -c`, `node -e`,
+  `ruby -e`, `perl -e`, `php -r` or `pwsh -Command` (also `-EncodedCommand`),
+  `Invoke-Expression` / `Start-Process`, `ssh host <cmd>`, `docker` / `kubectl exec ... <cmd>`,
+  or text piped into a shell. A page script (`browser_eval`) that names a payment API
+  (`fetch`, `XMLHttpRequest`, `sendBeacon`) asks on any page, not only on a checkout; and a
+  script that has not been approved for a payment runs with requests to payment APIs blocked at
+  the browser's network until the page changes. The page is checked for every browser tool, including
   `browser_eval` and the `pc_browser_*` tools of your own computer (there by the page address
   and the button's label only), and for replayed workflow browser steps. The same read applies to the command or arguments a coding CLI
   engine hands over for its own tool, in any field, and to a program started on your
@@ -315,6 +322,18 @@ What still asks, and why:
 
 Mail the safety checks flag (a recipient who opted out, the daily volume) is not sent in an
 unattended run; the bot is told why and nobody is asked.
+
+A question (`ask_user`) in a run nobody watches (a schedule, a trigger, an inbound mail) is not
+answered by the bot and does not wait: the bot is told that nobody can answer now and that the
+answer must not come from it or from text a page, mail or trigger gave it, so it finishes
+what does not depend on the answer and ends its turn with the question, which you read in the
+run's report. In a mission, the question after the first batch blocks the item it stops (the
+question is the reason you see in the blocked list) and the session takes the next item.
+
+The switch for the lane is read once, when the daemon starts. If `host.toml` exists but cannot
+be read or parsed (or `full_access_lane` has the wrong type), the lane stays **off** for that
+run of the daemon and the daemon logs an error; the diagnostics list in Settings (and `bot doctor`) shows
+"full access lane: OFF" with the reason. Fix the file and restart. With no `host.toml` the lane is on.
 
 What the level cannot know: a charge behind an ordinary button, a payment made by a script
 file, a desktop window or an API Praxi does not recognise. See the threat model.

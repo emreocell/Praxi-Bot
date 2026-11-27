@@ -367,10 +367,19 @@ fn build_agent_with_skills(
             }
         }
     };
-    let full_access_lane = full_access_lane_enabled(
-        &host_limits,
+    let lane = agent_core::full_access_lane_switch(
+        std::fs::read_to_string(data_dir.join("host.toml")),
         std::env::var("BOT_FULL_ACCESS_LANE").ok().as_deref(),
     );
+    if let Some(problem) = &lane.problem {
+        // The kill switch cannot be read, so the lane stays off for this run of the daemon: bots
+        // at the Full level ask like Balanced ones until the file is fixed and the daemon restarts.
+        support_logs::tracing::error!(
+            target: "praxi_support",
+            reason = "full_access_lane_off",
+            "the Full access lane is OFF for this run: {problem}. Fix host.toml and restart the daemon (the lane is on by default)."
+        );
+    }
     // The discovery threshold is `LoopConfig`'s default (40).
     Ok(AgentLoop::new(
         Arc::clone(storage),
@@ -383,7 +392,8 @@ fn build_agent_with_skills(
             secret_requests,
             memory,
             safe_mode,
-            full_access_lane,
+            full_access_lane: lane.enabled,
+            full_access_lane_problem: lane.problem,
             knowledge_decider: Some(Arc::new(agent_core::HeuristicKnowledgeDecider::new(
                 Arc::clone(storage),
             ))),
@@ -466,33 +476,6 @@ struct ExperimentalFile {
 #[derive(Default, Deserialize)]
 struct Experimental {
     secret_request: Option<bool>,
-}
-
-/// The operator's switch for the Full access lane (on by default): `host.toml`
-/// `[security] full_access_lane = false`, overridden by `BOT_FULL_ACCESS_LANE`
-/// (`on`/`1`/`true`/`yes` or `off`/`0`/`false`/`no`). Off: a bot at the Full level falls back to
-/// the older, narrower waivers and everything else asks, as before the lane existed.
-pub(crate) fn full_access_lane_enabled(host: &str, env: Option<&str>) -> bool {
-    let file = toml::from_str::<SecurityFile>(host)
-        .unwrap_or_default()
-        .security
-        .full_access_lane
-        .unwrap_or(true);
-    match env.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
-        Some("on" | "1" | "true" | "yes") => true,
-        Some("off" | "0" | "false" | "no") => false,
-        _ => file,
-    }
-}
-
-#[derive(Default, Deserialize)]
-struct SecurityFile {
-    #[serde(default)]
-    security: Security,
-}
-#[derive(Default, Deserialize)]
-struct Security {
-    full_access_lane: Option<bool>,
 }
 
 /// How long an unanswered approval or question waits before it expires
@@ -1295,6 +1278,7 @@ pub fn serve(
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
     cfg.safe_mode = safe_mode;
+    cfg.full_access_lane = agent.full_access_lane();
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
         cfg.allowed_origins.extend(parse_origins(&extra));
@@ -1891,31 +1875,6 @@ secret_request=true",
             Some("garbage")
         ));
         assert!(!secret_requests_enabled("not toml [", None));
-    }
-
-    #[test]
-    fn full_access_lane_switch_is_on_by_default_and_reads_file_and_environment() {
-        assert!(full_access_lane_enabled("", None));
-        assert!(full_access_lane_enabled(
-            "[security]\nfull_access_lane=true",
-            None
-        ));
-        assert!(!full_access_lane_enabled(
-            "[security]\nfull_access_lane=false",
-            None
-        ));
-        assert!(!full_access_lane_enabled("", Some(" OFF ")));
-        assert!(!full_access_lane_enabled("", Some("0")));
-        assert!(full_access_lane_enabled(
-            "[security]\nfull_access_lane=false",
-            Some("on")
-        ));
-        assert!(!full_access_lane_enabled(
-            "[security]\nfull_access_lane=false",
-            Some("garbage")
-        ));
-        // A host file that cannot be read keeps the default: the lane, not a silent rollback.
-        assert!(full_access_lane_enabled("not toml [", None));
     }
 
     #[test]

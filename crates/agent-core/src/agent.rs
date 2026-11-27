@@ -593,6 +593,16 @@ impl AgentLoop {
         self.sh.tools.clone()
     }
 
+    /// Whether the Full access lane is on for this run of the daemon, and why it is off when the
+    /// operator's setting could not be read ([`crate::FullLaneSwitch`]).
+    #[must_use]
+    pub fn full_access_lane(&self) -> crate::FullLaneSwitch {
+        crate::FullLaneSwitch {
+            enabled: self.sh.cfg.full_access_lane,
+            problem: self.sh.cfg.full_access_lane_problem.clone(),
+        }
+    }
+
     /// Audit outgoing card coverage against the registry actually assembled by
     /// the host, including optional and dynamically registered tools.
     /// # Errors
