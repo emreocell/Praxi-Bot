@@ -63,6 +63,14 @@ verb, such as `get and pay`, counts as **Moves money**.
 Use **Sign out of Composio** on the account card to suspend access to all
 Composio apps. Praxi keeps your app settings, including bot access.
 
+## Home Assistant
+
+The **Home Assistant** card in the main view sets up your smart home without
+editing a file: address, long-lived access token, **Save and test**, which bots
+may use it and which services may run without a card. See
+[Home Assistant](home-assistant.md). (The **Home Assistant** MCP server in the
+catalog below is a different, optional connection.)
+
 ## MCP servers
 
 Choose **MCP servers** in the top bar for direct and self-managed connections:

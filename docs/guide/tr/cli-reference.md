@@ -51,7 +51,7 @@ Ctrl-C'ye kadar açık tutar ([bağlantı ölçüm kılavuzu](../../design/live-
 | 3 | Daemon'a ulaşılamıyor |
 | 4 | Kimlik doğrulama reddedildi (ya da API token'ı yok, ya da Host/Origin reddedildi) |
 | 5 | Bulunamadı |
-| 6 | İstek reddedildi (geçersiz girdi, çakışma, `setup_required` ya da başarısız bir `bot email test`) |
+| 6 | İstek reddedildi (geçersiz girdi, çakışma, `setup_required` ya da başarısız bir `bot email test` ya da `bot ha test`) |
 | 7 | Çalışma bir hatayla bitti ya da iptal edildi |
 
 ## Komutlar
@@ -298,6 +298,18 @@ Bekleyen bir soru kartını yanıtlar.
 | `bot email add --provider agentmail --name <NAME> --bot <NAME_OR_ID>\|--all-bots` | **Kendi** AgentMail API anahtarınla bir AgentMail gelen kutusu oluşturur ve onu hesap olarak ekler. Seçenekler: `--name-hint <TEXT>` (`@` işaretinden önceki bölüm, varsayılan: hesap adı), `--domain <VERIFIED_DOMAIN>` (varsayılan: paylaşılan `agentmail.to`), `--allowed-sender`, `--api-key-env <VAR>` (verilmezse gizli istem, anahtar hiçbir zaman argüman olmaz) |
 | `bot email rm <NAME>` | Bir hesabı ve saklanan parolasını ya da anahtarını kaldırır. `--delete-inbox` gelen kutusunu AgentMail'de de siler (geri alınamaz, varsayılan olarak kapalı) |
 | `bot email test <NAME>` | IMAP girişi ile SMTP kimlik doğrulamasını ya da AgentMail anahtarını sınar. Hiçbir şey gönderilmez. Denetim geçmezse 6 ile çıkar |
+
+### `bot ha`
+
+Çalışan arka plan hizmetinde Home Assistant'ı kurar (bkz. [Home Assistant](home-assistant.md)). Yalnızca sahip içindir; değişiklikler sonraki araç çağrısından itibaren geçerli olur.
+
+| Alt komut | Anlamı |
+| --- | --- |
+| `bot ha status` | Kurulu olup olmadığını, adresi, hangi botların kullanabildiğini ve sormadan izin verilen servisleri gösterir (anahtarı asla) |
+| `bot ha setup --url <URL>` | Adresi ve uzun ömürlü erişim anahtarını Home Assistant'a sorar, yalnızca kabul ederse kaydeder ve varlık sayısını yazar. Seçenekler: `--token-env <DEĞİŞKEN>` (verilmezse gizli istem; anahtar asla argüman olmaz), `--keep-token` (saklanan anahtarı korur; yalnızca aynı adres için), `--allow <DOMAIN.SERVICE>` (tekrarlanabilir: o servis için kart çıkmaz) |
+| `bot ha test` | Kayıtlı kurulumu dener. `--url <URL>` ile `--token-env <DEĞİŞKEN>` kayıtlı olmayan bir adresi dener. Home Assistant kabul etmezse 6 ile çıkar |
+| `bot ha access` | Hangi botların kullanabileceğini seçer: `--all` ya da `--bot <AD_VEYA_KİMLİK>` (tekrarlanabilir); ikisi de yoksa hiçbir bot |
+| `bot ha remove` | Kurulumu ve saklanan anahtarı kaldırır |
 
 ### `bot providers`
 

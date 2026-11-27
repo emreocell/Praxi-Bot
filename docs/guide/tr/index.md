@@ -23,7 +23,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Telegram](telegram.md) | Botlarınla telefonundan konuşmak. |
 | [Discord](discord.md) | Botlarınla Discord üzerinden konuşmak. |
 | [Takvim](calendar.md) | Botların CalDAV takviminde etkinlik okuması ve eklemesi. |
-| [Home Assistant](home-assistant.md) | Botların evdeki cihazları okuması ve yönetmesi. |
+| [Home Assistant](home-assistant.md) | Uygulamadan kurup botların evdeki cihazları okumasını ve yönetmesini sağlama. |
 | [Bilgisayar kullanımı](computer-use.md) | Botların kendi Windows bilgisayarında uygulama kullanması. |
 | [Eski yedekleri geri yükleme](backup-and-restore.md) | Eski, şifresiz yedekler. |
 | [Bağlantıyı dene](connection-test.md) | Anahtarların ve uygulama bağlantılarının çalışıp çalışmadığını tek tıkla gör. |

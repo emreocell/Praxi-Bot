@@ -52,7 +52,7 @@ Documented in `bot --help` and stable across client commands:
 | 3 | Daemon unreachable |
 | 4 | Authentication rejected (or missing API token, or Host/Origin refused) |
 | 5 | Not found |
-| 6 | Request rejected (invalid input, conflict, `setup_required`, or a failing `bot email test`) |
+| 6 | Request rejected (invalid input, conflict, `setup_required`, or a failing `bot email test` or `bot ha test`) |
 | 7 | The run ended with an error or was cancelled |
 
 ## Commands
@@ -302,6 +302,18 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 | `bot email add --provider agentmail --name <NAME> --bot <NAME_OR_ID>\|--all-bots` | Create an AgentMail inbox with **your own** AgentMail API key and add it as an account. Options: `--name-hint <TEXT>` (part before the `@`; default: the account name), `--domain <VERIFIED_DOMAIN>` (default: the shared `agentmail.to`), `--allowed-sender`, `--api-key-env <VAR>` (hidden prompt when omitted; the key is never an argument) |
 | `bot email rm <NAME>` | Remove an account and its stored password or key. `--delete-inbox` also deletes the inbox at AgentMail (irreversible; off by default) |
 | `bot email test <NAME>` | IMAP login and SMTP authentication, or the AgentMail key. Nothing is sent. Exit 6 when the check does not pass |
+
+### `bot ha`
+
+Set up Home Assistant on the running daemon (see [Home Assistant](home-assistant.md)). Owner-only; changes apply to the next tool call.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot ha status` | Show whether it is set up, the address, which bots may use it and the services allowed without asking (never the token) |
+| `bot ha setup --url <URL>` | Check the address and the long-lived token against Home Assistant, save only if it accepts, and print the entity count. Options: `--token-env <VAR>` (hidden prompt when omitted; the token is never an argument), `--keep-token` (keep the stored token; only for the same address), `--allow <DOMAIN.SERVICE>` (repeatable: no card for that service) |
+| `bot ha test` | Check the saved setup. `--url <URL>` with `--token-env <VAR>` tries an address that is not saved. Exit 6 when Home Assistant does not accept |
+| `bot ha access` | Choose which bots may use it: `--all`, or `--bot <NAME_OR_ID>` (repeatable); with neither, no bot |
+| `bot ha remove` | Remove the setup and the stored token |
 
 ### `bot providers`
 

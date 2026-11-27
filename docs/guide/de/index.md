@@ -24,7 +24,7 @@ deutsche Seite, wenn es sie gibt.
 | [Telegram](telegram.md) | Mit deinen Bots vom Handy aus sprechen. |
 | [Discord](discord.md) | Mit deinen Bots über Discord sprechen. |
 | [Kalender](calendar.md) | Bots lesen und erstellen Termine in einem CalDAV-Kalender. |
-| [Home Assistant](home-assistant.md) | Bots lesen und steuern Geräte im Haus. |
+| [Home Assistant](home-assistant.md) | In der App einrichten, damit Bots Geräte im Haus lesen und steuern. |
 | [Computersteuerung](computer-use.md) | Bots benutzen Apps auf deinem eigenen Windows-PC. |
 | [Alte Backups wiederherstellen](backup-and-restore.md) | Ältere, unverschlüsselte Backups. |
 | [Verbindung testen](connection-test.md) | Mit einem Klick sehen, ob Schlüssel und App-Verbindungen funktionieren. |

@@ -63,6 +63,13 @@ yapar** sayılır.
 Composio kartından oturumu kapatırsan botların Composio uygulamalarına erişimi
 duraklar. Uygulama ayarları ve hangi botların erişebildiği saklanır.
 
+## Home Assistant
+
+Ana görünümdeki **Home Assistant** kartı akıllı evini dosya düzenlemeden kurar: adres, uzun ömürlü erişim anahtarı,
+**Kaydet ve test et**, hangi botların kullanabileceği ve hangi servislerin kart çıkmadan çalışabileceği.
+Bkz. [Home Assistant](home-assistant.md). (Aşağıdaki katalogdaki **Home Assistant** MCP sunucusu ayrı,
+isteğe bağlı bir bağlantıdır.)
+
 ## MCP sunucuları
 
 Doğrudan ve kendin yönettiğin bağlantılar için üst çubukta **MCP sunucuları**'na tıkla:
