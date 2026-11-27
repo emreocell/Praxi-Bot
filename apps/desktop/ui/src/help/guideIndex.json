@@ -34,6 +34,7 @@
       "Connect Composio once",
       "Connect and manage an app",
       "What asks before it runs",
+      "Home Assistant",
       "MCP servers",
       "MCP server status",
       "Managing connections and signing out",
@@ -209,6 +210,7 @@
       "bot grants",
       "bot schedules",
       "bot email",
+      "bot ha",
       "bot providers",
       "bot catalog",
       "bot secrets",
@@ -427,9 +429,11 @@
     "doc": "home-assistant.md",
     "title": "Home Assistant",
     "headings": [
-      "Set it up",
-      "Tools",
-      "Safety"
+      "Set it up in the app",
+      "From the command line",
+      "Tools and what asks",
+      "Safety",
+      "By hand (headless hosts)"
     ],
     "summary": "Bots can read your Home Assistant entities and call services (turn a light on,"
   },

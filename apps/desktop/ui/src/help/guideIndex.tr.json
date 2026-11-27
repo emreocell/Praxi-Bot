@@ -33,6 +33,7 @@
       "Composio hesabını bağla",
       "Uygulamayı bağla ve yönet",
       "Hangi işlem çalışmadan önce sorar",
+      "Home Assistant",
       "MCP sunucuları",
       "MCP sunucusunun durumu",
       "Bağlantıları yönetmek ve oturumu kapatmak",
@@ -205,6 +206,7 @@
       "bot grants",
       "bot schedules",
       "bot email",
+      "bot ha",
       "bot providers",
       "bot catalog",
       "bot secrets",
@@ -422,9 +424,11 @@
     "doc": "tr/home-assistant.md",
     "title": "Home Assistant",
     "headings": [
-      "Kurulum",
-      "Araçlar",
-      "Güvenlik"
+      "Uygulamadan kurulum",
+      "Komut satırından",
+      "Araçlar ve neler sorar",
+      "Güvenlik",
+      "Elle (ekransız sunucular)"
     ],
     "summary": "Botlar Home Assistant varlıklarını okuyabilir ve servisleri çağırabilir (ışığı açmak, termostatı ayarlamak gibi)."
   },
