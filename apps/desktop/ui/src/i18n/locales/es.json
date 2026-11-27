@@ -3446,6 +3446,10 @@
         "hint": "Elige una de las opciones de la lista y guarda de nuevo.",
         "title": "Esa configuración del motor no es válida"
       },
+      "bad_homeassistant_config": {
+        "hint": "Revisa la dirección y la clave de acceso e inténtalo de nuevo.",
+        "title": "La configuración de Home Assistant no es válida"
+      },
       "bad_mcp_config": {
         "hint": "Revisa el comando o la dirección y vuelve a intentarlo.",
         "title": "La configuración del servidor no es válida"

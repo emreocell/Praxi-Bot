@@ -179,9 +179,11 @@
     "doc": "de/home-assistant.md",
     "title": "Home Assistant",
     "headings": [
-      "Einrichten",
-      "Werkzeuge",
-      "Sicherheit"
+      "In der App einrichten",
+      "Auf der Kommandozeile",
+      "Werkzeuge und was nachfragt",
+      "Sicherheit",
+      "Von Hand (Hosts ohne Bildschirm)"
     ],
     "summary": "Bots können deine Home-Assistant-Entitäten lesen und Dienste aufrufen (ein Licht einschalten, einen Thermostat"
   },

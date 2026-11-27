@@ -3446,6 +3446,10 @@
         "hint": "Wähle eine der Optionen in der Liste und speichere erneut.",
         "title": "Diese Engine-Einstellung ist ungültig"
       },
+      "bad_homeassistant_config": {
+        "hint": "Prüfe die Adresse und den Zugriffsschlüssel und versuche es erneut.",
+        "title": "Die Home-Assistant-Einstellungen sind nicht gültig"
+      },
       "bad_mcp_config": {
         "hint": "Prüfe den Befehl oder die Adresse und versuche es erneut.",
         "title": "Die Servereinstellungen sind ungültig"

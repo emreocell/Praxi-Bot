@@ -1032,6 +1032,48 @@
       "productivity": "Verimlilik",
       "social": "Sosyal"
     },
+    "homeAssistant": {
+      "access": {
+        "all": "Tüm botlar",
+        "nobody": "En az bir bot seçmezsen hiçbir bot Home Assistant'ı kullanamaz.",
+        "save": "Erişimi kaydet",
+        "saved": "Home Assistant erişimi kaydedildi.",
+        "some": "Yalnızca bu botlar",
+        "title": "Home Assistant'ı kimler kullanabilir",
+        "warning": "Yenileri dahil her bot evini okuyabilir ve cihazları açıp kapatabilir."
+      },
+      "addressHint": "Home Assistant'ı açtığın adres, örneğin http://homeassistant.local:8123. Botların yalnızca bu adresle konuşur.",
+      "addressLabel": "Home Assistant adresi",
+      "checking": "Kontrol ediliyor...",
+      "description": "Botların akıllı evini okuyabilsin, cihazları açıp kapatabilsin.",
+      "loadError": "Home Assistant yüklenemedi ({{message}}).",
+      "remove": "Kaldır",
+      "removeConfirm": "Home Assistant'ı kaldır",
+      "removeHint": "Kayıtlı anahtar silinir ve botların Home Assistant'a erişemez.",
+      "riskNote": "Evini okumak, seçtiğin botlar için her zaman serbesttir. Bir şeyi açıp kapatmak ise her botun erişim düzeyine bağlıdır.",
+      "saveAndTest": "Kaydet ve test et",
+      "servicesHint": "Sıradan cihazlar (ışıklar, anahtarlar, iklim, medya oynatıcılar) her botun erişim düzeyini izler. Kilitler, alarmlar, garaj kapıları ve panjurlar, betikler ve sahneler gibi geri kalan her şey, düzey ne olursa olsun her zaman sana sorar. Bir servis için sormasını istemiyorsan buraya satır satır domain.servis biçiminde yaz. O zaman her cihazda sormadan çalışır.",
+      "servicesInvalid": "Her servisi domain.servis biçiminde yaz, örneğin cover.open_cover. Geçersiz: {{names}}.",
+      "servicesLabel": "Sormadan izin verilen servisler",
+      "servicesPlaceholder": "cover.open_cover",
+      "status": {
+        "off": "Kurulmadı",
+        "on": "Bağlı"
+      },
+      "test": "Bağlantıyı test et",
+      "testFailed": "Bağlanılamadı: {{error}}",
+      "testOk": "Bağlandı. Home Assistant'ta {{count}} varlık var.",
+      "testOk_one": "Bağlandı. Home Assistant'ta {{count}} varlık var.",
+      "title": "Home Assistant",
+      "toast": {
+        "removed": "Home Assistant kaldırıldı.",
+        "saved": "Home Assistant kuruldu ({{count}} varlık)",
+        "saved_one": "Home Assistant kuruldu ({{count}} varlık)"
+      },
+      "tokenHint": "Home Assistant'ta profilini aç, Güvenlik'i seç ve Uzun ömürlü erişim bölümünde bir anahtar oluştur. Güvenli depoda saklanır ve bir daha gösterilmez.",
+      "tokenLabel": "Uzun ömürlü erişim anahtarı",
+      "tokenStored": "Bir anahtar kayıtlı. Aynı kalsın istiyorsan boş bırak."
+    },
     "loading": "Katalog yükleniyor…",
     "localSection": "Bu bilgisayarda",
     "manage": "Yönet",
@@ -3531,6 +3573,10 @@
       "bad_engine": {
         "hint": "Listeden bir seçenek seçip yeniden kaydet.",
         "title": "Bu motor ayarı geçerli değil"
+      },
+      "bad_homeassistant_config": {
+        "hint": "Adresi ve erişim anahtarını kontrol edip yeniden dene.",
+        "title": "Home Assistant ayarları geçerli değil"
       },
       "bad_mcp_config": {
         "hint": "Komutu ya da adresi kontrol edip yeniden dene.",

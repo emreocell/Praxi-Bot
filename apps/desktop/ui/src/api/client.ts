@@ -202,6 +202,11 @@ import type {
   CalendarAccountInput,
   CalendarTestInput,
   CalendarTestReport,
+  HomeAssistantInput,
+  HomeAssistantSaved,
+  HomeAssistantSettings,
+  HomeAssistantTestInput,
+  HomeAssistantTestReport,
   WebSearchConfig,
   WebSearchConfigInput,
   WebSearchTestInput,
@@ -2043,6 +2048,30 @@ export class ApiClient {
   /** Try a saved account (`name`) or an unsaved login; lists its calendars. */
   testCalendar(input: CalendarTestInput): Promise<CalendarTestReport> {
     return this.request("POST", "/calendar/test", { body: input });
+  }
+
+  /** Home Assistant: owner-only. The address, whether a token is stored, the allowed services, the bots. */
+  getHomeAssistant(): Promise<HomeAssistantSettings> {
+    return this.request("GET", "/homeassistant");
+  }
+
+  /** Checks the hub first and saves only if it accepts. The `token` is write-only; omitted keeps the stored one. */
+  saveHomeAssistant(input: HomeAssistantInput): Promise<HomeAssistantSaved> {
+    return this.request("PUT", "/homeassistant", { body: input });
+  }
+
+  /** `null` = every bot, an empty list = none. */
+  setHomeAssistantBots(bots: string[] | null): Promise<HomeAssistantSettings> {
+    return this.request("PUT", "/homeassistant/bots", { body: { bots } });
+  }
+
+  removeHomeAssistant(): Promise<void> {
+    return this.request("DELETE", "/homeassistant");
+  }
+
+  /** The saved hub (empty input), or an address and token that are not saved yet. */
+  testHomeAssistant(input: HomeAssistantTestInput = {}): Promise<HomeAssistantTestReport> {
+    return this.request("POST", "/homeassistant/test", { body: input });
   }
 
   getWebSearch(): Promise<WebSearchConfig> {

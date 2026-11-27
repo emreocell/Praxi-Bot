@@ -57,6 +57,9 @@ import type {
   CalendarAccount,
   CalendarAccountInput,
   CalendarTestInput,
+  HomeAssistantInput,
+  HomeAssistantSettings,
+  HomeAssistantTestInput,
   WebSearchConfig,
   WebSearchConfigInput,
   WebSearchTestInput,
@@ -2947,6 +2950,11 @@ export class MockApiClient extends ApiClient {
       case "PUT /calendar":
       case "DELETE /calendar":
         return ok(this.calendar(method, seg, opts.body));
+      case "GET /homeassistant":
+      case "PUT /homeassistant":
+      case "POST /homeassistant":
+      case "DELETE /homeassistant":
+        return ok(this.homeAssistantRoute(method, seg, opts.body));
       default:
         throw new ApiError(404, "not_found", `mock: ${method} ${path}`);
     }
@@ -3494,6 +3502,58 @@ export class MockApiClient extends ApiClient {
     };
     this.calendarAccounts[at] = next;
     return structuredClone(next);
+  }
+
+  private homeAssistant: (HomeAssistantSettings & { token: string }) | null = null;
+
+  private homeAssistantRoute(method: string, seg: string[], body: unknown): unknown {
+    const [, sub] = seg;
+    const view = (): HomeAssistantSettings =>
+      this.homeAssistant
+        ? { configured: true, url: this.homeAssistant.url, token_set: true, trusted_services: [...this.homeAssistant.trusted_services], bots: this.homeAssistant.bots ? [...this.homeAssistant.bots] : null }
+        : { configured: false, url: null, token_set: false, trusted_services: [], bots: null };
+    if (sub === "test" && method === "POST") {
+      const input = (body ?? {}) as HomeAssistantTestInput;
+      if (!input.url && !input.token) {
+        if (!this.homeAssistant) throw new ApiError(404, "not_found", "Home Assistant is not set up");
+        return { ok: true, entities: 42, error: null };
+      }
+      if (!input.url || !input.token) {
+        throw new ApiError(422, "bad_homeassistant_config", "give the address and the access key together");
+      }
+      return input.token === "wrong"
+        ? { ok: false, entities: null, error: "Home Assistant refused the access key. Create a new long-lived access key in your Home Assistant profile (Security) and try again." }
+        : { ok: true, entities: 42, error: null };
+    }
+    if (sub === "bots" && method === "PUT") {
+      if (!this.homeAssistant) throw new ApiError(404, "not_found", "Home Assistant is not set up");
+      this.homeAssistant.bots = ((body ?? {}) as { bots: string[] | null }).bots;
+      return view();
+    }
+    if (method === "PUT") {
+      const input = (body ?? {}) as HomeAssistantInput;
+      if (input.token === "wrong") {
+        throw new ApiError(422, "bad_homeassistant_config", "Home Assistant refused the access key. Create a new long-lived access key in your Home Assistant profile (Security) and try again.");
+      }
+      if (!input.token && (!this.homeAssistant || this.homeAssistant.url !== input.url)) {
+        throw new ApiError(422, "bad_homeassistant_config", "an access key is needed");
+      }
+      this.homeAssistant = {
+        configured: true,
+        url: input.url,
+        token_set: true,
+        token: input.token ?? this.homeAssistant?.token ?? "",
+        trusted_services: input.trusted_services ?? [],
+        bots: this.homeAssistant?.bots ?? null
+      };
+      return { settings: view(), entities: 42 };
+    }
+    if (method === "DELETE") {
+      if (!this.homeAssistant) throw new ApiError(404, "not_found", "Home Assistant is not set up");
+      this.homeAssistant = null;
+      return undefined;
+    }
+    return view();
   }
 
   private web(method: string, seg: string[], body: unknown): unknown {

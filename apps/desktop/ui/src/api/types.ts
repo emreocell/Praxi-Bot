@@ -543,6 +543,14 @@ export type CalendarTestInput = S["CalendarTestInput"];
 export type CalendarTestReport = S["CalendarTestReport"];
 export type CalendarFound = S["CalendarFoundDto"];
 
+// ---- Home Assistant (`/v1/homeassistant*`) ---------------------------------
+
+export type HomeAssistantSettings = S["HomeAssistantDto"];
+export type HomeAssistantInput = S["HomeAssistantInput"];
+export type HomeAssistantSaved = S["HomeAssistantSaved"];
+export type HomeAssistantTestInput = S["HomeAssistantTestInput"];
+export type HomeAssistantTestReport = S["HomeAssistantTestReport"];
+
 // ---- E-mail accounts (`/v1/email/*`) ---------------------------------------
 
 export type EmailAccount = S["EmailAccountDto"];

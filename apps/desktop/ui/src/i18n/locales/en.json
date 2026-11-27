@@ -1032,6 +1032,48 @@
       "productivity": "Productivity",
       "social": "Social"
     },
+    "homeAssistant": {
+      "access": {
+        "all": "All bots",
+        "nobody": "No bot can use Home Assistant until you tick at least one.",
+        "save": "Save access",
+        "saved": "Access to Home Assistant saved.",
+        "some": "Only these bots",
+        "title": "Who can use Home Assistant",
+        "warning": "Every bot, including new ones, can read your home and switch things."
+      },
+      "addressHint": "The address you open Home Assistant at, for example http://homeassistant.local:8123. Your bots talk to this address and nowhere else.",
+      "addressLabel": "Address of Home Assistant",
+      "checking": "Checking...",
+      "description": "Let your bots read your smart home and switch things on and off.",
+      "loadError": "Could not load Home Assistant ({{message}}).",
+      "remove": "Remove",
+      "removeConfirm": "Remove Home Assistant",
+      "removeHint": "This deletes the stored key, and your bots lose access to Home Assistant.",
+      "riskNote": "Reading your home is always allowed for the bots you choose. Switching things follows each bot's access level.",
+      "saveAndTest": "Save and test",
+      "servicesHint": "Plain devices (lights, switches, climate, media players) follow each bot's access level. Everything else, such as locks, alarms, garage doors and covers, scripts and scenes, always asks you first, whatever the level is. List a service here, one per line as domain.service, to stop asking for it. It then runs without asking on every device.",
+      "servicesInvalid": "Write each service as domain.service, for example cover.open_cover. Not valid: {{names}}.",
+      "servicesLabel": "Services allowed without asking",
+      "servicesPlaceholder": "cover.open_cover",
+      "status": {
+        "off": "Not set up",
+        "on": "Connected"
+      },
+      "test": "Test connection",
+      "testFailed": "Could not connect: {{error}}",
+      "testOk": "Connected. Home Assistant has {{count}} entities.",
+      "testOk_one": "Connected. Home Assistant has {{count}} entity.",
+      "title": "Home Assistant",
+      "toast": {
+        "removed": "Home Assistant was removed.",
+        "saved": "Home Assistant is set up ({{count}} entities)",
+        "saved_one": "Home Assistant is set up ({{count}} entity)"
+      },
+      "tokenHint": "Create one in Home Assistant: open your profile, choose Security and, under Long-lived access, create a key. It is kept in the secure store and is never shown again.",
+      "tokenLabel": "Long-lived access key",
+      "tokenStored": "A key is stored. Leave this empty to keep it."
+    },
     "loading": "Loading catalog…",
     "localSection": "On this computer",
     "manage": "Manage",
@@ -3531,6 +3573,10 @@
       "bad_engine": {
         "hint": "Pick one of the options in the list and save again.",
         "title": "That engine setting is not valid"
+      },
+      "bad_homeassistant_config": {
+        "hint": "Check the address and the access key, then try again.",
+        "title": "The Home Assistant settings are not valid"
       },
       "bad_mcp_config": {
         "hint": "Check the command or address and try again.",

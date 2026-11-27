@@ -2844,6 +2844,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/homeassistant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The saved Home Assistant setup: the address, whether a token is stored (never the token), the
+         *     owner's list of services bots may call without a card, and which bots may use it. Owner only.
+         */
+        get: operations["get_homeassistant"];
+        /**
+         * Check the hub (`GET /api/`, then count its entities), and only then save it. The `token` goes to
+         *     the secret store (never to `homeassistant.toml`, never returned). Takes effect for the next
+         *     tool call, no restart needed. Without `token` the stored one is kept, but only when the address
+         *     is unchanged. Owner only.
+         */
+        put: operations["put_homeassistant"];
+        post?: never;
+        /**
+         * Remove the setup and its stored token. The `ha_*` tools disappear from every bot at once.
+         *     Owner only.
+         */
+        delete: operations["delete_homeassistant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/homeassistant/bots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Choose which bots may use Home Assistant. `bots: null` = every bot, `[]` = none. Owner only. */
+        put: operations["put_homeassistant_bots"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/homeassistant/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try the saved hub (an empty body), or an address and token that are not saved yet (`url` and
+         *     `token`), and count its entities. A hub that cannot be reached or refuses the token answers `200`
+         *     with `ok: false` and a plain message. The daemon only ever dials the address given here or the
+         *     saved one. At most two connection tests run at once (`429`). Owner only.
+         */
+        post: operations["test_homeassistant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/host": {
         parameters: {
             query?: never;
@@ -8344,6 +8413,82 @@ export interface components {
             status: string;
             /** Format: int32 */
             step_index: number;
+        };
+        /** @description Body of `PUT /v1/homeassistant/bots`. */
+        HomeAssistantBotsInput: {
+            /**
+             * @description The bots that may use Home Assistant; `null` = every bot, an empty list = none.
+             *     The field must be present: an empty body or a misspelled name is refused instead of
+             *     silently granting every bot.
+             */
+            bots: string[] | null;
+        };
+        /** @description The saved Home Assistant setup (non-secret fields only). */
+        HomeAssistantDto: {
+            /** @description The bots that may use Home Assistant; `null` = every bot, an empty list = none. */
+            bots?: string[] | null;
+            /** @description Whether a hub is set up at all. */
+            configured: boolean;
+            /** @description Whether an access token is stored (never returned). */
+            token_set: boolean;
+            /**
+             * @description Services (`cover.open_cover`) bots may call without a card even though they open,
+             *     unlock or disarm something.
+             */
+            trusted_services: string[];
+            /** @description Address of the hub (`null` when not set up). */
+            url?: string | null;
+        };
+        /**
+         * @description Body of `PUT /v1/homeassistant`: the address and token are checked against the hub before
+         *     anything is saved.
+         */
+        HomeAssistantInput: {
+            /**
+             * @description Long-lived access token, **write-only**. Required the first time and whenever the address
+             *     changes; omitted otherwise it keeps the stored one.
+             */
+            token?: string | null;
+            /**
+             * @description Services bots may call without a card even though they open, unlock or disarm something:
+             *     exact `domain.service` names. Empty = none.
+             */
+            trusted_services?: string[];
+            /** @description Address of the hub, e.g. `http://homeassistant.local:8123`. */
+            url: string;
+        };
+        /** @description Result of `PUT /v1/homeassistant`. */
+        HomeAssistantSaved: {
+            /**
+             * Format: int32
+             * @description How many entities the hub reported when it was checked.
+             */
+            entities: number;
+            /** @description What is saved now. */
+            settings: components["schemas"]["HomeAssistantDto"];
+        };
+        /**
+         * @description Body of `POST /v1/homeassistant/test`: the saved hub (an empty body), or an address and
+         *     token that are not saved yet (`url` with `token`). Never a mix: the stored token is only
+         *     ever sent to the saved address.
+         */
+        HomeAssistantTestInput: {
+            /** @description Access token, **write-only**, used once. */
+            token?: string | null;
+            /** @description Address to try. */
+            url?: string | null;
+        };
+        /** @description Result of `POST /v1/homeassistant/test`. */
+        HomeAssistantTestReport: {
+            /**
+             * Format: int32
+             * @description How many entities the hub reports (`null` when the test failed).
+             */
+            entities?: number | null;
+            /** @description What went wrong, in plain words (`null` on success). */
+            error?: string | null;
+            /** @description `true` when the hub was reachable and accepted the token. */
+            ok: boolean;
         };
         /** @description `GET /v1/hosts/home`: the host adopted as the bots' home, if any. */
         HomeDto: {
@@ -20404,6 +20549,292 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    get_homeassistant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeAssistantDto"];
+                };
+            };
+            /** @description owner key required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Home Assistant setup is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_homeassistant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HomeAssistantInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeAssistantSaved"];
+                };
+            };
+            /** @description bad token or list */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description owner key required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid address, or the hub refused the token */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Home Assistant setup is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_homeassistant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description owner key required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Home Assistant is not set up */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Home Assistant setup is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_homeassistant_bots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HomeAssistantBotsInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeAssistantDto"];
+                };
+            };
+            /** @description too many bots */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description owner key required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Home Assistant is not set up */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Home Assistant setup is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_homeassistant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HomeAssistantTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeAssistantTestReport"];
+                };
+            };
+            /** @description bad token */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description owner key required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description nothing saved to test */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description an address needs a token, and the other way round */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Home Assistant setup is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

@@ -25,6 +25,7 @@ export const DAEMON_ERROR_CODES = [
   "bad_composio_request",
   "bad_email_config",
   "bad_engine",
+  "bad_homeassistant_config",
   "bad_mcp_config",
   "bad_profile",
   "bad_request",
