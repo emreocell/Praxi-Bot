@@ -176,6 +176,7 @@
       "Tur başına sınırlar",
       "Bildirimler ve onaylar",
       "Sohbetteki adım listesi",
+      "Bir adıma kim izin verdi",
       "Tanılama zaman çizelgesini kaydetmek"
     ],
     "summary": "Her konuşma, tek bir botla yapılan bir sohbettir. Sohbetler saklanır, yani sonra geri dönebilirsin. Bir mesaj bir çalışma başlatır (buna tur da denir): bot düşünür, araçları çağırır ve yanıtını akıta…"

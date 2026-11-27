@@ -2,6 +2,7 @@ import { Check, ChevronDown, ChevronRight, Globe, Loader2, Minus, X } from "luci
 import { type ReactNode, useEffect, useId, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { decisionLine } from "../lib/approvalProvenance";
 import { brandIcon } from "../lib/brandIcons";
 import { formatStamp, formatStepDuration, type MessageTimes } from "../lib/messageTime";
 import { type Chain, chainSeconds, type ChainStep } from "../lib/thinkingChain";
@@ -134,6 +135,8 @@ function ToolStep({ tool, times, live }: { tool: ToolItem; times: MessageTimes; 
   const decisionTime = decision && Number.isFinite(decision.offsetMs) && decision.offsetMs >= 0
     ? formatSpan(t, Math.floor(decision.offsetMs / 1000))
     : null;
+  const line = decisionLine(tool, decisionTime, (key) => t(key));
+  const decisionText = line ? t(line.key, line.values) : null;
   const site = label.chips.find((c) => c.icon === "globe");
   const timeText =
     ms !== undefined && showStepDuration(ms, state)
@@ -163,9 +166,9 @@ function ToolStep({ tool, times, live }: { tool: ToolItem; times: MessageTimes; 
             </span>
           ))
         )}
-        {decision && decisionTime !== null ? (
+        {decisionText ? (
           <span className={styles.allowed} data-testid="step-allowed">
-            {t(decision.outcome === "approved" ? "chat.chain.approvedAt" : "chat.chain.deniedAt", { time: decisionTime })}
+            {decisionText}
           </span>
         ) : null}
         {reasonText && !open ? (

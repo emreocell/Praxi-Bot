@@ -272,3 +272,68 @@ async fn a_local_address_asks_even_in_a_clean_run_and_a_grant_never_covers_it() 
     assert_eq!(after.details.as_ref().unwrap()["host"], "attacker.example");
     lp.cancel(run).unwrap();
 }
+
+/// "Allow for this task" covers the next call of the tool, and the journal says that is why:
+/// a remembered choice scoped to the task. An MCP server picks its tool names, so the rule
+/// carries only its scope, never the name. Both levels: on Full the grant replaces the
+/// untrusted-content gate's card, on the Asking level it replaces a plain policy ask as well.
+#[tokio::test]
+async fn a_task_grant_says_so_in_the_journal() {
+    use protocol::event::{AutonomyLevel, GrantedBy};
+    let ask = "[permissions]\npreset = \"read-and-draft\"\n";
+    for (extra, policy, level) in [
+        ("", Policy::full(), AutonomyLevel::Full),
+        (ask, Policy::approve_destructive(), AutonomyLevel::Ask),
+    ] {
+        let env = setup();
+        let page = page_tool("mcp:pw/browser_snapshot");
+        let crm = generic_mcp("mcp:crm/update");
+        let fake = Fake::new(vec![
+            use_tool("c1", "mcp:pw/browser_snapshot", &json!({})),
+            use_tool("c2", "mcp:crm/update", &json!({"id": 1})),
+            use_tool("c3", "mcp:crm/update", &json!({"id": 2})),
+            text("done"),
+        ]);
+        let lp = make_loop(
+            &env.storage,
+            env.bot,
+            &fake,
+            &[t(&page), t(&crm)],
+            profile(extra),
+            cfg(policy),
+        );
+        let mut rx = lp.subscribe();
+        let run = lp.run_turn(env.chat, "update the crm").unwrap();
+        let mut granted = Vec::new();
+        loop {
+            let event = until(&mut rx, |e| {
+                if let Event::ToolCallApproved(a) = e {
+                    granted.push((a.granted_by, a.level, a.rule_id.clone()));
+                }
+                matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+            })
+            .await;
+            let Event::ApprovalNeeded(card) = event else {
+                break;
+            };
+            let scope = if card.tool_name == "mcp:crm/update" {
+                ApprovalScope::RunTool
+            } else {
+                ApprovalScope::Once
+            };
+            lp.approve(card.call_id, scope, env.user).unwrap();
+        }
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+        assert_eq!(crm.count.load(Ordering::SeqCst), 2);
+        // The first update was answered on its card; the second ran on the task grant.
+        let owner = (Some(GrantedBy::OwnerCard), Some(level), None);
+        let remembered = (
+            Some(GrantedBy::RememberedChoice),
+            Some(level),
+            Some("task".to_owned()),
+        );
+        assert_eq!(granted.last(), Some(&remembered), "{level:?}: {granted:?}");
+        assert_eq!(granted.iter().filter(|g| **g == remembered).count(), 1);
+        assert!(granted.contains(&owner), "{level:?}: {granted:?}");
+    }
+}

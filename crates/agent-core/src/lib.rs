@@ -59,6 +59,8 @@ mod account_register_tests;
 #[cfg(test)]
 mod approval_expiry_tests;
 #[cfg(test)]
+mod approval_provenance_tests;
+#[cfg(test)]
 mod auto_continue_tests;
 #[cfg(test)]
 mod automation_author_tests;

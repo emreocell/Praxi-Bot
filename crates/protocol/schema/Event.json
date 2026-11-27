@@ -164,7 +164,7 @@
       }
     },
     {
-      "description": "The user approved a pending tool call.",
+      "description": "A pending tool call was allowed to run: the owner approved its card, or an automatic rule did the owner's part (see [`GrantedBy`]).\n\nThe three provenance fields are additive. An event recorded before they existed has none of them and always meant an answered card, but it does not say so: readers show it as an approval of unknown provenance.",
       "type": "object",
       "required": [
         "approved_by",
@@ -174,12 +174,42 @@
       ],
       "properties": {
         "approved_by": {
+          "description": "The owner who answered the card; for an automatic grant, the user the run belongs to (nobody answered).",
           "type": "string",
           "format": "uuid"
         },
         "call_id": {
           "type": "string",
           "format": "uuid"
+        },
+        "granted_by": {
+          "description": "What granted the call.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GrantedBy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "level": {
+          "description": "The bot's permission level when the call was decided.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutonomyLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rule_id": {
+          "description": "The remembered rule that covered the call, as `<scope>:<name>` with scope `chat`, `always`, `category` or `task` and `name` a tool or category name. Never a path, address, command or other text of the call.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "run_id": {
           "type": "string",
@@ -878,6 +908,15 @@
     }
   ],
   "definitions": {
+    "AutonomyLevel": {
+      "description": "The permission level the bot was on when the call was decided.",
+      "type": "string",
+      "enum": [
+        "ask",
+        "balanced",
+        "full"
+      ]
+    },
     "ControlRect": {
       "description": "A rectangle in global physical screen pixels.",
       "type": "object",
@@ -905,6 +944,67 @@
           "format": "double"
         }
       }
+    },
+    "GrantedBy": {
+      "description": "What let a tool call run: who or which rule answered the question that would otherwise have been a card. A closed set of daemon facts; nothing a page, a mail or a tool result says can reach it.",
+      "oneOf": [
+        {
+          "description": "The owner answered an approval card for this very call.",
+          "type": "string",
+          "enum": [
+            "owner_card"
+          ]
+        },
+        {
+          "description": "The Full level let the call through without a card, in a run the owner started.",
+          "type": "string",
+          "enum": [
+            "full_access"
+          ]
+        },
+        {
+          "description": "The Full level let the call through in a run started by a schedule, rule, webhook or mail the owner set up.",
+          "type": "string",
+          "enum": [
+            "owner_schedule"
+          ]
+        },
+        {
+          "description": "The Full level let the call through in an unattended session of the owner's mission.",
+          "type": "string",
+          "enum": [
+            "owner_mission"
+          ]
+        },
+        {
+          "description": "The Balanced level's lane let the call through.",
+          "type": "string",
+          "enum": [
+            "balanced_level"
+          ]
+        },
+        {
+          "description": "An owner-created standing grant covered exactly this call.",
+          "type": "string",
+          "enum": [
+            "standing_grant"
+          ]
+        },
+        {
+          "description": "A choice the owner made earlier on a card (\"this chat\", \"always\", \"for this task\") covered the call; `rule_id` names it.",
+          "type": "string",
+          "enum": [
+            "remembered_choice"
+          ]
+        },
+        {
+          "description": "The owner's own per-site or per-app allow rule covered the call.",
+          "type": "string",
+          "enum": [
+            "site_rule"
+          ]
+        }
+      ]
     },
     "HandoverKind": {
       "description": "What the owner is asked to do on a [`HandoverRequested`] card.",

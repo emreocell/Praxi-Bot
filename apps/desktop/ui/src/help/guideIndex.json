@@ -179,6 +179,7 @@
       "Limits per turn",
       "Notifications and approvals",
       "The step list in the chat",
+      "Who allowed a step",
       "Save a diagnostic timeline"
     ],
     "summary": "Every conversation is a chat with one bot. Chats are kept, so you can come"

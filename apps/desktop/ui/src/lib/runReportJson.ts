@@ -1,4 +1,4 @@
-import type { RunState, ToolItem, ToolStatus } from "../state/timeline.ts";
+import type { GrantedBy, GrantLevel, RunState, ToolItem, ToolStatus } from "../state/timeline.ts";
 import { isDiscoveryTool } from "./toolLabels.ts";
 
 type StepOutcome = ToolStatus | "answered" | "unanswered" | "stored" | "cancelled" | null;
@@ -14,9 +14,20 @@ interface ExportStep {
 
 type ApprovalEvent = { step_id: string; offset_ms: number | null } & (
   | { kind: "waiting_for_approval"; outcome: null }
-  | { kind: "approval_recorded"; outcome: "approved" | "denied" }
+  | ({ kind: "approval_recorded"; outcome: "approved" | "denied" } & Provenance)
   | { kind: "tool_outcome"; outcome: "done" | "error" }
 );
+
+/**
+ * What let an approved call run, from the daemon's own `granted_by` / `level` / `rule_id`. Each
+ * field is `null` when the daemon did not say (an approval recorded before version 4, or a
+ * denial). `rule` is the scope and tool or category name of a remembered rule, never call text.
+ */
+interface Provenance {
+  granted_by: GrantedBy | null;
+  level: GrantLevel | null;
+  rule: string | null;
+}
 
 const toolStatuses = new Set<ToolStatus>([
   "requested", "awaiting_approval", "running", "denied", "done", "error", "expired"
@@ -32,20 +43,25 @@ function appendApprovalEvents(
   stepId: string,
   startedMs: number
 ): void {
-  if (!item.gated) return;
+  const decision = item.approvalDecision;
+  // A call an automatic rule allowed has no card, but its recorded grant is still an approval.
+  if (!item.gated && !decision?.grant) return;
   const completionOffset = item.completedMs === undefined ? null : milliseconds(item.completedMs - startedMs);
 
   // Only an approval notice or a pending-card snapshot writes the summary. Export its presence, not its text.
   if (item.status === "awaiting_approval" || item.summary !== undefined) {
     events.push({ step_id: stepId, kind: "waiting_for_approval", offset_ms: null, outcome: null });
   }
-  const decision = item.approvalDecision;
   if (decision?.outcome === "approved" || decision?.outcome === "denied") {
+    const grant = decision.grant;
     events.push({
       step_id: stepId,
       kind: "approval_recorded",
       offset_ms: milliseconds(decision.offsetMs),
-      outcome: decision.outcome
+      outcome: decision.outcome,
+      granted_by: grant?.by ?? null,
+      level: grant?.level ?? null,
+      rule: grant?.rule ? (grant.rule.name ? `${grant.rule.scope}:${grant.rule.name}` : grant.rule.scope) : null
     });
   }
   if (item.status === "done" || item.status === "error") {
@@ -83,7 +99,7 @@ export function renderRunReportJson(run: RunState): string {
     : run.stopped ? "stopped"
       : run.error ? "failed" : "done";
   return JSON.stringify({
-    schema_version: 3,
+    schema_version: 4,
     outcome,
     duration_ms: run.finishedMs === undefined ? null : milliseconds(run.finishedMs - run.startedMs),
     steps,

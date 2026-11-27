@@ -90,10 +90,10 @@ test("exported report never contains private data (canary)", () => {
   assert.equal(report.steps.length, 5);
 });
 
-test("JSON schema v3 exposes only the documented run, step and approval-event fields", () => {
+test("JSON schema v4 exposes only the documented run, step and approval-event fields", () => {
   const json = renderRunReportJson(run());
   assert.deepEqual(JSON.parse(json), {
-    schema_version: 3,
+    schema_version: 4,
     outcome: "failed",
     duration_ms: 4000,
     steps: [
@@ -122,7 +122,7 @@ test("JSON leaves unrecorded timing and dependencies unknown", () => {
     }]
   }));
   assert.deepEqual(JSON.parse(json), {
-    schema_version: 3,
+    schema_version: 4,
     outcome: "unfinished",
     duration_ms: null,
     steps: [{
@@ -151,6 +151,8 @@ const denied: DaemonEvent = {
 const expiryReason = "expired: nobody answered in time";
 const policyDenyReason = "denied by policy";
 const pending = { step_id: "step-1", kind: "waiting_for_approval", offset_ms: null, outcome: null };
+// An approval recorded before the daemon said what granted it, and any denial: nothing is claimed.
+const unknownProvenance = { granted_by: null, level: null, rule: null };
 
 function exportRecordedEvents(events: DaemonEvent[], sequences?: number[]) {
   const state = events.reduce(
@@ -167,7 +169,7 @@ function exportRecordedEvents(events: DaemonEvent[], sequences?: number[]) {
 }
 
 test("JSON retains the recorded approval time after the same tool completes", () => {
-  const decision = { step_id: "step-1", kind: "approval_recorded", offset_ms: 300, outcome: "approved" };
+  const decision = { step_id: "step-1", kind: "approval_recorded", offset_ms: 300, outcome: "approved", ...unknownProvenance };
   assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved]), [pending, decision]);
   assert.deepEqual(exportRecordedEvents([started, requested, approved]), [{ ...decision, offset_ms: 200 }]);
   assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved, completed]), [
@@ -183,10 +185,57 @@ test("JSON does not apply an earlier decision to a reopened approval gate", () =
   assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved, waiting]), [pending]);
 });
 
+const granted = (extra: Record<string, unknown>): DaemonEvent =>
+  ({ ...approved, ...extra } as DaemonEvent);
+
+test("JSON v4 names what granted an approved call, from the daemon's fields only", () => {
+  const recorded = (extra: Record<string, unknown>, offset = 300) => ({
+    step_id: "step-1", kind: "approval_recorded", offset_ms: offset, outcome: "approved", ...extra
+  });
+  // An owner's card answer.
+  assert.deepEqual(
+    exportRecordedEvents([started, requested, waiting, granted({ granted_by: "owner_card", level: "ask" })]),
+    [pending, recorded({ granted_by: "owner_card", level: "ask", rule: null })]
+  );
+  // An automatic grant has no card: no waiting event, but the grant is recorded and the call's outcome follows.
+  assert.deepEqual(
+    exportRecordedEvents([started, requested, granted({ granted_by: "full_access", level: "full" }), completed]),
+    [
+      recorded({ granted_by: "full_access", level: "full", rule: null }, 200),
+      { step_id: "step-1", kind: "tool_outcome", offset_ms: 300, outcome: "done" }
+    ]
+  );
+  assert.deepEqual(
+    exportRecordedEvents([started, requested, granted({ granted_by: "remembered_choice", level: "balanced", rule_id: "always:shell_run" })]),
+    [recorded({ granted_by: "remembered_choice", level: "balanced", rule: "always:shell_run" }, 200)]
+  );
+  for (const by of ["owner_schedule", "owner_mission", "balanced_level", "standing_grant", "site_rule"]) {
+    assert.deepEqual(
+      exportRecordedEvents([started, requested, granted({ granted_by: by, level: "full" })]),
+      [recorded({ granted_by: by, level: "full", rule: null }, 200)]
+    );
+  }
+});
+
+test("JSON drops provenance it does not recognise or that does not look like a daemon id", () => {
+  const exported = (extra: Record<string, unknown>) =>
+    exportRecordedEvents([started, requested, granted(extra)]);
+  // A value from a newer daemon is unknown, not guessed.
+  assert.deepEqual(exported({ granted_by: "PRIVATE-NEW-KIND", level: "full" }), [
+    { step_id: "step-1", kind: "approval_recorded", offset_ms: 200, outcome: "approved", ...unknownProvenance }
+  ]);
+  // A level or rule id outside the closed shapes is dropped, so call text can never ride along.
+  for (const rule_id of [`always:${PRIVATE.input}`, "always:../../etc/passwd", "elsewhere:shell_run", `chat:${"x".repeat(65)}`, 7]) {
+    assert.deepEqual(exported({ granted_by: "remembered_choice", level: "PRIVATE-LEVEL", rule_id }), [
+      { step_id: "step-1", kind: "approval_recorded", offset_ms: 200, outcome: "approved", granted_by: "remembered_choice", level: null, rule: null }
+    ]);
+  }
+});
+
 test("JSON records a denial only after an observed gate and leaves reserved reasons ambiguous", () => {
   assert.deepEqual(exportRecordedEvents([started, requested, waiting, denied]), [
     pending,
-    { step_id: "step-1", kind: "approval_recorded", offset_ms: 300, outcome: "denied" },
+    { step_id: "step-1", kind: "approval_recorded", offset_ms: 300, outcome: "denied", ...unknownProvenance },
   ]);
   assert.deepEqual(exportRecordedEvents([started, requested, denied]), []);
   assert.deepEqual(exportRecordedEvents([started, requested, completed]), []);

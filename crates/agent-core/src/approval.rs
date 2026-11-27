@@ -13,7 +13,8 @@ use permission_engine::{
     Policy, balanced_lane, egress_must_ask, executes_must_ask,
 };
 use protocol::event::{
-    ApprovalNeeded, HandoverKind, QuestionAsked, ToolCallApproved, ToolCallDenied,
+    ApprovalNeeded, AutonomyLevel, GrantedBy, HandoverKind, QuestionAsked, ToolCallApproved,
+    ToolCallDenied,
 };
 use protocol::{BotId, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId};
 use serde_json::{Value, json};
@@ -61,6 +62,53 @@ impl Drop for ClosedGuard {
         if let Some(t) = self.tool.take() {
             t.approval_closed(&self.ctx, &self.input, self.token.as_deref());
         }
+    }
+}
+
+/// What let a call run without a card, as recorded on its `tool_call_approved` event.
+///
+/// Built only from daemon facts at the place the decision is made: the bot's level, the run's
+/// recorded initiator and message sources, and which rule covered the call. `rule_id` is
+/// `<scope>:<name>` with a registry tool name or a category name, never text of the call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Provenance {
+    pub granted_by: GrantedBy,
+    pub level: AutonomyLevel,
+    pub rule_id: Option<String>,
+}
+
+/// A decision with the reason code the audit log records and, when an automatic rule stood in
+/// for a card, the provenance the run journal records.
+pub(crate) struct Decided {
+    pub decision: Decision,
+    /// Audit code of an autonomy mode's allow.
+    pub reason: Option<&'static str>,
+    /// Set only when a card was replaced: a plain policy allow and the read shortcut ask no
+    /// question, so there is nothing to attribute.
+    pub grant: Option<Provenance>,
+}
+
+/// A rule id from a registry name: `<scope>:<name>`, or the bare scope when the name is not a
+/// plain identifier (an MCP server picks its tool names).
+pub(crate) fn rule_id(scope: &str, name: &str) -> String {
+    let plain = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'));
+    if plain {
+        format!("{scope}:{name}")
+    } else {
+        scope.to_owned()
+    }
+}
+
+/// The wire spelling of an autonomy mode.
+fn level_of_mode(mode: AutonomyMode) -> AutonomyLevel {
+    match mode {
+        AutonomyMode::Ask => AutonomyLevel::Ask,
+        AutonomyMode::Balanced => AutonomyLevel::Balanced,
+        AutonomyMode::Full => AutonomyLevel::Full,
     }
 }
 
@@ -408,6 +456,20 @@ impl Shared {
         input: &Value,
         target: Option<&ControlTarget>,
     ) -> (Decision, Option<&'static str>) {
+        let decided = self.decide_with_grant(ctx, name, effect, category, input, target);
+        (decided.decision, decided.reason)
+    }
+
+    /// [`Self::decide_with_reason`] plus who or what replaced the card ([`Provenance`]).
+    pub(crate) fn decide_with_grant(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        effect: Effect,
+        category: PermissionCategory,
+        input: &Value,
+        target: Option<&ControlTarget>,
+    ) -> Decided {
         // Taint is kept on the top-level run so subagents spawned after a
         // tainted replay inherit it and no per-child entry has to be cleaned up.
         let root = self.root_run_id(ctx);
@@ -430,27 +492,67 @@ impl Shared {
             self.router.tainted_runs.lock().insert(root);
         }
         let category = Self::money_category(name, effect, category, input);
+        let mut grant = None;
         let (decision, reason) =
-            self.decide_with_reason_inner(ctx, name, effect, category, input, target);
+            self.decide_with_reason_inner(ctx, name, effect, category, input, target, &mut grant);
         // An unreadable parent chain counts as tainted: ask, never allow.
         let tainted = root.is_none_or(|r| self.router.tainted_runs.lock().contains(&r));
         if tainted {
-            return if decision == Decision::Allow {
-                (Decision::ask(), None)
-            } else {
-                (decision, None)
+            return Decided {
+                decision: if decision == Decision::Allow {
+                    Decision::ask()
+                } else {
+                    decision
+                },
+                reason: None,
+                grant: None,
             };
         }
         // The Full level: the one place a plain ask becomes an allow for every call except the
         // ones that spend money. It sits after every deny, floor and workflow taint above.
         if decision.is_ask() && self.full_lane_allows(ctx, name, category, input, target, &decision)
         {
-            return (Decision::Allow, Some(FULL_POLICY_REASON));
+            return Decided {
+                decision: Decision::Allow,
+                reason: Some(FULL_POLICY_REASON),
+                grant: Some(self.full_provenance(ctx)),
+            };
         }
         let reason = reason.or_else(|| {
             (decision == Decision::Allow && self.full_access(ctx)).then_some(FULL_POLICY_REASON)
         });
-        (decision, reason)
+        Decided {
+            decision,
+            reason,
+            grant,
+        }
+    }
+
+    /// The level the call is decided under: Full also when the bot has no policy of its own and
+    /// the global preset is Full.
+    pub(crate) fn level_of(&self, ctx: &RunCtx) -> AutonomyLevel {
+        if self.full_access(ctx) {
+            AutonomyLevel::Full
+        } else {
+            level_of_mode(ctx.profile.permissions.mode())
+        }
+    }
+
+    /// Who the Full level's waiver served: the owner at the keyboard, an unattended session of
+    /// their mission, or else a schedule, rule, webhook or mail they set up.
+    fn full_provenance(&self, ctx: &RunCtx) -> Provenance {
+        let granted_by = if self.full_owner_started(ctx) {
+            GrantedBy::FullAccess
+        } else if self.mission_full_started(ctx) {
+            GrantedBy::OwnerMission
+        } else {
+            GrantedBy::OwnerSchedule
+        };
+        Provenance {
+            granted_by,
+            level: AutonomyLevel::Full,
+            rule_id: None,
+        }
     }
 
     /// The category a call is judged under: [`PermissionCategory::Money`] when the daemon
@@ -721,7 +823,9 @@ impl Shared {
         }
     }
 
-    #[allow(clippy::too_many_lines)] // One decision pipeline: deny floors, policy, gate, grants.
+    // One decision pipeline: deny floors, policy, gate, grants. `grant` is where it says which
+    // rule stood in for a card.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn decide_with_reason_inner(
         &self,
         ctx: &RunCtx,
@@ -730,6 +834,7 @@ impl Shared {
         category: PermissionCategory,
         input: &Value,
         target: Option<&ControlTarget>,
+        grant: &mut Option<Provenance>,
     ) -> (Decision, Option<&'static str>) {
         // Scoped admission allows only two active runs per credential. Until
         // child admission shares that counter, external agents cannot fan out.
@@ -830,6 +935,7 @@ impl Shared {
             }
         }
         let must_ask = self.gate_must_ask(ctx, name, input);
+        let gate_asked = must_ask;
         // Only a call that already has to ask can be covered, so the lookup is
         // skipped for every other call.
         let control_covered =
@@ -844,6 +950,12 @@ impl Shared {
         // decided below before it is looked at.
         let run_tool_covered = self.run_tool_covers(ctx, name, input);
         let must_ask = must_ask && !control_covered && !remembered && !run_tool_covered;
+        // The remembered choice that took the place of the untrusted-content gate's card.
+        let gate_rule = || Provenance {
+            granted_by: GrantedBy::RememberedChoice,
+            level: self.level_of(ctx),
+            rule_id: Some(rule_id(if remembered { "chat" } else { "task" }, name)),
+        };
         // The two-factor key and codes of the bot's OWN accounts: on the owner's Full level
         // nothing asks except money, so the always-ask test below is skipped for exactly these
         // two calls (the tools still refuse every account that is not this bot's own, and the
@@ -918,9 +1030,13 @@ impl Shared {
                     } else {
                         FULL_BROWSE_REASON
                     };
+                    *grant = Some(self.full_provenance(ctx));
                     return (Decision::Allow, Some(reason));
                 }
                 return (Decision::ask(), None);
+            }
+            if d == Decision::Allow && gate_asked && !must_ask {
+                *grant = Some(gate_rule());
             }
             return (d, None);
         }
@@ -943,10 +1059,8 @@ impl Shared {
         if must_ask {
             return (d, None);
         }
-        let granted = control_covered
-            || run_tool_covered
-            || profile_allows
-            || self.plain_granted(ctx, name, category, input);
+        let plain_rule = self.plain_grant_rule(ctx, name, category, input);
+        let granted = control_covered || run_tool_covered || profile_allows || plain_rule.is_some();
         if profile_allows
             && !control_covered
             && !run_tool_covered
@@ -961,13 +1075,35 @@ impl Shared {
                 self.cfg.read_tools_skip_ask
             };
         if granted || read_skip {
+            // The first rule that applies is the one named, in the order the checks above run.
+            if granted {
+                let (granted_by, rule) = if control_covered || run_tool_covered {
+                    (GrantedBy::RememberedChoice, Some(rule_id("task", name)))
+                } else if profile_allows {
+                    (GrantedBy::SiteRule, None)
+                } else {
+                    (GrantedBy::RememberedChoice, plain_rule)
+                };
+                *grant = Some(Provenance {
+                    granted_by,
+                    level: self.level_of(ctx),
+                    rule_id: rule,
+                });
+            }
             return (Decision::Allow, None);
         }
         // The autonomy mode's lane. It sits after every floor, the taint gate
         // and the grants, so it can only turn a plain policy-level ask into an
         // allow, never override one of those.
         match self.mode_lane(ctx, name, effect, category, input) {
-            Some(reason) => (Decision::Allow, Some(reason.code())),
+            Some(reason) => {
+                *grant = Some(Provenance {
+                    granted_by: GrantedBy::BalancedLevel,
+                    level: AutonomyLevel::Balanced,
+                    rule_id: None,
+                });
+                (Decision::Allow, Some(reason.code()))
+            }
             None => (d, None),
         }
     }
@@ -981,25 +1117,46 @@ impl Shared {
         category: PermissionCategory,
         input: &Value,
     ) -> bool {
+        self.plain_grant_rule(ctx, name, category, input).is_some()
+    }
+
+    /// The remembered rule that covers the call, as [`ToolCallApproved::rule_id`] spells it.
+    /// The first match wins, narrowest first: a target, this chat, then a persisted tool or
+    /// category rule.
+    fn plain_grant_rule(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        category: PermissionCategory,
+        input: &Value,
+    ) -> Option<String> {
         // A helper bot never inherits a standing, chat or scoped grant of
         // either bot: its approvals are once-only.
         if ctx.delegation().is_some() {
-            return false;
+            return None;
         }
-        self.scoped_covers(ctx, name, category, input) || {
-            let g = self.grants.lock();
-            g.this_chat.contains(&(
-                ctx.chat_id,
-                ctx.bot_id,
-                name.to_owned(),
-                ctx.tool_grant_scope(name, category),
-            )) || g.covers(
-                ctx.bot_id,
-                name,
-                category,
-                ctx.tool_grant_scope(name, category).as_deref(),
-            )
+        if let Some(scope) = self.scoped_rule(ctx, name, category, input) {
+            return Some(rule_id(scope, name));
         }
+        let computer = ctx.tool_grant_scope(name, category);
+        let g = self.grants.lock();
+        if g.this_chat
+            .contains(&(ctx.chat_id, ctx.bot_id, name.to_owned(), computer.clone()))
+        {
+            return Some(rule_id("chat", name));
+        }
+        g.covering(ctx.bot_id, name, category, computer.as_deref())
+            .map(|target| match target {
+                GrantTarget::Category(c) => rule_id(
+                    "category",
+                    serde_json::to_value(c)
+                        .ok()
+                        .as_ref()
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ),
+                _ => rule_id("always", name),
+            })
     }
 
     /// The run (or the top-level run of a subagent) was started by the owner
@@ -1095,6 +1252,23 @@ impl Shared {
         .await
     }
 
+    /// Journal that an automatic rule stood in for the card of `call_id`
+    /// ([`ToolCallApproved`] with the provenance; nobody answered, so `approved_by` is the
+    /// run's own user). Called once the call is committed to run.
+    pub(crate) fn emit_grant(&self, ctx: &RunCtx, call_id: ToolCallId, grant: Provenance) {
+        self.emit(
+            ctx,
+            Event::ToolCallApproved(ToolCallApproved {
+                run_id: ctx.run_id,
+                call_id,
+                approved_by: ctx.user_id,
+                granted_by: Some(grant.granted_by),
+                level: Some(grant.level),
+                rule_id: grant.rule_id,
+            }),
+        );
+    }
+
     /// Record that the autonomy mode, not an approval, let this call run: the
     /// reason code and the mode, so "why did it not ask?" has an answer.
     pub(crate) fn audit_auto_allow(
@@ -1125,21 +1299,22 @@ impl Shared {
         Ok(())
     }
 
-    /// A remembered rule (this chat, or persisted for this bot) covers this call's one target.
-    /// Never wider than the rule: a site, a folder or a command prefix, compared strictly.
-    fn scoped_covers(
+    /// A remembered rule (this chat, or persisted for this bot) covers this call's one target:
+    /// `"chat"` or `"always"`, the scope of the rule. Never wider than the rule: a site, a
+    /// folder or a command prefix, compared strictly.
+    fn scoped_rule(
         &self,
         ctx: &RunCtx,
         name: &str,
         category: PermissionCategory,
         input: &Value,
-    ) -> bool {
+    ) -> Option<&'static str> {
         let Derived::Scope(call) = scoped_grant::derive(name, input) else {
-            return false;
+            return None;
         };
         let computer = ctx.tool_grant_scope(name, category);
         let g = self.grants.lock();
-        g.this_chat_scoped
+        if g.this_chat_scoped
             .iter()
             .any(|(chat, bot, tool, rule, comp)| {
                 *chat == ctx.chat_id
@@ -1148,7 +1323,13 @@ impl Shared {
                     && *comp == computer
                     && rule.covers(&call)
             })
-            || g.covers_scoped(ctx.bot_id, name, &call, computer.as_deref())
+        {
+            Some("chat")
+        } else if g.covers_scoped(ctx.bot_id, name, &call, computer.as_deref()) {
+            Some("always")
+        } else {
+            None
+        }
     }
 
     /// A persisted rule names this navigation's origin.
@@ -4301,6 +4482,9 @@ impl ExecPermit {
                 run_id: self.ctx.run_id,
                 call_id: self.call_id,
                 approved_by: self.by,
+                granted_by: Some(GrantedBy::OwnerCard),
+                level: Some(self.sh.level_of(&self.ctx)),
+                rule_id: None,
             }),
         );
         self.closed.disarm();

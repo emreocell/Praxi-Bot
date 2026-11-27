@@ -559,7 +559,15 @@ fn collect(
             Event::ApprovalNeeded(a) => set(&mut calls, a.call_id, |c| {
                 "asked".clone_into(&mut c.decision);
             }),
-            Event::ToolCallApproved(a) => {
+            // An automatic grant (the Full lane, a remembered rule) is no one's answer: the call
+            // keeps counting as allowed. Only a card answer, or an event from before the daemon
+            // said what granted it, counts as approved.
+            Event::ToolCallApproved(a)
+                if matches!(
+                    a.granted_by,
+                    None | Some(protocol::event::GrantedBy::OwnerCard)
+                ) =>
+            {
                 set(&mut calls, a.call_id, |c| {
                     "approved".clone_into(&mut c.decision);
                 });

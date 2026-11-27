@@ -812,6 +812,7 @@ pub(crate) struct Grants {
 }
 
 impl Grants {
+    #[cfg(test)]
     pub fn covers(
         &self,
         bot: BotId,
@@ -819,16 +820,30 @@ impl Grants {
         category: PermissionCategory,
         computer: Option<&str>,
     ) -> bool {
-        self.always.iter().any(|g| {
-            !g.inert
-                && g.bot_id == bot
-                && g.computer.as_deref() == computer
-                && match &g.target {
-                    GrantTarget::Tool(t) => t == tool,
-                    GrantTarget::Category(c) => *c == category,
-                    GrantTarget::Scoped { .. } => false,
-                }
-        })
+        self.covering(bot, tool, category, computer).is_some()
+    }
+
+    /// The first persisted tool or category rule that covers the call.
+    pub fn covering(
+        &self,
+        bot: BotId,
+        tool: &str,
+        category: PermissionCategory,
+        computer: Option<&str>,
+    ) -> Option<&GrantTarget> {
+        self.always
+            .iter()
+            .find(|g| {
+                !g.inert
+                    && g.bot_id == bot
+                    && g.computer.as_deref() == computer
+                    && match &g.target {
+                        GrantTarget::Tool(t) => t == tool,
+                        GrantTarget::Category(c) => *c == category,
+                        GrantTarget::Scoped { .. } => false,
+                    }
+            })
+            .map(|g| &g.target)
     }
 
     /// A persisted rule for this tool whose target covers `call`.
@@ -2908,7 +2923,6 @@ fn needs_barrier(event: &Event) -> bool {
         Event::RunStarted(_)
             | Event::RunFinished(_)
             | Event::ApprovalNeeded(_)
-            | Event::ToolCallApproved(_)
             | Event::ToolCallDenied(_)
             | Event::QuestionAsked(_)
             | Event::SecretRequested(_)
@@ -2917,6 +2931,12 @@ fn needs_barrier(event: &Event) -> bool {
             | Event::SubagentStarted(_)
             | Event::SubagentFinished(_)
             | Event::Error(_)
+    ) || matches!(
+        event,
+        // An owner's answer is on disk before the tool runs; an automatic grant is a record of a
+        // decision no one waits for, so it is batched like the call's other events.
+        Event::ToolCallApproved(a)
+            if matches!(a.granted_by, None | Some(protocol::event::GrantedBy::OwnerCard))
     )
 }
 

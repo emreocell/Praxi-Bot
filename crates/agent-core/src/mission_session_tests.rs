@@ -1405,3 +1405,50 @@ async fn mission_tools_refuse_to_work_for_a_run_that_is_not_a_session() {
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert_eq!(w.store.progress(&w.mission).unwrap().done, 0);
 }
+
+/// An unattended session of the owner's mission gets the Full level's browsing waiver and says
+/// so: the journal names the mission, not the owner at the keyboard.
+#[tokio::test]
+async fn a_missions_waived_call_says_it_was_the_mission() {
+    let w = world(&["a.example"]);
+    owner_says(&w, "register me on https://good.example/");
+    let (mail, open) = (private_mail(), browser_open());
+    let fake = Fake::new(vec![
+        calls(&[("m", "mail_read", json!({"path": "inbox"}))]),
+        calls(&[(
+            "o",
+            "browser_open",
+            json!({"url": "https://good.example/signup?d=tail4242"}),
+        )]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &w.env.storage,
+        w.env.bot,
+        &fake,
+        &[t(&mail), t(&open)],
+        profile(FULL),
+        cfg(Policy::full()),
+    );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    lp.enable_missions(&w.store, &clock, None);
+    let mut rx = lp.subscribe();
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let mut granted = Vec::new();
+    while let Ok(item) = rx.try_recv() {
+        if let Event::ToolCallApproved(a) = item.envelope.event {
+            granted.push((a.granted_by, a.level, a.rule_id));
+        }
+    }
+    assert_eq!(
+        granted,
+        vec![(
+            Some(protocol::event::GrantedBy::OwnerMission),
+            Some(protocol::event::AutonomyLevel::Full),
+            None
+        )]
+    );
+}

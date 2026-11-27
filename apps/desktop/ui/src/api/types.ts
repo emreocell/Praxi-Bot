@@ -336,6 +336,12 @@ export type DaemonEvent =
       run_id: string;
       call_id: string;
       approved_by: string;
+      /** What granted the call (`GrantedBy` in crates/protocol); absent on events recorded before it existed. */
+      granted_by?: string;
+      /** The bot's permission level when the call was decided: `ask`, `balanced` or `full`. */
+      level?: string;
+      /** The remembered rule that covered the call, `<scope>:<name>`; never text of the call. */
+      rule_id?: string;
     }
   | {
       type: "tool_call_denied";

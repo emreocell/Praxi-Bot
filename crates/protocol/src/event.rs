@@ -66,12 +66,67 @@ pub struct ApprovalNeeded {
     pub details: Option<Value>,
 }
 
-/// The user approved a pending tool call.
+/// What let a tool call run: who or which rule answered the question that would
+/// otherwise have been a card. A closed set of daemon facts; nothing a page, a
+/// mail or a tool result says can reach it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantedBy {
+    /// The owner answered an approval card for this very call.
+    OwnerCard,
+    /// The Full level let the call through without a card, in a run the owner
+    /// started.
+    FullAccess,
+    /// The Full level let the call through in a run started by a schedule, rule,
+    /// webhook or mail the owner set up.
+    OwnerSchedule,
+    /// The Full level let the call through in an unattended session of the
+    /// owner's mission.
+    OwnerMission,
+    /// The Balanced level's lane let the call through.
+    BalancedLevel,
+    /// An owner-created standing grant covered exactly this call.
+    StandingGrant,
+    /// A choice the owner made earlier on a card ("this chat", "always",
+    /// "for this task") covered the call; `rule_id` names it.
+    RememberedChoice,
+    /// The owner's own per-site or per-app allow rule covered the call.
+    SiteRule,
+}
+
+/// The permission level the bot was on when the call was decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AutonomyLevel {
+    Ask,
+    Balanced,
+    Full,
+}
+
+/// A pending tool call was allowed to run: the owner approved its card, or an
+/// automatic rule did the owner's part (see [`GrantedBy`]).
+///
+/// The three provenance fields are additive. An event recorded before they
+/// existed has none of them and always meant an answered card, but it does not
+/// say so: readers show it as an approval of unknown provenance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolCallApproved {
     pub run_id: RunId,
     pub call_id: ToolCallId,
+    /// The owner who answered the card; for an automatic grant, the user the
+    /// run belongs to (nobody answered).
     pub approved_by: UserId,
+    /// What granted the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted_by: Option<GrantedBy>,
+    /// The bot's permission level when the call was decided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<AutonomyLevel>,
+    /// The remembered rule that covered the call, as `<scope>:<name>` with scope
+    /// `chat`, `always`, `category` or `task` and `name` a tool or category name.
+    /// Never a path, address, command or other text of the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
 }
 
 /// The user denied a pending tool call.
@@ -449,6 +504,29 @@ mod tests {
         });
         let v = serde_json::to_value(&ev).unwrap();
         assert_eq!(v["type"], "message_delta");
+    }
+
+    #[test]
+    fn approval_provenance_is_additive_and_old_event_round_trips_unchanged() {
+        let old = serde_json::json!({
+            "type": "tool_call_approved", "run_id": RunId::new(),
+            "call_id": ToolCallId::new(), "approved_by": UserId::new(),
+        });
+        let event: Event = serde_json::from_value(old.clone()).unwrap();
+        let Event::ToolCallApproved(a) = &event else {
+            panic!("not an approval");
+        };
+        assert_eq!(
+            (a.granted_by, a.level, a.rule_id.as_deref()),
+            (None, None, None)
+        );
+        assert_eq!(serde_json::to_value(&event).unwrap(), old);
+        let mut full = old;
+        full["granted_by"] = serde_json::json!("remembered_choice");
+        full["level"] = serde_json::json!("balanced");
+        full["rule_id"] = serde_json::json!("always:shell_run");
+        let event: Event = serde_json::from_value(full.clone()).unwrap();
+        assert_eq!(serde_json::to_value(event).unwrap(), full);
     }
 
     #[test]

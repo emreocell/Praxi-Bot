@@ -18,8 +18,8 @@ use futures::StreamExt;
 use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
 use protocol::event::{
-    MessageDelta, ModelFallback, RunError, TodoItem, TodoStatus, TodoUpdated, ToolCallCompleted,
-    ToolCallDenied, ToolCallRequested,
+    GrantedBy, MessageDelta, ModelFallback, RunError, TodoItem, TodoStatus, TodoUpdated,
+    ToolCallCompleted, ToolCallDenied, ToolCallRequested,
 };
 use protocol::{Event, RunId, ToolCallId};
 use provider_catalog::{
@@ -32,7 +32,7 @@ use task_runtime::{ExecError, RetryPolicy, StepExecutor, StepSpec, StepStatus};
 use tokio_util::sync::CancellationToken;
 use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 
-use crate::approval::{ExecPermit, QuestionRoute};
+use crate::approval::{Decided, ExecPermit, Provenance, QuestionRoute};
 use crate::compaction::Compaction;
 use crate::history::{
     GUARD_NOTE, build_messages, status_of, step_output, tool_defs, truncate_utf8,
@@ -79,6 +79,8 @@ enum Slot {
         /// the policy mutex immediately before the tool is invoked.
         permit: Option<ExecPermit>,
         auto_reason: Option<&'static str>,
+        /// What stood in for the card, journaled once the call is committed to run.
+        grant: Option<Provenance>,
         payment: tool_registry::PaymentApproval,
         class: PlannedClass,
         /// The program a desktop input call would reach, resolved before the
@@ -95,6 +97,8 @@ enum Slot {
         permit: Option<ExecPermit>,
         /// Why the Full lane let the call through without a card, audited before it runs.
         auto_reason: Option<&'static str>,
+        /// What stood in for the card, journaled once the call is committed to run.
+        grant: Option<Provenance>,
     },
 }
 
@@ -1871,8 +1875,12 @@ impl TurnExecutor {
                 },
                 tool_registry::PaymentApproval::Approved,
             );
-            let (decision, auto_reason) = match &resolved.spec {
-                Some(spec) => self.sh.decide_with_reason(
+            let Decided {
+                decision,
+                reason: auto_reason,
+                grant: auto_grant,
+            } = match &resolved.spec {
+                Some(spec) => self.sh.decide_with_grant(
                     &ctx,
                     &resolved.name,
                     spec.effect,
@@ -1881,7 +1889,11 @@ impl TurnExecutor {
                     target.as_ref(),
                 ),
                 // Malformed `use_tool`: executes nothing, only reports the error.
-                None => (Decision::Allow, None),
+                None => Decided {
+                    decision: Decision::Allow,
+                    reason: None,
+                    grant: None,
+                },
             };
             // Recheck immediately before the approval branch too: policy can
             // change after preflight. No prepared slot has executed yet.
@@ -2000,13 +2012,14 @@ impl TurnExecutor {
                 // call (verified by the tool against the live facts) stands in
                 // for the card. Nothing else can: policy, presets and grants
                 // were already overridden to Ask for such a call.
-                if category != PermissionCategory::Money
-                    && self
-                        .sh
+                let standing = if category == PermissionCategory::Money {
+                    None
+                } else {
+                    self.sh
                         .standing_grant(&ctx, &resolved.name, &resolved.input)
                         .await
-                        .is_some()
-                {
+                };
+                if let Some(standing) = standing {
                     Slot::Run {
                         tool,
                         name: resolved.name.clone(),
@@ -2015,6 +2028,11 @@ impl TurnExecutor {
                         meta,
                         permit: None,
                         auto_reason: None,
+                        grant: Some(Provenance {
+                            granted_by: GrantedBy::StandingGrant,
+                            level: self.sh.level_of(&ctx),
+                            rule_id: Some(crate::approval::rule_id("standing", &standing.id)),
+                        }),
                         payment,
                         class,
                         target,
@@ -2042,6 +2060,7 @@ impl TurnExecutor {
                             meta,
                             permit: Some(permit),
                             auto_reason: None,
+                            grant: None,
                             payment,
                             class,
                             target,
@@ -2071,6 +2090,7 @@ impl TurnExecutor {
                     call: call_uuid,
                     meta,
                     auto_reason: carried.is_none().then_some(auto_reason).flatten(),
+                    grant: carried.is_none().then_some(auto_grant).flatten(),
                     permit: carried,
                     payment,
                     class,
@@ -2082,6 +2102,7 @@ impl TurnExecutor {
                     call: c,
                     permit,
                     auto_reason,
+                    grant,
                     ..
                 } if is_spawn => Slot::Spawn {
                     name: spawn_name,
@@ -2090,6 +2111,7 @@ impl TurnExecutor {
                     model_call_id: call.id.clone(),
                     permit,
                     auto_reason,
+                    grant,
                 },
                 other => other,
             };
@@ -2129,6 +2151,7 @@ impl TurnExecutor {
                     model_call_id,
                     permit,
                     auto_reason,
+                    grant,
                 } => {
                     if let Err(reason) = commit_or_deny(permit) {
                         return (user_denied(reason), true, None, None, not_run);
@@ -2138,6 +2161,9 @@ impl TurnExecutor {
                         && let Err(error) = self.sh.audit_auto_allow(ctx_ref, &name, reason)
                     {
                         return (error, true, None, None, not_run);
+                    }
+                    if let Some(grant) = grant {
+                        self.sh.emit_grant(ctx_ref, call_id, grant);
                     }
                     if name == crate::delegation::ASK_BOT {
                         let (t, e, d, fact) = self
@@ -2163,6 +2189,7 @@ impl TurnExecutor {
                     meta,
                     permit,
                     auto_reason,
+                    grant,
                     payment,
                     class,
                     target,
@@ -2178,6 +2205,9 @@ impl TurnExecutor {
                             self.sh.audit_auto_allow(ctx_ref, &tool.spec().name, reason)
                     {
                         return (error, true, None, None, not_run);
+                    }
+                    if let Some(grant) = grant {
+                        self.sh.emit_grant(ctx_ref, call_id, grant);
                     }
                     let typed_secret = (tool.spec().name == "browser_fill")
                         .then(|| {

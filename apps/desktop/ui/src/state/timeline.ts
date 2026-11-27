@@ -50,10 +50,58 @@ export interface ToolItem {
   details?: unknown;
   /** The call went through an approval gate. */
   gated: boolean;
-  /** The observed decision for this gate, relative to the run's start. */
-  approvalDecision?: { outcome: "approved" | "denied"; offsetMs: number };
+  /**
+   * The observed decision for this gate, relative to the run's start. `grant` says what let an
+   * approved call run; it is absent for a denial and for an approval recorded before the daemon
+   * said (provenance unknown, not "the owner").
+   */
+  approvalDecision?: { outcome: "approved" | "denied"; offsetMs: number; grant?: ApprovalGrant };
   error?: string;
   denyReason?: string;
+}
+
+/** What let a call run (`GrantedBy` in crates/protocol/src/event.rs). */
+export type GrantedBy =
+  | "owner_card"
+  | "full_access"
+  | "owner_schedule"
+  | "owner_mission"
+  | "balanced_level"
+  | "standing_grant"
+  | "remembered_choice"
+  | "site_rule";
+
+const GRANTED_BY: ReadonlySet<string> = new Set<GrantedBy>([
+  "owner_card", "full_access", "owner_schedule", "owner_mission",
+  "balanced_level", "standing_grant", "remembered_choice", "site_rule"
+]);
+
+export type GrantLevel = "ask" | "balanced" | "full";
+
+export type GrantRuleScope = "chat" | "always" | "category" | "task" | "standing";
+
+export interface ApprovalGrant {
+  by: GrantedBy;
+  level?: GrantLevel;
+  /** The remembered rule: its scope, and the tool or category name it names (never call text). */
+  rule?: { scope: GrantRuleScope; name?: string };
+}
+
+const RULE_ID = /^(chat|always|category|task|standing)(?::([A-Za-z0-9_.-]{1,64}))?$/;
+
+/**
+ * The provenance an approval event carries, checked field by field: a value this build does not
+ * know (a newer daemon) or one that is not shaped like a daemon id is dropped, never shown.
+ */
+export function grantOf(e: { granted_by?: unknown; level?: unknown; rule_id?: unknown }): ApprovalGrant | undefined {
+  if (typeof e.granted_by !== "string" || !GRANTED_BY.has(e.granted_by)) return undefined;
+  const grant: ApprovalGrant = { by: e.granted_by as GrantedBy };
+  if (e.level === "ask" || e.level === "balanced" || e.level === "full") grant.level = e.level;
+  const rule = typeof e.rule_id === "string" ? RULE_ID.exec(e.rule_id) : null;
+  if (rule) {
+    grant.rule = { scope: rule[1] as GrantRuleScope, ...(rule[2] ? { name: rule[2] } : {}) };
+  }
+  return grant;
 }
 
 export interface QuestionItem {
@@ -426,18 +474,22 @@ function reduce(
           approvalDecision: undefined
         }))
       );
-    case "tool_call_approved":
+    case "tool_call_approved": {
+      const grant = grantOf(e);
       return withRun(state, e.run_id, ts, (r) =>
         updateTool(r, e.call_id, (t) => ({
           ...t,
           status: "running",
-          gated: true,
+          // An automatic grant is no card: the step did not go through an approval gate.
+          gated: t.gated || grant === undefined || grant.by === "owner_card",
           approvalDecision: t.approvalDecision ?? {
             outcome: "approved",
-            offsetMs: ts - r.startedMs
+            offsetMs: ts - r.startedMs,
+            ...(grant ? { grant } : {})
           }
         }))
       );
+    }
     case "tool_call_denied":
       return withRun(state, e.run_id, ts, (r) => {
         const expired = isExpiredReason(e.reason);

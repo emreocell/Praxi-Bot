@@ -20,7 +20,7 @@ const INHERITED: &str = "";
 const CUSTOM: &str = "[permissions.categories]\nfs = { level = { level = \"allow\" } }\nshell = { level = { level = \"allow\" } }\nmessaging = { level = { level = \"allow\" } }\naccounts = { level = { level = \"allow\" } }\nbrowser = { level = { level = \"allow\" } }\nmoney = { level = { level = \"allow\" } }\n";
 
 #[derive(Clone, Copy, Debug)]
-enum Start {
+pub(crate) enum Start {
     /// Typed in the desktop app.
     Owner,
     /// A schedule's own instruction.
@@ -36,7 +36,7 @@ enum Start {
 const TRUSTED: [Start; 3] = [Start::Owner, Start::Schedule, Start::Trigger];
 const UNTRUSTED: [Start; 2] = [Start::Stranger, Start::Channel];
 
-fn start_run(
+pub(crate) fn start_run(
     lp: &crate::AgentLoop,
     env: &crate::tests::Env,
     start: Start,
@@ -144,7 +144,7 @@ impl tool_registry::Tool for Asks {
 }
 
 /// The run's context after a trivial turn, so a decision can be asked directly.
-async fn ctx_of(
+pub(crate) async fn ctx_of(
     start: Start,
     preset: &str,
     cfg: crate::LoopConfig,
