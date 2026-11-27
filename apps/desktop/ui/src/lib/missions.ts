@@ -132,3 +132,52 @@ export function buildAnswers(
   }
   return { answers, unanswered, canSend: answers.length > 0 && unanswered.length === 0 };
 }
+
+/** The item the bot works on right now: the newest one marked `doing`, or null. */
+export function currentItem(items: readonly MissionItem[]): MissionItem | null {
+  let best: MissionItem | null = null;
+  for (const it of items) {
+    if (it.status === "doing" && (!best || it.updated_at_ms > best.updated_at_ms)) {
+      best = it;
+    }
+  }
+  return best;
+}
+
+/** An item in one short phrase: its title when that already names the key ("Register on a.io"), else "key · title". */
+export function itemLabel(it: Pick<MissionItem, "key" | "title">): string {
+  const title = it.title?.trim() ?? "";
+  if (!title || title === it.key) {
+    return it.key;
+  }
+  return title.toLowerCase().includes(it.key.toLowerCase()) ? title : `${it.key} · ${title}`;
+}
+
+/** The mission that runs in this chat: an active one first, else the newest that ended there. */
+export function missionForChat(all: readonly Mission[], chatId: string | undefined): Mission | null {
+  if (!chatId) {
+    return null;
+  }
+  const here = all.filter((m) => m.chat_id === chatId);
+  return missionsToShow(here)[0] ?? null;
+}
+
+/**
+ * The one sentence under a mission's progress that tells the owner what they can do now:
+ * `leave` while it runs (it works alone and writes when done or stuck), `answer` while it waits
+ * for them, `paused` while paused; null once it ended (the report says the rest).
+ */
+export type MissionNote = "leave" | "answer" | "paused";
+
+export function missionNote(m: Pick<Mission, "state">): MissionNote | null {
+  switch (m.state) {
+    case "running":
+      return "leave";
+    case "blocked":
+      return "answer";
+    case "paused":
+      return "paused";
+    default:
+      return null;
+  }
+}

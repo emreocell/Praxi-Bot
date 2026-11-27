@@ -995,7 +995,8 @@ export class MockApiClient extends ApiClient {
   /** Repairs run so far (tests). */
   readonly repairs: string[] = [];
   private readonly liveView = new MockLiveViewService();
-  private readonly missions = new MockMissions(ATLAS);
+  // Review states `?screen=mission` / `mission-done`: the open chat is that mission's chat.
+  private readonly missions = new MockMissions(ATLAS, Date.now(), typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("screen") === "mission" ? { id: "mission-running", chatId: CHAT_ID } : new URLSearchParams(window.location.search).get("screen") === "mission-done" ? { id: "mission-done", chatId: CHAT_ID } : null);
   private readonly hostSetup = new MockHostSetup();
   private lastPlan: import("./types.ts").PackPlan | null = null;
   private webSearchConfig: WebSearchConfig = {
@@ -2014,6 +2015,12 @@ export class MockApiClient extends ApiClient {
             "Can you prepare this week's work summary? I'd like to see what shipped and what's next.",
             "## A good week of progress.\n\nI reviewed the latest changes in GitHub and your workspace. Here is your weekly summary:\n\n| Workstream | Delivered | Status |\n| --- | --- | --- |\n| Desktop experience | Settings, chat and model selection | Ready |\n| Integrations | 5 connected apps | Ready |\n| Quality checks | Types and interface tests | Complete |\n\n### Next up\n\nAfter reviewing open tasks, we can run the release checks.\n\n```sh\npnpm typecheck\npnpm --dir apps/desktop/ui test\n```\n\nI can turn this into a report to share with your team.",
           ];
+          const missionScreen = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("screen") : null;
+          if (missionScreen === "mission" || missionScreen === "mission-done") {
+            const seededMission = mockMissionChat(missionScreen === "mission-done", tr);
+            this.messages.set(seg[1], seededMission);
+            return ok(seededMission);
+          }
           const seeded = content.map((text, index): Message => ({ id: `mock-message-${index}`, chat_id: CHAT_ID, content: text, role: index % 2 === 0 ? "user" : "assistant", created_at_ms: NOW + index * 1000, ...(index % 2 === 0 ? { source: "owner" } : { run_id: "mock-info-run" }) }));
           if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "mention") {
             // Review screen: an @mention and the mentioned bot's own reply.
@@ -3533,11 +3540,36 @@ export class MockApiClient extends ApiClient {
   }
 }
 
+/** The conversation of a mission's chat for `?screen=mission` / `mission-done`: the goal, the bot's
+ *  first reply and, once it ended, the plain-text report the daemon posts (`render_text`). */
+function mockMissionChat(ended: boolean, tr: boolean): Message[] {
+  const at = NOW - 90 * 60_000;
+  const rows: Message[] = [
+    { id: "mock-mission-1", chat_id: CHAT_ID, role: "user", source: "owner", created_at_ms: at, content: ended ? "List my shop in the local web directories." : "Register me on these 15 sites so I get backlinks, and report what worked." } as Message,
+    { id: "mock-mission-2", chat_id: CHAT_ID, role: "assistant", run_id: "mock-info-run", created_at_ms: at + 60_000, content: tr ? "Listeyi çıkardım ve sırayla çalışıyorum. Takıldığım yerleri tek bir listede soracağım." : "I made the list and I am working through it. I will ask about anything I get stuck on in one list." } as Message
+  ];
+  if (ended) {
+    rows.push({ id: "mock-mission-3", chat_id: CHAT_ID, role: "assistant", created_at_ms: at + 80 * 60_000, content: [
+      "Mission finished / Görev tamamlandı: Directory listings",
+      "10 done, 0 blocked, 0 to do, 1 given up, 1 skipped (of 12). 6 sessions, 301 model calls.",
+      "",
+      "Given up:",
+      "- paywall.biz: The site only takes paid listings.",
+      "",
+      "Decisions I made:",
+      "- Used the owner's work address for every sign-up.",
+      "- Left out sites that ask for a payment.",
+      ""
+    ].join("\n") } as Message);
+  }
+  return rows;
+}
+
 /** The id of the live mock run for `?screen=working|approval` (review states), else null. */
 function mockLiveRunId(): string | null {
   if (typeof window === "undefined") return null;
   const screen = new URLSearchParams(window.location.search).get("screen");
-  return screen === "working" || screen === "approval" || screen === "approval-site" || screen === "subagents" || screen === "notifications" ? "mock-live" : null;
+  return screen === "working" || screen === "mission" || screen === "approval" || screen === "approval-site" || screen === "subagents" || screen === "notifications" ? "mock-live" : null;
 }
 
 /** Review-state events for `?mock=1&screen=...` (approval, streaming, default run). */
@@ -3545,7 +3577,7 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
   const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
   const screen = new URLSearchParams(window.location.search).get("screen");
   if (screen === "long-chat") return longChatEvents();
-  if (screen === "approval" || screen === "approval-site" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "subagents" || screen === "notifications") {
+  if (screen === "approval" || screen === "approval-site" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "mission" || screen === "subagents" || screen === "notifications") {
     const bot_id = "11111111-1111-4111-8111-111111111111";
     const chat_id = "33333333-3333-4333-8333-333333333333";
     const events: GlobalEnvelope["event"][] = [
@@ -3556,6 +3588,11 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
       ] as GlobalEnvelope["event"][] : ([
         { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : screen === "approval-site" ? "Panelden güncel sipariş durumunu kontrol edeceğim." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
       ] as GlobalEnvelope["event"][])),
+      ...(screen === "mission" ? [
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-m1", tool_name: "browser_open", input: { url: "https://india.dev/signup" } },
+        { type: "tool_call_completed", run_id: "mock-live", call_id: "mock-m1", error: null },
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-m2", tool_name: "browser_fill", input: { selector: "#email" } }
+      ] as GlobalEnvelope["event"][] : []),
       ...(screen === "working" ? [
         { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-w1", tool_name: "web_search", input: { query: "cpu llm benchmark 2026" } },
         { type: "tool_call_completed", run_id: "mock-live", call_id: "mock-w1", error: null },

@@ -4794,7 +4794,7 @@
       "stopped": "Stopped"
     },
     "counts": {
-      "blocked": "blocked",
+      "blocked": "need you",
       "done": "done",
       "left": "left"
     },
@@ -4807,6 +4807,13 @@
       "summary": "Report"
     },
     "endedAt": "ended {{when}}",
+    "header": {
+      "answer": "Answer ({{count}})",
+      "answer_one": "Answer ({{count}})",
+      "answer_other": "Answer ({{count}})",
+      "label": "Mission progress",
+      "report": "Report"
+    },
     "headline": {
       "done": "Finished: {{done}} of {{total}} done",
       "failed": "Could not finish: {{done}} of {{total}} done",
@@ -4827,14 +4834,45 @@
       "missing": "Write an answer or tick “Skip this one”.",
       "placeholder": "What the bot should do… Never a password or a code.",
       "send": "Send answers",
+      "sendCount": "Send {{count}} answers",
+      "sendCount_one": "Send {{count}} answer",
+      "sendCount_other": "Send {{count}} answers",
       "sending": "Sending…",
       "skip": "Skip this one",
       "title": "Needs you ({{count}})",
       "title_one": "Needs you ({{count}})",
       "title_other": "Needs you ({{count}})"
     },
+    "note": {
+      "answer": "It is waiting for your answers. Answer them in one go and it continues where it stopped.",
+      "leave": "It works on its own, so you can do other things. It writes in its chat when it is done or needs you.",
+      "paused": "Paused. Resume it and it continues where it stopped."
+    },
+    "now": "Now: {{item}}",
     "pause": "Pause",
     "progressLabel": "Progress: {{done}} of {{total}} done",
+    "report": {
+      "blocked": "{{count}} need you",
+      "blocked_one": "{{count}} needs you",
+      "blocked_other": "{{count}} need you",
+      "done": "{{done}} of {{total}} done",
+      "failed": "{{count}} given up",
+      "failed_one": "{{count}} given up",
+      "failed_other": "{{count}} given up",
+      "open": "{{count}} still to do",
+      "open_one": "{{count}} still to do",
+      "open_other": "{{count}} still to do",
+      "outcome": {
+        "blocked": "Mission needs you",
+        "cancelled": "Mission stopped",
+        "done": "Mission finished",
+        "failed": "Mission could not finish",
+        "update": "Mission update"
+      },
+      "skipped": "{{count}} skipped",
+      "skipped_one": "{{count}} skipped",
+      "skipped_other": "{{count}} skipped"
+    },
     "resume": "Resume",
     "sessions": "{{count}} sessions",
     "sessions_one": "{{count}} session",

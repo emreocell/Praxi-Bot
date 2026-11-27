@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Mission } from "../api/types.ts";
+import type { Mission, MissionItem } from "../api/types.ts";
 import {
   buildAnswers,
+  currentItem,
+  itemLabel,
+  missionForChat,
+  missionNote,
   isUnanswered,
   missionChip,
   missionCounts,
@@ -127,4 +131,39 @@ test("the chip and the headline follow the state", () => {
   );
   assert.deepEqual(missionHeadline(mission("a", "done")).values, { done: 7, blocked: 2, left: 6, total: 15 });
   assert.equal(missionHeadline(mission("a", "cancelled")).key, "missions.headline.stopped");
+});
+
+function item(key: string, status: string, at: number, title = `Register on ${key}`): MissionItem {
+  return { key, kind: "site", title, status, attempts: 1, result: null, last_error: null, blocked_reason: null, needs_live_owner: false, owner_answer: null, updated_at_ms: at } as MissionItem;
+}
+
+test("the current item is the newest one being worked on", () => {
+  assert.equal(currentItem([item("a.io", "done", 9), item("b.io", "doing", 3), item("c.io", "doing", 5), item("d.io", "todo", 8)])?.key, "c.io");
+  assert.equal(currentItem([item("a.io", "done", 9)]), null);
+});
+
+test("an item reads as one phrase without repeating its key", () => {
+  assert.equal(itemLabel({ key: "hotel.io", title: "Register on hotel.io" }), "Register on hotel.io");
+  assert.equal(itemLabel({ key: "hotel.io", title: "Sign up" }), "hotel.io · Sign up");
+  assert.equal(itemLabel({ key: "hotel.io", title: "" }), "hotel.io");
+});
+
+test("a chat shows its own mission: the active one first, else the newest that ended there", () => {
+  const all = [
+    mission("old", "done", { chat_id: "c1", finished_at_ms: 10, updated_at_ms: 10 }),
+    mission("live", "running", { chat_id: "c1", updated_at_ms: 5 }),
+    mission("other", "running", { chat_id: "c2", updated_at_ms: 50 })
+  ];
+  assert.equal(missionForChat(all, "c1")?.id, "live");
+  assert.equal(missionForChat(all.slice(0, 1), "c1")?.id, "old");
+  assert.equal(missionForChat(all, "c3"), null);
+  assert.equal(missionForChat(all, undefined), null);
+});
+
+test("the note says the owner can leave while it runs, answer while it waits, nothing once it ended", () => {
+  assert.equal(missionNote({ state: "running" }), "leave");
+  assert.equal(missionNote({ state: "blocked" }), "answer");
+  assert.equal(missionNote({ state: "paused" }), "paused");
+  assert.equal(missionNote({ state: "done" }), null);
+  assert.equal(missionNote({ state: "cancelled" }), null);
 });

@@ -60,7 +60,7 @@ export class MockMissions {
   private readonly items = new Map<string, MissionItem[]>();
   private readonly digests = new Map<string, MissionDigest>();
 
-  constructor(botId: string, now = Date.now()) {
+  constructor(botId: string, now = Date.now(), inChat: { id: string; chatId: string } | null = null) {
     const sites = ["alpha.io", "bravo.dev", "charlie.app", "delta.net", "echo.co", "foxtrot.org", "golf.com", "hotel.io", "india.dev", "juliet.app", "kilo.net", "lima.co", "mike.org", "nova.com", "oscar.io"];
     const running: MissionItem[] = sites.map((key, i) => {
       const at = now - (15 - i) * MIN;
@@ -131,6 +131,8 @@ export class MockMissions {
         finished_at_ms: now - 3 * 86_400_000
       }
     ];
+    const moved = inChat ? this.missions.find((m) => m.id === inChat.id) : undefined;
+    if (moved && inChat) moved.chat_id = inChat.chatId;
   }
 
   private detail(m: Mission): MissionDetail {

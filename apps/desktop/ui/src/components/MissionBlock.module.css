@@ -1,5 +1,6 @@
 .block { display: flex; flex-direction: column; gap: var(--space-3); min-width: var(--space-0); }
-.label { margin: var(--space-0); padding-inline: var(--size-border-thick); font-size: var(--font-size-2xs); font-weight: var(--font-weight-regular); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; color: var(--color-text-muted); }
+/* Section title: the same small caps as the settings groups and the rest of the panel. */
+.label { margin: var(--space-0); padding-inline: var(--space-half); font-size: var(--font-size-2xs); font-weight: var(--font-weight-semibold); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; color: var(--color-text-muted); }
 .card, .start { display: flex; flex-direction: column; gap: var(--space-2); min-width: var(--space-0); padding: var(--space-3); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background-color: var(--color-surface-elevated); }
 :global(:root[data-style="line"]) .card, :global(:root[data-style="line"]) .start { background: transparent; border-color: var(--color-border-strong); }
 .head { display: flex; align-items: flex-start; gap: var(--space-2); min-width: var(--space-0); }
@@ -12,15 +13,26 @@
 .headline, .meta, .hint { margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .headline { color: var(--color-text-secondary); }
 .meta { font-size: var(--font-size-2xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.bar { display: flex; height: var(--space-2); overflow: hidden; border-radius: var(--radius-pill); background-color: var(--color-surface-active); }
+.bar { display: flex; height: var(--space-1); overflow: hidden; border-radius: var(--radius-pill); background-color: var(--color-surface-active); }
 .barDone { width: calc(var(--share) * 1%); background-color: var(--color-success); }
 .barBlocked { width: calc(var(--share) * 1%); background-color: var(--color-warning); }
-.counts { display: grid; grid-template-columns: repeat(3, minmax(var(--space-0), 1fr)); gap: var(--space-2); margin: var(--space-0); }
-.count { display: flex; flex-direction: column-reverse; align-items: flex-start; }
-.count dt { font-size: var(--font-size-2xs); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; color: var(--color-text-muted); }
-.count dd { margin: var(--space-0); font-size: var(--font-size-md); font-weight: var(--font-weight-medium); color: var(--color-text); font-variant-numeric: tabular-nums; }
-.count[data-kind="done"] dd { color: var(--color-success); }
-.count[data-kind="blocked"] dd { color: var(--color-warning); }
+/* "● 7 done  ● 2 need you  ● 6 left": one line under the bar, the dots in the bar's colours. */
+.counts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.count { display: inline-flex; flex-direction: row-reverse; align-items: center; gap: var(--space-1); }
+.count::after { content: ""; flex: none; width: var(--space-1); height: var(--space-1); margin-inline-end: var(--space-half); border-radius: 50%; background-color: var(--color-text-faint); }
+.count[data-kind="done"]::after { background-color: var(--color-success); }
+.count[data-kind="blocked"]::after { background-color: var(--color-warning); }
+.count dt { color: var(--color-text-muted); }
+.count dd { margin: var(--space-0); font-weight: var(--font-weight-medium); color: var(--color-text); font-variant-numeric: tabular-nums; }
+/* "Now: Register on india.dev" and the sentence on what the owner can do. */
+.now, .note { display: flex; align-items: flex-start; gap: var(--space-2); margin: var(--space-0); font-size: var(--font-size-xs); line-height: var(--line-height-normal); overflow-wrap: anywhere; }
+.now { color: var(--color-text); }
+.nowDot { flex: none; width: var(--space-2); height: var(--space-2); margin-top: calc(var(--space-1) + var(--space-half) / 2); border-radius: 50%; background-color: var(--color-accent); animation: missionPulse 1.6s ease-in-out infinite; }
+@keyframes missionPulse { 50% { opacity: 0.3; } }
+.note { padding: var(--space-2); border-radius: var(--radius-md); background-color: var(--color-surface-active); color: var(--color-text-secondary); }
+.note > svg { flex: none; width: var(--size-icon-sm); height: var(--size-icon-sm); margin-top: var(--space-half); color: var(--color-accent-text); }
+.note[data-note="answer"] > svg, .note[data-note="paused"] > svg { color: var(--color-warning); }
+@media (prefers-reduced-motion: reduce) { .nowDot { animation: none; } }
 .reason { margin: var(--space-0); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background-color: var(--color-warning-subtle); color: var(--color-warning); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
 .card[data-state="failed"] .reason { background-color: var(--color-danger-subtle); color: var(--color-danger); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
@@ -41,10 +53,12 @@
 .startSummary > svg, .digestSummary > svg { width: var(--size-icon-sm); height: var(--size-icon-sm); flex: none; }
 .startForm { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
 .field { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text); }
-.needs { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: var(--size-border) solid var(--color-warning); border-radius: var(--radius-md); background-color: var(--color-warning-subtle); }
+/* The questions: a calm card with a warning edge (a full warning fill made every word shout). */
+.needs { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: var(--size-border) solid var(--color-border); border-inline-start: var(--space-1) solid var(--color-warning); border-radius: var(--radius-md); background-color: var(--color-surface); }
 .needsTitle { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0); font-size: var(--font-size-ui); font-weight: var(--font-weight-medium); color: var(--color-warning); }
 .needsTitle > svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }
 .needsList { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.needsList > li + li { padding-top: var(--space-3); border-top: var(--size-border) solid var(--color-border); }
 .needsItem { display: flex; flex-direction: column; gap: var(--space-1); min-width: var(--space-0); }
 .itemTitle { margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text); overflow-wrap: anywhere; }
 .itemReason { margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-secondary); overflow-wrap: anywhere; }
@@ -54,5 +68,5 @@
 .digest { border-top: var(--size-border) solid var(--color-border); padding-top: var(--space-2); }
 .digestBody { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-secondary); }
 .digestBody p { margin: var(--space-0); }
-.digestHead { margin: var(--space-2) var(--space-0) var(--space-0); font-size: var(--font-size-2xs); font-weight: var(--font-weight-regular); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; color: var(--color-text-muted); }
+.digestHead { margin: var(--space-2) var(--space-0) var(--space-0); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text); }
 .digestList { display: flex; flex-direction: column; gap: var(--space-half); margin: var(--space-0); padding-inline-start: var(--space-4); overflow-wrap: anywhere; }

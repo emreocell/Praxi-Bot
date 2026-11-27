@@ -4794,8 +4794,8 @@
       "stopped": "Durduruldu"
     },
     "counts": {
-      "blocked": "takılan",
-      "done": "biten",
+      "blocked": "seni bekliyor",
+      "done": "bitti",
       "left": "kalan"
     },
     "digest": {
@@ -4807,6 +4807,13 @@
       "summary": "Rapor"
     },
     "endedAt": "{{when}} tarihinde bitti",
+    "header": {
+      "answer": "Yanıtla ({{count}})",
+      "answer_one": "Yanıtla ({{count}})",
+      "answer_other": "Yanıtla ({{count}})",
+      "label": "Görev ilerlemesi",
+      "report": "Rapor"
+    },
     "headline": {
       "done": "Bitti: {{total}} işin {{done}} tanesi tamamlandı",
       "failed": "Bitirilemedi: {{total}} işin {{done}} tanesi tamamlandı",
@@ -4827,14 +4834,45 @@
       "missing": "Bir yanıt yaz ya da “Bunu atla” kutusunu işaretle.",
       "placeholder": "Botun ne yapması gerektiğini yaz… Parola ya da kod yazma.",
       "send": "Yanıtları gönder",
+      "sendCount": "{{count}} yanıtı gönder",
+      "sendCount_one": "{{count}} yanıtı gönder",
+      "sendCount_other": "{{count}} yanıtı gönder",
       "sending": "Gönderiliyor…",
       "skip": "Bunu atla",
       "title": "Sana ihtiyacı var ({{count}})",
       "title_one": "Sana ihtiyacı var ({{count}})",
       "title_other": "Sana ihtiyacı var ({{count}})"
     },
+    "note": {
+      "answer": "Yanıtlarını bekliyor. Hepsini tek seferde yanıtla, kaldığı yerden devam eder.",
+      "leave": "Kendi başına çalışıyor, başka işlere geçebilirsin. Bitince ya da sana ihtiyacı olunca kendi sohbetine yazar.",
+      "paused": "Duraklatıldı. Devam ettirince kaldığı yerden sürer."
+    },
+    "now": "Şimdi: {{item}}",
     "pause": "Duraklat",
     "progressLabel": "İlerleme: {{total}} işin {{done}} tanesi bitti",
+    "report": {
+      "blocked": "{{count}} tanesi seni bekliyor",
+      "blocked_one": "{{count}} tanesi seni bekliyor",
+      "blocked_other": "{{count}} tanesi seni bekliyor",
+      "done": "{{total}} işin {{done}} tanesi bitti",
+      "failed": "{{count}} tanesinden vazgeçildi",
+      "failed_one": "{{count}} tanesinden vazgeçildi",
+      "failed_other": "{{count}} tanesinden vazgeçildi",
+      "open": "{{count}} tanesi yapılacak",
+      "open_one": "{{count}} tanesi yapılacak",
+      "open_other": "{{count}} tanesi yapılacak",
+      "outcome": {
+        "blocked": "Görev seni bekliyor",
+        "cancelled": "Görev durduruldu",
+        "done": "Görev tamamlandı",
+        "failed": "Görev bitirilemedi",
+        "update": "Görev durumu"
+      },
+      "skipped": "{{count}} tanesi atlandı",
+      "skipped_one": "{{count}} tanesi atlandı",
+      "skipped_other": "{{count}} tanesi atlandı"
+    },
     "resume": "Devam ettir",
     "sessions": "{{count}} oturum",
     "sessions_one": "{{count}} oturum",

@@ -176,6 +176,8 @@ import { BotFilesCard } from "../components/BotFilesCard";
 import { ComputerUseOffCard } from "../components/ComputerAccess";
 import { ComputerTargetChip, computerTargetOf } from "../components/ComputerTargetChip";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { MissionChatHeader, MissionDigestMessage, useChatMission } from "../components/MissionChatHeader";
+import { parseMissionDigest } from "../lib/missionDigestText";
 import { itemsWithoutDuplicateError } from "../lib/runErrorNotice";
 
 /** Empty-chat prompt starters (plain text for the composer, not commands). */
@@ -314,6 +316,8 @@ export function ChatView({
   } = useDaemon();
   const chat = chats.find((c) => c.id === chatId);
   const bot = bots.find((b) => b.id === chat?.bot_id);
+  // A mission's chat: a compact progress header on top and its reports as cards (ux3-missions).
+  const chatMission = useChatMission(chat?.bot_id, chatId);
   const view = bot ? botView(bot) : null;
   const { dto: providersDto } = useProviders();
   const { report: connectionReport, state: connectionState } = useConnectivity();
@@ -1718,6 +1722,7 @@ export function ChatView({
         </header>
       ) : null}
 
+      {!liveChatSlots?.root ? <MissionChatHeader chat={chatMission} /> : null}
       <div className={styles.scrollWrap}>
       {findOpen ? (
         <ChatFindBar key={findSeed.n} rootRef={timelineRef} contentKey={entries} initialQuery={findSeed.q} onClose={() => setFindOpen(false)} />
@@ -1814,7 +1819,16 @@ export function ChatView({
                 );
               case "superseded":
                 return <SupersededView key={e.key} group={e.group} />;
-              case "assistant":
+              case "assistant": {
+                // The report a mission posts when it ends or waits for the owner, as a card.
+                const report = chatMission.mission && !e.runId ? parseMissionDigest(e.text) : null;
+                if (report) {
+                  return (
+                    <div key={e.key} id={e.key} data-message-row="assistant">
+                      <MissionDigestMessage digest={report} />
+                    </div>
+                  );
+                }
                 return (
                   <AssistantMessageRow key={e.key} id={e.key} ts={e.ts} text={e.text} source={e.source}
                     botId={e.botId ?? chat?.bot_id} runId={e.runId}
@@ -1822,6 +1836,7 @@ export function ChatView({
                     run={e.runId ? events.runs[e.runId] : undefined}
                     runDto={runs.find((r) => r.id === e.runId)} />
                 );
+              }
               case "imported_note": {
                 const counts = importedNoteCounts(e.text);
                 return (

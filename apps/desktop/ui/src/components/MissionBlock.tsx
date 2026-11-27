@@ -1,4 +1,4 @@
-import { CircleCheck, Clock, Pause, Play, Rocket, ShieldAlert, Square, TriangleAlert } from "lucide-react";
+import { CircleCheck, Clock, DoorOpen, Pause, Play, Rocket, ShieldAlert, Square, TriangleAlert } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type ApiClient, ApiError } from "../api/client";
@@ -7,11 +7,14 @@ import { humanLine } from "../lib/humanError";
 import {
   type AnswerDraft,
   buildAnswers,
+  currentItem,
   isActiveMission,
+  itemLabel,
   MISSION_POLL_MS,
   missionChip,
   missionCounts,
   missionHeadline,
+  missionNote,
   missionsToShow,
   type MissionChip,
   progressPercent,
@@ -20,13 +23,13 @@ import {
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./MissionBlock.module.css";
 
-interface MissionView {
+export interface MissionView {
   mission: Mission;
   /** The ledger's blocked items and digest; fetched for missions that have blocked items or ended. */
   detail: MissionDetail | null;
 }
 
-const CHIP_ICONS: Record<MissionChip, typeof Rocket> = {
+export const CHIP_ICONS: Record<MissionChip, typeof Rocket> = {
   running: Rocket,
   paused: Pause,
   needsYou: ShieldAlert,
@@ -70,7 +73,8 @@ function useMissions(botId: string, visible: boolean) {
         const shown = readAll ? missionsToShow(all) : [...missionsToShow(all), ...(ended.current ? [ended.current] : [])];
         const next = await Promise.all(
           shown.map(async (mission): Promise<MissionView> => {
-            if (mission.progress.blocked === 0 && isActiveMission(mission)) {
+            // A running mission's ledger says what it works on now; a quiet paused one needs nothing.
+            if (mission.progress.blocked === 0 && mission.state === "paused") {
               return { mission, detail: null };
             }
             const hit = details.current.get(mission.id);
@@ -237,12 +241,8 @@ function MissionCard({
   const chip = missionChip(m.state);
   const ChipIcon = CHIP_ICONS[chip];
   const live = isActiveMission(m);
-  const counts = missionCounts(m.progress);
-  const pct = progressPercent(m.progress);
-  const headline = missionHeadline(m);
   const blocked = detail?.blocked ?? [];
   const when = (ms: number) => new Date(ms).toLocaleString(i18n.language, { dateStyle: "medium", timeStyle: "short" });
-  const pctOf = (n: number) => (m.progress.total > 0 ? (n / m.progress.total) * 100 : 0);
   return (
     <article className={styles.card} aria-labelledby={titleId} data-testid="mission-card" data-state={m.state}>
       <header className={styles.head}>
@@ -254,32 +254,8 @@ function MissionCard({
           {t(`missions.chip.${chip}`)}
         </span>
       </header>
-      <p className={styles.headline}>{t(headline.key, headline.values)}</p>
-      <div
-        className={styles.bar}
-        role="progressbar"
-        aria-label={t("missions.progressLabel", { done: counts.done, total: m.progress.total })}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={pct}
-      >
-        <span className={styles.barDone} style={{ "--share": pctOf(counts.done) } as CSSProperties} />
-        <span className={styles.barBlocked} style={{ "--share": pctOf(counts.blocked) } as CSSProperties} />
-      </div>
-      <dl className={styles.counts}>
-        <div className={styles.count} data-kind="done">
-          <dt>{t("missions.counts.done")}</dt>
-          <dd>{counts.done}</dd>
-        </div>
-        <div className={styles.count} data-kind="blocked">
-          <dt>{t("missions.counts.blocked")}</dt>
-          <dd>{counts.blocked}</dd>
-        </div>
-        <div className={styles.count} data-kind="left">
-          <dt>{t("missions.counts.left")}</dt>
-          <dd>{counts.left}</dd>
-        </div>
-      </dl>
+      <MissionProgress mission={m} />
+      <MissionNow mission={m} items={detail?.items ?? []} />
       <p className={styles.meta}>
         {[
           t("missions.sessions", { count: m.sessions }),
@@ -336,14 +312,89 @@ function MissionCard({
   );
 }
 
+/** The bar and one line of numbers: "7 of 15 done · 2 need you · 6 left" (shared with the chat header). */
+export function MissionProgress({ mission: m }: { mission: Mission }) {
+  const { t } = useTranslation();
+  const counts = missionCounts(m.progress);
+  const pct = progressPercent(m.progress);
+  const headline = missionHeadline(m);
+  const pctOf = (n: number) => (m.progress.total > 0 ? (n / m.progress.total) * 100 : 0);
+  return (
+    <>
+      <p className={styles.headline}>{t(headline.key, headline.values)}</p>
+      <div
+        className={styles.bar}
+        role="progressbar"
+        aria-label={t("missions.progressLabel", { done: counts.done, total: m.progress.total })}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+      >
+        <span className={styles.barDone} style={{ "--share": pctOf(counts.done) } as CSSProperties} />
+        <span className={styles.barBlocked} style={{ "--share": pctOf(counts.blocked) } as CSSProperties} />
+      </div>
+      <dl className={styles.counts}>
+        <div className={styles.count} data-kind="done">
+          <dt>{t("missions.counts.done")}</dt>
+          <dd>{counts.done}</dd>
+        </div>
+        {counts.blocked > 0 ? (
+          <div className={styles.count} data-kind="blocked">
+            <dt>{t("missions.counts.blocked")}</dt>
+            <dd>{counts.blocked}</dd>
+          </div>
+        ) : null}
+        {counts.left > 0 || isActiveMission(m) ? (
+          <div className={styles.count} data-kind="left">
+            <dt>{t("missions.counts.left")}</dt>
+            <dd>{counts.left}</dd>
+          </div>
+        ) : null}
+      </dl>
+    </>
+  );
+}
+
+/**
+ * "Now: Register on india.dev", then the one sentence on what the owner can do: leave it alone
+ * while it runs (it writes in its chat when done or stuck), answer while it waits, resume if paused.
+ */
+export function MissionNow({ mission: m, items }: { mission: Mission; items: readonly MissionItem[] }) {
+  const { t } = useTranslation();
+  const doing = m.state === "running" ? currentItem(items) : null;
+  const note = missionNote(m);
+  if (!doing && !note) {
+    return null;
+  }
+  return (
+    <>
+      {doing ? (
+        <p className={styles.now} data-testid="mission-now">
+          <span className={styles.nowDot} aria-hidden="true" />
+          <span>{t("missions.now", { item: itemLabel(doing) })}</span>
+        </p>
+      ) : null}
+      {note ? (
+        <p className={styles.note} data-note={note} data-testid="mission-note">
+          {note === "leave" ? <DoorOpen aria-hidden="true" /> : note === "answer" ? <ShieldAlert aria-hidden="true" /> : <Pause aria-hidden="true" />}
+          <span>{t(`missions.note.${note}`)}</span>
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 /** ONE list for every item parked on the owner, and ONE button that answers them all. */
-function NeedsYou({
+export function NeedsYou({
   items,
   busy,
-  onSend
+  onSend,
+  heading: Heading = "h4"
 }: {
   items: readonly MissionItem[];
   busy: boolean;
+  /** The title's level where it sits (h4 in the panel's card, h3 under the chat header's h2). */
+  heading?: "h3" | "h4";
   onSend: (answers: ReturnType<typeof buildAnswers>["answers"]) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
@@ -364,10 +415,10 @@ function NeedsYou({
         }
       }}
     >
-      <h4 className={styles.needsTitle} id={`${id}-title`}>
+      <Heading className={styles.needsTitle} id={`${id}-title`}>
         <ShieldAlert aria-hidden="true" />
         {t("missions.needsYou.title", { count: items.length })}
-      </h4>
+      </Heading>
       <p className={styles.hint}>{t("missions.needsYou.intro")}</p>
       <ul className={styles.needsList}>
         {items.map((it) => {
@@ -376,8 +427,7 @@ function NeedsYou({
           return (
             <li key={it.key} className={styles.needsItem} data-testid="mission-blocked-item">
               <p className={styles.itemTitle}>
-                <b>{it.key}</b>
-                {it.title && it.title !== it.key ? <span> · {it.title}</span> : null}
+                <b>{itemLabel(it)}</b>
               </p>
               {it.blocked_reason ? <p className={styles.itemReason}>{it.blocked_reason}</p> : null}
               {it.needs_live_owner ? (
@@ -415,19 +465,23 @@ function NeedsYou({
         })}
       </ul>
       <button type="submit" className={styles.primary} disabled={busy || !canSend} data-testid="mission-send-answers">
-        {busy ? t("missions.needsYou.sending") : t("missions.needsYou.send")}
+        {busy
+          ? t("missions.needsYou.sending")
+          : answers.length > 0
+            ? t("missions.needsYou.sendCount", { count: answers.length })
+            : t("missions.needsYou.send")}
       </button>
     </form>
   );
 }
 
-function DigestList({ title, rows }: { title: string; rows: MissionDigest["blocked"] }) {
+function DigestList({ title, rows, heading: Heading }: { title: string; rows: MissionDigest["blocked"]; heading: "h3" | "h5" }) {
   if (rows.length === 0) {
     return null;
   }
   return (
     <>
-      <h5 className={styles.digestHead}>{title}</h5>
+      <Heading className={styles.digestHead}>{title}</Heading>
       <ul className={styles.digestList}>
         {rows.map((r) => (
           <li key={r.key}>
@@ -441,35 +495,44 @@ function DigestList({ title, rows }: { title: string; rows: MissionDigest["block
 }
 
 /** What the bot reports when a mission ends: the counts, what is stuck, what it gave up on, what it decided. */
-function Digest({ digest }: { digest: MissionDigest }) {
+export function Digest({ digest, bare = false }: { digest: MissionDigest; bare?: boolean }) {
   const { t, i18n } = useTranslation();
+  // Under the panel card's h4, or right under the chat header's h2 when bare.
+  const heading = bare ? "h3" : "h5";
+  const Heading = heading;
   const p = digest.progress;
+  const content = (
+    <div className={styles.digestBody}>
+      <p className={styles.meta}>
+        {new Date(digest.at_ms).toLocaleString(i18n.language, { dateStyle: "medium", timeStyle: "short" })}
+      </p>
+      <p>{t("missions.digest.counts", { done: p.done, blocked: p.blocked, failed: p.failed, total: p.total })}</p>
+      {digest.reason ? <p>{digest.reason}</p> : null}
+      <DigestList title={t("missions.digest.blocked")} rows={digest.blocked} heading={heading} />
+      <DigestList title={t("missions.digest.failed")} rows={digest.failed} heading={heading} />
+      <DigestList title={t("missions.digest.done")} rows={digest.done_sample} heading={heading} />
+      {digest.decisions.length > 0 ? (
+        <>
+          <Heading className={styles.digestHead}>{t("missions.digest.decisions")}</Heading>
+          <ul className={styles.digestList}>
+            {digest.decisions.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+  if (bare) {
+    return <div data-testid="mission-digest">{content}</div>;
+  }
   return (
     <details className={styles.digest} data-testid="mission-digest">
       <summary className={styles.digestSummary}>
         <Clock aria-hidden="true" />
         {t("missions.digest.summary")}
       </summary>
-      <div className={styles.digestBody}>
-        <p className={styles.meta}>
-          {new Date(digest.at_ms).toLocaleString(i18n.language, { dateStyle: "medium", timeStyle: "short" })}
-        </p>
-        <p>{t("missions.digest.counts", { done: p.done, blocked: p.blocked, failed: p.failed, total: p.total })}</p>
-        {digest.reason ? <p>{digest.reason}</p> : null}
-        <DigestList title={t("missions.digest.blocked")} rows={digest.blocked} />
-        <DigestList title={t("missions.digest.failed")} rows={digest.failed} />
-        <DigestList title={t("missions.digest.done")} rows={digest.done_sample} />
-        {digest.decisions.length > 0 ? (
-          <>
-            <h5 className={styles.digestHead}>{t("missions.digest.decisions")}</h5>
-            <ul className={styles.digestList}>
-              {digest.decisions.map((d) => (
-                <li key={d}>{d}</li>
-              ))}
-            </ul>
-          </>
-        ) : null}
-      </div>
+      {content}
     </details>
   );
 }

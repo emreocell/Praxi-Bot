@@ -1,0 +1,194 @@
+/* The mission header over a mission's chat: as wide as the messages, compact, never scrolling away. */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: calc(100% - var(--space-6) * 2);
+  max-width: var(--size-content-max);
+  margin: var(--space-2) auto var(--space-0);
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+}
+
+:global(:root[data-style="line"]) .root {
+  background: transparent;
+  border-color: var(--color-border-strong);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+}
+
+.icon {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  color: var(--color-accent-text);
+}
+
+.title {
+  flex: 1;
+  overflow: hidden;
+  min-width: var(--space-0);
+  margin: var(--space-0);
+  color: var(--color-text);
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Everything under the title lines up with the title, not with the rocket. */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-inline-start: calc(var(--size-icon-sm) + var(--space-2));
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: calc(var(--space-6) + var(--space-1));
+  padding: var(--space-1) var(--space-3);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background-color: var(--color-surface-active);
+  color: var(--color-text);
+}
+
+.toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.toggle[data-tone="warning"] {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.toggle > svg {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.toggle > .chevron {
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.toggle[aria-expanded="true"] > .chevron {
+  transform: rotate(180deg);
+}
+
+/* The answers form or the report: under the header, scrolling on its own if long. */
+.panel {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding-inline-start: calc(var(--size-icon-sm) + var(--space-2));
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+/* The report a mission posts to its chat, as a card in the assistant column. */
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 88%;
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.reportHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  color: var(--color-success);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+.report[data-outcome="blocked"] .reportHead {
+  color: var(--color-warning);
+}
+
+.report[data-outcome="failed"] .reportHead {
+  color: var(--color-danger);
+}
+
+.report[data-outcome="cancelled"] .reportHead,
+.report[data-outcome="update"] .reportHead {
+  color: var(--color-text-muted);
+}
+
+.reportHead > svg {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.reportTitle {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.reportCounts,
+.reportReason {
+  margin: var(--space-0);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.reportSection h3 {
+  margin: var(--space-1) var(--space-0) var(--space-1);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.reportSection ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+  margin: var(--space-0);
+  padding-inline-start: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle > .chevron {
+    transition: none;
+  }
+}
