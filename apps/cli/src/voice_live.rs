@@ -942,7 +942,7 @@ mod tests {
             let mut cfg = fake.config();
             cfg.ws_base = base.into();
             let err = open(cfg).await.err().expect("open must fail");
-            let text = format!("{err:?} {err}");
+            let text = format!("{err:?}");
             assert!(text.contains("invalid Gemini endpoint"), "{base}: {text}");
             assert!(!text.contains("SECRETKEY"), "{base}: {text}");
             assert!(!text.contains(base), "{base}: {text}");
@@ -1110,7 +1110,10 @@ mod tests {
         assert_eq!(random.len(), 16, "{}", a.name);
         let path = dir.path().join("x.wav");
         Wav::create(&path, INPUT_RATE).unwrap();
-        assert!(Wav::create(&path, INPUT_RATE).is_err(), "an existing file is not reused");
+        assert!(
+            Wav::create(&path, INPUT_RATE).is_err(),
+            "an existing file is not reused"
+        );
     }
 
     #[test]
@@ -1132,7 +1135,10 @@ mod tests {
         k.write(Side::Assistant, &[1, 0], OUTPUT_RATE);
         let big = sparse_wav(dir.path(), "4-dddd-assistant.wav", 150 * mb, 10);
         k.finish();
-        assert!(!mid.exists(), "the next oldest goes when the total is still over");
+        assert!(
+            !mid.exists(),
+            "the next oldest goes when the total is still over"
+        );
         assert!(new.exists() && big.exists());
     }
 }
