@@ -5042,27 +5042,26 @@
     }
   },
   "notifyHistory": {
-    "approvedToast": "Permitido",
+    "action": {
+      "open": "Abrir",
+      "reply": "Responder",
+      "retry": "Reintentar"
+    },
+    "allRead": "Todo leído",
     "askedTimes": "{{bot}} preguntó {{count}} veces",
     "clear": "Limpiar",
     "clearedToast": "Notificaciones borradas",
-    "deniedToast": "Denegado",
     "dismiss": "Cerrar",
-    "empty": "Cuando un bot termine una tarea o necesite tu permiso, lo verás aquí.",
-    "emptyAction": "Ver qué te necesita",
-    "emptyTitle": "Nada nuevo",
+    "empty": "Cuando un bot termine, te pregunte algo o falle, lo verás aquí.",
+    "emptyAction": "Ajustes de notificaciones",
+    "emptyTitle": "No hay notificaciones",
     "filterChip": {
       "all": "Todas",
-      "errors": "Errores",
+      "errors": "Fallidos",
       "needsYou": "Te necesita",
-      "runs": "Ejecuciones"
+      "runs": "Terminados"
     },
     "filters": "Filtrar notificaciones",
-    "groups": {
-      "earlier": "Anteriores",
-      "needsYou": "Te necesita",
-      "updates": "Novedades"
-    },
     "held": "Retenida (horas de silencio)",
     "heldMuted": "Retenida (bot silenciado)",
     "heldMutedShort": "Silenciado",
@@ -5072,7 +5071,6 @@
     "noMatch": "Ninguna notificación coincide con estos filtros.",
     "noMatchTitle": "Nada por aquí",
     "onlyUnread": "No leídas",
-    "openNeeds": "Abrir Te necesita",
     "quietNote": "{{count}} notificaciones fueron retenidas durante las horas de silencio y siguen sin leerse.",
     "quietNote_one": "{{count}} notificación fue retenida durante las horas de silencio y sigue sin leerse.",
     "repeatedTimes": "{{count}} veces",
@@ -5086,11 +5084,12 @@
     },
     "retention": "Se guardan durante {{days}} días, hasta {{max}} notificaciones, y luego se eliminan automáticamente.",
     "retriedToast": "Reintentando en el chat",
-    "retry": "Reintentar",
+    "showLess": "Mostrar menos",
+    "showMore": "{{count}} más",
     "showSnoozed": "Pospuestas ({{count}})",
     "snooze": "Posponer 1 h",
     "snoozeHint": "Oculta esto durante una hora. Vuelve por sí solo.",
-    "subtitle": "Aprobaciones, tareas terminadas y errores de tus bots.",
+    "subtitle": "Por bot: lo que te necesita, lo que falló y lo que terminó.",
     "systemBot": "Praxi",
     "time": {
       "hoursAgo": "hace {{count}} h",
@@ -5099,6 +5098,19 @@
       "yesterday": "Ayer"
     },
     "title": "Notificaciones",
+    "type": {
+      "failed": "Falló",
+      "finished": "Terminado",
+      "needsYou": "Te necesita"
+    },
+    "typeCount": {
+      "failed": "{{count}} fallaron",
+      "failed_one": "{{count}} falló",
+      "finished": "{{count}} terminados",
+      "finished_one": "{{count}} terminado",
+      "needsYou": "{{count}} te necesitan",
+      "needsYou_one": "{{count}} te necesita"
+    },
     "undo": "Deshacer",
     "unread": "No leída",
     "unreadCount": "{{count}} sin leer",

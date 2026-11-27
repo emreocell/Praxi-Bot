@@ -5042,27 +5042,26 @@
     }
   },
   "notifyHistory": {
-    "approvedToast": "Erlaubt",
+    "action": {
+      "open": "Öffnen",
+      "reply": "Antworten",
+      "retry": "Erneut versuchen"
+    },
+    "allRead": "Alles gelesen",
     "askedTimes": "{{bot}} hat {{count}}-mal gefragt",
     "clear": "Leeren",
     "clearedToast": "Benachrichtigungen gelöscht",
-    "deniedToast": "Abgelehnt",
     "dismiss": "Schließen",
-    "empty": "Wenn ein Bot eine Aufgabe beendet oder dein OK braucht, siehst du es hier.",
-    "emptyAction": "Ansehen, was dich braucht",
-    "emptyTitle": "Nichts Neues",
+    "empty": "Wenn ein Bot fertig ist, dich etwas fragt oder scheitert, siehst du es hier.",
+    "emptyAction": "Benachrichtigungseinstellungen",
+    "emptyTitle": "Keine Benachrichtigungen",
     "filterChip": {
       "all": "Alle",
-      "errors": "Fehler",
+      "errors": "Fehlgeschlagen",
       "needsYou": "Braucht dich",
-      "runs": "Läufe"
+      "runs": "Fertig"
     },
     "filters": "Benachrichtigungen filtern",
-    "groups": {
-      "earlier": "Früher",
-      "needsYou": "Braucht dich",
-      "updates": "Neuigkeiten"
-    },
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "heldMutedShort": "Stumm",
@@ -5072,7 +5071,6 @@
     "noMatch": "Keine Benachrichtigung passt zu diesen Filtern.",
     "noMatchTitle": "Hier ist nichts",
     "onlyUnread": "Ungelesen",
-    "openNeeds": "„Braucht dich“ öffnen",
     "quietNote": "{{count}} Benachrichtigungen wurden in den Ruhezeiten zurückgehalten und sind noch ungelesen.",
     "quietNote_one": "{{count}} Benachrichtigung wurde in den Ruhezeiten zurückgehalten und ist noch ungelesen.",
     "repeatedTimes": "{{count}}-mal",
@@ -5086,11 +5084,12 @@
     },
     "retention": "Wird {{days}} Tage lang aufbewahrt, höchstens {{max}} Benachrichtigungen, danach automatisch entfernt.",
     "retriedToast": "Wird im Chat erneut versucht",
-    "retry": "Erneut versuchen",
+    "showLess": "Weniger anzeigen",
+    "showMore": "{{count}} weitere",
     "showSnoozed": "Zurückgestellt ({{count}})",
     "snooze": "1 Std. zurückstellen",
     "snoozeHint": "Blendet dies für eine Stunde aus. Es kommt von selbst wieder.",
-    "subtitle": "Freigaben, abgeschlossene Aufgaben und Fehler deiner Bots.",
+    "subtitle": "Nach Bot: was dich braucht, was fehlschlug und was fertig ist.",
     "systemBot": "Praxi",
     "time": {
       "hoursAgo": "vor {{count}} Std.",
@@ -5099,6 +5098,19 @@
       "yesterday": "Gestern"
     },
     "title": "Benachrichtigungen",
+    "type": {
+      "failed": "Fehlgeschlagen",
+      "finished": "Fertig",
+      "needsYou": "Braucht dich"
+    },
+    "typeCount": {
+      "failed": "{{count}} fehlgeschlagen",
+      "failed_one": "{{count}} fehlgeschlagen",
+      "finished": "{{count}} fertig",
+      "finished_one": "{{count}} fertig",
+      "needsYou": "{{count}} brauchen dich",
+      "needsYou_one": "{{count}} braucht dich"
+    },
     "undo": "Rückgängig",
     "unread": "Ungelesen",
     "unreadCount": "{{count}} ungelesen",

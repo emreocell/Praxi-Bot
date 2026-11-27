@@ -5042,27 +5042,26 @@
     }
   },
   "notifyHistory": {
-    "approvedToast": "İzin verildi",
+    "action": {
+      "open": "Aç",
+      "reply": "Yanıtla",
+      "retry": "Tekrar dene"
+    },
+    "allRead": "Hepsi okundu",
     "askedTimes": "{{bot}} {{count}} kez sordu",
     "clear": "Temizle",
     "clearedToast": "Bildirimler temizlendi",
-    "deniedToast": "Reddedildi",
     "dismiss": "Kapat",
-    "empty": "Bot bir işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
-    "emptyAction": "Seni bekleyenlere bak",
-    "emptyTitle": "Yeni bir şey yok",
+    "empty": "Bir bot işini bitirince, sana bir şey sorunca ya da bir işte başarısız olunca burada görürsün.",
+    "emptyAction": "Bildirim ayarları",
+    "emptyTitle": "Bildirim yok",
     "filterChip": {
       "all": "Tümü",
-      "errors": "Hatalar",
+      "errors": "Başarısız",
       "needsYou": "Seni bekliyor",
-      "runs": "Çalışmalar"
+      "runs": "Bitti"
     },
     "filters": "Bildirimleri süz",
-    "groups": {
-      "earlier": "Daha önce",
-      "needsYou": "Seni bekliyor",
-      "updates": "Güncellemeler"
-    },
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
     "heldMutedShort": "Sessizde",
@@ -5072,7 +5071,6 @@
     "noMatch": "Bu süzgeçlere uyan bildirim yok.",
     "noMatchTitle": "Burada bir şey yok",
     "onlyUnread": "Okunmamış",
-    "openNeeds": "Sizi bekleyenleri aç",
     "quietNote": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
     "quietNote_one": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
     "repeatedTimes": "{{count}} kez",
@@ -5086,11 +5084,12 @@
     },
     "retention": "{{days}} gün boyunca, en fazla {{max}} bildirim saklanır; sonra kendiliğinden silinir.",
     "retriedToast": "Sohbette yeniden deneniyor",
-    "retry": "Yeniden dene",
+    "showLess": "Daha az göster",
+    "showMore": "{{count}} tane daha",
     "showSnoozed": "Ertelenenler ({{count}})",
     "snooze": "1 saat ertele",
     "snoozeHint": "Bunu bir saatliğine gizle. Kendiliğinden geri gelir.",
-    "subtitle": "Botların bekleyen onayları, biten işleri ve hataları.",
+    "subtitle": "Botlara göre: seni bekleyenler, başarısız olanlar ve bitenler.",
     "systemBot": "Praxi",
     "time": {
       "hoursAgo": "{{count}} sa önce",
@@ -5099,6 +5098,19 @@
       "yesterday": "Dün"
     },
     "title": "Bildirimler",
+    "type": {
+      "failed": "Başarısız",
+      "finished": "Bitti",
+      "needsYou": "Seni bekliyor"
+    },
+    "typeCount": {
+      "failed": "{{count}} başarısız",
+      "failed_one": "{{count}} başarısız",
+      "finished": "{{count}} bitti",
+      "finished_one": "{{count}} bitti",
+      "needsYou": "{{count}} seni bekliyor",
+      "needsYou_one": "{{count}} seni bekliyor"
+    },
     "undo": "Geri al",
     "unread": "Okunmadı",
     "unreadCount": "{{count}} okunmamış",

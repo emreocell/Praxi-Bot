@@ -32,6 +32,7 @@ test("every list I own shows a titled empty state with one sentence of help, in 
   }
 });
 
-test("the notification empty state offers its one action", () => {
-  assert.match(read("../views/NotificationHistoryView.tsx"), /onAction=\{onOpenNeeds\}/);
+test("the notification empty state offers its one action: the notification settings", () => {
+  assert.match(read("../views/NotificationHistoryView.tsx"), /onAction=\{openNotificationSettings\}/);
+  assert.match(read("../views/NotificationHistoryView.tsx"), /openSettingsTarget\(\{ page: "general", card: "notifications"/);
 });

@@ -4909,14 +4909,12 @@
     }
   },
   "notifyHistory": {
-    "approvedToast": "Autorisé",
     "askedTimes": "{{bot}} a demandé {{count}} fois",
     "clear": "Effacer",
     "clearedToast": "Notifications effacées",
-    "deniedToast": "Refusé",
     "dismiss": "Ignorer",
     "empty": "Quand un bot termine un travail ou a besoin de votre accord, vous le verrez ici.",
-    "emptyAction": "Voir ce qui vous attend",
+    "emptyAction": "Paramètres des notifications",
     "emptyTitle": "Rien de nouveau",
     "filterChip": {
       "all": "Tout",
@@ -4925,11 +4923,6 @@
       "runs": "Exécutions"
     },
     "filters": "Filtrer les notifications",
-    "groups": {
-      "earlier": "Plus tôt",
-      "needsYou": "Besoin de vous",
-      "updates": "Mises à jour"
-    },
     "held": "Retenue (heures calmes)",
     "heldMuted": "Retenue (bot en sourdine)",
     "heldMutedShort": "En sourdine",
@@ -4939,7 +4932,6 @@
     "noMatch": "Aucune notification ne correspond à ces filtres.",
     "noMatchTitle": "Rien ici",
     "onlyUnread": "Non lues",
-    "openNeeds": "Ouvrir « Besoin de vous »",
     "quietNote": "{{count}} notifications ont été retenues pendant les heures calmes et ne sont toujours pas lues.",
     "quietNote_one": "{{count}} notification a été retenue pendant les heures calmes et n'est toujours pas lue.",
     "repeatedTimes": "{{count}} fois",
@@ -4953,7 +4945,6 @@
     },
     "retention": "Conservées {{days}} jours, jusqu'à {{max}} notifications, puis supprimées automatiquement.",
     "retriedToast": "Nouvelle tentative dans la conversation",
-    "retry": "Réessayer",
     "showSnoozed": "Reportées ({{count}})",
     "snooze": "Reporter 1 h",
     "snoozeHint": "Masque ceci pendant une heure. Cela revient tout seul.",

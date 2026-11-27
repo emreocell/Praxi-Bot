@@ -180,6 +180,7 @@
   gap: var(--space-2);
 }
 
+/* One group per bot: its avatar and name, then how many need me / failed / finished. */
 .groupHeader {
   display: flex;
   align-items: center;
@@ -187,18 +188,130 @@
   padding: 0 var(--space-1);
 }
 
-/* Section heading: small sentence-case type, not shouting capitals. */
 .groupTitle {
   margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.groupCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* The three types in one colour each, everywhere: the bot header counts, the row tag, the row icon. */
+.countTag {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-half) var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: color-mix(in srgb, var(--color-text) 7%, transparent);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.countTag[data-type="needsYou"] {
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning);
+}
+
+.countTag[data-type="failed"] {
+  background-color: var(--color-danger-subtle);
+  color: var(--color-danger);
+}
+
+.typeIcon {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--size-avatar-sm);
+  height: var(--size-avatar-sm);
+  border-radius: var(--radius-md);
+  background-color: color-mix(in srgb, var(--color-success) 14%, transparent);
+  color: var(--color-success);
+}
+
+.typeIcon > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.typeIcon[data-type="needsYou"] {
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning);
+}
+
+.typeIcon[data-type="failed"] {
+  background-color: var(--color-danger-subtle);
+  color: var(--color-danger);
+}
+
+.typeLabel {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.typeLabel[data-type="needsYou"] {
+  color: var(--color-warning);
+}
+
+.typeLabel[data-type="failed"] {
+  color: var(--color-danger);
+}
+
+/* "3 more" under a bot's first rows. */
+.moreRow {
+  border-top: var(--size-border) solid var(--color-border);
+}
+
+.moreButton {
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+.moreButton:hover {
+  background-color: var(--state-hover);
+  color: var(--color-text);
+}
+
+.moreButton:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--size-border-thick) var(--color-focus);
+}
+
+.allRead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
-.groupCount {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
+.allRead > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+/* Under the empty state's sentence: the three kinds of notification it will show. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
 }
 
 .list {
@@ -253,38 +366,11 @@
   background-color: var(--color-accent-text);
 }
 
-.avatarWrap {
-  position: relative;
-  flex-shrink: 0;
-  display: inline-flex;
-}
 
-.statusPin {
-  position: absolute;
-  right: var(--space-0);
-  bottom: var(--space-0);
-  width: var(--size-status-dot);
-  height: var(--size-status-dot);
-  border-radius: var(--radius-pill);
-  border: var(--size-border-thick) solid var(--color-surface);
-  background-color: var(--color-text-muted);
-}
 
-.pin_warn {
-  background-color: var(--color-warning);
-}
 
-.pin_danger {
-  background-color: var(--color-danger);
-}
 
-.pin_ok {
-  background-color: var(--color-success);
-}
 
-.pin_neutral {
-  background-color: var(--color-accent-text);
-}
 
 .body {
   flex: 1;
@@ -324,10 +410,6 @@
   color: var(--color-text-muted);
 }
 
-.botLabel {
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-}
 
 .collapsePill {
   display: inline-flex;

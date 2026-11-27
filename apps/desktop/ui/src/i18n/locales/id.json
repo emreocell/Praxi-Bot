@@ -4795,14 +4795,12 @@
     }
   },
   "notifyHistory": {
-    "approvedToast": "Allowed",
     "askedTimes": "{{bot}} asked {{count}} times",
     "clear": "Clear",
     "clearedToast": "Notifications cleared",
-    "deniedToast": "Denied",
     "dismiss": "Dismiss",
     "empty": "When a bot finishes a job or needs your OK, you will see it here.",
-    "emptyAction": "See what needs you",
+    "emptyAction": "Pengaturan notifikasi",
     "emptyTitle": "Nothing new",
     "filterChip": {
       "all": "All",
@@ -4811,11 +4809,6 @@
       "runs": "Runs"
     },
     "filters": "Filter notifications",
-    "groups": {
-      "earlier": "Earlier",
-      "needsYou": "Needs you",
-      "updates": "Updates"
-    },
     "held": "Held (quiet hours)",
     "heldMuted": "Held (bot muted)",
     "heldMutedShort": "Muted",
@@ -4825,7 +4818,6 @@
     "noMatch": "No notification matches these filters.",
     "noMatchTitle": "Nothing here",
     "onlyUnread": "Unread",
-    "openNeeds": "Open Needs you",
     "quietNote": "{{count}} notifications were held back during quiet hours and are still unread.",
     "quietNote_one": "{{count}} notification was held back during quiet hours and is still unread.",
     "repeatedTimes": "{{count}} times",
@@ -4839,7 +4831,6 @@
     },
     "retention": "Kept for {{days}} days, up to {{max}} notifications, then removed automatically.",
     "retriedToast": "Retrying in chat",
-    "retry": "Retry",
     "showSnoozed": "Snoozed ({{count}})",
     "snooze": "Snooze 1 h",
     "snoozeHint": "Hide this for one hour. It comes back by itself.",

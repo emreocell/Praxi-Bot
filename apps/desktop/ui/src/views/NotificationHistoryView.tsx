@@ -14,22 +14,25 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  MessageCircleQuestion,
   Moon,
+  Reply,
   RotateCcw,
   RotateCw,
-  Trash2,
-  X
+  Trash2
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
 import { EmptyState } from "../components/EmptyState";
-import { useDecisionActions } from "../components/PendingDecisions";
 import { useToast } from "../components/Toast";
 import { botView } from "../lib/botProfile";
 import { humanLine } from "../lib/humanError";
 import { formatStamp } from "../lib/messageTime";
 import {
   type CollapsedNotification,
+  collapseDuplicates,
   filterEntries,
   type FilterCategory,
   groupInbox,
@@ -41,7 +44,8 @@ import {
   NO_FILTER,
   unreadCount
 } from "../lib/notificationHistory";
-import { approvalActions } from "../lib/notifyRules";
+import { BOT_PREVIEW_MAX, inboxByBot, type NotifyPrimary, type NotifyType, primaryAction } from "../lib/notifyInbox";
+import { openSettingsTarget } from "../lib/settingsLink";
 import { ownerKey } from "../lib/ownerKey";
 import { formatRelativeTime } from "../lib/relativeTime";
 import { lastTurn } from "../lib/resendTurn";
@@ -73,13 +77,14 @@ export function NotificationHistoryView({
 }) {
   const { t, i18n } = useTranslation();
   const { bots, needs, client, refreshRuns } = useDaemon();
-  const { decide } = useDecisionActions();
   const toast = useToast();
   const list = useNotificationHistory();
 
   const [filter, setFilter] = useState<HistoryFilter>(NO_FILTER);
   const [now, setNow] = useState(() => Date.now());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // Bots whose whole list is open (otherwise the first BOT_PREVIEW_MAX rows and "N more").
+  const [openBots, setOpenBots] = useState<Set<string>>(() => new Set());
   const [busyKeys, setBusyKeys] = useState<Set<string>>(() => new Set());
   const [undoList, setUndoList] = useState<HistoryEntry[] | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -104,7 +109,6 @@ export function NotificationHistoryView({
   }, [list.length, undoList]);
 
   const liveCallIds = useMemo(() => new Set(needs.map((n) => n.callId)), [needs]);
-  const liveNeedByCallId = useMemo(() => new Map(needs.map((n) => [n.callId, n])), [needs]);
 
   const unread = unreadCount(list, now);
   const heldQuiet = heldByQuietCount(list, now);
@@ -123,9 +127,9 @@ export function NotificationHistoryView({
     [list, now, liveCallIds]
   );
 
-  const grouped = useMemo(
-    () => groupInbox(visible, now, liveCallIds),
-    [visible, now, liveCallIds]
+  const botGroups = useMemo(
+    () => inboxByBot(collapseDuplicates(visible, liveCallIds), liveCallIds),
+    [visible, liveCallIds]
   );
 
   const setBusy = (key: string, on: boolean) => {
@@ -172,32 +176,6 @@ export function NotificationHistoryView({
     return () => window.removeEventListener("keydown", onKey);
   }, [undoList, handleUndo]);
 
-  const handleApprove = async (item: CollapsedNotification, callId: string) => {
-    setBusy(item.key, true);
-    try {
-      await decide(callId)("approve", "once");
-      resolveNotifications(item.ids, "approved");
-      toast.show(t("notifyHistory.approvedToast"), "success");
-    } catch (e) {
-      toast.show(humanLine(e), "danger");
-    } finally {
-      setBusy(item.key, false);
-    }
-  };
-
-  const handleDeny = async (item: CollapsedNotification, callId: string) => {
-    setBusy(item.key, true);
-    try {
-      await decide(callId)("deny");
-      resolveNotifications(item.ids, "denied");
-      toast.show(t("notifyHistory.deniedToast"), "info");
-    } catch (e) {
-      toast.show(humanLine(e), "danger");
-    } finally {
-      setBusy(item.key, false);
-    }
-  };
-
   const handleRetry = async (item: CollapsedNotification) => {
     const chatId = item.primary.chatId;
     if (!chatId) {
@@ -228,6 +206,8 @@ export function NotificationHistoryView({
       setBusy(item.key, false);
     }
   };
+
+  const openNotificationSettings = () => openSettingsTarget({ page: "general", card: "notifications", field: "" });
 
   const openEntry = (ids: readonly string[], chatId: string) => {
     markNotificationsRead(ids);
@@ -272,28 +252,26 @@ export function NotificationHistoryView({
   };
 
   const days = Math.round(HISTORY_MAX_AGE_MS / 86_400_000);
-  const totalVisibleGroups =
-    grouped.needsYou.length + grouped.updates.length + grouped.earlier.length;
 
-  const renderRow = (item: CollapsedNotification) => {
+  const TYPE_ICON: Record<NotifyType, typeof CircleCheck> = {
+    needsYou: MessageCircleQuestion,
+    failed: CircleAlert,
+    finished: CircleCheck
+  };
+  const ACTION_ICON: Record<NotifyPrimary, typeof Reply> = { reply: Reply, retry: RotateCw, open: ArrowUpRight };
+
+  const runPrimary = (action: NotifyPrimary, item: CollapsedNotification) => {
+    if (action === "retry") void handleRetry(item);
+    else openEntry(item.ids, item.primary.chatId);
+  };
+
+  const renderRow = (item: CollapsedNotification, type: NotifyType, botLabel: string) => {
     const n = item.primary;
-    const bot = bots.find((b) => b.id === n.botId);
-    const view = bot ? botView(bot) : null;
-    const botLabel = view?.name || n.botName || t("notifyHistory.systemBot");
-    const avatarBot = view ?? { id: n.botId || "praxi", name: botLabel };
     const isBusy = busyKeys.has(item.key);
     const isExpanded = expanded.has(item.key);
-
-    const activeCallId = !privateMode ? item.activeCallId : undefined;
-    const liveNeed = activeCallId ? liveNeedByCallId.get(activeCallId) : undefined;
-    const inlineApproval =
-      liveNeed?.tool &&
-      approvalActions({
-        callId: liveNeed.callId,
-        toolName: liveNeed.tool.name,
-        input: liveNeed.tool.input,
-        details: liveNeed.tool.details
-      }).includes("allow");
+    const action = primaryAction(item, type, privateMode);
+    const TypeIcon = TYPE_ICON[type];
+    const ActionIcon = ACTION_ICON[action];
 
     const retryRemaining =
       n.retryAtMs !== undefined && n.resolved !== "retried"
@@ -307,26 +285,15 @@ export function NotificationHistoryView({
           })
         : n.title;
 
-    const showRetry =
-      !privateMode && n.kind === "failed" && Boolean(n.chatId) && n.resolved !== "retried";
-
     const relTime = formatRelativeTime(item.latestTs, now, i18n.language, t);
     const fullStamp = formatStamp(item.latestTs, i18n.language);
-
-    const tone =
-      n.kind === "needsYou" && n.resolved === undefined
-        ? "warn"
-        : n.kind === "failed"
-          ? "danger"
-          : n.kind === "longRun" || n.kind === "scheduleDone"
-            ? "ok"
-            : "neutral";
 
     return (
       <li
         key={item.key}
         className={[styles.rowWrap, item.unread ? styles.rowUnread : ""].filter(Boolean).join(" ")}
         data-testid="notify-history-item"
+        data-type={type}
       >
         <div
           className={styles.row}
@@ -336,7 +303,7 @@ export function NotificationHistoryView({
             if (ev.target !== ev.currentTarget) return;
             if (ev.key === "Enter" || ev.key === " ") {
               ev.preventDefault();
-              openEntry(item.ids, n.chatId);
+              runPrimary(action, item);
             } else if (ev.key === "r" && item.unread) {
               ev.preventDefault();
               markNotificationsRead(item.ids);
@@ -357,10 +324,9 @@ export function NotificationHistoryView({
             className={[styles.unreadDot, item.unread ? styles.unreadDotOn : ""].filter(Boolean).join(" ")}
             aria-hidden="true"
           />
-          <div className={styles.avatarWrap}>
-            <BotAvatar bot={avatarBot} size="sm" live={false} decorative />
-            <span className={[styles.statusPin, styles[`pin_${tone}`]].join(" ")} aria-hidden="true" />
-          </div>
+          <span className={styles.typeIcon} data-type={type} aria-hidden="true">
+            <TypeIcon />
+          </span>
           <div className={styles.body}>
             <div className={styles.titleRow}>
               <span className={styles.headline}>{headline}</span>
@@ -383,7 +349,7 @@ export function NotificationHistoryView({
             </div>
             {n.body ? <p className={styles.subline}>{n.body}</p> : null}
             <div className={styles.meta}>
-              <span className={styles.botLabel}>{botLabel}</span>
+              <span className={styles.typeLabel} data-type={type}>{t(`notifyHistory.type.${type}`)}</span>
               <span aria-hidden="true">·</span>
               <time dateTime={new Date(item.latestTs).toISOString()} title={fullStamp}>
                 {relTime}
@@ -403,50 +369,16 @@ export function NotificationHistoryView({
             </div>
           </div>
           <div className={styles.rowActions}>
-            {inlineApproval && activeCallId ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={isBusy}
-                  onClick={() => void handleApprove(item, activeCallId)}
-                  data-testid="notify-inline-allow"
-                >
-                  <Check aria-hidden="true" />
-                  {t("notify.action.allow")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={isBusy}
-                  onClick={() => void handleDeny(item, activeCallId)}
-                  data-testid="notify-inline-deny"
-                >
-                  <X aria-hidden="true" />
-                  {t("notify.action.deny")}
-                </Button>
-              </>
-            ) : null}
-            {showRetry ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={isBusy}
-                onClick={() => void handleRetry(item)}
-                data-testid="notify-inline-retry"
-              >
-                <RotateCw aria-hidden="true" />
-                {t("notifyHistory.retry")}
-              </Button>
-            ) : null}
             <Button
               size="sm"
-              variant="ghost"
+              variant={action === "open" ? "ghost" : action === "reply" ? "primary" : "secondary"}
+              disabled={isBusy}
+              onClick={() => runPrimary(action, item)}
               data-notify-open
-              onClick={() => openEntry(item.ids, n.chatId)}
+              data-testid={`notify-action-${action}`}
             >
-              <ArrowUpRight aria-hidden="true" />
-              {t(n.chatId ? "needs.open" : "notifyHistory.openNeeds")}
+              <ActionIcon aria-hidden="true" />
+              {t(`notifyHistory.action.${action}`)}
             </Button>
             {item.unread ? (
               <button
@@ -499,20 +431,51 @@ export function NotificationHistoryView({
     );
   };
 
-  const renderSection = (
-    sectionKey: "needsYou" | "updates" | "earlier",
-    items: CollapsedNotification[]
-  ) => {
-    if (items.length === 0) return null;
+  const renderBot = (group: (typeof botGroups)[number]) => {
+    const bot = group.botId ? bots.find((b) => b.id === group.botId) : undefined;
+    const view = bot ? botView(bot) : null;
+    const botLabel = view?.name || group.botName || t("notifyHistory.systemBot");
+    const avatarBot = view ?? { id: group.botId || "praxi", name: botLabel };
+    const headId = `notify-bot-${group.botId || "praxi"}`;
+    const all = openBots.has(group.botId);
+    const shown = all ? group.rows : group.rows.slice(0, BOT_PREVIEW_MAX);
+    const hidden = group.rows.length - shown.length;
+    const counts = (["needsYou", "failed", "finished"] as const).filter((k) => group.counts[k] > 0);
     return (
-      <section className={styles.group} aria-labelledby={`notify-group-${sectionKey}`} data-testid={`notify-group-${sectionKey}`}>
+      <section key={group.botId || "praxi"} className={styles.group} aria-labelledby={headId} data-testid="notify-bot-group">
         <header className={styles.groupHeader}>
-          <h2 id={`notify-group-${sectionKey}`} className={styles.groupTitle}>
-            {t(`notifyHistory.groups.${sectionKey}`)}
-          </h2>
-          <span className={styles.groupCount}>{items.length}</span>
+          <BotAvatar bot={avatarBot} size="sm" live={false} decorative />
+          <h2 id={headId} className={styles.groupTitle}>{botLabel}</h2>
+          <span className={styles.groupCounts}>
+            {counts.map((k) => (
+              <span key={k} className={styles.countTag} data-type={k}>
+                {t(`notifyHistory.typeCount.${k}`, { count: group.counts[k] })}
+              </span>
+            ))}
+          </span>
         </header>
-        <ul className={styles.list}>{items.map(renderRow)}</ul>
+        <ul className={styles.list}>
+          {shown.map((r) => renderRow(r.item, r.type, botLabel))}
+          {hidden > 0 || all ? (
+            <li className={styles.moreRow}>
+              <button
+                type="button"
+                className={styles.moreButton}
+                aria-expanded={all}
+                onClick={() =>
+                  setOpenBots((prev) => {
+                    const next = new Set(prev);
+                    if (!next.delete(group.botId)) next.add(group.botId);
+                    return next;
+                  })
+                }
+                data-testid="notify-bot-more"
+              >
+                {all ? t("notifyHistory.showLess") : t("notifyHistory.showMore", { count: hidden })}
+              </button>
+            </li>
+          ) : null}
+        </ul>
       </section>
     );
   };
@@ -528,14 +491,20 @@ export function NotificationHistoryView({
                 <span className={styles.unreadPill} data-testid="notify-unread-pill">
                   {t("notifyHistory.unreadCount", { count: unread })}
                 </span>
+              ) : list.length > 0 ? (
+                <span className={styles.allRead} data-testid="notify-all-read">
+                  <CheckCheck aria-hidden="true" />
+                  {t("notifyHistory.allRead")}
+                </span>
               ) : null}
             </div>
             <p className={styles.subtitle}>{t("notifyHistory.subtitle")}</p>
           </div>
+          {list.length > 0 ? (
           <div className={styles.actions}>
             <Button
               size="sm"
-              variant="ghost"
+              variant={unread > 0 ? "secondary" : "ghost"}
               disabled={unread === 0}
               onClick={markAllNotificationsRead}
               data-testid="notify-history-mark-read"
@@ -554,6 +523,7 @@ export function NotificationHistoryView({
               {t("notifyHistory.clear")}
             </Button>
           </div>
+          ) : null}
         </header>
 
         <span role="status" aria-live="polite" className={styles.srOnly}>
@@ -629,12 +599,17 @@ export function NotificationHistoryView({
             icon={BellOff}
             title={t("notifyHistory.emptyTitle")}
             actionLabel={t("notifyHistory.emptyAction")}
-            onAction={onOpenNeeds}
+            onAction={openNotificationSettings}
             testId="notify-history-empty"
           >
             {t("notifyHistory.empty")}
+            <span className={styles.legend} aria-hidden="true">
+              {(["needsYou", "failed", "finished"] as const).map((k) => (
+                <span key={k} className={styles.countTag} data-type={k}>{t(`notifyHistory.type.${k}`)}</span>
+              ))}
+            </span>
           </EmptyState>
-        ) : totalVisibleGroups === 0 ? (
+        ) : botGroups.length === 0 ? (
           <EmptyState
             icon={BellOff}
             title={t("notifyHistory.noMatchTitle")}
@@ -645,11 +620,7 @@ export function NotificationHistoryView({
             {t("notifyHistory.noMatch")}
           </EmptyState>
         ) : (
-          <div className={styles.groups}>
-            {renderSection("needsYou", grouped.needsYou)}
-            {renderSection("updates", grouped.updates)}
-            {renderSection("earlier", grouped.earlier)}
-          </div>
+          <div className={styles.groups}>{botGroups.map(renderBot)}</div>
         )}
 
         <p className={styles.retention} data-testid="notify-history-retention">
