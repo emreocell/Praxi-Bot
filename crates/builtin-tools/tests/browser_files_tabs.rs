@@ -22,7 +22,7 @@ use tool_registry::{ContentPart, ToolContext, ToolError, ToolRegistry};
 
 const FILES: &str = "<title>Files</title><h1>Files</h1>\
 <label>Pick <input type=file id=f></label><p id=out>none</p>\
-<a href=\"/dl/hello.txt\">Get hello</a> <a href=\"/dl/evil.txt\">Get evil</a> <a href=\"/dl/big.bin\">Get big</a>\
+<a href=\"/dl/hello.txt\">Get hello</a> <a href=\"/dl/evil.txt\">Get evil</a> <a href=\"/dl/big.bin\">Get big</a> <a href=\"/dl/page.html\">Get page</a>\
 <script>document.getElementById('f').addEventListener('change',async e=>{const x=e.target.files[0];\
 document.getElementById('out').textContent='picked:'+x.name+':'+await x.text();});</script>";
 
@@ -43,6 +43,7 @@ async fn serve() -> u16 {
                     let (name, body) = match file {
                         "hello.txt" => ("hello.txt", "hello download".to_owned()),
                         "evil.txt" => ("..\\..\\evil.txt", "not a path".to_owned()),
+                        "page.html" => ("page.html", "<script>alert(1)</script>".to_owned()),
                         _ => ("big.bin", "x".repeat(3000)),
                     };
                     format!(
@@ -232,7 +233,15 @@ async fn a_workspace_file_goes_into_a_page_and_a_download_lands_in_the_sandbox()
         "-----BEGIN RSA PRIVATE KEY-----\nx",
     )
     .unwrap();
-    for path in [".env", "backup.txt", "../../outside.txt"] {
+    std::fs::write(rig.ws.join("passwords.txt"), "hunter2").unwrap();
+    std::fs::write(rig.ws.join("export.bin"), "id AKIAIOSFODNN7EXAMPLE").unwrap();
+    for path in [
+        ".env",
+        "backup.txt",
+        "../../outside.txt",
+        "passwords.txt",
+        "export.bin",
+    ] {
         let err = rig
             .call("browser_upload", json!({"ref": input, "path": path}))
             .await
@@ -249,10 +258,15 @@ async fn a_workspace_file_goes_into_a_page_and_a_download_lands_in_the_sandbox()
         .await;
     rig.ok("browser_click", json!({"ref": ref_of(&links, "Get evil")}))
         .await;
+    rig.ok("browser_click", json!({"ref": ref_of(&links, "Get page")}))
+        .await;
     let mut listing = String::new();
     for _ in 0..60 {
         listing = rig.ok("browser_downloads", json!({})).await;
-        if listing.contains("hello.txt |") && listing.contains("evil.txt |") {
+        if listing.contains("hello.txt |")
+            && listing.contains("evil.txt |")
+            && listing.contains("page.html.download |")
+        {
             break;
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -273,6 +287,9 @@ async fn a_workspace_file_goes_into_a_page_and_a_download_lands_in_the_sandbox()
             .any(|e| e.file_name().to_string_lossy().ends_with("evil.txt")),
         "{listing}"
     );
+    // A page the browser would render is saved under a `.download` suffix, not as `.html`.
+    assert!(listing.contains("page.html.download |"), "{listing}");
+    assert!(!folder.join("page.html").exists());
     assert!(!rig.ws.join("evil.txt").exists());
     assert!(!rig.ws.parent().unwrap().join("evil.txt").exists());
     // The download is outside content for the file tools.

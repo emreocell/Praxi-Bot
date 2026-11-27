@@ -1662,11 +1662,11 @@ impl Page {
             let paths: Vec<String> = files
                 .iter()
                 .map(|p| {
-                    std::fs::canonicalize(p)
-                        .unwrap_or_else(|_| p.clone())
-                        .to_string_lossy()
-                        .trim_start_matches(r"\\?\")
-                        .to_string()
+                    crate::downloads::plain_path(
+                        &std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()),
+                    )
+                    .to_string_lossy()
+                    .into_owned()
                 })
                 .collect();
             self.cmd_on(

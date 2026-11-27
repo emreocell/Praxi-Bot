@@ -68,11 +68,19 @@ impl Drop for ClosedGuard {
 /// read (the code predates the web tools; it stays because audit consumers know it).
 const FULL_BROWSE_REASON: &str = "mode.full.owner_browse";
 
+/// Audit reason code of a `browser_upload` the Full level let through.
+const FULL_UPLOAD_REASON: &str = "mode.full.owner_upload";
+
+/// The one call that hands a FILE of this computer to a page. It has its own, narrower Full-level
+/// rule ([`Shared::full_upload_waives`]) and is not in [`FULL_BROWSER_CALLS`].
+pub(crate) const FULL_UPLOAD_CALL: &str = "browser_upload";
+
 /// The managed browser's calls that Full lets an owner-started run make after reading a page:
 /// open, go back and forward, reload, click, type, select, press, select text, tabs (including a
 /// new tab on an address, judged like `browser_open`) and the batch. NOT `browser_eval` (a page
 /// script can send anything anywhere), NOT `browser_upload` (it hands a file of this computer
-/// to a page: it keeps asking) and not the user's own computer (`pc_*`).
+/// to a page: it has the narrower rule of [`FULL_UPLOAD_CALL`]) and not the user's own computer
+/// (`pc_*`).
 pub(crate) const FULL_BROWSER_CALLS: [&str; 13] = [
     "browser_open",
     "browser_back",
@@ -625,7 +633,12 @@ impl Shared {
             if d == Decision::Allow && must_ask && !self.gate_waived(ctx, name, input) {
                 // The owner's Full level: an owner-started run browses after reading a page.
                 if self.full_mode_waives(ctx, name, input) {
-                    return (Decision::Allow, Some(FULL_BROWSE_REASON));
+                    let reason = if name == FULL_UPLOAD_CALL {
+                        FULL_UPLOAD_REASON
+                    } else {
+                        FULL_BROWSE_REASON
+                    };
+                    return (Decision::Allow, Some(reason));
                 }
                 return (Decision::ask(), None);
             }
@@ -1248,11 +1261,14 @@ impl Shared {
         // A subagent (and a helper bot another bot called) keeps the old rule: it never inherits
         // the owner's Full autonomy from the run that started it.
         let web_read = FULL_WEB_READ_CALLS.contains(&name);
+        let upload = name == FULL_UPLOAD_CALL;
         if ctx.parent_run_id.is_some()
             || ctx.delegation().is_some()
-            || !(web_read || FULL_BROWSER_CALLS.contains(&name))
+            || !(web_read || upload || FULL_BROWSER_CALLS.contains(&name))
             || ctx.profile.permissions.mode() != AutonomyMode::Full
             || !self.full_waivers_apply(ctx)
+            // a file of this computer: the owner's own run only, never a mission session
+            || (upload && !self.full_owner_started(ctx))
         {
             return false;
         }
@@ -1262,18 +1278,11 @@ impl Shared {
         if !web_read && self.browser_may_hold_logins(ctx, input) {
             return false;
         }
-        if self.content_class(ctx, name, input).executes
-            || crate::browser_url::opens_non_public(name, input)
-            || taint::input_forbids_egress(input)
-            || taint::input_needs_a_card_to_show(input)
-        {
+        if !self.full_input_is_plain(ctx, name, input) {
             return false;
         }
-        if let Some(r) = &self.cfg.redactor {
-            let mut shown = input.clone();
-            if crate::shared::redact_value(r, &mut shown) {
-                return false;
-            }
+        if upload {
+            return self.full_upload_waives(ctx, input);
         }
         let (urls, texts) = crate::full_autonomy::split_input(input);
         // A key, a card number or an encoded blob is never typed or sent silently.
@@ -1352,6 +1361,55 @@ impl Shared {
         }
         taint.seen.sent += sent;
         true
+    }
+
+    /// The part of the Full level's rule every waived call shares: it starts no program, opens
+    /// no non-public address, hides no character and carries nothing the redactor would change.
+    fn full_input_is_plain(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
+        if self.content_class(ctx, name, input).executes
+            || crate::browser_url::opens_non_public(name, input)
+            || taint::input_forbids_egress(input)
+            || taint::input_needs_a_card_to_show(input)
+        {
+            return false;
+        }
+        let Some(r) = &self.cfg.redactor else {
+            return true;
+        };
+        let mut shown = input.clone();
+        !crate::shared::redact_value(r, &mut shown)
+    }
+
+    /// The owner's Full level for `browser_upload`: a file of the bot's workspace is set on a
+    /// page's file input without a card only when ALL hold (on top of everything
+    /// [`Self::full_mode_waives`] already requires: the owner's own run, the Full level, no
+    /// signed-in profile, nothing hidden in the input):
+    ///
+    /// * the page that owns the input is on a site the OWNER named or approved
+    ///   ([`Self::trusted_host`]): a file is private data, and an untrusted page must never be
+    ///   able to talk the bot into carrying one to a site the owner did not choose. On any other
+    ///   site the upload asks, whatever the run has read so far;
+    /// * the input is exactly a `ref` and one or more paths (nothing else rides along).
+    ///
+    /// What this does NOT waive, because the tool itself enforces it before and after any
+    /// approval: the file rules of `fs_read` (the bot's folders, credentials, daemon data), the
+    /// hard refusal of anything that looks like a secret, the size and count caps, a second look
+    /// at the file right before the browser takes it, and an audit record of every upload (name,
+    /// size, hash, destination origin). The owner's site and form rules (block / ask) are
+    /// decided before this and still win.
+    fn full_upload_waives(&self, ctx: &RunCtx, input: &Value) -> bool {
+        let plain_shape = input.as_object().is_some_and(|o| {
+            o.keys()
+                .all(|k| matches!(k.as_str(), "ref" | "path" | "paths"))
+        });
+        if !plain_shape {
+            return false;
+        }
+        let Some(host) = ctx.page_origin.lock().as_deref().and_then(host_of_origin) else {
+            return false;
+        };
+        let named = self.owner_named_hosts(ctx);
+        self.trusted_host(ctx, &host, &named)
     }
 
     /// The owner's Full level for `shell_run` (the bot's OWN host shell) after the run read

@@ -124,6 +124,7 @@ fn tools(origin: Option<&str>) -> Vec<Arc<TestTool>> {
         "browser_press",
         "browser_tabs",
         "browser_eval",
+        "browser_upload",
     ] {
         all.push(real(name, Effect::Write, b, "ok"));
     }
@@ -777,6 +778,96 @@ async fn other_levels_and_runs_that_are_not_owner_started_keep_the_gate() {
         other.initiator = Some(kind);
         assert!(card(other, &deep).await.is_some(), "{kind:?}");
     }
+}
+
+const CV: (&str, fn() -> Value) = ("browser_upload", || json!({"ref": "e7", "path": "cv.pdf"}));
+
+/// The owner's rule for Full: a file of the bot's workspace goes into a form on a site the
+/// owner named without a card, also after the run read the owner's private mail (the site is
+/// theirs). The tool still refuses secrets, re-checks the file and audits the upload.
+#[tokio::test]
+async fn a_full_owner_run_uploads_to_the_owners_site_without_a_card() {
+    let one = [(CV.0, CV.1())];
+    assert_eq!(card(Case::full(), &one).await, None);
+    let many = [(
+        "browser_upload",
+        json!({"ref": "e7", "paths": ["cv.pdf", "photo.png"]}),
+    )];
+    assert_eq!(card(Case::full(), &many).await, None);
+    // private data AND untrusted content in the run: the owner's own site still passes
+    assert_eq!(card(private(), &one).await, None);
+}
+
+#[tokio::test]
+async fn an_upload_to_a_site_the_owner_did_not_name_asks_even_in_full() {
+    for mut case in [Case::full(), private()] {
+        case.origin = Some("https://stranger.example:443");
+        assert_eq!(
+            card(case, &[(CV.0, CV.1())]).await.as_deref(),
+            Some("browser_upload")
+        );
+    }
+    // a page whose origin is unknown is never "the owner's site"
+    let mut unknown = Case::full();
+    unknown.origin = None;
+    assert!(card(unknown, &[(CV.0, CV.1())]).await.is_some());
+    // anything but a ref and paths rides along: it asks
+    assert!(
+        card(
+            Case::full(),
+            &[(
+                "browser_upload",
+                json!({"ref": "e7", "path": "cv.pdf", "note": "hello"}),
+            )],
+        )
+        .await
+        .is_some()
+    );
+    // a profile that may be signed in keeps asking, like every other page action
+    let mut signed = Case::full();
+    signed.saved_sign_in = true;
+    assert!(card(signed, &[(CV.0, CV.1())]).await.is_some());
+}
+
+#[tokio::test]
+async fn lower_levels_and_runs_that_are_not_the_owners_still_ask_for_an_upload() {
+    let one = [(CV.0, CV.1())];
+    // Normal ("approve destructive") level, and a custom level on a Full policy
+    let mut balanced = Case::full();
+    balanced.preset = BALANCED;
+    balanced.policy = Policy::approve_destructive();
+    assert_eq!(
+        card(balanced, &one).await.as_deref(),
+        Some("browser_upload")
+    );
+    let mut custom = Case::full();
+    custom.preset = "";
+    assert!(card(custom, &one).await.is_some());
+    // not typed by the owner at the desktop
+    for source in ["telegram", "api", "webhook"] {
+        let mut other = Case::full();
+        other.source = source;
+        assert!(card(other, &one).await.is_some(), "{source}");
+    }
+    // a run another initiator started, a mission included (its brief is copied text)
+    for kind in [
+        InitiatorKind::ExternalAgent,
+        InitiatorKind::ExternalSchedule,
+        InitiatorKind::Channel,
+        InitiatorKind::Routine,
+        InitiatorKind::Schedule,
+        InitiatorKind::Mission,
+    ] {
+        let mut other = Case::full();
+        other.initiator = Some(kind);
+        assert!(card(other, &one).await.is_some(), "{kind:?}");
+    }
+    // the web-read tools' own waiver does not leak: `browser_eval` and a payment still ask
+    assert!(
+        card(Case::full(), &[("browser_eval", json!({"script": "1"}))])
+            .await
+            .is_some()
+    );
 }
 
 #[tokio::test]

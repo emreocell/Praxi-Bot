@@ -290,16 +290,30 @@ impl Downloads {
                         tokio::spawn(async move { worker.run(&c, step).await });
                     }
                     // Events were dropped: a finished download may now sit under its guid.
-                    // `report` hides guid-named files, and a later cleanup removes them.
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    // `report` hides guid-named files; the sweep removes the ones no download of
+                    // this session accounts for any more.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        me.sweep(ORPHAN_AGE);
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
     }
 
+    /// Delete what a crash, a lagged event stream or a cancelled download left in the folder:
+    /// a browser temp file (`*.crdownload`, `*.tmp`) or a file still under its guid that no
+    /// download of this session is receiving, and that has not been touched for `min_age`.
+    /// (Without this the leftovers count towards the file cap for ever.) Returns how many went.
+    pub(crate) fn sweep(&self, min_age: std::time::Duration) -> usize {
+        let live: std::collections::HashSet<String> =
+            lock(&self.state).active.keys().cloned().collect();
+        sweep_orphans(&self.policy.dir, &live, min_age)
+    }
+
     /// Finished files in the folder plus this session's notes.
     pub(crate) fn report(&self) -> DownloadReport {
+        self.sweep(ORPHAN_AGE);
         let (running, refused, origins) = {
             let s = lock(&self.state);
             (
@@ -369,6 +383,53 @@ fn count_files(dir: &Path) -> usize {
     })
 }
 
+/// How long an unclaimed temp or guid file must lie untouched before it is deleted: a download
+/// that just finished is renamed within moments and must never be taken for a leftover.
+const ORPHAN_AGE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// The same, when a browser has just started and nothing of this session can be in flight.
+const ORPHAN_AGE_AT_START: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A browser temp file or a guid-named file (see [`Downloads::sweep`]).
+fn is_browser_leftover(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let temporary = Path::new(&lower)
+        .extension()
+        .is_some_and(|x| x == "crdownload" || x == "tmp");
+    is_guid_name(name) || temporary
+}
+
+/// Delete the browser leftovers of `dir` that are not `live` guids and are older than `min_age`.
+/// Only plain files (never a link or a folder) whose name is a guid or a browser temp name.
+fn sweep_orphans(
+    dir: &Path,
+    live: &std::collections::HashSet<String>,
+    min_age: std::time::Duration,
+) -> usize {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for e in rd.filter_map(std::result::Result::ok) {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let stem = name.split('.').next().unwrap_or_default();
+        if !is_browser_leftover(&name) || live.contains(&name) || live.contains(stem) {
+            continue;
+        }
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else {
+            continue;
+        };
+        let old_enough = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age >= min_age);
+        if meta.is_file() && old_enough && std::fs::remove_file(e.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 fn list_finished(dir: &Path) -> Vec<Download> {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -382,11 +443,7 @@ fn list_finished(dir: &Path) -> Vec<Download> {
                 return None;
             }
             let name = e.file_name().to_string_lossy().into_owned();
-            let lower = name.to_ascii_lowercase();
-            let temporary = Path::new(&lower)
-                .extension()
-                .is_some_and(|x| x == "crdownload" || x == "tmp");
-            if is_guid_name(&name) || temporary {
+            if is_browser_leftover(&name) {
                 return None;
             }
             let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
@@ -426,7 +483,10 @@ const MAX_NAME_CHARS: usize = 120;
 const LAUNCHABLE: &[&str] = &[
     "exe", "msi", "bat", "cmd", "com", "scr", "pif", "ps1", "psm1", "vbs", "vbe", "js", "jse",
     "wsf", "wsh", "hta", "jar", "lnk", "dll", "reg", "cpl", "sh", "command", "app", "apk",
-    "appimage", "desktop", "scf", "url", "inf",
+    "appimage", "desktop", "scf", "url", "inf", "gadget", "ps1xml", "psd1", "msc", "jnlp",
+    // A page the browser renders, with its scripts, when opened by a double click: a saved
+    // `.html` or `.svg` runs script in the `file:` origin of the owner's computer.
+    "html", "htm", "xhtml", "xht", "shtml", "svg", "svgz", "mhtml", "mht", "mhtm",
 ];
 
 const WINDOWS_RESERVED: &[&str] = &[
@@ -562,13 +622,36 @@ pub fn mime_of(name: &str) -> &'static str {
     }
 }
 
-/// `policy` with its folder resolved to the plain absolute path the browser is given (no
-/// verbatim `\\?\` prefix on Windows). A folder that does not exist yet is left as written.
+/// The plain form of a verbatim path (`\\?\C:\x` -> `C:\x`, `\\?\UNC\h\s` -> `\\h\s`), which
+/// is what the browser is given: it does not take the verbatim prefix `canonicalize` adds on
+/// Windows. A path that is not a plain drive or UNC form is returned unchanged (a prefix is never
+/// cut blindly, `\\?\UNC\h\s` would turn into the relative `UNC\h\s`). A no-op off Windows.
+#[must_use]
+pub fn plain_path(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let mut chars = rest.chars();
+        if chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && chars.next() == Some(':')
+            && matches!(chars.next(), Some('\\') | None)
+        {
+            return PathBuf::from(rest);
+        }
+    }
+    path.to_path_buf()
+}
+
+/// `policy` with its folder resolved to the plain absolute path the browser is given (see
+/// [`plain_path`]). A folder that does not exist yet is left as written.
 pub(crate) fn resolved(policy: &DownloadPolicy) -> DownloadPolicy {
     let dir = std::fs::canonicalize(&policy.dir).unwrap_or_else(|_| policy.dir.clone());
-    let plain = dir.to_string_lossy().trim_start_matches(r"\\?\").to_owned();
     DownloadPolicy {
-        dir: PathBuf::from(plain),
+        dir: plain_path(&dir),
         ..policy.clone()
     }
 }
@@ -584,6 +667,8 @@ pub(crate) async fn enable(
     let policy = resolved(&policy);
     let path = policy.dir.to_string_lossy().into_owned();
     let downloads = Downloads::new(policy);
+    // A crashed earlier browser may have left partial files that would count against the cap.
+    downloads.sweep(ORPHAN_AGE_AT_START);
     // Listen first: an event sent right after the command must not be missed.
     downloads.listen(client);
     client
@@ -662,6 +747,18 @@ mod tests {
         let n = sanitize_file_name(&long);
         assert_eq!(n.chars().count(), MAX_NAME_CHARS);
         assert!(Path::new(&n).extension().is_some_and(|x| x == "pdf"));
+    }
+
+    #[test]
+    fn a_verbatim_path_becomes_a_plain_one_only_in_a_known_form() {
+        let plain = |s: &str| plain_path(Path::new(s)).to_string_lossy().into_owned();
+        assert_eq!(plain(r"\\?\C:\Users\a\dl"), r"C:\Users\a\dl");
+        assert_eq!(plain(r"\\?\UNC\host\share\dl"), r"\\host\share\dl");
+        // not a drive and not UNC: left alone, never cut into a relative path
+        assert_eq!(plain(r"\\?\Volume{1234}\dl"), r"\\?\Volume{1234}\dl");
+        assert_eq!(plain(r"\\?\GLOBALROOT\x"), r"\\?\GLOBALROOT\x");
+        assert_eq!(plain("/home/a/dl"), "/home/a/dl");
+        assert_eq!(plain(r"C:\x"), r"C:\x");
     }
 
     #[test]
@@ -767,6 +864,87 @@ mod tests {
         assert_eq!(r.finished[0].size, 3);
         assert_eq!(r.finished[0].mime, "application/pdf");
         assert_eq!(r.running, ["arriving.zip"]);
+    }
+
+    #[test]
+    fn a_page_a_browser_renders_gets_a_download_suffix_too() {
+        for raw in [
+            "report.html",
+            "a.HTM",
+            "pic.svg",
+            "saved.mhtml",
+            "x.xhtml",
+            "launch.jnlp",
+            "snap.msc",
+            "m.ps1xml",
+            "w.gadget",
+        ] {
+            assert!(sanitize_file_name(raw).ends_with(".download"), "{raw}");
+        }
+        // Read through the suffix the type is unknown, so nothing opens it by mistake.
+        assert_eq!(mime_of("report.html.download"), "application/octet-stream");
+        assert_eq!(sanitize_file_name("notes.md"), "notes.md");
+    }
+
+    fn age(path: &Path, secs: u64) {
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(secs);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    #[test]
+    fn leftovers_nobody_is_receiving_are_swept_and_do_not_count_against_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let (orphan, live, fresh, partial) = (
+            "0b8a5c1e-aaaa-bbbb-cccc-0123456789ab",
+            "1b8a5c1e-aaaa-bbbb-cccc-0123456789ab",
+            "2b8a5c1e-aaaa-bbbb-cccc-0123456789ab",
+            "partial.crdownload",
+        );
+        for n in [orphan, live, fresh, partial, "keep.txt"] {
+            std::fs::write(dir.path().join(n), b"x").unwrap();
+        }
+        for n in [orphan, live, partial, "keep.txt"] {
+            age(&dir.path().join(n), 3600);
+        }
+        let d = Downloads::new(DownloadPolicy {
+            max_files: 50,
+            ..policy(dir.path())
+        });
+        // `live` is being received by this session; `fresh` was just written
+        assert_eq!(begin(&d, live, "arriving.bin"), None);
+        assert_eq!(d.sweep(ORPHAN_AGE), 2);
+        assert!(!dir.path().join(orphan).exists());
+        assert!(!dir.path().join(partial).exists());
+        for n in [live, fresh, "keep.txt"] {
+            assert!(dir.path().join(n).exists(), "{n} must stay");
+        }
+        // a folder named like a leftover is never touched; without an age limit `fresh` goes
+        let folder = dir.path().join("3b8a5c1e-aaaa-bbbb-cccc-0123456789ab");
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(d.sweep(std::time::Duration::ZERO), 1);
+        assert!(folder.is_dir());
+        assert!(dir.path().join(live).exists());
+    }
+
+    #[test]
+    fn the_report_sweeps_old_leftovers_before_counting() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in 0..3 {
+            let p = dir
+                .path()
+                .join(format!("{n}b8a5c1e-aaaa-bbbb-cccc-0123456789ab"));
+            std::fs::write(&p, b"x").unwrap();
+            age(&p, 3600);
+        }
+        let d = Downloads::new(policy(dir.path()));
+        let _ = d.report();
+        // the cap of 3 files is not used up by crash leftovers any more
+        assert_eq!(begin(&d, "g1", "fresh.txt"), None);
     }
 
     #[test]

@@ -61,7 +61,7 @@ pub use destination::{
 };
 pub use diff::{SnapshotDiff, diff, diff_text};
 pub use downloads::{
-    Download, DownloadPolicy, DownloadReport, list_folder, mime_of, sanitize_file_name,
+    Download, DownloadPolicy, DownloadReport, list_folder, mime_of, plain_path, sanitize_file_name,
 };
 pub use error::{Error, Result};
 pub use human::{Feel, HumanLike};

@@ -153,7 +153,7 @@ async fn an_upload_sets_a_workspace_file_on_the_input_and_does_not_submit() {
         "{calls:?}"
     );
     assert!(
-        out.contains("set 1 file(s)") && out.contains("cv.pdf (14 bytes)"),
+        out.contains("set 1 file(s)") && out.contains("cv.pdf (14 bytes, sha256 "),
         "{out}"
     );
     assert!(out.contains("not submitted"), "{out}");
@@ -189,6 +189,16 @@ async fn files_that_look_like_secrets_are_never_sent_to_a_page() {
         "notes.txt",
         "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
     );
+    // Generic exfiltration targets the first list does not name: by name, by folder, by type,
+    // by a double extension and by what the file says.
+    rig.write("passwords.txt", "hello");
+    rig.write(".aws/config", "[default]\nregion = eu");
+    rig.write("data/app.sqlite", "x");
+    rig.write("my_rsa", "x");
+    rig.write("key.pem.txt", "x");
+    rig.write("report.txt", "aws_secret_access_key = abcdefghijklmnop");
+    rig.write("list.txt", "id AKIAIOSFODNN7EXAMPLE end");
+    rig.write("photo.jpg", "SQLite format 3\0 not a photo");
     for path in [
         ".env",
         "id_rsa",
@@ -196,6 +206,14 @@ async fn files_that_look_like_secrets_are_never_sent_to_a_page() {
         "keys/wallet.p12",
         ".ssh/config",
         "notes.txt",
+        "passwords.txt",
+        ".aws/config",
+        "data/app.sqlite",
+        "my_rsa",
+        "key.pem.txt",
+        "report.txt",
+        "list.txt",
+        "photo.jpg",
     ] {
         let err = rig
             .call("browser_upload", json!({"ref": "e1", "path": path}))
@@ -213,6 +231,14 @@ async fn files_that_look_like_secrets_are_never_sent_to_a_page() {
         "keys/wallet.p12",
         ".ssh/config",
         "notes.txt",
+        "passwords.txt",
+        ".aws/config",
+        "data/app.sqlite",
+        "my_rsa",
+        "key.pem.txt",
+        "report.txt",
+        "list.txt",
+        "photo.jpg",
     ] {
         let err = rig
             .call("browser_upload", json!({"ref": "e1", "path": path}))
@@ -474,12 +500,60 @@ fn secret_files_are_recognised_by_name_folder_and_first_bytes() {
         assert!(secret_file_reason(&make(rel, "x")).is_some(), "{rel}");
     }
     assert!(secret_file_reason(&make("k.txt", "-----BEGIN RSA PRIVATE KEY-----")).is_some());
+    // Generic names, types, folders and contents.
+    for rel in [
+        "passwords.txt",
+        "MyPasswordList.csv",
+        "prod_secret_key.txt",
+        "prod-secrets.txt",
+        "github_token.txt",
+        "backup_rsa",
+        "key.pem.txt",
+        "vault.kdbx.zip",
+        "x/app.sqlite",
+        "x/cookies.db",
+        "infra/prod.tfvars",
+        "x/.aws/config",
+        "x/.git/config",
+        "x/.password-store/mail.txt",
+    ] {
+        assert!(secret_file_reason(&make(rel, "x")).is_some(), "{rel}");
+    }
+    for (rel, body) in [
+        ("a.txt", "[default]\naws_secret_access_key = abc"),
+        ("b.txt", "key id: ASIAIOSFODNN7EXAMPLE"),
+        ("c.txt", "-----BEGIN OPENSSH PRIVATE KEY-----"),
+        (
+            "d.txt",
+            "token ghp_0123456789abcdefghijklmnopqrstuvwxyz0123",
+        ),
+        (
+            "e.json",
+            "{\"type\": \"service_account\", \"project_id\": \"p\"}",
+        ),
+        ("f.bin", "SQLite format 3\0\u{1}\u{2}"),
+        ("g.txt", "-----BEGIN PGP PRIVATE KEY BLOCK-----"),
+    ] {
+        assert!(secret_file_reason(&make(rel, body)).is_some(), "{rel}");
+    }
+    // A key hidden in UTF-16 text is read too.
+    let mut utf16 = vec![0xFF, 0xFE];
+    for u in "-----BEGIN RSA PRIVATE KEY-----".encode_utf16() {
+        utf16.extend_from_slice(&u.to_le_bytes());
+    }
+    let wide = dir.path().join("wide.txt");
+    std::fs::write(&wide, utf16).unwrap();
+    assert!(secret_file_reason(&wide).is_some());
     for rel in [
         "cv.pdf",
         "photo.jpg",
         "environment.txt",
         "report-2025.csv",
         "keynote.pptx",
+        "secretary.docx",
+        "tokenizer.json",
+        "my-passport-photo.png",
+        "x/github/readme.md",
     ] {
         assert!(
             secret_file_reason(&make(rel, "plain content")).is_none(),
@@ -487,4 +561,168 @@ fn secret_files_are_recognised_by_name_folder_and_first_bytes() {
         );
     }
     let _ = Path::new("");
+}
+
+/// A hook that changes `file` the first time the browser is asked for a snapshot: the control
+/// gate does that right after the paths were judged and before the files are handed on, which
+/// is where the approval of a real call is waited for.
+fn change_file_at_the_gate(rig: &Rig, change: impl Fn() + Send + Sync + 'static) {
+    let done = std::sync::atomic::AtomicBool::new(false);
+    *rig.fake.hook.lock() = Some(Arc::new(move |call: &str| {
+        if call.starts_with("snapshot") && !done.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            change();
+        }
+    }));
+}
+
+#[tokio::test]
+async fn a_file_that_changes_between_the_check_and_the_upload_is_not_uploaded() {
+    for case in [
+        "grown",
+        "same size, other bytes",
+        "turned into a key",
+        "replaced",
+    ] {
+        let rig = Rig::new();
+        let file = rig.write("cv.pdf", "%PDF-1.4 hello");
+        let target = file.clone();
+        let tmp = rig.tmp.path().to_path_buf();
+        change_file_at_the_gate(&rig, move || match case {
+            "grown" => std::fs::write(&target, "%PDF-1.4 hello and a lot more").unwrap(),
+            "same size, other bytes" => {
+                std::fs::write(&target, "%PDF-1.4 HELLO").unwrap();
+                let f = std::fs::File::options().write(true).open(&target).unwrap();
+                f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
+                    .unwrap();
+            }
+            "turned into a key" => std::fs::write(
+                &target,
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+            )
+            .unwrap(),
+            _ => {
+                // another file renamed over the first
+                let other = tmp.join("other.pdf");
+                std::fs::write(&other, "%PDF-1.4 hello").unwrap();
+                std::fs::rename(&other, &target).unwrap();
+            }
+        });
+        let err = rig
+            .call("browser_upload", json!({"ref": "e7", "path": "cv.pdf"}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("changed after it was checked")
+                || err.to_string().contains("not sent to a page"),
+            "{case}: {err}"
+        );
+        assert!(rig.uploads().is_empty(), "{case}: {:?}", rig.uploads());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_put_in_place_of_the_file_after_the_check_is_not_followed() {
+    let rig = Rig::new();
+    let file = rig.write("cv.pdf", "%PDF-1.4 hello");
+    let outside = rig.tmp.path().join("outside.txt");
+    std::fs::write(&outside, "private").unwrap();
+    let target = file.clone();
+    change_file_at_the_gate(&rig, move || {
+        std::fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink(&outside, &target).unwrap();
+    });
+    let err = rig
+        .call("browser_upload", json!({"ref": "e7", "path": "cv.pdf"}))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::PermissionDenied(_)) || err.to_string().contains("plain file"),
+        "{err}"
+    );
+    assert!(rig.uploads().is_empty());
+}
+
+#[tokio::test]
+async fn an_unchanged_file_passes_the_second_look() {
+    let rig = Rig::new();
+    rig.write("cv.pdf", "%PDF-1.4 hello");
+    // The hook touches nothing: the same call runs the same way.
+    change_file_at_the_gate(&rig, || {});
+    rig.call("browser_upload", json!({"ref": "e7", "path": "cv.pdf"}))
+        .await
+        .unwrap();
+    assert_eq!(rig.uploads().len(), 1);
+}
+
+#[tokio::test]
+async fn every_upload_leaves_name_size_hash_and_destination_for_the_audit_log() {
+    use sha2::{Digest, Sha256};
+    let rig = Rig::new();
+    rig.write("cv.pdf", "%PDF-1.4 hello");
+    *rig.fake.url.lock() = Some("https://jobs.example/apply?step=2#x".into());
+    let run = "upload-audit-run";
+    let tool = rig
+        .tools
+        .iter()
+        .find(|t| t.spec().name == "browser_upload")
+        .unwrap();
+    let ctx = ToolContext {
+        run_id: run.into(),
+        bot_id: Some("bot-a".into()),
+        ..ToolContext::default()
+    };
+    tool.call(&ctx, json!({"ref": "e7", "path": "cv.pdf"}))
+        .await
+        .unwrap();
+    let got = super::take_sideband(run).upload.expect("an upload record");
+    let want = Sha256::digest(b"%PDF-1.4 hello")
+        .iter()
+        .fold(String::new(), |mut acc, b| {
+            let _ = std::fmt::Write::write_fmt(&mut acc, format_args!("{b:02x}"));
+            acc
+        });
+    assert_eq!(got.origin.as_deref(), Some("https://jobs.example:443"));
+    assert_eq!(got.files.len(), 1);
+    assert_eq!(got.files[0].name, "cv.pdf");
+    assert_eq!(got.files[0].size, 14);
+    assert_eq!(got.files[0].sha256, want);
+    // A refused file leaves no record.
+    rig.write(".env", "TOKEN=abc");
+    assert!(
+        tool.call(&ctx, json!({"ref": "e7", "path": ".env"}))
+            .await
+            .is_err()
+    );
+    assert!(super::take_sideband(run).upload.is_none());
+}
+
+#[tokio::test]
+async fn without_a_provenance_ledger_downloads_stay_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap().join("ws");
+    let data = std::fs::canonicalize(tmp.path()).unwrap().join("data");
+    for dir in [root.join("bot-a"), data.clone()] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    // The same file rules, but nothing to record "outside content" in.
+    let (_fs, gate): (_, FileGate) = tools_scoped_with_gate(
+        &data,
+        &[],
+        &[],
+        Some(Arc::new(Access { root })),
+        Some(tmp.path().to_path_buf()),
+        None,
+    );
+    let fake = Arc::new(FakeBrowser::default());
+    // a folder was set earlier: it must be taken away, not left in place
+    *fake.download_dir.lock() = Some(PathBuf::from("/stale"));
+    let tools =
+        super::tools_with_files(fake.clone(), &data, None, None, None, Some(Arc::new(gate)));
+    let tool = tools
+        .iter()
+        .find(|t| t.spec().name == "browser_snapshot")
+        .unwrap();
+    tool.call(&Rig::ctx("bot-a"), json!({})).await.unwrap();
+    assert_eq!(*fake.download_dir.lock(), None);
 }

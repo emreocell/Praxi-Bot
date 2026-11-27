@@ -532,8 +532,13 @@ mod tests {
         // Loose ceiling so a runaway description is noticed; not a target. Raised from 24 000
         // when `shell_interactive` (about 1.9 KB) joined a list that was already near it, and
         // to 28 000 when `browser_upload`, `browser_downloads`, `browser_reload` and
-        // `browser_forward` (together about 2 KB, with the longer `browser_tabs`) joined.
-        assert!(total < 28_000, "tool list grew to {total} bytes");
+        // `browser_forward` (together about 2 KB, with the longer `browser_tabs`) joined, and
+        // to 30 000 because that left no room at all: the next tool must not trip it.
+        assert!(total < 30_000, "tool list grew to {total} bytes");
+        assert!(
+            total + 1_000 < 30_000,
+            "tool list is {total} bytes: no room left below the 30 000 ceiling, raise it with the next tool"
+        );
     }
 
     #[test]

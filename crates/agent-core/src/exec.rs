@@ -2144,6 +2144,21 @@ impl TurnExecutor {
                             tabs_ref.lock().insert(call_id, tab);
                         }
                     }
+                    // Every file handed to a page is in the audit log: name, size, hash and the
+                    // origin it went to (structured facts of the tool, not words of the page).
+                    if !is_error && let Some(upload) = &reported.upload {
+                        self.sh.audit(
+                            ctx_ref,
+                            "system",
+                            "browser.upload",
+                            &serde_json::json!({
+                                "tool": tool_name,
+                                "origin": upload.origin,
+                                "files": upload.files,
+                                "mode": ctx_ref.profile.permissions.mode().as_str(),
+                            }),
+                        );
+                    }
                     // The result is in the model context even when the tool
                     // returned an error. A denial before this point is not.
                     // The class was captured at resolution time. Output
