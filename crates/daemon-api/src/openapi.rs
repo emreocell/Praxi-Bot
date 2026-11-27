@@ -852,6 +852,7 @@ impl Modify for Security {
         mission_routes::MissionDigestItemDto,
         mission_routes::MissionDto,
         mission_routes::MissionItemDto,
+        mission_routes::MissionWaitDto,
         mission_routes::MissionProgressDto,
         mission_routes::CreateMissionInput,
         bot_limits_routes::BotLimitsDto,

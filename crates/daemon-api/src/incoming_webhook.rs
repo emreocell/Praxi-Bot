@@ -102,7 +102,8 @@ pub struct IncomingWebhookCreated {
 /// A call was accepted. The run continues in the background.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct IncomingWebhookAccepted {
-    /// Always `accepted`.
+    /// `accepted` (a run started), `queued` (the schedule that owns the webhook runs it) or
+    /// `mission_woken` (a mission was waiting for this call and continues; no separate run).
     pub status: String,
     /// Webhook that fired.
     pub webhook_id: Uuid,
@@ -646,13 +647,18 @@ pub(crate) async fn receive_webhook(
         reject(&s, &guard, now, Some(row.id), "replay");
         return Err(invalid_signature());
     }
-    let accepted = match start_run(&s, &row, text) {
-        Ok(accepted) => accepted,
-        Err(err) => {
-            let _ = s.storage().forget_webhook_signature(row.id, &key);
-            guard.lock().undo_hit(row.id, now);
-            return Err(err);
-        }
+    // A mission that parked an item on this webhook (`mission_wait`) takes the call: the body
+    // is stored capped as untrusted data and the mission continues; no separate run starts.
+    let accepted = match wake_missions(&s, &row, text) {
+        Some(accepted) => accepted,
+        None => match start_run(&s, &row, text) {
+            Ok(accepted) => accepted,
+            Err(err) => {
+                let _ = s.storage().forget_webhook_signature(row.id, &key);
+                guard.lock().undo_hit(row.id, now);
+                return Err(err);
+            }
+        },
     };
     audit(
         &s,
@@ -733,6 +739,40 @@ fn signature_key(signature: &str) -> String {
         .or_else(|| trimmed.strip_prefix("SHA256="))
         .unwrap_or(trimmed)
         .to_ascii_lowercase()
+}
+
+/// Hand a verified call to the missions waiting for this webhook. `None`: none waits (or this
+/// computer does not run missions), the call starts its normal run.
+fn wake_missions(
+    s: &AppState,
+    hook: &IncomingWebhook,
+    payload: &str,
+) -> Option<IncomingWebhookAccepted> {
+    let supervisor = s.mission_supervisor().ok()?;
+    let safe_payload = s.agent().redact_host_text(payload.to_owned());
+    let woken = s
+        .leader()
+        .with_active(|| {
+            supervisor.deliver_webhook(
+                &hook.bot_id.0.to_string(),
+                &hook.id.to_string(),
+                &safe_payload,
+            )
+        })
+        .ok()?
+        .ok()?;
+    if woken == 0 {
+        return None;
+    }
+    let _ = s
+        .storage()
+        .mark_incoming_webhook_fired(hook.id, storage::now_ms());
+    Some(IncomingWebhookAccepted {
+        status: "mission_woken".into(),
+        webhook_id: hook.id,
+        run_id: None,
+        chat_id: None,
+    })
 }
 
 fn start_run(

@@ -28137,7 +28137,7 @@
           },
           "status": {
             "type": "string",
-            "description": "Always `accepted`."
+            "description": "`accepted` (a run started), `queued` (the schedule that owns the webhook runs it) or\n`mission_woken` (a mission was waiting for this call and continues; no separate run)."
           },
           "webhook_id": {
             "type": "string",
@@ -31990,7 +31990,7 @@
           },
           "state": {
             "type": "string",
-            "description": "`running`, `paused`, `blocked`, `done`, `failed` or `cancelled`."
+            "description": "`running`, `waiting` (every open item waits for a timer, a mail or a webhook), `paused`,\n`blocked`, `done`, `failed` or `cancelled`."
           },
           "state_reason": {
             "type": [
@@ -32029,6 +32029,7 @@
           "status",
           "attempts",
           "needs_live_owner",
+          "waiting_for",
           "updated_at_ms"
         ],
         "properties": {
@@ -32080,7 +32081,7 @@
           },
           "status": {
             "type": "string",
-            "description": "`todo`, `doing`, `done`, `blocked`, `failed` or `skipped`."
+            "description": "`todo`, `doing`, `done`, `blocked`, `waiting`, `failed` or `skipped`."
           },
           "title": {
             "type": "string",
@@ -32090,6 +32091,13 @@
             "type": "integer",
             "format": "int64",
             "description": "Last change (ms since epoch)."
+          },
+          "waiting_for": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MissionWaitDto"
+            },
+            "description": "What a `waiting` item waits for (usually one entry; the first to happen wakes it)."
           }
         }
       },
@@ -32100,6 +32108,7 @@
           "total",
           "done",
           "blocked",
+          "waiting",
           "todo",
           "doing",
           "failed",
@@ -32134,7 +32143,7 @@
           "left": {
             "type": "integer",
             "format": "int32",
-            "description": "Still for the bot to work on: `todo + doing` (blocked items are counted in `blocked`).",
+            "description": "Still for the bot to work on: `todo + doing` (blocked and waiting items are counted in\n`blocked` and `waiting`).",
             "minimum": 0
           },
           "skipped": {
@@ -32154,6 +32163,64 @@
             "format": "int32",
             "description": "All items.",
             "minimum": 0
+          },
+          "waiting": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Parked on a wake: a timer, a mail or a webhook (`mission_wait`).",
+            "minimum": 0
+          }
+        }
+      },
+      "MissionWaitDto": {
+        "type": "object",
+        "description": "What a `waiting` item waits for. The mail filter and the webhook name are the bot's own\nwords or the owner's, shown as plain text.",
+        "required": [
+          "kind",
+          "due_at_ms",
+          "reason"
+        ],
+        "properties": {
+          "due_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "A timer: when it fires. A mail or webhook wait: when it gives up and the item is\nparked for the owner (ms since epoch)."
+          },
+          "from_domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Mail: the sender's domain."
+          },
+          "keyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Mail: text the subject or body contains."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`after` (a timer), `mail` (in the bot's own inbox) or `webhook`."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the bot waits."
+          },
+          "subject_contains": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Mail: text the subject contains."
+          },
+          "webhook_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Webhook: its name."
           }
         }
       },

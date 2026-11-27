@@ -38,6 +38,8 @@ pub struct MissionProgressDto {
     pub done: u32,
     /// Parked for the owner (CAPTCHA, 2FA, a question).
     pub blocked: u32,
+    /// Parked on a wake: a timer, a mail or a webhook (`mission_wait`).
+    pub waiting: u32,
     /// Not started.
     pub todo: u32,
     /// Being worked on right now.
@@ -46,7 +48,8 @@ pub struct MissionProgressDto {
     pub failed: u32,
     /// Left out on purpose.
     pub skipped: u32,
-    /// Still for the bot to work on: `todo + doing` (blocked items are counted in `blocked`).
+    /// Still for the bot to work on: `todo + doing` (blocked and waiting items are counted in
+    /// `blocked` and `waiting`).
     pub left: u32,
 }
 
@@ -108,7 +111,8 @@ pub struct MissionDto {
     pub title: String,
     /// The owner's words, verbatim.
     pub goal: String,
-    /// `running`, `paused`, `blocked`, `done`, `failed` or `cancelled`.
+    /// `running`, `waiting` (every open item waits for a timer, a mail or a webhook), `paused`,
+    /// `blocked`, `done`, `failed` or `cancelled`.
     pub state: String,
     /// Why it is paused, blocked or failed.
     pub state_reason: Option<String>,
@@ -143,7 +147,7 @@ pub struct MissionItemDto {
     pub kind: String,
     /// What to do, one line.
     pub title: String,
-    /// `todo`, `doing`, `done`, `blocked`, `failed` or `skipped`.
+    /// `todo`, `doing`, `done`, `blocked`, `waiting`, `failed` or `skipped`.
     pub status: String,
     /// How often a session started on it.
     pub attempts: u32,
@@ -158,8 +162,31 @@ pub struct MissionItemDto {
     pub needs_live_owner: bool,
     /// What the owner answered for a blocked item.
     pub owner_answer: Option<String>,
+    /// What a `waiting` item waits for (usually one entry; the first to happen wakes it).
+    pub waiting_for: Vec<MissionWaitDto>,
     /// Last change (ms since epoch).
     pub updated_at_ms: i64,
+}
+
+/// What a `waiting` item waits for. The mail filter and the webhook name are the bot's own
+/// words or the owner's, shown as plain text.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MissionWaitDto {
+    /// `after` (a timer), `mail` (in the bot's own inbox) or `webhook`.
+    pub kind: String,
+    /// Mail: the sender's domain.
+    pub from_domain: Option<String>,
+    /// Mail: text the subject contains.
+    pub subject_contains: Option<String>,
+    /// Mail: text the subject or body contains.
+    pub keyword: Option<String>,
+    /// Webhook: its name.
+    pub webhook_name: Option<String>,
+    /// A timer: when it fires. A mail or webhook wait: when it gives up and the item is
+    /// parked for the owner (ms since epoch).
+    pub due_at_ms: i64,
+    /// Why the bot waits.
+    pub reason: String,
 }
 
 /// A line of the owner digest.
@@ -276,6 +303,7 @@ fn progress_dto(p: missions::Progress) -> MissionProgressDto {
         total: p.total,
         done: p.done,
         blocked: p.blocked,
+        waiting: p.waiting,
         todo: p.todo,
         doing: p.doing,
         failed: p.failed,
@@ -318,7 +346,29 @@ fn mission_dto(s: &AppState, m: &Mission) -> Result<MissionDto, ApiError> {
     })
 }
 
-fn item_dto(i: &missions::Item) -> MissionItemDto {
+fn wait_dto(w: &missions::Wait) -> MissionWaitDto {
+    let (from_domain, subject_contains, keyword, webhook_name) = match &w.spec {
+        missions::WaitSpec::After => (None, None, None, None),
+        missions::WaitSpec::Mail { filter } => (
+            filter.from_domain.clone(),
+            filter.subject_contains.clone(),
+            filter.keyword.clone(),
+            None,
+        ),
+        missions::WaitSpec::Webhook { name, .. } => (None, None, None, Some(name.clone())),
+    };
+    MissionWaitDto {
+        kind: w.spec.kind().to_owned(),
+        from_domain,
+        subject_contains,
+        keyword,
+        webhook_name,
+        due_at_ms: w.due_at_ms,
+        reason: w.reason.clone(),
+    }
+}
+
+fn item_dto(i: &missions::Item, waits: &[missions::Wait]) -> MissionItemDto {
     MissionItemDto {
         key: i.key.clone(),
         kind: i.kind.clone(),
@@ -330,6 +380,11 @@ fn item_dto(i: &missions::Item) -> MissionItemDto {
         blocked_reason: i.blocked_reason.clone(),
         needs_live_owner: i.live_only,
         owner_answer: i.owner_answer.clone(),
+        waiting_for: waits
+            .iter()
+            .filter(|w| w.item_key == i.key)
+            .map(wait_dto)
+            .collect(),
         updated_at_ms: i.updated_at_ms,
     }
 }
@@ -347,14 +402,15 @@ fn digest_items(v: &[missions::DigestItem]) -> Vec<MissionDigestItemDto> {
 fn detail(s: &AppState, m: &Mission) -> Result<MissionDetailDto, ApiError> {
     let store = s.mission_store()?;
     let items = store.items(&m.id, None).map_err(store_err)?;
+    let waits = store.active_waits(&m.id).map_err(store_err)?;
     Ok(MissionDetailDto {
         mission: mission_dto(s, m)?,
         blocked: items
             .iter()
             .filter(|i| i.status == ItemStatus::Blocked)
-            .map(item_dto)
+            .map(|i| item_dto(i, &waits))
             .collect(),
-        items: items.iter().map(item_dto).collect(),
+        items: items.iter().map(|i| item_dto(i, &waits)).collect(),
         digest: m.digest.as_ref().map(|d| MissionDigestDto {
             at_ms: d.at_ms,
             outcome: d.outcome.clone(),
@@ -407,7 +463,10 @@ pub(crate) async fn list_missions(
             !active_only
                 || matches!(
                     m.state,
-                    MissionState::Running | MissionState::Paused | MissionState::Blocked
+                    MissionState::Running
+                        | MissionState::Waiting
+                        | MissionState::Paused
+                        | MissionState::Blocked
                 )
         })
         .map(|m| mission_dto(&s, m))
@@ -637,7 +696,7 @@ pub(crate) async fn answer_mission(
     }
     // An answer or a skip may start a blocked mission again, and a mission only runs unattended
     // on a bot that is still at the Full level.
-    let resumes = m.state == MissionState::Blocked;
+    let resumes = matches!(m.state, MissionState::Blocked | MissionState::Waiting);
     if resumes && !s.agent().bot_is_full(BotId(uuid_of(&m.bot_id))) {
         return Err(ApiError::bad_request(
             "the bot is no longer on the Full level; set it back before answering",

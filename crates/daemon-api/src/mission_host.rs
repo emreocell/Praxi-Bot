@@ -21,6 +21,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::mission_wakes::{DaemonWakeChecks, OwnInboxProbe};
 use crate::{AppState, error::ApiError};
 
 /// How long a session waits for the mission chat to be free (the owner may be typing in it).
@@ -193,7 +194,12 @@ impl AppState {
     pub fn enable_missions(&self) -> Result<usize, missions::MissionError> {
         let store = Arc::new(MissionStore::open(self.data_dir().join(DB_FILE))?);
         let clock: Arc<dyn missions::supervisor::Clock> = Arc::new(SystemClock);
-        let n = self.0.agent.enable_missions(&store, &clock);
+        let checks: Arc<dyn missions::wake::WakeChecks> = Arc::new(DaemonWakeChecks {
+            storage: self.storage_arc(),
+            mail: self.0.agent.mail_handle(),
+            user_id: self.user_id(),
+        });
+        let n = self.0.agent.enable_missions(&store, &clock, Some(&checks));
         let _ = self.0.mission_store.set(store);
         Ok(n)
     }
@@ -238,6 +244,9 @@ impl AppState {
             SupervisorConfig::default(),
             token.clone(),
         ));
+        supervisor.set_mail_probe(Arc::new(OwnInboxProbe {
+            mail: self.0.agent.mail_handle(),
+        }));
         let task = supervisor.spawn();
         *slot = Some(MissionRuntime {
             supervisor,
