@@ -166,6 +166,16 @@ documentation, the marketing site (`site/`), packaging manifests (`packaging/`) 
 that only changes UI sources also skips the Windows real-app smoke run (Linux still runs it; every
 push to `main` runs both). A PR is merged only when CI is green.
 
+**Server install end to end.** `.github/workflows/server-install-e2e.yml` installs Praxi with
+`scripts/install-linux.sh` on a fresh Ubuntu 24.04 (a systemd container) from a tarball built in the
+run, then checks services, `praxi doctor`, the token-protected API on loopback, the `praxi` command,
+Node.js/npm for the service user, the browser repair, `--update` (same and newer tag),
+`--uninstall` and `--purge`. It runs when the installer or `scripts/linux/` change, every Monday, and
+by hand. Locally (needs Docker with `--privileged`, and network): build `bot` and `bot-node`, then
+`bash scripts/linux/tests/e2e/run.sh --bin-dir <dir with both> [--mode host-mode|headless]`.
+The installer is not changed for the test: it trusts only `/usr/bin/gh`, which the test replaces with
+a double that checks the same policy flags and that the bundle names the archive's SHA-256 and tag.
+
 **How the pull request jobs are laid out.** The workspace tests run with
 [cargo-nextest](https://nexte.st) (the `ci` profile in `.config/nextest.toml`, no retries) and the
 doctests with `cargo test --doc`. The Windows workspace tests are split in two jobs that run at the
