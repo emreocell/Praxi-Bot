@@ -646,8 +646,10 @@ swap_in_node_dir() { # <staged directory>
     mv -T -- "${NODE_DIR}" "${old}" || die "could not move the old Node.js out of the way (${NODE_DIR}); nothing was changed"
   fi
   if ! mv -T -- "$1" "${NODE_DIR}"; then
-    [[ ! -e "${old}" ]] || mv -T -- "${old}" "${NODE_DIR}" || true
-    die "could not move the new Node.js into ${NODE_DIR}; the previous one was put back"
+    if [[ -e "${old}" ]] && mv -T -- "${old}" "${NODE_DIR}"; then
+      die "could not move the new Node.js into ${NODE_DIR}; the previous one was put back"
+    fi
+    die "could not move the new Node.js into ${NODE_DIR}, and putting the previous one back failed; it stays in ${old} (the installer tries once more as it exits)"
   fi
   remove_leftover "${old}"
 }
