@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
+    catalog::check_stdio_package_pin,
     config::{McpImport, McpServerConfig, McpTransport},
     error::{McpError, Result},
 };
@@ -712,6 +713,7 @@ fn prepare<'a>(bytes: &'a [u8], expected: Option<(&str, &str)>) -> Result<Prepar
         &probe,
         Path::new("/bundle"),
     )?;
+    check_stdio_package_pin(&inspection.id, &resolved.command, &resolved.args)?;
     McpServerConfig::stdio(&inspection.id, resolved.command, resolved.args).validate()?;
     Ok(PreparedBundle {
         zip,
@@ -878,10 +880,51 @@ fn resolve(
     })
 }
 
+/// Variables that change how the launched program, its package manager or its
+/// network stack behaves. The review card shows only names, so a publisher
+/// cannot set these, and a description cannot talk the owner into doing so.
+fn reserved_env_name(name: &str) -> bool {
+    const PREFIXES: [&str; 8] = [
+        "LD_",
+        "DYLD_",
+        "NPM_CONFIG_",
+        "PIP_",
+        "UV_",
+        "YARN_",
+        "PYTHON",
+        "NODE_",
+    ];
+    const NAMES: [&str; 20] = [
+        "PATH",
+        "PATHEXT",
+        "COMSPEC",
+        "SYSTEMROOT",
+        "BASH_ENV",
+        "ENV",
+        "PERL5OPT",
+        "RUBYOPT",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "HOME",
+        "USERPROFILE",
+    ];
+    let upper = name.to_ascii_uppercase();
+    NAMES.contains(&upper.as_str()) || PREFIXES.iter().any(|prefix| upper.starts_with(prefix))
+}
+
 pub(crate) fn valid_env_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && !reserved_env_name(name)
 }
 
 fn check_values(
@@ -1364,6 +1407,22 @@ mod tests {
                 .to_string()
                 .contains("not supported")
         );
+    }
+
+    #[test]
+    fn loader_environment_names_and_unpinned_package_runners_are_refused() {
+        let files = [("server/index.js", b"//".as_slice())];
+        for name in ["NODE_OPTIONS", "npm_config_registry", "LD_PRELOAD", "PATH"] {
+            let m = MANIFEST.replace("\"LANG_HINT\"", &format!("\"{name}\""));
+            assert_eq!(
+                inspect(&bundle(&m, &files)).unwrap_err().to_string(),
+                "invalid MCP server config: the bundle has an invalid or duplicate environment name"
+            );
+        }
+        let unpinned = MANIFEST
+            .replace("\"command\": \"node\"", "\"command\": \"npx\"")
+            .replace("\"${__dirname}/server/index.js\"", "\"-y\", \"@scope/pkg\"");
+        assert!(inspect(&bundle(&unpinned, &files)).is_err());
     }
 
     #[test]

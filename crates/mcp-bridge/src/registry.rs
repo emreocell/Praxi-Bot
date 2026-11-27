@@ -791,6 +791,23 @@ mod tests {
     }
 
     #[test]
+    fn loader_and_package_manager_variables_make_a_source_unavailable() {
+        for name in [
+            "NODE_OPTIONS",
+            "npm_config_registry",
+            "LD_PRELOAD",
+            "PIP_INDEX_URL",
+        ] {
+            let body = format!(
+                r#"{{"servers":[{{"server":{{"name":"a/env","version":"1",
+              "packages":[{{"registryType":"npm","identifier":"p","version":"1.0.0","transport":{{"type":"stdio"}},
+                "environmentVariables":[{{"name":"{name}","isRequired":true}}]}}]}}}}]}}"#
+            );
+            assert_eq!(parse_search(body.as_bytes()).unwrap()[0].sources.len(), 0);
+        }
+    }
+
+    #[test]
     fn failed_secret_write_leaves_no_secret_behind() {
         use crate::mcpb::test_support::FlakyStore;
         let body = r#"{"servers":[{"server":{"name":"a/two","version":"1",
