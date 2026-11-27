@@ -67,6 +67,17 @@ error.
   run `sudo praxi doctor` so the check runs with the service's own user,
   environment (`/etc/praxi/praxi.env`), and mount namespace rather than your
   interactive shell.
+- **Browser (`browser`)** reports which Chrome, Chromium or Edge the bot would start, or why none
+  can be used (only the snap Chromium exists, `BOT_BROWSER_PATH` points to nothing). On Linux, when
+  no browser works, the check offers **Install browser**: it downloads a pinned Google Chrome for
+  Testing into the data folder (about 200 MB, SHA-256 checked, no root) and starts it once. The
+  same is `bot browser install` in a terminal (`sudo praxi browser install` on a host set up with
+  `install-linux.sh`). A system browser always wins over the downloaded one. If the browser is
+  installed but cannot start, the message says why: missing system libraries (install them, or
+  run `sudo ./install-linux.sh --update --with-desktop`), or, on Ubuntu 23.10 and later, an
+  AppArmor rule that blocks the browser sandbox for a browser in the data folder; the installer
+  script's browser in `/opt/praxi-browser` comes with that rule. Praxi does not switch the browser
+  sandbox off to make it start (Chrome only runs without it when the service itself runs as root).
 - **Free RAM (`free_ram`)** on Linux reads `MemAvailable` from `/proc/meminfo`
   and warns below 512 MiB (suggesting lowering `limits.max_computer_runs` in
   `host.toml`).

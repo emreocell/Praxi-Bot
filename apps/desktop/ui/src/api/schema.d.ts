@@ -11028,7 +11028,7 @@ export interface components {
          *     a shell command, and regenerating the API token is not offered.
          * @enum {string}
          */
-        Repair: "create_data_dir" | "reload_providers" | "restart_browser";
+        Repair: "create_data_dir" | "reload_providers" | "restart_browser" | "install_browser";
         /** @description `POST /v1/doctor/repair/{id}` response. */
         RepairResult: {
             /** @description What it did. */
@@ -18483,7 +18483,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Repair id: create_data_dir, reload_providers or restart_browser */
+                /** @description Repair id: create_data_dir, reload_providers, restart_browser or install_browser */
                 id: string;
             };
             cookie?: never;

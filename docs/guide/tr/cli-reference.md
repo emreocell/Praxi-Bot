@@ -114,6 +114,19 @@ başarısız olursa 1 ile çıkar.
 
 `--json`, denetimleri JSON olarak yazdırır.
 
+### `bot browser install`
+
+Sağlama toplamı doğrulanmış bir Chrome for Testing'i veri klasörüne indirir ve çalıştığını
+görmek için bir kez başlatır. Botun kullanabileceği tarayıcısı olmayan bir Linux bilgisayar için
+(bir sunucu ya da tek Chromium'u, sertleştirilmiş servisin çalıştıramadığı snap paketi olan
+Ubuntu). Arşiv, `storage.googleapis.com` adresinden https üzerinden gelir; sürümü ve SHA-256
+değeri sabitlenmiştir, eşleşmeden hiçbir şey açılmaz. Yaklaşık 1 GB boş disk alanı gerekir, root
+gerekmez. Bot bu tarayıcıyı yalnızca sistemde Chrome, Chromium ya da Edge yoksa kullanır. Chrome
+for Testing kendini güncellemez; yeni bir Praxi yeni sabitlenmiş sürümü getirir.
+`install-linux.sh` ile kurulmuş bir sunucuda servisin kullanıcısıyla çalıştır:
+`sudo praxi browser install`. Ayarlar > Tanılama'da aynı işlem **Tarayıcıyı kur** düğmesidir.
+`--json`, `{"installed", "path", "already_there"}` yazdırır.
+
 ### `bot backup create | verify | restore`
 
 `bot backup create <FILE>`; botlarını, sohbetlerini, hafızanı, becerilerini, iş akışlarını,

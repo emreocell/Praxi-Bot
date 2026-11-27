@@ -64,7 +64,11 @@ impl fmt::Display for Error {
             Self::Timeout(m) => write!(f, "timeout: {m}"),
             Self::Closed => write!(f, "CDP connection closed"),
             Self::Json(m) => write!(f, "json error: {m}"),
-            Self::BrowserNotFound => write!(f, "no Chrome or Edge installation found"),
+            Self::BrowserNotFound => write!(
+                f,
+                "no Chrome, Chromium or Edge was found on this computer. {}",
+                crate::launch::install_advice()
+            ),
             Self::Launch(m) => write!(f, "browser launch failed: {m}"),
             Self::UnknownRef(r) => write!(
                 f,

@@ -360,6 +360,14 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
             };
             if can_restart && c.status == doctor::Status::Ok {
                 c.repair(Repair::RestartBrowser)
+            } else if found.is_err()
+                && crate::browser_install::offered(
+                    std::env::consts::OS,
+                    std::env::consts::ARCH,
+                    browser_override_set(),
+                )
+            {
+                c.repair(Repair::InstallBrowser)
             } else {
                 c
             }
@@ -437,7 +445,7 @@ pub(crate) async fn get_doctor(State(s): State<AppState>) -> Result<Json<DoctorR
 /// before anything runs (no record, no repair), and `doctor.repair` records
 /// the outcome.
 #[utoipa::path(post, path = "/v1/doctor/repair/{id}", tag = "doctor", security(("bearer" = [])),
-    params(("id" = String, Path, description = "Repair id: create_data_dir, reload_providers or restart_browser")),
+    params(("id" = String, Path, description = "Repair id: create_data_dir, reload_providers, restart_browser or install_browser")),
     responses((status = 200, body = RepairResult), (status = 401, body = ErrorBody),
               (status = 403, body = ErrorBody, description = "not the local user"),
               (status = 404, body = ErrorBody, description = "not an allow-listed repair"),
@@ -516,6 +524,7 @@ async fn run_repair(s: &AppState, repair: Repair) -> Result<String, ApiError> {
             let r = crate::routes::reload_from_host(s).await?;
             Ok(format!("{} provider(s) loaded", r.active.len()))
         }
+        Repair::InstallBrowser => install_browser(s).await,
         Repair::RestartBrowser => {
             let host = s
                 .doctor_host()
@@ -525,6 +534,46 @@ async fn run_repair(s: &AppState, repair: Repair) -> Result<String, ApiError> {
                 .await
                 .map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "repair_failed", e))
         }
+    }
+}
+
+/// Whether the owner pinned a browser with `BOT_BROWSER_PATH` (an install would change nothing).
+fn browser_override_set() -> bool {
+    [browser_cdp::launch::BROWSER_ENV, "BOT_BROWSER_PATH"]
+        .iter()
+        .any(|k| std::env::var(k).is_ok_and(|v| !v.trim().is_empty()))
+}
+
+/// `install_browser`: download, verify and unpack Chrome for Testing, then start it once. Takes
+/// a few minutes on a slow link (about 200 MB), so the Settings page sends this call without
+/// its usual time limit.
+async fn install_browser(s: &AppState) -> Result<String, ApiError> {
+    use crate::browser_install::{self as bi, InstallError};
+    let result = bi::install(
+        &s.data_dir(),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        &bi::System,
+        &|_| {},
+    )
+    .await;
+    match result {
+        Ok(done) if done.already_there => Ok(format!(
+            "a verified browser was already installed: {}",
+            done.binary.display()
+        )),
+        Ok(done) => Ok(format!(
+            "browser installed and started once: {}",
+            done.binary.display()
+        )),
+        Err(e @ (InstallError::Busy | InstallError::Unsupported { .. })) => {
+            Err(ApiError::conflict(e.to_string()))
+        }
+        Err(e) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "repair_failed",
+            e.to_string(),
+        )),
     }
 }
 

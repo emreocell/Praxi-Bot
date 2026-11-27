@@ -82,6 +82,8 @@ http-body-util = "0.1"
 tempfile.workspace = true
 wiremock.workspace = true
 tower = { version = "0.5", features = ["util"] }
+# Builds the small fake browser archive of the `browser_install` tests.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [[bin]]
 name = "daemon-cli-fixture"

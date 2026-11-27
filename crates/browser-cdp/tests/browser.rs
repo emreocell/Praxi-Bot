@@ -44,6 +44,37 @@ async fn open(b: &Browser, html: &str) -> Page {
     b.new_page(&data_url(html)).await.expect("open page")
 }
 
+/// Honest headless defaults: the page sees the host's language and time zone (what a person
+/// using this computer would send), and the viewport is as wide as the requested window.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn headless_browser_follows_the_host_language_and_time_zone() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(&b, "<title>host</title>").await;
+    if let Some(languages) = browser_cdp::host::host_languages() {
+        let want: Vec<&str> = languages.split(',').collect();
+        let got = p.evaluate("navigator.languages").await.unwrap();
+        assert_eq!(got[0], want[0], "{got}");
+    }
+    let zone = p
+        .evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
+        .await
+        .unwrap();
+    let env_tz = std::env::var("TZ").ok().filter(|t| !t.trim().is_empty());
+    if let Some(want) = env_tz.or_else(browser_cdp::host::host_timezone) {
+        assert_eq!(zone, want.as_str());
+    }
+    let width = p.evaluate("window.innerWidth").await.unwrap();
+    assert_eq!(
+        width, 1280,
+        "the viewport is as wide as the requested window"
+    );
+    // No disguise: the browser says what it is.
+    let ua = p.evaluate("navigator.userAgent").await.unwrap();
+    assert!(ua.as_str().unwrap().contains("HeadlessChrome"), "{ua}");
+    b.close().await.unwrap();
+}
+
 #[tokio::test]
 #[ignore = "needs Chrome/Edge"]
 async fn checkout_detection_uses_visible_payment_fields() {

@@ -64,6 +64,14 @@ test("a repair button only appears for a fixable warning or failure", () => {
   });
 });
 
+test("the install-browser repair is a normal repair button and shows as busy while it runs", () => {
+  const idle = { phase: "ready" as const, running: null };
+  const missing = check({ status: "warn", repair: "install_browser" });
+  assert.deepEqual(repairButton(missing, idle), { repair: "install_browser", disabled: false, busy: false });
+  const running = { phase: "ready" as const, running: "install_browser" as const };
+  assert.deepEqual(repairButton(missing, running), { repair: "install_browser", disabled: true, busy: true });
+});
+
 test("repair buttons are disabled while a repair runs or checks reload", () => {
   const fixable = check({ status: "fail", repair: "reload_providers" });
   const other = check({ id: "data_dir", status: "warn", repair: "create_data_dir" });

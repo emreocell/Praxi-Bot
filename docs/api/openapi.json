@@ -8824,7 +8824,7 @@
           {
             "name": "id",
             "in": "path",
-            "description": "Repair id: create_data_dir, reload_providers or restart_browser",
+            "description": "Repair id: create_data_dir, reload_providers, restart_browser or install_browser",
             "required": true,
             "schema": {
               "type": "string"
@@ -34660,7 +34660,8 @@
         "enum": [
           "create_data_dir",
           "reload_providers",
-          "restart_browser"
+          "restart_browser",
+          "install_browser"
         ]
       },
       "RepairResult": {

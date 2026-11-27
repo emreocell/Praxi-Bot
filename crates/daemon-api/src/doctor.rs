@@ -89,14 +89,18 @@ pub enum Repair {
     ReloadProviders,
     /// Restart the shared browser session (only when the embedder supports it).
     RestartBrowser,
+    /// Download a checksum-verified Chrome for Testing into the data directory
+    /// (Linux, when no usable browser exists).
+    InstallBrowser,
 }
 
 impl Repair {
     /// Every repair.
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 4] = [
         Self::CreateDataDir,
         Self::ReloadProviders,
         Self::RestartBrowser,
+        Self::InstallBrowser,
     ];
 
     /// Stable id used in `POST /v1/doctor/repair/{id}`.
@@ -106,6 +110,7 @@ impl Repair {
             Self::CreateDataDir => "create_data_dir",
             Self::ReloadProviders => "reload_providers",
             Self::RestartBrowser => "restart_browser",
+            Self::InstallBrowser => "install_browser",
         }
     }
 
@@ -1382,7 +1387,7 @@ pub fn check_browser_found(found: Result<&Path, &str>) -> Check {
             ID,
             N,
             e.to_owned(),
-            "install a non-snap Chrome/Chromium/Edge or set BOT_BROWSER_PATH",
+            "install a non-snap Chrome/Chromium/Edge or set BOT_BROWSER_PATH; on Linux `bot browser install` downloads a checked Chrome into the Praxi data folder (`sudo praxi browser install` on a host set up with install-linux.sh)",
         ),
     }
 }

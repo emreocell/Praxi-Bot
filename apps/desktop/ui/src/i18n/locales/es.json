@@ -6967,11 +6967,15 @@
       "problems_other": "{{count}} elementos necesitan atención",
       "repair": {
         "create_data_dir": "Crear carpeta",
+        "install_browser": "Install browser",
         "reload_providers": "Recargar proveedores",
         "restart_browser": "Reiniciar navegador"
       },
       "repairDone": "Reparación terminada",
       "repairFailed": "La reparación no funcionó",
+      "repairRunning": {
+        "install_browser": "Downloading Chrome (about 200 MB) and checking it. This can take a few minutes; you can keep working."
+      },
       "reportCopied": "Informe de soporte copiado. Las claves, contraseñas, direcciones de correo y tu carpeta de usuario están ocultas.",
       "reportFailed": "No se pudo crear el informe de soporte",
       "rerun": "Ejecutar de nuevo",

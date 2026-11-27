@@ -216,6 +216,10 @@ export function DiagnosticsCard() {
             const Icon = TONE_ICON[tone];
             const button = repairButton(check, state, busy);
             const outcome = state.outcomes[check.id];
+            // A slow repair (the browser download) says what it is doing while it runs.
+            const runningNote = button?.busy
+              ? t(`settingsModal.diagnostics.repairRunning.${button.repair}`, { defaultValue: "" })
+              : "";
             const hint = check.status === "warn" || check.status === "fail"
               ? t(`settingsModal.diagnostics.hints.${check.id}`, check.hint ?? "")
               : "";
@@ -230,6 +234,11 @@ export function DiagnosticsCard() {
                   </span>
                   <span className={styles.detail}>{detailOf(tone, check)}</span>
                   {hint ? <span className={styles.hint}>{hint}</span> : null}
+                  {runningNote ? (
+                    <span className={styles.hint} role="status">
+                      {runningNote}
+                    </span>
+                  ) : null}
                   {outcome ? (
                     <span className={outcome.ok ? styles.outcomeOk : styles.outcomeBad} role="status">
                       {outcome.text}

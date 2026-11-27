@@ -388,7 +388,11 @@ programını yeniden çalıştır. Chrome for Testing kendiliğinden güncellenm
 güncellemek için, yeni sürümün arşivlerini iki platform için de (`linux64` ve `linux-arm64`)
 `https://storage.googleapis.com/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`
 adresinden indir, `sha256sum` ile özetlerini hesapla ve `install_cft` işlevinin başındaki `version`,
-`sha256_linux64` ve `sha256_linux_arm64` değerlerini birlikte güncelle.
+`sha256_linux64` ve `sha256_linux_arm64` değerlerini birlikte güncelle; aynı sürümü, sağlama
+toplamlarını ve arşiv boyutlarını `crates/daemon-api/src/browser_install.rs` içinde de güncelle
+(iki yerdeki sağlama toplamları ya da sürüm farklıysa bir test başarısız olur). Kurulum betiğiyle
+kurulmamış bir bilgisayarda `bot browser install` ve Ayarlar > Tanılama > Tarayıcıyı kur'un veri
+klasörüne indirdiği, bu Rust kopyasıdır.
 
 Fedora/RHEL, yöneticinin etkinleştirdiği RPM depolarından zayıf bağımlılıklar olmadan `chromium`
 kullanır. Bu depolarda `chromium` yoksa (örneğin Oracle Linux), kurulum programı her iki işlemci için

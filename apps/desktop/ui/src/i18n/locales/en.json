@@ -7047,11 +7047,15 @@
       "problems_other": "{{count}} items need attention",
       "repair": {
         "create_data_dir": "Create folder",
+        "install_browser": "Install browser",
         "reload_providers": "Reload providers",
         "restart_browser": "Restart browser"
       },
       "repairDone": "Repair finished",
       "repairFailed": "The repair did not succeed",
+      "repairRunning": {
+        "install_browser": "Downloading Chrome (about 200 MB) and checking it. This can take a few minutes; you can keep working."
+      },
       "reportCopied": "Support report copied. Keys, passwords, e-mail addresses and your user folder are masked.",
       "reportFailed": "Could not create the support report",
       "rerun": "Run again",

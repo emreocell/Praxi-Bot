@@ -2485,7 +2485,7 @@ export class MockApiClient extends ApiClient {
         })] });
       case "POST /doctor": {
         const id = seg[1] === "repair" ? (seg[2] ?? "") : "";
-        if (!["create_data_dir", "reload_providers", "restart_browser"].includes(id)) {
+        if (!["create_data_dir", "reload_providers", "restart_browser", "install_browser"].includes(id)) {
           throw new ApiError(404, "not_found", `repair ${id} not found`);
         }
         this.repairs.push(id);

@@ -243,7 +243,21 @@ struct HostDisplayFacts<'a> {
 /// Exact commands for the two most common Linux-host problems; the Add a
 /// server wizard and docs/guide/linux-host.md use the same wording.
 const FIX_DISPLAY: &str = "run `sudo systemctl restart praxi-xvfb` and `sudo systemctl status praxi-xvfb`; if the unit is missing: `sudo ./install-linux.sh --update --with-desktop`";
-const FIX_BROWSER: &str = "run `sudo ./install-linux.sh --update --with-desktop` (installs a non-snap Chromium), or set BOT_BROWSER_PATH; then `sudo praxi doctor`";
+const FIX_BROWSER: &str = "run `bot browser install` (downloads a checked Chrome into the Praxi data folder; `sudo praxi browser install` on a host set up with install-linux.sh), or `sudo ./install-linux.sh --update --with-desktop` (installs a non-snap Chromium), or set BOT_BROWSER_PATH; then `sudo praxi doctor`";
+
+/// A browser that is there but did not start needs the fix for its cause, not a second install.
+fn fix_for_launch_error(error: &str) -> &'static str {
+    if error.contains("sandbox cannot start") {
+        FIX_BROWSER_SANDBOX
+    } else if error.contains("missing system libraries") {
+        FIX_BROWSER_LIBRARIES
+    } else {
+        FIX_BROWSER
+    }
+}
+
+const FIX_BROWSER_SANDBOX: &str = "run `sudo ./install-linux.sh --update --with-desktop` once: it installs the browser together with the AppArmor rule that lets its sandbox start; then `sudo praxi doctor`";
+const FIX_BROWSER_LIBRARIES: &str = "install the libraries Chrome needs (Ubuntu/Debian: `sudo apt-get install -y libnss3 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon0 libasound2 libxdamage1 libxfixes3 libxrandr2 libpango-1.0-0 libcairo2`), or run `sudo ./install-linux.sh --update --with-desktop`; then `sudo praxi doctor`";
 
 fn diagnose_host_display(
     f: &HostDisplayFacts<'_>,
@@ -789,7 +803,12 @@ fn check_browser(found: Option<&Path>) -> Check {
                         p.display()
                     ),
                 ),
-                Err(e) => Check::fail(ID, N, format!("{}: {e}", p.display()), FIX_BROWSER),
+                Err(e) => Check::fail(
+                    ID,
+                    N,
+                    format!("{}: {e}", p.display()),
+                    fix_for_launch_error(&e),
+                ),
             }
         }
         None => Check::warn(
@@ -1428,6 +1447,25 @@ id = "m1"
                 .as_ref()
                 .unwrap()
                 .contains("non-snap")
+        );
+    }
+
+    #[test]
+    fn a_browser_that_does_not_start_gets_the_fix_for_its_cause() {
+        assert_eq!(
+            fix_for_launch_error("exited early: the Chrome sandbox cannot start (user namespaces)"),
+            FIX_BROWSER_SANDBOX
+        );
+        assert_eq!(
+            fix_for_launch_error("the browser is missing system libraries. Browser said: libnss3"),
+            FIX_BROWSER_LIBRARIES
+        );
+        assert_eq!(
+            fix_for_launch_error("headless launch timed out"),
+            FIX_BROWSER
+        );
+        assert!(
+            FIX_BROWSER_SANDBOX.contains("AppArmor") && FIX_BROWSER_LIBRARIES.contains("libnss3")
         );
     }
 

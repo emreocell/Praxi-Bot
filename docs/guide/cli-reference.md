@@ -115,6 +115,18 @@ fails.
 
 `--json` prints the checks as JSON.
 
+### `bot browser install`
+
+Download a checksum-verified Chrome for Testing into the data directory and start it once to
+prove it runs. For a Linux computer with no browser the bot can use (a server, or Ubuntu where the
+only Chromium is the snap package, which cannot run under the hardened service). The archive comes
+from `storage.googleapis.com` over https and is pinned by version and SHA-256; nothing is unpacked
+before it matches. It needs about 1 GB of free disk space and no root. The bot uses this browser
+only when no Chrome, Chromium or Edge is installed on the system. Chrome for Testing does not
+update itself; a newer Praxi ships a newer pin. On a host set up with `install-linux.sh`, run it as
+the service's user: `sudo praxi browser install`. Settings > Diagnostics has the same action as an
+**Install browser** button. `--json` prints `{"installed", "path", "already_there"}`.
+
 ### `bot backup create | verify | restore`
 
 `bot backup create <FILE>` writes one passphrase-encrypted file with your bots, chats,

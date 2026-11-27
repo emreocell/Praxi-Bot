@@ -543,7 +543,7 @@ export class ApiClient {
   protected async request<T>(
     method: string,
     path: string,
-    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; headers?: Record<string, string>; raw?: Blob; keepalive?: boolean; localOwnerOnly?: boolean } = {}
+    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; noTimeout?: boolean; headers?: Record<string, string>; raw?: Blob; keepalive?: boolean; localOwnerOnly?: boolean } = {}
   ): Promise<T> {
     const res = await this.send(method, path, opts);
     if (res.status === 204) {
@@ -1975,7 +1975,8 @@ export class ApiClient {
   }
   /** Run one allow-listed repair; only ever called from a user click. */
   doctorRepair(id: RepairId): Promise<RepairResult> {
-    return this.request("POST", `/doctor/repair/${encodeURIComponent(id)}`);
+    // Installing the browser downloads about 200 MB: it must not be cut by the request timeout.
+    return this.request("POST", `/doctor/repair/${encodeURIComponent(id)}`, { noTimeout: id === "install_browser" });
   }
   /** Redacted Markdown support report. */
   doctorReport(): Promise<string> {

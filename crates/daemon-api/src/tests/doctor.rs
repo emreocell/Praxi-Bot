@@ -124,8 +124,10 @@ async fn doctor_lists_typed_checks_without_side_effects() {
     // Sealed PATH in the test setup: no coding CLI installed, which is neutral.
     assert_eq!(get("cli_accounts")["status"], "skipped");
     assert_eq!(get("peer_link")["status"], "skipped");
-    // No embedder host: no browser restart offered, desktop not "failed".
-    assert!(get("browser")["repair"].is_null());
+    // No embedder host: no browser restart offered (a computer with no browser at all is
+    // offered the install instead, which depends on the machine running the test).
+    assert_ne!(get("browser")["repair"], "restart_browser");
+    assert!(get("browser")["repair"].is_null() || get("browser")["repair"] == "install_browser");
     assert_ne!(get("desktop_automation")["status"], "fail");
     for c in checks {
         assert!(c["title"].is_string() && c["detail"].is_string(), "{c}");
@@ -419,7 +421,12 @@ async fn a_repair_that_cannot_be_audited_does_not_run() {
          BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;",
     )
     .unwrap();
-    for id in ["reload_providers", "restart_browser", "create_data_dir"] {
+    for id in [
+        "reload_providers",
+        "restart_browser",
+        "create_data_dir",
+        "install_browser",
+    ] {
         let r = call(&t, Method::POST, &format!("/v1/doctor/repair/{id}"), None).await;
         assert_eq!(
             r.status,

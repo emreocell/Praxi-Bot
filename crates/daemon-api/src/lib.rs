@@ -82,6 +82,7 @@ pub mod trusted_folders;
 pub(crate) mod workspace_routes;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod bot_limits_routes;
+pub mod browser_install;
 mod browser_profiles;
 pub mod calendar;
 mod calendar_routes;

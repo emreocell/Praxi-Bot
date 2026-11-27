@@ -187,6 +187,7 @@
       "bot serve",
       "bot logs",
       "bot doctor",
+      "bot browser install",
       "bot backup create | verify | restore",
       "bot restore",
       "bot status",

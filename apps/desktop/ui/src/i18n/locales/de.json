@@ -6967,11 +6967,15 @@
       "problems_other": "{{count}} Punkte brauchen Aufmerksamkeit",
       "repair": {
         "create_data_dir": "Ordner erstellen",
+        "install_browser": "Install browser",
         "reload_providers": "Anbieter neu laden",
         "restart_browser": "Browser neu starten"
       },
       "repairDone": "Reparatur abgeschlossen",
       "repairFailed": "Die Reparatur war nicht erfolgreich",
+      "repairRunning": {
+        "install_browser": "Downloading Chrome (about 200 MB) and checking it. This can take a few minutes; you can keep working."
+      },
       "reportCopied": "Support-Bericht kopiert. Schlüssel, Passwörter, E-Mail-Adressen und dein Benutzerordner sind maskiert.",
       "reportFailed": "Der Support-Bericht konnte nicht erstellt werden",
       "rerun": "Erneut ausführen",

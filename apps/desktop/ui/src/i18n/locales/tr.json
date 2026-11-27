@@ -7047,11 +7047,15 @@
       "problems_other": "{{count}} öğe ilgi bekliyor",
       "repair": {
         "create_data_dir": "Klasörü oluştur",
+        "install_browser": "Tarayıcıyı kur",
         "reload_providers": "Sağlayıcıları yeniden yükle",
         "restart_browser": "Tarayıcıyı yeniden başlat"
       },
       "repairDone": "Onarım tamamlandı",
       "repairFailed": "Onarım başarılı olmadı",
+      "repairRunning": {
+        "install_browser": "Chrome indiriliyor (yaklaşık 200 MB) ve doğrulanıyor. Birkaç dakika sürebilir; çalışmaya devam edebilirsin."
+      },
       "reportCopied": "Destek raporu kopyalandı. Anahtarlar, token'lar, e-posta adresleri ve kullanıcı klasörün gizlendi.",
       "reportFailed": "Destek raporu oluşturulamadı",
       "rerun": "Yeniden çalıştır",

@@ -2,6 +2,7 @@
 
 mod backup_cmd;
 mod backup_crypto;
+mod browser_cmd;
 mod calendar_host;
 mod catalog_cmd;
 mod channels;
@@ -177,6 +178,11 @@ enum Command {
     Setup(SetupCmd),
     /// Check installation health (data directory, config, providers, daemon, browser, and more).
     Doctor(DoctorCmd),
+    /// Set up the browser the bot uses (Linux servers: download a checked Chrome).
+    Browser {
+        #[command(subcommand)]
+        action: browser_cmd::BrowserAction,
+    },
     /// Show recent redacted logs from this computer (also works while the daemon is stopped).
     Logs(logs_cmd::LogsCmd),
     /// Manage stored secrets (values are never printed).
@@ -799,6 +805,8 @@ fn run() -> Result<()> {
         _ => {}
     }
     let data_dir = data_dir(&cli)?;
+    // Lets browser discovery find a browser installed into this data directory.
+    browser_cdp::launch::register_data_dir(&data_dir);
     let mut say = |s: &str| println!("{s}");
 
     if cli.remote.is_some()
@@ -878,6 +886,9 @@ fn run() -> Result<()> {
         }
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
         Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
+        Command::Browser { action } => {
+            return browser_cmd::run(action, &data_dir, cli.json, &mut std::io::stdout());
+        }
         Command::Logs(c) => return logs_cmd::run(c, &data_dir),
         Command::Backup { action } if !action.needs_secret_store() => {
             return backup_cmd::run(
@@ -1036,6 +1047,7 @@ fn run() -> Result<()> {
         | Command::SelfUpdate(_)
         | Command::Logs(_)
         | Command::Doctor(_)
+        | Command::Browser { .. }
         | Command::Serve { .. }
         | Command::Status
         | Command::Proxy
