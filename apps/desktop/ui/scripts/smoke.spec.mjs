@@ -416,13 +416,16 @@ export async function flows(ctx) {
       await page.getByTestId('message-search-button').click();
       const box = page.getByRole('combobox', { name: /search/i });
       await box.fill('SMOKE');
-      const hit = page.getByRole('option').filter({ hasText: /hello smoke/i }).first();
+      // The overlay lists bots and chats found by name first (instant, no testid beyond search-bot-row / search-chat-row),
+      // then the daemon's message hits: wait for a message hit, not for a chat whose title happens to match.
+      const hit = page.getByRole('option').filter({ hasText: /hello smoke/i }).and(page.locator('[role=option]:not([data-testid^="search-"])')).first();
       await hit.waitFor(T);
       if ((await page.locator('mark').count()) === 0) throw new Error('the matched word is not highlighted');
       await page.waitForTimeout(300);
       await page.screenshot({ path: join(ctx.shots, `smoke-search-${theme}.png`), timeout: 5000 });
       if (theme === 'obsidian') {
-        await box.press('ArrowDown');
+        // Walk down from the first row (a bot or chat found by name may come first) to the message hit, then open it.
+        for (let i = 0; i < 12 && (await hit.getAttribute('data-active')) !== 'true'; i++) await box.press('ArrowDown');
         await box.press('Enter');
         await page.getByRole('combobox', { name: /search/i }).waitFor({ state: 'hidden', timeout: 5000 });
         await page.locator('[data-flash="true"]').first().waitFor(T);
