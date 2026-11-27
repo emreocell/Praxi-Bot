@@ -180,6 +180,9 @@ export async function flows(ctx) {
         await page.keyboard.press('Escape');
         await page.getByRole('button', { name: 'Settings', exact: true }).click();
         await page.getByTestId('settings-nav-connections').click();
+        // The storage card is an advanced setting: it sits behind the page's "more options" fold, closed on open.
+        const moreOptions = page.getByTestId('settings-show-advanced');
+        if ((await moreOptions.getAttribute('aria-expanded')) !== 'true') await moreOptions.click();
         const storage = page.getByTestId('workspace-storage-card');
         await storage.waitFor(T);
         await storage.locator('[data-testid="workspace-open-root-folder"]').scrollIntoViewIfNeeded();
