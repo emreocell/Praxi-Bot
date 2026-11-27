@@ -33,7 +33,7 @@ Hayır. Botların bilgisayarında çalışır. Sunucu yalnızca, bilgisayarın k
 **Zamanlanmış görevler**'i aç ve **Yeni zamanlama**'ya bas. Bkz. [İşleri otomatikleştir](automate.md).
 
 **Bot beni hatırlar mı?**
-İşe yarar bilgileri, örneğin adını ya da işleri nasıl sevdiğini tutabilir. Bunlar bilgisayarında kalır. **Ayarlar → Veriler ve yedek** botların neyi hatırladığını gösterir. Bkz. [Botlar ve profiller](bots-and-profiles.md).
+İşe yarar bilgileri, örneğin adını ya da işleri nasıl sevdiğini tutabilir. Bunlar bilgisayarında kalır. **Ayarlar → Yapay zekâ ve hafıza** botların neyi hatırladığını gösterir. Bkz. [Botlar ve profiller](bots-and-profiles.md).
 
 **Bir şey çalışmıyor.**
 Bkz. [Sık görülen sorunları çöz](fix-common-problems.md).

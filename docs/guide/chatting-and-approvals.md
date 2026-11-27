@@ -63,7 +63,7 @@ chat), and `/workflow <name> key=value ...` (run a saved workflow directly, see
 In the desktop composer, typing `/` at the start of a message opens a command
 menu that also includes local commands handled by the app itself (never sent to
 the bot): `/export` (download the open chat as Markdown) and app shortcuts
-`/help`, `/settings`, `/models`, `/apps`, and `/schedules`. In Telegram there
+`/help`, `/settings`, `/vault`, `/models`, `/apps`, and `/schedules`. In Telegram there
 are extra commands, see [Telegram](telegram.md).
 
 ![Typing / in the message box opens the command menu](images/en/composer-commands.webp)
@@ -139,7 +139,7 @@ app sees a server, so existing chats do not all start unread):
 
 - **Keyboard shortcuts dialog**: press **`?`** anywhere when no text field has
   focus (or open it from the command palette with `Ctrl/Cmd+K` → **Keyboard
-  shortcuts**, from the account menu, or by typing `/help` in the composer). The
+  shortcuts**, from the profile menu, or by typing `/help` in the composer). The
   dialog lists global shortcuts (`Ctrl/Cmd+K` command palette, `?` shortcuts,
   `Ctrl/Cmd+,` settings, `Ctrl/Cmd+F` find in chat, `Esc` close side panel,
   `Shift+Esc` exit live-view keyboard focus, and your configured stop hotkey),

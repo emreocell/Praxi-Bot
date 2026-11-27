@@ -242,7 +242,7 @@ gerektiğini belirler: **Praxi bir CLI'ı ancak `praxi` olarak kurulmuş ve giri
 `ubuntu`'nun ev klasörüne gider ve Praxi onu kurulu değil olarak gösterir. `/var/lib/praxi` bilerek
 özeldir (`0750`); bir denetim geçsin diye izinlerini gevşetme. Bunun yerine işi `praxi` olarak yap:
 
-- **Uygulamada.** *Ayarlar → Ev → <sunucu> üzerindeki kodlama CLI'ları* sunucunun kendi servisi
+- **Uygulamada.** Bilgisayar seçicisinde sunucuyu seçtikten sonra *Ayarlar → Bağlantılar* kodlama CLI'larını o sunucuda kurulu hâlleriyle listeler; yanıtlar sunucunun kendi servisi
   tarafından yanıtlanır; yani sunucudaki botların gerçekten çalıştırabildiğini gösterir ve en üstte
   hangi kullanıcı ve ev klasörü olduğunu söyler. **Sunucuya kur** ve **<sunucu> üzerinde giriş yap**
   `praxi` olarak çalışır; giriş, bağlantıyı ve tek kullanımlık kodu uygulamada gösterir. Kurulu ama

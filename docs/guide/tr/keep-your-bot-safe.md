@@ -4,7 +4,7 @@ Botun senin bilgisayarında çalışır, yani kontrol sende kalır. Bu sayfa kur
 
 ## Üç seviye
 
-Hesap menüsünden **Ayarlar**'ı, sonra **Güvenlik ve izinler**'i aç. Bir seviye seçersin. Bir bota kendi kurallarını vermediysen her bot bu seviyeye uyar.
+Profil menüsünden **Ayarlar**'ı, sonra **Güvenlik**'i aç. Bir seviye seçersin. Bir bota kendi kurallarını vermediysen her bot bu seviyeye uyar.
 
 | Seviye | Bot bunu kendi başına yapar | Bot önce sana sorar |
 | --- | --- | --- |

@@ -484,6 +484,14 @@
     "summary": "Her an açık duran Linux sunucunun (systemd, yetkisiz praxi kullanıcısı) günlük işletimi."
   },
   {
+    "doc": "tr/import-from-assistants.md",
+    "title": "Diğer asistanlardan içe aktarma",
+    "headings": [
+      "İçe aktarma ekranını aç"
+    ],
+    "summary": "Praxi, Claude, Cursor, VS Code, Codex, OpenClaw, Hermes ya da seçtiğin bir"
+  },
+  {
     "doc": "tr/incoming-webhooks.md",
     "title": "Gelen webhook'lar",
     "headings": [
@@ -818,12 +826,12 @@
     "headings": [
       "Sayfalar",
       "Arama",
-      "Basit ve Gelişmiş",
+      "Daha fazla seçenek",
       "Güvenlik düzeyleri",
       "Önerilene sıfırla",
       "Küçük ekranlar"
     ],
-    "summary": "Değişiklikler kendiliğinden kaydedilir: her değişiklikten sonra sağ üstteki etikette Kaydedildi yazar."
+    "summary": "yazı alanında /settings yazarak aç. Değişiklikler kendiliğinden kaydedilir: her"
   },
   {
     "doc": "tr/skill-management-api.md",
@@ -869,7 +877,7 @@
     "title": "Sorun giderme (teknik)",
     "headings": [
       "Son günlükler ve destek paketi",
-      "Tanılama (Ayarlar → Tanılama, bot doctor)",
+      "Tanılama (Ayarlar → Sistem, bot doctor)",
       "7/24 çalışan sunucu",
       "daemon not reachable at http://127.0.0.1:47821 (çıkış kodu 3)",
       "Kimlik doğrulama reddedildi (çıkış kodu 4)",

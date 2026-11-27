@@ -15,7 +15,7 @@ past a paywall. If a site says no, the bot is told to stop and say so.
 Only you can do this, from your own computer, over your SSH login: the server's
 Praxi user has no administrator rights, so a bot can never install it.
 
-1. Open **Settings → Computers**, pick the server and choose **Tools**.
+1. Open the **computer picker** at the top → **Your servers**, pick the server and press **Tool packs**.
 2. Tick **Web scraping**. It needs Python, which comes with **Developer tools**
    (add that pack first if the list says Python is needed).
 3. Press **Review**: you see exactly what would change before anything
@@ -79,7 +79,7 @@ without asking you. To turn it off for all bots, use **Remove**.
 | [Trafilatura](https://github.com/adbar/trafilatura) 2.4.0 (page text) | Apache-2.0 |
 | Its dependencies (courlan, htmldate, lxml, dateparser, urllib3, ...) | Apache-2.0, BSD, MIT; `certifi` is MPL-2.0 (unchanged) |
 
-Settings → Computers shows the licence and a source link for every tool pack.
+The tool-pack dialog shows the licence and a source link for every pack.
 The full list with versions and checksums is in `THIRD_PARTY_NOTICES.md` and
 `packs/scrape/requirements.lock`.
 

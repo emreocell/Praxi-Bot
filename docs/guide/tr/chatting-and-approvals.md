@@ -40,7 +40,7 @@ Eller serbest konuşmak için masaüstü yazı alanındaki telefon düğmesine (
 
 Yönlendirici açıkken `/stop` (geçerli çalışmayı durdur), `/new` (yeni sohbet başlat) ve `/workflow <name> key=value ...` (kayıtlı bir iş akışını doğrudan çalıştır, bkz. [İş akışları](workflows.md)) modele ulaşmadan doğrudan işlenir.
 
-Masaüstü yazı alanında bir mesajın başına `/` yazmak, uygulamanın kendi işlediği (bota hiç gönderilmeyen) yerel komutları da içeren bir komut menüsü açar: `/export` (açık sohbeti Markdown olarak indir) ve uygulama kısayolları `/help`, `/settings`, `/models`, `/apps` ile `/schedules`. Telegram'da ek komutlar var, bkz. [Telegram](telegram.md).
+Masaüstü yazı alanında bir mesajın başına `/` yazmak, uygulamanın kendi işlediği (bota hiç gönderilmeyen) yerel komutları da içeren bir komut menüsü açar: `/export` (açık sohbeti Markdown olarak indir) ve uygulama kısayolları `/help`, `/settings`, `/vault`, `/models`, `/apps` ile `/schedules`. Telegram'da ek komutlar var, bkz. [Telegram](telegram.md).
 
 ![Mesaj kutusuna / yazınca komut menüsü açılır](../images/tr/composer-commands.webp)
 
@@ -83,7 +83,7 @@ Daemon okunma durumunu saklamaz. Masaüstü uygulaması sunucu başına ve sohbe
 
 ### Klavye kısayolları ve “Yenilikler”
 
-- **Klavye kısayolları penceresi**: hiçbir metin alanı odakta değilken herhangi bir yerde **`?`** tuşuna bas (ya da `Ctrl/Cmd+K` ile açtığın komut paletinden **Klavye kısayolları**'nı seç, hesap menüsünden aç ya da yazı alanına `/help` yaz). Pencere şunları listeler: genel kısayollar (`Ctrl/Cmd+K` komut paleti, `?` kısayollar, `Ctrl/Cmd+,` ayarlar, `Ctrl/Cmd+F` sohbette ara, `Esc` yan paneli kapat, `Shift+Esc` canlı görünümün klavye odağından çık ve senin belirlediğin durdurma kısayolu), yazı alanı kısayolları (belirlediğin gönderme ve yeni satır tuşları, `Up`/`Down` ile mesaj geçmişini geri çağırma, eğik çizgi/bahsetme menüsünde gezinme), yazı alanı eğik çizgi komutları ve pencere gezinme tuşları.
+- **Klavye kısayolları penceresi**: hiçbir metin alanı odakta değilken herhangi bir yerde **`?`** tuşuna bas (ya da `Ctrl/Cmd+K` ile açtığın komut paletinden **Klavye kısayolları**'nı seç, profil menüsünden aç ya da yazı alanına `/help` yaz). Pencere şunları listeler: genel kısayollar (`Ctrl/Cmd+K` komut paleti, `?` kısayollar, `Ctrl/Cmd+,` ayarlar, `Ctrl/Cmd+F` sohbette ara, `Esc` yan paneli kapat, `Shift+Esc` canlı görünümün klavye odağından çık ve senin belirlediğin durdurma kısayolu), yazı alanı kısayolları (belirlediğin gönderme ve yeni satır tuşları, `Up`/`Down` ile mesaj geçmişini geri çağırma, eğik çizgi/bahsetme menüsünde gezinme), yazı alanı eğik çizgi komutları ve pencere gezinme tuşları.
 - **“Yenilikler” kartı**: bir uygulama güncellemesinden sonra masaüstü uygulaması, kurulu her sürüm için bir kez bir **Yenilikler** penceresi gösterir. Notlar uygulamanın içinde gelir (İngilizce, Türkçe ve Almanca), ağdan hiçbir şey indirilmez. İlk karşılamayı henüz tamamlamamış yepyeni bir kurulum, kartı göstermek yerine sürümü sessizce kaydeder.
 
 ### Sunucu çevrimdışıyken göndermek

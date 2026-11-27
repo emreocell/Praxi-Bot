@@ -259,7 +259,7 @@ must live: **a CLI is only seen by Praxi if it is installed, and signed in, as `
 lands in `ubuntu`'s home, and Praxi will list it as not installed. `/var/lib/praxi` is private
 (mode `0750`) on purpose; do not loosen it to make a check pass. Instead, do the work as `praxi`:
 
-- **In the app.** *Settings → Home → Coding CLIs on <server>* is answered by the server's own
+- **In the app.** With the server selected in the computer picker, *Settings → Connections* lists coding CLIs as installed on that server; answers come from the server's own
   daemon, so it shows exactly what the server's bots can run, and says at the top which user and
   home folder that is. **Install on server** and **Sign in on <server>** run as `praxi`; the sign-in
   shows the link and the one-time code in the app. A CLI that is installed but has no sign-in shows

@@ -195,7 +195,7 @@
       "Running a CLI with its own tools (engine mode)",
       "Engines defined by a data file"
     ],
-    "summary": "Settings → Providers lists CLI engines on the daemon's computer. Refresh"
+    "summary": "re-runs bounded version and authentication probes. Detection also warms at"
   },
   {
     "doc": "cli-reference.md",
@@ -487,6 +487,14 @@
       "Troubleshooting"
     ],
     "summary": "Day-to-day operation of the always-on Linux host (systemd, unprivileged user"
+  },
+  {
+    "doc": "import-from-assistants.md",
+    "title": "Import from other assistants",
+    "headings": [
+      "Open the import screen"
+    ],
+    "summary": "Praxi can read setups you already have in Claude, Cursor, VS Code, Codex,"
   },
   {
     "doc": "incoming-webhooks.md",
@@ -843,12 +851,12 @@
     "headings": [
       "The pages",
       "Search",
-      "Simple and Advanced",
+      "More options",
       "Safety levels",
       "Reset to recommended",
       "Small screens"
     ],
-    "summary": "Open Settings from the account menu. Everything is on ten pages with plain names."
+    "summary": "Open Settings from the profile menu (your name at the bottom of the left"
   },
   {
     "doc": "skill-management-api.md",
@@ -895,7 +903,7 @@
     "title": "Troubleshooting",
     "headings": [
       "Recent logs and a support bundle",
-      "Diagnostics (Settings → Diagnostics, bot doctor)",
+      "Diagnostics (Settings → System, bot doctor)",
       "Start-up check (desktop app)",
       "The always-on host",
       "daemon not reachable at http://127.0.0.1:47821 (exit code 3)",

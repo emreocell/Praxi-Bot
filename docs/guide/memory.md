@@ -27,7 +27,7 @@ If you switch on **Smart** finding (below) with an online embedding provider, th
 
 ## See, correct and forget
 
-Open **Settings → Personal memory**, choose a bot, and you can:
+Open **Settings → AI and memory**, choose a bot, and you can:
 
 ![The Library tab of a bot's panel: skills, documents, notes and memory as shelves with one action each](images/en/bot-panel-library.webp)
 
@@ -51,7 +51,7 @@ Notes picked up from web pages, files, tools or other bots appear in the **Needs
 
 ## Switch it off, or ask first
 
-Each bot has its own setting under **Edit bot → Advanced → Memory** (and at the top of **Settings → Personal memory**):
+Each bot has its own setting under **Edit bot → Advanced → Memory** (and at the top of **Settings → AI and memory**):
 
 | Setting | What happens |
 | --- | --- |
@@ -71,4 +71,4 @@ Only you, on the computer that runs the bot, can change these settings; a paired
 * **Basic (word match)** is the default. A note is found when it shares words with your message ("tea" finds "likes green tea"). It needs no model and sends nothing anywhere. It does not understand that "car" and "automobile" mean the same.
 * **Smart (meaning)** uses an embedding model you already set up for a bot's knowledge (see [Knowledge embeddings](knowledge-embeddings.md)), so "car" can find "drives an automobile". Switching on re-indexes your notes in the background and shows progress; until it is done, Basic is used. If the model fails, Praxi falls back to Basic and nothing is lost.
 
-Use **Settings → Personal memory → How memories are found** to switch.
+Use **Settings → AI and memory → How memories are found** to switch.

@@ -33,6 +33,11 @@ Three ideas run through the whole product:
 
 Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 
+- **Settings redesign (eight pages, Vault and Updates).** **Settings** is grouped into You, Your bots, and App pages: **General**, **Appearance**, **AI and memory**, **Connections**, **Safety**, **Vault**, **System**, and **Updates**. Expert cards sit under **More options**; many cards have a **`?` popover**. See [Settings](settings.md).
+- **Profile menu and bot panel.** The profile menu (bottom of the left rail) opens Settings, Vault, Schedules, Updates, and Help. Each bot's **Activity**, **Automation**, **Library**, and **Tools** tabs live in the right-hand panel. See [Bots and profiles](bots-and-profiles.md) and [Managing chats](chatting-and-approvals.md#managing-chats-desktop-app).
+- **Import from other assistants.** **Settings → General** or `bot import` can copy setups from Claude, Cursor, VS Code, Codex, and others. See [Import from other assistants](import-from-assistants.md).
+- **Apps, MCP Registry, and `.mcpb` bundles.** **Apps** covers Composio, custom MCP, REST APIs, and registry search. See [Connecting apps](apps.md) and [MCP servers](mcp-servers.md).
+- **Missions and schedules in the bot panel.** Long jobs start from the **Activity** tab; scheduled jobs and webhooks are edited under **Automation**, and the full list stays in the left-rail **Schedules** item. See [Missions](missions.md) and [Automate things](automate.md).
 - **Bot-only left rail and chat management in the bot panel.** The left rail lists bots only; each bot's chats live in its right-hand panel (**Library → Chats**) with an overflow menu for rename, pin, archive, and delete. See [Managing chats](chatting-and-approvals.md#managing-chats-desktop-app).
 - **Message copy and Markdown export.** Hover or focus any message to copy its visible text, or type `/export` in the composer to save the open chat as a `.md` file. See [Copying messages and Markdown export](chatting-and-approvals.md#copying-messages-and-markdown-export).
 - **Keyboard shortcuts dialog (`?`) and "What's new" card.** Press `?` (outside text fields) or use the command palette (`Ctrl/Cmd+K`) to view all shortcuts. Bundled release notes appear once per version after an update with no network fetch. See [Keyboard shortcuts and "What's new"](chatting-and-approvals.md#keyboard-shortcuts-and-whats-new).
@@ -79,6 +84,7 @@ Seven short pages in plain words. Read them in this order:
 | Run the always-on Linux host: logs, restart, upgrade, backup | [Host operations](host-operations.md) |
 | Add a server so bots run around the clock (guided, no jargon) | [Adding a server](servers.md) |
 | Understand what a host does when it is demoted or hears another active host | [Host leadership limits](host-leadership.md) |
+| Import setup from Claude, Cursor, VS Code, or another assistant | [Import from other assistants](import-from-assistants.md) |
 | Create a bot and understand its profile file | [Bots and profiles](bots-and-profiles.md) |
 | Talk to a bot, approve or deny actions | [Chatting and approvals](chatting-and-approvals.md) |
 | Talk to a bot hands-free by voice (desktop app) | [Voice call mode](voice-call.md) |

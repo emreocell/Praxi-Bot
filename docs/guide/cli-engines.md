@@ -1,6 +1,6 @@
 # Coding CLI engines
 
-Settings → Providers lists CLI engines on the **daemon's computer**. Refresh
+**Settings → AI and memory** lists CLI engines on the **daemon's computer** (open **More options** for the full list). Refresh
 re-runs bounded version and authentication probes. Detection also warms at
 daemon startup. Terminal PATH entries are supplemented with user-local, npm,
 Node version-manager and native Windows installation directories. Relative
@@ -39,7 +39,7 @@ Ambient API keys are withheld and are not evidence of a usable CLI login.
 
 ## Install and sign in on a server
 
-On a headless server (a paired host) the engine list under Settings → Home shows each coding CLI **as it is installed there**: the daemon on the server answers, as its own service user, so the list always matches what the bots on that server can run. **Install on server** runs the engine's fixed installer as that user (an npm package into a user-level prefix, or the vendor's installer script into the user's `~/.local/bin`); nothing is written outside that user's own folders. The row then reads *Ready · account* (when the CLI names its account), *Installed · sign-in needed* or *Installed · sign-in state unknown*.
+On a headless server (a paired host), switch the computer picker to that server, then open **Settings → Connections**; the engine list shows each coding CLI **as it is installed there**: the daemon on the server answers, as its own service user, so the list always matches what the bots on that server can run. **Install on server** runs the engine's fixed installer as that user (an npm package into a user-level prefix, or the vendor's installer script into the user's `~/.local/bin`); nothing is written outside that user's own folders. The row then reads *Ready · account* (when the CLI names its account), *Installed · sign-in needed* or *Installed · sign-in state unknown*.
 
 **Sign in on server** runs the vendor's own login command on the server and shows what it asks of you in the app: a link with an **Open the page** and a **Copy link** button, the one-time code to type there (device flows), or a box to paste the code the page shows (paste flows). When it finishes, the server confirms the sign-in and the app shows the account. The login runs on a terminal (a PTY), because these CLIs only print their link when they think a person is typing. Only the link, the code and the account name leave the server; the rest of the output stays private and a pasted code goes straight to the CLI and is never kept. The link is the first one the CLI prints, and only when its host is exactly one of the vendor's sign-in hosts (no subdomains: not `*.amazonaws.com`, not `google.com`) and its path is the one expected; the window shows that host above the buttons. A sign-in is confirmed by the CLI's own status, by a success line ("not logged in" is not one), or by a credential file that appeared or changed after the link was shown (never a symlink, never a folder). If the desktop loses host administration while a sign-in waits, the sign-in stops and its process tree is killed.
 

@@ -1,7 +1,7 @@
 # Test connection
 
 Every key and app connection in Praxi-Bot has a **Test connection** button: AI provider keys
-(Settings → AI), web search and dictation keys (Settings), e-mail accounts, MCP servers (Apps) and
+(**Settings → AI and memory** or the profile menu **AI** tile), web search and dictation keys (**Settings → Connections** and **General**), e-mail accounts, MCP servers (**Apps**) and
 the first-run key step. The test runs on the Praxi service on your computer, never shows your key,
 gives up after about 12 seconds and answers with one of the results below. The HTTP status and the
 service's own error code are in the **Details** box.

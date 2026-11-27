@@ -5,7 +5,7 @@ accepted, and shows how many approvals are waiting.
 
 ## Recent logs and a support bundle
 
-Open **Settings → Help → View recent logs** (also available in Help). Search or
+Open **Help** from the profile menu → **View recent logs**. Search or
 choose a level, then **Copy shown logs** to copy exactly the redacted entries on
 screen. **Preview support bundle** prepares four files: `versions.json`,
 `diagnostics.json` (service readiness and safe-mode flags), `recent-logs.jsonl`
@@ -30,7 +30,7 @@ On Linux systemd hosts the same structured stderr reaches the journal; use
 `GET /v1/logs/recent?level=warn&since=<milliseconds>` requires both the API token
 and the local owner key. Every paired peer is denied.
 
-## Diagnostics (Settings → Diagnostics, `bot doctor`)
+## Diagnostics (Settings → System, `bot doctor`)
 
 **Reporting a bug:** open Help and use *Copy diagnostic info*. It first shows exactly
 the text it would copy (versions, platform, check results; keys, passwords, e-mail
@@ -185,12 +185,12 @@ bot that keeps controlling the screen.
 
 Safe mode is chosen **only when the service starts**, by you:
 
-- **Desktop app:** Settings → Diagnostics → **Restart in safe mode**, or **Start in
+- **Desktop app:** Settings → System → **Restart in safe mode** (**More options** if needed), or **Start in
   safe mode** on the screen shown when the service does not come up.
 - **Terminal:** `bot serve --safe`, or set `BOT_SAFE_MODE=1` before `bot serve`.
 
 While it is on, the app shows a banner ("Safe mode. Tools, schedules and channels are
-off.") and `bot doctor`, Settings → Diagnostics and `GET /v1/health` (`safe_mode`) say
+off.") and `bot doctor`, Settings → System and `GET /v1/health` (`safe_mode`) say
 so. You can still chat (the model answers, with no tools; any tool call is refused)
 and read and change bots, schedules and settings.
 

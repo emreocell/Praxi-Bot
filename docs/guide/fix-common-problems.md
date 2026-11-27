@@ -2,7 +2,7 @@
 
 Find the message you see. Do the steps in order. The message titles below are the words the app shows.
 
-If nothing helps: open **Help** from the account menu, press **Show what will be copied**, read it, then press **Copy**. Keys, passwords and e-mail addresses are masked. Nothing is sent anywhere. Paste the text into a bug report. See also the technical [Troubleshooting](troubleshooting.md) page.
+If nothing helps: open **Help** from the profile menu, press **Show what will be copied**, read it, then press **Copy**. Keys, passwords and e-mail addresses are masked. Nothing is sent anywhere. Paste the text into a bug report. See also the technical [Troubleshooting](troubleshooting.md) page.
 
 ## 1. "Praxi's local service stopped" or "Praxi cannot reach its local service"
 
@@ -29,7 +29,7 @@ The AI service did not give an answer.
 
 1. Read the details under the message. They say what the service reported.
 2. Press **Try again**.
-3. Open **Settings → Bots & models** and check that your key is there. If not, add it again.
+3. Open **Settings → AI and memory** and check that your key is there. If not, add it again.
 4. Pick another model and try again.
 
 ## 4. "did not accept this key"
@@ -63,7 +63,7 @@ You pressed **Deny**, or the card timed out and the answer became no.
 
 1. Ask again and say the file's full name or folder.
 2. If a program is named in the message, install that program. Then ask again.
-3. If the bot was told to use a folder it may not touch, add it as a trusted folder: **Settings → Safety & permissions**.
+3. If the bot was told to use a folder it may not touch, add it as a trusted folder: **Settings → Safety**.
 
 ## 8. "Safe mode is on"
 

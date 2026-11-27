@@ -2,7 +2,7 @@
 
 Gördüğün iletiyi bul. Adımları sırayla yap. Aşağıdaki ileti başlıkları, uygulamanın gösterdiği sözlerdir.
 
-Hiçbiri işe yaramazsa: hesap menüsünden **Yardım**'ı aç, **Kopyalanacakları göster**'e bas, oku, sonra **Kopyala**'ya bas. Anahtarlar, parolalar ve e-posta adresleri gizlenir. Hiçbir yere bir şey gönderilmez. Metni bir hata raporuna yapıştır. Teknik [Sorun giderme](troubleshooting.md) sayfasına da bak.
+Hiçbiri işe yaramazsa: profil menüsünden **Yardım**'ı aç, **Kopyalanacakları göster**'e bas, oku, sonra **Kopyala**'ya bas. Anahtarlar, parolalar ve e-posta adresleri gizlenir. Hiçbir yere bir şey gönderilmez. Metni bir hata raporuna yapıştır. Teknik [Sorun giderme](troubleshooting.md) sayfasına da bak.
 
 ## 1. "Praxi'nin yerel servisi durdu" ya da "Praxi yerel servisine ulaşamıyor"
 
@@ -29,7 +29,7 @@ Yapay zekâ servisi yanıt vermedi.
 
 1. İletinin altındaki ayrıntıları oku. Servisin ne bildirdiğini söylerler.
 2. **Yeniden dene**'ye bas.
-3. **Ayarlar → Botlar ve modeller**'i aç ve anahtarının orada olduğunu kontrol et. Yoksa yeniden ekle.
+3. **Ayarlar → Yapay zekâ ve hafıza**yı aç ve anahtarının orada olduğunu kontrol et. Yoksa yeniden ekle.
 4. Başka bir model seç ve yeniden dene.
 
 ## 4. "bu anahtarı kabul etmedi"
@@ -63,7 +63,7 @@ Bir mesaj gitmediyse ("Mesajın gönderilmedi") bağlantını kontrol et ve yeni
 
 1. Yeniden iste ve dosyanın tam adını ya da klasörünü söyle.
 2. İletide bir program adı geçiyorsa o programı kur. Sonra yeniden iste.
-3. Bota dokunmaması gereken bir klasörü kullanması söylendiyse onu güvenilen klasör olarak ekle: **Ayarlar → Güvenlik ve izinler**.
+3. Bota dokunmaması gereken bir klasörü kullanması söylendiyse onu güvenilen klasör olarak ekle: **Ayarlar → Güvenlik**.
 
 ## 8. "Güvenli mod açık"
 

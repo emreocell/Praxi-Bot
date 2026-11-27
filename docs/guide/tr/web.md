@@ -39,7 +39,7 @@ genelde çalışmaz. Çare, programların kullanması için yapılmış bir aram
 [Sunucuda arama](#sunucuda-arama).
 
 Arka uçları, öncelik sırasını ve API anahtarlarını ayarlayabilir, canlı bir deneme de
-yapabilirsin. Bunu masaüstü uygulamasında **Ayarlar → Web araması** altından ya da
+yapabilirsin. Bunu masaüstü uygulamasında **Ayarlar → Bağlantılar → E-posta ve web** altından ya da
 `<data_dir>/web.toml` dosyasından yaparsın. Arka uçlar ayarlı öncelik sırasıyla denenir ve sonuç
 döndüren ilki kazanır (varsayılan sıra):
 
@@ -68,7 +68,7 @@ max_redirects = 5            # at most 10
 ```
 
 Her anahtar isteğe bağlıdır. Brave ya da Tavily anahtarlarını gizli bilgi deposuna kaydet (ya da
-**Ayarlar → Web araması** altına gir, orası anahtarı yalnızca yazılır biçimde saklar). Sonra
+**Ayarlar → Bağlantılar → E-posta ve web** altına gir, orası anahtarı yalnızca yazılır biçimde saklar). Sonra
 `web.toml` içinde gizli bilginin adını göster:
 
 ```sh
@@ -94,7 +94,7 @@ Bir arama sağlayıcısı seç, bir kez. Bunlardan herhangi biri sunucuda `web_s
 | Tavily | Tavily hesabından bir API anahtarı | Barındırılan hizmet. Yapay zekâ ajanları için yapılmış. Kullanım sınırı planına göre değişir. |
 | SearXNG | Bir SearXNG sunucusunun adresi | Kendi sunucunda çalışır, hesap ya da arama başına ücret yok. Tek komutla kurulum aşağıda. |
 
-**Uygulamada:** **Ayarlar → Web araması** sayfasını aç, sağlayıcıyı seç, anahtarı (ya da SearXNG
+**Uygulamada:** **Ayarlar → Bağlantılar → E-posta ve web** sayfasını aç, sağlayıcıyı seç, anahtarı (ya da SearXNG
 adresini) yapıştır ve **Kaydet ve dene** düğmesine bas. Deneme, o sağlayıcı üzerinden gerçek bir
 arama yapar ve cevap verip vermediğini söyler. Anahtarlar gizli depoda yalnızca yazılabilir olarak
 saklanır, bir daha gösterilmez.
@@ -118,7 +118,7 @@ sudo bash scripts/install-searxng.sh --allow-latest
 değişebilecek bir imajı çalıştırmaz. Komut `/opt/praxi/searxng/settings.yml` dosyasını yazar (JSON cevabı açık, rastgele bir gizli
 anahtar), yalnızca `127.0.0.1:8080` üzerinde dinleyen ve sunucuyla birlikte yeniden başlayan
 `praxi-searxng` adlı bir kapsayıcı başlatır, ona gerçek bir arama sorar ve Praxi'ye verilecek adresi
-yazar: `http://127.0.0.1:8080`. Bunu **Ayarlar → Web araması → SearXNG** alanına yapıştır ya da
+yazar: `http://127.0.0.1:8080`. Bunu **Ayarlar → Bağlantılar → E-posta ve web → SearXNG** alanına yapıştır ya da
 `web.toml` içine (`searxng_url`) yazıp Praxi'yi yeniden başlat.
 
 - `--port <n>` başka bir port, `--dir <yol>` başka bir ayar klasörü, `--image <ref>` çalışacak

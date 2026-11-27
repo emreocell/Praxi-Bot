@@ -39,9 +39,11 @@ address, and move on to the next site."*
 
 ## Starting a mission
 
-Open the bot's right-hand panel, **Activity**, **Start a mission**, describe the
-task once and press **Start**. The bot has to be on the **Full** level (a mission
-works without asking, so that is the level where it can).
+Open the bot's right-hand panel (**bot chip** in the title bar), **Activity** tab,
+**Start a mission**, describe the task once and press **Start**. The bot has to
+be on the **Full** level (a mission works without asking, so that is the level
+where it can). The **Automation** tab explains how missions differ from scheduled
+jobs and links here.
 
 The bot may ask its questions once, in one message, at the start. After that it
 decides for itself and writes the decisions down; you read them in the report.

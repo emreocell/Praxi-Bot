@@ -4,7 +4,7 @@ Your bot works on your computer, so you stay in charge. This page explains the r
 
 ## The three levels
 
-Open **Settings** from the account menu, then **Safety & permissions**. You pick one level. Every bot follows it, unless you gave that bot its own rules.
+Open **Settings** from the profile menu, then **Safety**. You pick one level. Every bot follows it, unless you gave that bot its own rules.
 
 | Level | The bot does this on its own | The bot asks you first |
 | --- | --- | --- |

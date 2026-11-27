@@ -80,4 +80,4 @@ Emin değilsen **Dengeli**'yi bırak. Sonra değiştirebilirsin. Bkz. [Botunu g�
 - [Sık görülen sorunları çöz](fix-common-problems.md): bir şey çalışmadığında.
 - [Hızlı yanıtlar](quick-faq.md): sık sorulan sorulara kısa yanıtlar.
 
-İstediğin an hesap menüsünden **Yardım**'ı da açabilirsin.
+İstediğin an profil menüsünden **Yardım**'ı da açabilirsin. Claude, Cursor veya başka bir asistandan mı geliyorsun? Bkz. [Diğer asistanlardan içe aktarma](import-from-assistants.md).

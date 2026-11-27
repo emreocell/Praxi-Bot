@@ -1,7 +1,7 @@
 # Bağlantıyı dene
 
 Praxi-Bot'taki her anahtarın ve uygulama bağlantısının bir **Bağlantıyı dene** düğmesi var: yapay zekâ
-sağlayıcı anahtarları (Ayarlar → Yapay zekâ), web araması ve dikte anahtarları (Ayarlar), e-posta
+sağlayıcı anahtarları (**Ayarlar → Yapay zekâ ve hafıza** veya profil menüsündeki **Yapay zekâ** kutucuğu), web araması ve dikte anahtarları (**Ayarlar → Bağlantılar** ve **Genel**), e-posta
 hesapları, MCP sunucuları (Uygulamalar) ve ilk kurulumdaki anahtar adımı. Deneme bilgisayarındaki Praxi
 hizmetinde çalışır, anahtarını asla göstermez, yaklaşık 12 saniye sonra vazgeçer ve aşağıdaki
 sonuçlardan biriyle yanıt verir. HTTP durumu ve hizmetin kendi hata kodu **Ayrıntılar** kutusundadır.
