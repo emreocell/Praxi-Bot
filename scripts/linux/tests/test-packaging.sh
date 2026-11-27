@@ -688,6 +688,62 @@ cp "${FAKE_BIN}/gh" "${SANDBOX}/usr/bin/gh"
 chmod 755 "${SANDBOX}/usr/bin/gh"
 pass "--verify-only keeps using the caller's gh"
 
+# 5b-lock. The maintenance lock is never opened through a link, and has to be a regular file of root
+# (the test user in the sandbox): a link planted at that name would redirect the open (and the
+# creation) of a root run. A held lock still stops a second installer.
+LOCK="${SANDBOX}/opt/praxi.maintenance.lock"
+LOCK_VICTIM="${TMP_ROOT}/lock-victim"
+lock_install() {
+  run_timed bash "$1" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" --skip-packages --no-start
+}
+[[ -f "${LOCK}" && ! -L "${LOCK}" ]] || fail "the installer must create the maintenance lock as a regular file"
+mv "${LOCK}" "${LOCK}.real"
+printf 'keep\n' > "${LOCK_VICTIM}"
+ln -s "${LOCK_VICTIM}" "${LOCK}"
+if lock_install "${SB_INSTALL}" > "${TMP_ROOT}/lock-link.log" 2>&1; then
+  fail "a maintenance lock that is a link must stop the installation"
+fi
+assert_file_contains "${TMP_ROOT}/lock-link.log" "is a symbolic link"
+[[ "$(cat "${LOCK_VICTIM}")" == "keep" ]] || fail "the installer wrote through the planted lock link"
+rm -f "${LOCK}"
+ln -s "${TMP_ROOT}/lock-created-through-link" "${LOCK}"
+if lock_install "${SB_INSTALL}" > "${TMP_ROOT}/lock-dangling.log" 2>&1; then
+  fail "a maintenance lock that is a dangling link must stop the installation"
+fi
+assert_file_contains "${TMP_ROOT}/lock-dangling.log" "is a symbolic link"
+[[ ! -e "${TMP_ROOT}/lock-created-through-link" ]] || fail "the installer created a file through the planted lock link"
+rm -f "${LOCK}"
+mkdir "${LOCK}"
+if lock_install "${SB_INSTALL}" > "${TMP_ROOT}/lock-dir.log" 2>&1; then
+  fail "a maintenance lock that is a directory must stop the installation"
+fi
+assert_file_contains "${TMP_ROOT}/lock-dir.log" "is not a regular file"
+rmdir "${LOCK}"
+: > "${LOCK}"
+sed "s|^readonly TRUSTED_UID=.*|readonly TRUSTED_UID=$((REAL_UID + 1))|" "${SB_INSTALL}" > "${TMP_ROOT}/install-other-root.sh"
+if lock_install "${TMP_ROOT}/install-other-root.sh" > "${TMP_ROOT}/lock-owner.log" 2>&1; then
+  fail "a maintenance lock that root does not own must stop the installation"
+fi
+assert_file_contains "${TMP_ROOT}/lock-owner.log" "is not owned by root"
+flock "${LOCK}" sleep 30 &
+LOCK_HOLDER=$!
+for _ in $(seq 1 50); do
+  flock -n "${LOCK}" true 2>/dev/null || break
+  sleep 0.1
+done
+if lock_install "${SB_INSTALL}" > "${TMP_ROOT}/lock-held.log" 2>&1; then
+  kill "${LOCK_HOLDER}" 2>/dev/null || true
+  fail "an installer must not run while the maintenance lock is held"
+fi
+kill "${LOCK_HOLDER}" 2>/dev/null || true
+wait "${LOCK_HOLDER}" 2>/dev/null || true
+assert_file_contains "${TMP_ROOT}/lock-held.log" "another Praxi maintenance operation is running"
+rm -f "${LOCK}" "${LOCK}.real"
+lock_install "${SB_INSTALL}" > "${TMP_ROOT}/lock-fresh.log" 2>&1 \
+  || { cat "${TMP_ROOT}/lock-fresh.log" >&3; fail "an installation without an existing lock failed"; }
+[[ -f "${LOCK}" && ! -L "${LOCK}" ]] || fail "the lock was not recreated as a regular file"
+pass "the maintenance lock is never opened through a link and must be root's regular file; a held lock still stops the installer"
+
 # 5b-flat. The flat tree this installer writes is authoritative: stale managed generations are dropped,
 # so a later managed update adopts these files instead of re-pointing the launchers at an older release.
 mkdir -p "${SANDBOX}/opt/praxi/versions/v0.0.1/bin"

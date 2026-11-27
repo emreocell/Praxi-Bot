@@ -340,11 +340,37 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
 fi
 
+# Open ${1} as the maintenance lock in descriptor ${maintenance_lock}, never through a link. Mirrors
+# lock_file() of `bot self-update`: what is locked must be a regular file of ${TRUSTED_UID}, and the
+# name must still lead to the very file that was opened. A plain `exec fd>>path` would follow a link
+# planted at that name, and create whatever it points to.
+open_maintenance_lock() {
+  local path="$1" tmp owner fd_id path_id
+  [[ ! -L "${path}" ]] || die "unsafe maintenance lock: ${path} is a symbolic link"
+  if [[ ! -e "${path}" ]]; then
+    # link(2) neither follows a link at the new name nor replaces anything: the name is ours only if
+    # it was free, and a lock file that raced into place is checked like any other below.
+    tmp="$(mktemp -- "${path}.XXXXXX")" || die "cannot create the maintenance lock ${path}"
+    ln -- "${tmp}" "${path}" 2>/dev/null || true
+    rm -f -- "${tmp}"
+  fi
+  # Read-only: this open never creates a file. flock(2) does not need write access.
+  exec {maintenance_lock}<"${path}" || die "cannot open the maintenance lock ${path}"
+  [[ -f "/proc/self/fd/${maintenance_lock}" ]] || die "unsafe maintenance lock: ${path} is not a regular file"
+  read -r owner fd_id < <(stat -L -c '%u %d:%i' -- "/proc/self/fd/${maintenance_lock}") \
+    || die "cannot inspect the maintenance lock ${path}"
+  [[ "${owner}" == "${TRUSTED_UID}" ]] || die "unsafe maintenance lock: ${path} is not owned by root"
+  # Without -L, stat describes a link itself: a name that became a link differs from the open file.
+  path_id="$(stat -c '%d:%i' -- "${path}")" || die "cannot inspect the maintenance lock ${path}"
+  [[ ! -L "${path}" && "${path_id}" == "${fd_id}" ]] \
+    || die "unsafe maintenance lock: ${path} was replaced while it was opened"
+}
+
 # The managed updater, local self-update and this installer share this lock.
 if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
   command -v flock >/dev/null 2>&1 || die "flock is required; install util-linux and retry"
   mkdir -p -- "$(dirname "${PREFIX}")"
-  exec {maintenance_lock}>>"${PREFIX}.maintenance.lock"
+  open_maintenance_lock "${PREFIX}.maintenance.lock"
   flock -n "${maintenance_lock}" || die "another Praxi maintenance operation is running; wait and retry"
 fi
 

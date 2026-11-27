@@ -180,6 +180,20 @@ and the installer rollback below only switch program files. Before upgrading a h
 with important data, take a backup as described below so you can also recover from a
 failed data migration.
 
+The database copy is a rollback aid, not a backup. It holds only the SQLite databases in
+`/var/lib/praxi` and `/var/lib/praxi/bots/<id>`, taken for this one update and replaced by the
+next. Before the copy the updater stops the daemon and then every other process of the `praxi`
+user (a leftover one is ended; if one will not stop, the update stops before changing
+anything). It reads and writes the data directory only through directory handles and refuses
+a link anywhere inside it. The restore first prepares every database beside its place, then
+replaces them all, so a failure while preparing leaves the data as it was. If the updater is
+killed during the last few renames, its recovery step (it runs after every updater run)
+finishes the restore before the daemon starts; if that fails the daemon stays stopped and
+the next update refuses until `sudo systemctl start praxi-update-check.service` has finished
+it. A power loss in that moment is not covered. Keep your own backup of everything else, as
+described below: the encrypted secret file, browser profiles, host config and the API token
+are not in the copy.
+
 ## Roll back
 
 Use the path that matches how far the upgrade got.

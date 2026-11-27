@@ -174,6 +174,21 @@ kurulum programı geri alması yalnızca program dosyalarını değiştirir. Ön
 sunucuyu yükseltmeden önce aşağıdaki yedekleme adımlarını uygula. Böylece başarısız
 bir veri geçişinden de dönebilirsin.
 
+Veritabanı kopyası bir yedek değil, geri almaya yardım eden bir kopyadır. Yalnızca
+`/var/lib/praxi` ve `/var/lib/praxi/bots/<id>` içindeki SQLite veritabanlarını içerir, o tek
+güncelleme için alınır ve sonraki güncelleme onu değiştirir. Kopyadan önce güncelleyici servisi,
+ardından `praxi` kullanıcısının diğer tüm süreçlerini durdurur (artakalan varsa sonlandırılır;
+biri durmazsa güncelleme hiçbir şeyi değiştirmeden durur). Veri dizinini yalnızca dizin
+tanıtıcılarıyla okur ve yazar, içindeki herhangi bir bağlantıyı (symlink) reddeder. Geri yükleme
+önce her veritabanını yerinin yanında hazırlar, sonra hepsini birlikte yerine koyar; hazırlık
+sırasındaki bir hata veriyi olduğu gibi bırakır. Güncelleyici son birkaç yeniden adlandırma
+sırasında öldürülürse, kurtarma adımı (her güncelleyici çalışmasından sonra çalışır) servis
+açılmadan önce geri yüklemeyi bitirir; bu da olmazsa servis kapalı kalır ve
+`sudo systemctl start praxi-update-check.service` işlemi bitirene kadar sonraki güncelleme
+başlamaz. O anda elektrik kesilmesi kapsam dışıdır. Geri kalan her şey için aşağıda anlatıldığı gibi
+kendi yedeğini tut: şifreli gizli dosyası, tarayıcı profilleri, sunucu ayarı ve API belirteci
+kopyada yoktur.
+
 ## Geri alma
 
 Yükseltmenin ne kadar ilerlediğine uyan yolu kullan.

@@ -7,6 +7,12 @@ use semver::Version;
 #[cfg(target_os = "linux")]
 #[path = "db_snapshot.rs"]
 mod db_snapshot;
+#[cfg(target_os = "linux")]
+#[path = "fd_dir.rs"]
+mod fd_dir;
+#[cfg(target_os = "linux")]
+#[path = "proc_pin.rs"]
+mod proc_pin;
 
 fn release_version(tag: &str) -> Option<Version> {
     Version::parse(tag.strip_prefix('v')?).ok()
@@ -86,19 +92,32 @@ fn admit_request(
     Ok(())
 }
 
-/// Who connected to the update socket, as the kernel reported it.
+/// Who connected to the update socket, as the kernel reported it, and when that process started
+/// (clock ticks since boot, from the process itself).
 struct Peer {
     pid: u32,
     uid: u32,
+    started: u64,
 }
 
 /// Only the managed daemon's main process may request an update: same process as systemd's
 /// `MainPID`, same non-root user, and in the `praxi.service` control group. A shared service UID
 /// alone would also let subprocesses such as shell tools (or a lookalike process) in.
-fn peer_is_daemon(peer: &Peer, daemon_pid: u32, daemon_user: u32, peer_cgroups: &str) -> bool {
+///
+/// The peer must also be older than this updater, which systemd starts only after the connection
+/// arrived: a process that started later merely holds the number of the real peer, which exited
+/// (the socket stays usable by whoever inherited it).
+fn peer_is_daemon(
+    peer: &Peer,
+    daemon_pid: u32,
+    daemon_user: u32,
+    peer_cgroups: &str,
+    updater_started: u64,
+) -> bool {
     peer.pid == daemon_pid
         && daemon_user != 0
         && peer.uid == daemon_user
+        && peer.started <= updater_started
         && in_service_cgroup(peer_cgroups)
 }
 
@@ -205,10 +224,11 @@ pub(super) use systemd::{recover, run};
 mod systemd {
     use super::{
         Channel, HostUpdateState, Peer, Readiness, Result, Settings, Steps, admit_request,
-        channel_accepts, db_snapshot, newer_release, parse_settings, peer_is_daemon, readiness,
-        release_version, status_uid, transact,
+        channel_accepts, db_snapshot, newer_release, parse_settings, peer_is_daemon, proc_pin,
+        readiness, release_version, transact,
     };
     use daemon_api::host::{HostUpdateStatus, UPDATE_STATUS};
+    use proc_pin::Proc;
     use std::{
         io::{BufRead, Read, Write},
         os::unix::fs::{MetadataExt, OpenOptionsExt},
@@ -218,6 +238,9 @@ mod systemd {
     };
 
     const UNIT: &str = "praxi.service";
+    const PROC: &str = "/proc";
+    /// How long the service user's processes get to disappear after the stop, killed if need be.
+    const QUIET_TIMEOUT: Duration = Duration::from_secs(10);
     /// The units that hold the daemon up (`praxi-xvfb.service` upholds `praxi.service`): they are
     /// stopped first, or systemd would start the daemon again while its data is being copied.
     const DISPLAY_UNITS: [&str; 2] = ["praxi-xvfb.service", "praxi-desktop.service"];
@@ -388,6 +411,22 @@ mod systemd {
         Ok(())
     }
 
+    /// Stop the stack, then make sure nothing of the service user runs. The data directory belongs
+    /// to that user: a process that outlived its unit (outside the control group, or a straggler of
+    /// a crashed release) could swap what root is about to read or replace. Fails, with nothing
+    /// touched yet, if one cannot be stopped.
+    async fn stop_quietly(
+        sys: &impl Systemctl,
+        display: &mut Vec<&'static str>,
+        proc_root: &Path,
+        service_user: u32,
+        kill: impl Fn(&Proc, u32) -> std::io::Result<()>,
+        wait: Duration,
+    ) -> Result<()> {
+        stop_stack(sys, display).await?;
+        proc_pin::quiet_user(proc_root, service_user, kill, wait).await
+    }
+
     async fn start_stack(sys: &impl Systemctl, display: &[&'static str]) -> Result<()> {
         // The display units are best effort: a desktop that fails must not fail the daemon.
         for unit in display {
@@ -474,7 +513,15 @@ mod systemd {
         }
 
         async fn stop(&mut self) -> Result<()> {
-            stop_stack(&System, &mut self.display).await
+            stop_quietly(
+                &System,
+                &mut self.display,
+                Path::new(PROC),
+                db_snapshot::data_owner(&self.data)?,
+                proc_pin::kill,
+                QUIET_TIMEOUT,
+            )
+            .await
         }
 
         fn snapshot(&mut self) -> Result<()> {
@@ -519,7 +566,19 @@ mod systemd {
     }
 
     async fn activate(prefix: &Path, target: &Path, port: u16) -> Result<HostUpdateState> {
-        use super::super::read_version_link;
+        use super::super::{read_version_link, trusted_root_path};
+        // Root works inside the data directory and the snapshot directory below it: the way there
+        // must be root's own. (The directories themselves are opened without following a link and
+        // checked by `db_snapshot`.)
+        // `/var/lib` above the data directory; above the updater's own state directory the same.
+        for ancestor in [
+            Path::new(db_snapshot::DATA_DIR).parent(),
+            Path::new(db_snapshot::SNAPSHOT_DIR)
+                .parent()
+                .and_then(Path::parent),
+        ] {
+            trusted_root_path(ancestor.ok_or("invalid data path")?)?;
+        }
         let current = read_version_link(prefix, "current")?.ok_or("missing rollback baseline")?;
         let previous = read_version_link(prefix, "previous")?;
         let mut live = Live {
@@ -542,24 +601,80 @@ mod systemd {
         Ok(state)
     }
 
-    async fn requested_tag() -> Result<String> {
+    /// The process that connected to the update socket, pinned through its `/proc/<pid>` directory
+    /// the moment it is seen. From here on a number reused by another process cannot be mistaken for
+    /// it: reads through the pin fail once the peer has exited.
+    struct PinnedPeer {
+        proc: Proc,
+        peer: Peer,
+    }
+
+    fn pin(proc_root: &Path, pid: u32, uid: u32) -> Result<PinnedPeer> {
+        let proc = Proc::open(proc_root, pid)
+            .map_err(|e| format!("the requesting process is already gone ({e})"))?;
+        // The kernel named a user with the number; the process pinned under it has to be theirs.
+        if proc.uid()? != uid {
+            return Err("the requesting process's number belongs to another user now".into());
+        }
+        let started = proc.start_time()?;
+        Ok(PinnedPeer {
+            proc,
+            peer: Peer { pid, uid, started },
+        })
+    }
+
+    fn pin_peer(socket: &impl std::os::fd::AsFd) -> Result<PinnedPeer> {
+        let credentials = rustix::net::sockopt::socket_peercred(socket)?;
+        pin(
+            Path::new(PROC),
+            u32::try_from(credentials.pid.as_raw_pid())?,
+            credentials.uid.as_raw(),
+        )
+    }
+
+    fn own_start_time() -> Result<u64> {
+        Ok(Proc::open(Path::new(PROC), std::process::id())?.start_time()?)
+    }
+
+    /// Whether the pinned peer is the daemon's main process. Everything is read through the pin (the
+    /// user, start time and control group), never by pid, and the daemon is looked up by the
+    /// `MainPID` that systemd reports before and after, so a restart in between is noticed.
+    async fn authorize(
+        sys: &impl Systemctl,
+        proc_root: &Path,
+        pinned: &PinnedPeer,
+        updater_started: u64,
+    ) -> Result<()> {
+        const DENIED: &str = "update requests must come from the managed daemon process";
+        let daemon_pid = main_pid(sys).await?;
+        let uid = pinned.proc.uid()?;
+        let started = pinned.proc.start_time()?;
+        let cgroups = pinned.proc.cgroup()?;
+        if uid != pinned.peer.uid || started != pinned.peer.started {
+            return Err(DENIED.into());
+        }
+        let daemon = Proc::open(proc_root, daemon_pid)?;
+        let peer = Peer {
+            pid: pinned.peer.pid,
+            uid,
+            started,
+        };
+        if !peer_is_daemon(&peer, daemon_pid, daemon.uid()?, &cgroups, updater_started)
+            || daemon.start_time()? != started
+            || main_pid(sys).await? != daemon_pid
+        {
+            return Err(DENIED.into());
+        }
+        Ok(())
+    }
+
+    async fn requested_tag() -> Result<(String, PinnedPeer)> {
         // systemd passes the accepted Unix socket as stdin.
         let stdin = std::io::stdin();
-        let peer = rustix::net::sockopt::socket_peercred(&stdin)?;
-        let peer = Peer {
-            pid: u32::try_from(peer.pid.as_raw_pid())?,
-            uid: peer.uid.as_raw(),
-        };
-        let daemon_pid = main_pid(&System).await?;
-        let daemon_user = status_uid(&std::fs::read_to_string(format!(
-            "/proc/{daemon_pid}/status"
-        ))?)
-        .ok_or("cannot tell which user runs the daemon")?;
-        let cgroups =
-            std::fs::read_to_string(format!("/proc/{}/cgroup", peer.pid)).unwrap_or_default();
-        if !peer_is_daemon(&peer, daemon_pid, daemon_user, &cgroups) {
-            return Err("update requests must come from the managed daemon process".into());
-        }
+        let pinned = pin_peer(&stdin)?;
+        // A first look, before the peer is given a socket slot and time to talk. The check that
+        // counts is made again under the update lock.
+        authorize(&System, Path::new(PROC), &pinned, own_start_time()?).await?;
         // A peer that connects and says nothing must not hold one of the few socket slots.
         rustix::net::sockopt::set_socket_timeout(
             &stdin,
@@ -577,7 +692,7 @@ mod systemd {
         }
         tag.pop();
         release_version(&tag).ok_or("invalid release tag")?;
-        Ok(tag)
+        Ok((tag, pinned))
     }
 
     async fn latest(
@@ -614,6 +729,25 @@ mod systemd {
             .map(|(_, release)| release))
     }
 
+    /// Finish a rollback of the data that was killed after its commit, before anything starts again:
+    /// the daemon must not open databases of two generations. The stack is stopped first, as for any
+    /// work in the data directory. Returns the display units to start again.
+    async fn finish_restore(
+        sys: &impl Systemctl,
+        data: &Path,
+        snapshot: &Path,
+        service_user: u32,
+        proc_root: &Path,
+        kill: impl Fn(&Proc, u32) -> std::io::Result<()>,
+        wait: Duration,
+    ) -> Result<Vec<&'static str>> {
+        eprintln!("Praxi update: finishing the interrupted rollback of the data");
+        let mut display = Vec::new();
+        stop_quietly(sys, &mut display, proc_root, service_user, kill, wait).await?;
+        db_snapshot::restore(data, snapshot)?;
+        Ok(display)
+    }
+
     /// `ExecStopPost` of the updater units. An updater that was killed (time limit, crash, OOM)
     /// leaves `running` behind, which keeps the desktop's update button off, and can leave the daemon
     /// stopped. Holding the maintenance lock proves that no other update is running.
@@ -621,13 +755,46 @@ mod systemd {
         let Ok(_maintenance) = super::super::maintenance_lock() else {
             return Ok(());
         };
-        let Some(status) = read_status().filter(|s| matches!(s.state, HostUpdateState::Running))
-        else {
-            return Ok(());
+        let (data, snapshot) = (
+            Path::new(db_snapshot::DATA_DIR),
+            Path::new(db_snapshot::SNAPSHOT_DIR),
+        );
+        // `Ok(None)`: no rollback of the data was left unfinished.
+        let restored = match db_snapshot::restore_pending(snapshot) {
+            Ok(false) => Ok(None),
+            Ok(true) => match db_snapshot::data_owner(data) {
+                Ok(owner) => finish_restore(
+                    &System,
+                    data,
+                    snapshot,
+                    owner,
+                    Path::new(PROC),
+                    proc_pin::kill,
+                    QUIET_TIMEOUT,
+                )
+                .await
+                .map(Some),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
         };
-        eprintln!("Praxi update: the previous update run did not finish");
-        publish(HostUpdateState::Failed, status.tag.as_deref())?;
-        if let Err(error) = start_stack(&System, &[]).await {
+        let running = read_status().filter(|s| matches!(s.state, HostUpdateState::Running));
+        if running.is_none() && matches!(restored, Ok(None)) {
+            return Ok(());
+        }
+        if let Some(status) = &running {
+            eprintln!("Praxi update: the previous update run did not finish");
+            publish(HostUpdateState::Failed, status.tag.as_deref())?;
+        }
+        let display = match restored {
+            Ok(display) => display.unwrap_or_default(),
+            Err(error) => {
+                // Starting the daemon on a mixture of two generations is worse than leaving it down.
+                eprintln!("Praxi update: could not finish the rollback of the data: {error}");
+                return Ok(());
+            }
+        };
+        if let Err(error) = start_stack(&System, &display).await {
             eprintln!("Praxi update: could not start the daemon again: {error}");
         }
         Ok(())
@@ -640,13 +807,18 @@ mod systemd {
         };
         let prefix = Path::new(PREFIX);
         trusted_root_path(prefix)?;
-        let requested = if scheduled {
-            None
+        let (requested, peer) = if scheduled {
+            (None, None)
         } else {
-            Some(requested_tag().await?)
+            let (tag, peer) = requested_tag().await?;
+            (Some(tag), Some(peer))
         };
         let _maintenance = maintenance_lock()?;
         let _lock = lock(prefix)?;
+        // Under the lock, before anything is changed: the requester is still the daemon's main process.
+        if let Some(peer) = &peer {
+            authorize(&System, Path::new(PROC), peer, own_start_time()?).await?;
+        }
         // Nothing else runs now: an update still marked as running was killed.
         clear_stale_running()?;
         let installed = installed_tag(prefix)?;
@@ -898,6 +1070,257 @@ mod systemd {
             assert_eq!(property("MainPID=\n", "MainPID"), None);
             assert_eq!(property("", "NRestarts"), None);
         }
+
+        const DAEMON_CGROUP: &str = "0::/system.slice/praxi.service\n";
+
+        /// A process directory as `/proc/<pid>` shows it.
+        fn process(root: &Path, pid: u32, uid: u32, started: u64, cgroup: &str) {
+            let dir = root.join(pid.to_string());
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("status"),
+                format!("State:\tS (sleeping)\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("stat"),
+                format!("{pid} (bot) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 {started} 0 0\n"),
+            )
+            .unwrap();
+            std::fs::write(dir.join("cgroup"), cgroup).unwrap();
+        }
+
+        /// The process exits: what its directory held is gone (a pinned handle sees that).
+        fn exits(root: &Path, pid: u32) {
+            std::fs::remove_dir_all(root.join(pid.to_string())).unwrap();
+        }
+
+        /// `systemctl show` reports these `MainPID`s in turn; the last one repeats.
+        struct MainPids(RefCell<Vec<u32>>);
+
+        impl MainPids {
+            fn of(pids: &[u32]) -> Self {
+                Self(RefCell::new(pids.to_vec()))
+            }
+        }
+
+        impl Systemctl for MainPids {
+            fn run(&self, _: &[&str]) -> impl std::future::Future<Output = Result<bool>> {
+                std::future::ready(Ok(true))
+            }
+
+            fn show(&self, _: &[&str]) -> impl std::future::Future<Output = Result<String>> {
+                let mut pids = self.0.borrow_mut();
+                let pid = if pids.len() > 1 {
+                    pids.remove(0)
+                } else {
+                    pids[0]
+                };
+                std::future::ready(Ok(format!("MainPID={pid}\n")))
+            }
+        }
+
+        #[tokio::test]
+        async fn the_daemons_main_process_is_authorized_through_its_pin() {
+            let root = tempfile::tempdir().unwrap();
+            process(root.path(), 100, 999, 500, DAEMON_CGROUP);
+            let pinned = pin(root.path(), 100, 999).unwrap();
+            assert_eq!(pinned.peer.started, 500);
+            authorize(&MainPids::of(&[100]), root.path(), &pinned, 1000)
+                .await
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_peer_that_exited_is_not_the_daemon_that_was_given_its_number() {
+            // A subprocess of the daemon (same user, but not in the service's control group) connects,
+            // hands the socket on and exits. The daemon is restarted and receives the same pid: a
+            // fine daemon, older than the updater. Only the pin tells it from the real peer.
+            let root = tempfile::tempdir().unwrap();
+            process(
+                root.path(),
+                100,
+                999,
+                500,
+                "0::/user.slice/session-3.scope\n",
+            );
+            let pinned = pin(root.path(), 100, 999).unwrap();
+            exits(root.path(), 100);
+            process(root.path(), 100, 999, 900, DAEMON_CGROUP);
+            assert!(
+                authorize(&MainPids::of(&[100]), root.path(), &pinned, 1000)
+                    .await
+                    .is_err(),
+                "the number was reused: the pinned peer is gone and was no daemon"
+            );
+            // A pin made after the swap (which is what a path based check does) would pass.
+            let late = pin(root.path(), 100, 999).unwrap();
+            authorize(&MainPids::of(&[100]), root.path(), &late, 1000)
+                .await
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn the_peer_is_read_through_its_pin_never_by_its_number() {
+            // The stranger that got the number is, by construction, indistinguishable by what a read
+            // by number returns (same user, same start, in the service's group). Only reads through
+            // the pin, which fail once the peer is gone, tell that the peer was not the daemon.
+            let root = tempfile::tempdir().unwrap();
+            process(
+                root.path(),
+                100,
+                999,
+                500,
+                "0::/user.slice/session-3.scope\n",
+            );
+            let pinned = pin(root.path(), 100, 999).unwrap();
+            exits(root.path(), 100);
+            process(root.path(), 100, 999, 500, DAEMON_CGROUP);
+            assert!(
+                authorize(&MainPids::of(&[100]), root.path(), &pinned, 1000)
+                    .await
+                    .is_err()
+            );
+        }
+
+        #[tokio::test]
+        async fn a_process_that_started_after_the_updater_is_not_the_peer() {
+            // The number was reused between the connection and the first look: the new holder started
+            // after this updater did.
+            let root = tempfile::tempdir().unwrap();
+            process(root.path(), 100, 999, 1500, DAEMON_CGROUP);
+            let pinned = pin(root.path(), 100, 999).unwrap();
+            assert!(
+                authorize(&MainPids::of(&[100]), root.path(), &pinned, 1000)
+                    .await
+                    .is_err()
+            );
+        }
+
+        #[tokio::test]
+        async fn a_restart_while_the_peer_is_checked_is_noticed() {
+            let root = tempfile::tempdir().unwrap();
+            process(root.path(), 100, 999, 500, DAEMON_CGROUP);
+            process(root.path(), 200, 999, 800, DAEMON_CGROUP);
+            let pinned = pin(root.path(), 100, 999).unwrap();
+            // systemd reports another main process by the time the checks are done.
+            assert!(
+                authorize(&MainPids::of(&[100, 200]), root.path(), &pinned, 1000)
+                    .await
+                    .is_err()
+            );
+            // The peer is not the main process at all: another process of the service.
+            assert!(
+                authorize(&MainPids::of(&[200]), root.path(), &pinned, 1000)
+                    .await
+                    .is_err()
+            );
+            // No main process (the daemon is down).
+            assert!(
+                authorize(&MainPids::of(&[0]), root.path(), &pinned, 1000)
+                    .await
+                    .is_err()
+            );
+        }
+
+        #[test]
+        fn the_pin_refuses_a_number_that_belongs_to_another_user() {
+            let root = tempfile::tempdir().unwrap();
+            process(root.path(), 100, 1000, 500, DAEMON_CGROUP);
+            assert!(pin(root.path(), 100, 999).is_err());
+            assert!(pin(root.path(), 101, 999).is_err(), "no such process");
+        }
+
+        #[tokio::test]
+        async fn nothing_of_the_service_user_runs_once_the_stack_is_stopped() {
+            let sys = FakeSystemctl::new(&[UNIT, "praxi-xvfb.service"]);
+            let proc = tempfile::tempdir().unwrap();
+            // A straggler outside the stopped units' control groups; another user's process.
+            process(proc.path(), 10, 999, 1, "0::/user.slice/x.scope\n");
+            process(proc.path(), 11, 1000, 1, "0::/user.slice/y.scope\n");
+            let killed = RefCell::new(Vec::new());
+            let mut display = Vec::new();
+            stop_quietly(
+                &sys,
+                &mut display,
+                proc.path(),
+                999,
+                |p, uid| {
+                    assert_eq!(uid, 999);
+                    killed
+                        .borrow_mut()
+                        .push((p.pid(), sys.calls.borrow().len()));
+                    exits(proc.path(), p.pid());
+                    Ok(())
+                },
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+            assert_eq!(display, ["praxi-xvfb.service"]);
+            // Only the straggler, and only after every unit had been stopped.
+            let calls = sys.calls.borrow();
+            let stopped = calls.iter().filter(|c| c.starts_with("stop ")).count();
+            assert_eq!(stopped, 2);
+            assert_eq!(*killed.borrow(), [(10, calls.len())]);
+            assert!(proc.path().join("11").exists());
+        }
+
+        #[tokio::test]
+        async fn a_straggler_that_cannot_be_stopped_aborts_before_the_data_is_touched() {
+            let sys = FakeSystemctl::new(&[UNIT]);
+            let proc = tempfile::tempdir().unwrap();
+            process(proc.path(), 10, 999, 1, "0::/user.slice/x.scope\n");
+            let error = stop_quietly(
+                &sys,
+                &mut Vec::new(),
+                proc.path(),
+                999,
+                |_, _| Ok(()),
+                Duration::from_millis(250),
+            )
+            .await
+            .unwrap_err();
+            assert!(error.to_string().contains("still running"), "{error}");
+            // `transact` stops at an error of `stop`: the snapshot is never taken, nothing is switched.
+        }
+
+        #[tokio::test]
+        async fn a_rollback_killed_after_its_commit_is_finished_with_the_stack_stopped() {
+            let data = tempfile::tempdir().unwrap();
+            std::fs::write(data.path().join("bot.db"), "generation 1").unwrap();
+            let snapshots = tempfile::tempdir().unwrap();
+            std::fs::set_permissions(snapshots.path(), std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            let snapshot = snapshots.path().join("snapshot");
+            db_snapshot::take(data.path(), &snapshot).unwrap();
+            assert!(!db_snapshot::restore_pending(&snapshot).unwrap());
+            // The new release migrated; the rollback staged its file, committed and was killed.
+            std::fs::write(data.path().join("bot.db"), "generation 2!").unwrap();
+            db_snapshot::interrupt_after_commit(data.path(), &snapshot).unwrap();
+            assert!(db_snapshot::restore_pending(&snapshot).unwrap());
+
+            let sys = FakeSystemctl::new(&[UNIT, "praxi-xvfb.service"]);
+            let proc = tempfile::tempdir().unwrap();
+            let display = finish_restore(
+                &sys,
+                data.path(),
+                &snapshot,
+                999,
+                proc.path(),
+                |_, _| Ok(()),
+                Duration::from_millis(100),
+            )
+            .await
+            .unwrap();
+            assert_eq!(display, ["praxi-xvfb.service"]);
+            assert!(sys.calls.borrow().iter().any(|c| c == "stop praxi.service"));
+            assert_eq!(
+                std::fs::read_to_string(data.path().join("bot.db")).unwrap(),
+                "generation 1"
+            );
+            assert!(!db_snapshot::restore_pending(&snapshot).unwrap());
+        }
     }
 }
 
@@ -979,25 +1402,32 @@ mod tests {
     #[test]
     fn only_the_daemons_main_process_in_its_own_service_may_request_an_update() {
         let unified = "0::/system.slice/praxi.service\n";
-        let peer = |pid, uid| Peer { pid, uid };
-        assert!(peer_is_daemon(&peer(100, 999), 100, 999, unified));
+        // The peer started at tick 100; the updater, started for its connection, at 200.
+        let peer = |pid, uid| Peer {
+            pid,
+            uid,
+            started: 100,
+        };
+        assert!(peer_is_daemon(&peer(100, 999), 100, 999, unified, 200));
         assert!(peer_is_daemon(
             &peer(100, 999),
             100,
             999,
-            "0::/praxi.slice/praxi.service"
+            "0::/praxi.slice/praxi.service",
+            200
         ));
         assert!(peer_is_daemon(
             &peer(100, 999),
             100,
             999,
-            "12:cpu:/\n1:name=systemd:/system.slice/praxi.service\n"
+            "12:cpu:/\n1:name=systemd:/system.slice/praxi.service\n",
+            200
         ));
         // A subprocess of the daemon (same user, same service, other pid).
-        assert!(!peer_is_daemon(&peer(101, 999), 100, 999, unified));
+        assert!(!peer_is_daemon(&peer(101, 999), 100, 999, unified, 200));
         // The daemon's pid with another user; or root, which the daemon never is.
-        assert!(!peer_is_daemon(&peer(100, 1000), 100, 999, unified));
-        assert!(!peer_is_daemon(&peer(100, 0), 100, 0, unified));
+        assert!(!peer_is_daemon(&peer(100, 1000), 100, 999, unified, 200));
+        assert!(!peer_is_daemon(&peer(100, 0), 100, 0, unified, 200));
         // Same pid and user in another service, in a sub-group of it, or with no group at all.
         for cgroup in [
             "0::/system.slice/other.service",
@@ -1008,10 +1438,25 @@ mod tests {
             "garbage",
         ] {
             assert!(
-                !peer_is_daemon(&peer(100, 999), 100, 999, cgroup),
+                !peer_is_daemon(&peer(100, 999), 100, 999, cgroup, 200),
                 "{cgroup}"
             );
         }
+    }
+
+    #[test]
+    fn a_peer_that_started_after_the_updater_only_holds_the_number_of_the_real_one() {
+        let unified = "0::/system.slice/praxi.service\n";
+        let peer = |started| Peer {
+            pid: 100,
+            uid: 999,
+            started,
+        };
+        // Older than the updater, or started in the same clock tick: the real peer is possible.
+        assert!(peer_is_daemon(&peer(199), 100, 999, unified, 200));
+        assert!(peer_is_daemon(&peer(200), 100, 999, unified, 200));
+        // Started after the updater did: the connection predates it, so this cannot be the peer.
+        assert!(!peer_is_daemon(&peer(201), 100, 999, unified, 200));
     }
 
     #[test]
