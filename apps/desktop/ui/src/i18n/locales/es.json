@@ -688,8 +688,6 @@
   },
   "approvalDock": {
     "counter": "Aprobación {{current}} de {{total}}",
-    "keyAllow": "Permitir una vez",
-    "keyDeny": "Denegar",
     "label": "Esperando tu aprobación",
     "next": "Aprobación siguiente",
     "previous": "Aprobación anterior"

@@ -688,8 +688,6 @@
   },
   "approvalDock": {
     "counter": "Freigabe {{current}} von {{total}}",
-    "keyAllow": "Einmal erlauben",
-    "keyDeny": "Ablehnen",
     "label": "Wartet auf deine Freigabe",
     "next": "Nächste Freigabe",
     "previous": "Vorherige Freigabe"

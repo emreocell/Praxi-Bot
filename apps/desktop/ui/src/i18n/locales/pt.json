@@ -618,8 +618,6 @@
   },
   "approvalDock": {
     "counter": "Approval {{current}} of {{total}}",
-    "keyAllow": "Allow once",
-    "keyDeny": "Deny",
     "label": "Waiting for your approval",
     "next": "Next approval",
     "previous": "Previous approval"

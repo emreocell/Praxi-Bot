@@ -688,8 +688,6 @@
   },
   "approvalDock": {
     "counter": "Onay {{current}} / {{total}}",
-    "keyAllow": "Bir kez izin ver",
-    "keyDeny": "Reddet",
     "label": "Onayın gerekli",
     "next": "Sonrakini göster",
     "previous": "Öncekini göster"

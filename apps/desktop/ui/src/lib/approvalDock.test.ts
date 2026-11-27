@@ -57,7 +57,20 @@ test("one approval is one docked card with the three answers, no counter", () =>
   assert.ok(!html.includes("approval-dock-counter"), "no counter for a single approval");
   assert.ok(html.includes("webioo.com.tr"), "says what it wants to do");
   assert.ok(html.includes("approval-details"), "details are there, collapsed");
-  assert.ok(!/<details[^>]*\sopen/.test(html), "details start collapsed");
+  assert.match(html, /data-testid="approval-details-toggle"[^>]*aria-expanded="false"|aria-expanded="false"[^>]*data-testid="approval-details-toggle"/, "the toggle says it is closed");
+  assert.match(html, /<div[^>]*hidden=""[^>]*data-testid="approval-details"/, "details start collapsed");
+  // One row of answers: no second line under the card repeating "Allow once" / "Deny" next to the keys.
+  assert.equal((html.match(/>Deny</g) ?? []).length, 1, "Deny is said once, by its button");
+  assert.equal((html.match(/<kbd/g) ?? []).length, 2, "the two key hints, both inside buttons");
+});
+
+test("the Details toggle sits with the answers and controls the region it opens", () => {
+  const html = renderToStaticMarkup(createElement(ApprovalDock, { pages: [page("c1")] }));
+  const controls = /aria-controls="([^"]+)"[^>]*data-testid="approval-details-toggle"/.exec(html)?.[1];
+  assert.ok(controls, html);
+  assert.ok(html.includes(`id="${controls}"`), "the region has the id the toggle names");
+  const actions = html.slice(0, html.indexOf('data-testid="approval-details"'));
+  assert.ok(actions.lastIndexOf("approval-details-toggle") > actions.lastIndexOf(">Deny"), "after Deny, in the same row");
 });
 
 test("several approvals are a counter on one dock, one card shown at a time", () => {
@@ -71,11 +84,28 @@ test("an empty dock renders nothing", () => {
   assert.equal(renderToStaticMarkup(createElement(ApprovalDock, { pages: [] })), "");
 });
 
+test("the card on screen shows its keys inside its buttons: Enter on Allow, Esc on Deny", () => {
+  const html = renderToStaticMarkup(createElement(ApprovalDock, { pages: [page("c1")] }));
+  assert.ok(html.includes('data-testid="approval-key-allow"'), "Enter hint on Allow");
+  assert.ok(html.includes('data-testid="approval-key-deny"'), "Esc hint on Deny");
+  assert.ok(html.includes('aria-keyshortcuts="Enter"') && html.includes('aria-keyshortcuts="Escape"'), "the keys are in the accessible description");
+  // The hint is decoration: the button's name stays "Allow once" / "Deny" for screen readers and tests.
+  assert.match(html, /<kbd[^>]*aria-hidden="true"[^>]*data-testid="approval-key-allow"/);
+});
+
 test("a card that must be read does not advertise Enter", () => {
-  const read: DockPage = { ...page("c9", "email_send"), keys: "deny" };
-  const html = renderToStaticMarkup(createElement(ApprovalDock, { pages: [read] }));
-  assert.ok(!html.includes("Allow once</span>"), "no Enter hint");
-  assert.ok(html.includes("Deny</span>"), "Esc hint stays");
+  const html = renderToStaticMarkup(createElement(ApprovalDock, { pages: [page("c9", "email_send")] }));
+  assert.ok(!html.includes("approval-key-allow"), "no Enter hint");
+  assert.ok(!html.includes('aria-keyshortcuts="Enter"'), "and no Enter shortcut");
+  assert.ok(html.includes("approval-key-deny"), "Esc hint stays");
+});
+
+test("a card that does not answer the keys shows no key hints", () => {
+  const html = renderToStaticMarkup(
+    createElement(ApprovalCard, { tool: tool("c7"), variant: "dock", keyboard: false, onDecide: async () => {} })
+  );
+  assert.ok(!html.includes("<kbd"), html);
+  assert.ok(!html.includes("aria-keyshortcuts"));
 });
 
 test("the chat asks approvals only in the dock: no inline card, no second strip, a new message is not queued behind it", () => {
@@ -156,13 +186,22 @@ test("Enter still allows a look-only card once it is armed, never before, and Es
   }
 });
 
-test("the dock hint advertises Enter only for pages Enter may answer, and the keys are bound to the card shown", () => {
+test("the Enter hint follows the same rule as the key, and the keys are bound to the card shown", () => {
   const view = readFileSync(new URL("../views/ChatView.tsx", import.meta.url), "utf8");
-  assert.match(view, /keys: enterMayAllow\(tool\) \? "both" : "deny"/, "the hint follows the same rule as the key");
   assert.match(view, /key: entry\.callId,/, "one page per call id");
+  assert.match(view, /keyboard=\{active\}/, "only the page on screen answers the keys");
   assert.match(view, /onDecide=\{decisions\.decide\(entry\.callId\)\}/, "the answer goes to that card's call id");
-  const del: DockPage = { ...page("c8", "fs_delete"), keys: enterMayAllow(tool("c8", "fs_delete", { path: "a" })) ? "both" : "deny" };
-  const html = renderToStaticMarkup(createElement(ApprovalDock, { pages: [del] }));
-  assert.ok(!html.includes("Allow once</span>"), "a delete card shows no Enter hint");
-  assert.ok(html.includes("Deny</span>"), "Esc hint stays");
+  for (const [name, input] of [
+    ["fs_delete", { path: "a" }],
+    ["shell_run", { command: "ls" }],
+    ["browser_navigate", { url: "https://webioo.com.tr" }],
+    ["fs_read", { path: "notes.txt" }]
+  ] as const) {
+    const card = tool("k1", name, input);
+    const html = renderToStaticMarkup(
+      createElement(ApprovalCard, { tool: card, variant: "dock", keyboard: true, onDecide: async () => {} })
+    );
+    assert.equal(html.includes("approval-key-allow"), enterMayAllow(card), name);
+    assert.ok(html.includes("approval-key-deny"), `${name}: Esc denies every card`);
+  }
 });

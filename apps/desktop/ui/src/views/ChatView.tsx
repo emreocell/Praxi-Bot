@@ -47,7 +47,6 @@ import { ApiError } from "../api/client";
 import type { Bot, Message, Mission } from "../api/types";
 import {
   ApprovalCard,
-  enterMayAllow,
   NoticeLine,
   QuestionCard,
   SubagentCard,
@@ -1546,7 +1545,6 @@ export function ChatView({
       rows.forEach((r) => r.items.forEach((i) => batched.add(i.callId)));
       dockPages.push({
         key: `batch-${runId}`,
-        keys: "none",
         render: () => (
           <ApprovalBatchCard
             variant="dock"
@@ -1565,7 +1563,6 @@ export function ChatView({
       if (!tool || batched.has(entry.callId)) continue;
       dockPages.push({
         key: entry.callId,
-        keys: enterMayAllow(tool) ? "both" : "deny",
         caption:
           entry.chatId === chatId
             ? null

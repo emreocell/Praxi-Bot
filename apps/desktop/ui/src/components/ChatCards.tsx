@@ -1,7 +1,7 @@
 import type { EmailAccount } from "../api/types";
 import { useOptionalDaemonClient } from "../state/DaemonContext";
 import { daemonSender, identitiesFor, senderOf, switchReason } from "../lib/mailIdentity";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   AppWindow,
   Bot,
@@ -752,6 +752,10 @@ export function ApprovalCard({
       : t("chat.approval.compact.alwaysTool");
   const openDetailsByDefault =
     egress?.reviewFullPayload === true || mail !== null || (app ? app.count <= 1000 : false);
+  // Details open by default for a card that has to be read; the owner's own toggle wins after that.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const detailsOpen = userOpen ?? openDetailsByDefault;
+  const detailsId = useId();
 
   // Enter allows once, Esc denies: only for the card the dock shows, never for a card that has to
   // be read (a payload to review, an outgoing message, a mail) and never in the first moments.
@@ -843,9 +847,13 @@ export function ApprovalCard({
               size="sm"
               variant={risk === "delete" ? "secondary" : "primary"}
               disabled={disabled || reviewPending || unrenderable}
+              aria-keyshortcuts={keyboard && keyState.canAllow ? "Enter" : undefined}
               onClick={() => void decide("approve", "once")}
             >
               {allowLabel}
+              {keyboard && keyState.canAllow ? (
+                <kbd className={styles.keyHint} aria-hidden="true" data-testid="approval-key-allow">↵</kbd>
+              ) : null}
             </Button>
             {showAlways ? (
               <Button
@@ -864,23 +872,36 @@ export function ApprovalCard({
               variant={risk === "delete" ? "primary" : "ghost"}
               className={risk === "delete" ? undefined : styles.denyButton}
               disabled={disabled}
+              aria-keyshortcuts={keyboard ? "Escape" : undefined}
               onClick={() => void decide("deny", undefined, reason || undefined)}
             >
               {t("chat.approval.deny")}
+              {keyboard ? (
+                <kbd className={styles.keyHint} aria-hidden="true" data-testid="approval-key-deny">esc</kbd>
+              ) : null}
             </Button>
+            {/* Details is a quiet toggle at the end of the answers, not a row of its own. */}
+            <button
+              type="button"
+              className={styles.detailsToggle}
+              aria-expanded={detailsOpen}
+              aria-controls={detailsId}
+              data-testid="approval-details-toggle"
+              onClick={() => setUserOpen(!detailsOpen)}
+            >
+              <span>{t("chat.approval.plain.details")}</span>
+              <ChevronDown size={14} aria-hidden="true" className={styles.detailsChevron} />
+            </button>
           </div>
         </div>
       </div>
 
-      <details
+      <div
+        id={detailsId}
         className={styles.detailsBox}
-        open={openDetailsByDefault || undefined}
+        hidden={!detailsOpen}
         data-testid="approval-details"
       >
-        <summary className={styles.detailsToggle}>
-          <ChevronDown size={14} aria-hidden="true" className={styles.detailsChevron} />
-          <span>{t("chat.approval.plain.details")}</span>
-        </summary>
         <div className={styles.detailsBody}>
           {bot ? (
             <>
@@ -1035,7 +1056,7 @@ export function ApprovalCard({
             onChange={(e) => setReason(e.target.value)}
           />
         </div>
-      </details>
+      </div>
 
       {error ? <p className={formStyles.error} role="alert">{error}</p> : null}
     </div>
