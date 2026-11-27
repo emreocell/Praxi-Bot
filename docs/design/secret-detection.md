@@ -1,9 +1,11 @@
 # Secret detection in the chat composer
 
-Status: detector and corpus implemented (issue #421, slices 1 and 2). The composer warning and its
-leak tests are in the desktop UI (`lib/secretDetect.ts`, `components/PastedSecretWarning.tsx`); it is a
-TypeScript port of the high-confidence shape rule only, because the Rust detector has no route or Tauri
-command yet. The labelled-context rule and a Settings switch are not done.
+Status: detector, corpus, composer card and the channel second check are implemented (issue #421).
+The composer warning is in the desktop UI (`lib/secretDetect.ts`, `components/PastedSecretWarning.tsx`);
+`lib/secretDetect.ts` is a TypeScript port of the Rust detector, and both test suites read the same
+corpus fixture, so they cannot drift. Telegram and Discord messages get a daemon-side second check
+(see [Other channels](#other-channels)). Not done: a Settings switch and "do not ask again for this
+kind".
 
 When someone pastes something that is very likely a credential into the chat box, the desktop app
 should *offer* to keep it out of the chat and store it in the vault instead. Today a pasted value is
@@ -15,7 +17,7 @@ reports where it thinks a secret is.
 
 ## Rules
 
-The detector reports a candidate only in two cases. Everything else is ignored.
+The detector reports a candidate only in the three cases below. Everything else is ignored.
 
 ### 1. Known shapes (high confidence)
 
@@ -47,6 +49,23 @@ changes what is masked in tool output.
 
 The `sk-` shape additionally needs a digit, because `sk-learn-is-a-fine-library` is a sentence, not a
 key. New shapes are added only when the format is documented by the provider and distinctive.
+
+### 1b. Card numbers (medium confidence)
+
+A payment card number is reported only when **all** of these hold:
+
+* 13 to 19 digits, Luhn-valid, not all the same digit;
+* a real network prefix with the matching length (Visa, Mastercard incl. the 2-series, Amex,
+  Discover, Diners, JCB, UnionPay, Troy);
+* it is written the way people write a card, either in groups (`4111 1111 1111 1111`,
+  `4111-1111-1111-1111`, Amex `3782 822463 10005`, one separator kind only), or as one run of digits
+  right after a card word (`card`, `kart`, `kredi kartı`, `visa`, ...);
+* it is not glued to a letter, `+`, `#`, `_` or a decimal point (`+4111...` is a phone number,
+  `4111...50` after a `.` is an amount).
+
+So an order number, a tracking number, a Unix time in milliseconds, an IBAN, a Turkish ID number or an
+ISBN is not a card, even when it has 16 digits. A bare 16-digit run with no card word is not reported
+even if it passes the Luhn check, because roughly one in ten random numbers does.
 
 ### 2. Labelled context (medium confidence)
 
@@ -141,41 +160,65 @@ name, never a value, and the detector never reports one as a secret.
 * The result types hold no value, so printing one cannot leak it. A test asserts this.
 * The existing `Redactor` keeps masking known shapes in tool output, events and logs whether or not
   this feature exists. A miss by the detector is therefore no worse than today.
-* Other channels (Telegram, paired devices) cannot show a card; they are out of scope for the first
-  version and keep behaving as they do now.
+* Other channels cannot show a card; see [Other channels](#other-channels).
+
+## Other channels
+
+Telegram and Discord cannot show the card, and a message from there reaches the daemon without the
+owner having seen a choice. So the adapters (`channel-telegram`, `channel-discord`) run the same
+detector once more, on the daemon side, with `secret_store::screen_inbound`, **before** the message
+is handed to the daemon (so before the model, the chat history, the event log and the run log):
+
+* each suspected value is replaced by `[REDACTED]` and the rest of the message goes on;
+* when nothing but secrets was in the message (a bare key), nothing is passed on;
+* the owner gets a reply in the chat, in their language (English or Turkish; Discord also German),
+  saying a secret was cut out and pointing at the vault in the desktop app. The reply names no kind
+  and never repeats the value.
+
+What this cannot do: the original message stays in the Telegram or Discord chat (and with that
+service), so the reply asks the owner to delete it. The Telegram adapter's durable inbox also keeps
+the raw update on disk (completed payloads are retained), as it did before this feature. A message a paired device
+sends through the daemon API is not screened by this second check.
 
 ## Out of scope
 
 Storing anything automatically, scanning old chat history, a password with no label and no shape,
-validating a key against a provider, telemetry, and the card UI itself.
+validating a key against a provider, telemetry, and deleting the original message in Telegram or
+Discord.
 
-## How the composer will call it
+## How the composer calls it
 
-The detector lives in the `secret-store` crate (`detect_secrets(&str) -> Vec<SecretCandidate>`). It
-uses only `regex`, which the crate already depends on, and does no I/O. Integration is a later slice.
-The intended route is a thin local call from the composer on send: a Tauri command, or a daemon
-route that returns only kinds and spans and never echoes the text, or the same code compiled to wasm
-if a round trip is unwanted. The composer then:
+The Rust detector lives in the `secret-store` crate (`detect_secrets(&str) -> Vec<SecretCandidate>`)
+and the channels use it directly. The composer does not call the daemon: the draft would have to leave
+the composer (and, with a paired host, the computer) before the owner has chosen anything. Instead
+`apps/desktop/ui/src/lib/secretDetect.ts` is a port that runs in the page. On send, the composer:
 
-1. calls the detector on the draft before sending;
-2. if there are candidates and the owner has not switched the feature off or silenced that `kind`,
-   shows a card naming the kind (never the value) with *Store in vault as ...*, *Send as is* and
-   *Cancel*;
-3. on "Store", writes the value through the vault path from #221 under the name the owner picks,
-   replaces the span with `placeholder(name)`, and sends the rewritten message.
+1. calls the detector on the draft (also for slash text and voice text);
+2. if there are candidates, shows a card naming the kind (never the value) with *Store in vault as
+   ...*, *Remove it from the message*, *Send anyway* and *Keep editing*;
+3. on "Store", writes the value through the vault route under the name the owner picks, replaces the
+   span with `[secret: name]`, and does not send yet.
 
-Nothing is sent, stored or removed without that click.
+"Send anyway" is a single-use argument of that one send, never a stored flag. Nothing is sent, stored
+or removed without a click.
 
 ## Tests
 
 `crates/secret-store/tests/secret_detection_corpus.rs` holds a positive corpus and a negative one.
+The labelled, card and negative rows live in `crates/secret-store/tests/fixtures/detect-corpus.json`,
+which `apps/desktop/ui/src/lib/secretDetect.test.ts` reads too: a row added there is checked against
+the Rust detector and its TypeScript port.
 
 * Positive: every known shape with fake values assembled at run time (so no secret-shaped literal
-  sits in the source and trips secret scanners), and labelled cases in English and Turkish. Each is
-  checked for kind, confidence and exact span.
+  sits in the source and trips secret scanners), labelled cases in English and Turkish, and card
+  numbers (public test numbers) in groups and after a card word. Each is checked for kind,
+  confidence and exact span.
 * Negative: laughs and keyboard mashes, words, UUIDs, git and SHA hashes, paths, URLs, version
-  strings, base64 image data, code snippets, labels followed by prose or placeholders, and realistic
-  Turkish and English chat messages, also wrapped in longer unicode text.
+  strings, base64 image data, code snippets, labels followed by prose or placeholders, numbers that
+  are not cards (order and tracking numbers, IBAN, ID numbers, timestamps, Luhn-invalid numbers), and
+  realistic Turkish and English chat messages, also wrapped in longer unicode text.
+* Channels: Telegram and Discord tests send a message with a key and a card number and check what
+  reaches the daemon fake and what the owner is told.
 
 The target is zero false positives on the negatives and every positive found. Add a message to the
 negative corpus whenever someone reports a false alarm.

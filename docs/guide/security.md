@@ -709,12 +709,27 @@ Praxi. `praxi doctor` reports the setting.
 ### A password pasted into the message box
 
 When the message you are about to send contains something that looks like a
-provider key or token (OpenAI-style, GitHub, Slack, AWS, Stripe, a private key
-block and similar), the app does not send it. It names the kind (never shows the
-value) and offers: store it in the vault and keep `[secret: name]` in the
-message, remove it from the message, send anyway, or keep editing. The check
-runs on your computer before anything is sent; it recognises known key formats
-only, so a plain password such as `password: hunter22` is not caught yet.
+secret, the app does not send it. It names the kind (never shows the value) and
+offers: store it in the vault and keep `[secret: name]` in the message, remove it
+from the message, send anyway, or keep editing. The check runs on your computer
+before anything is sent. It recognises:
+
+- known key formats (OpenAI-style, GitHub, Slack, AWS, Stripe, Google, a private
+  key block and similar);
+- a value right after a label such as `password:`, `api key`, `token`, `secret`,
+  `şifre`, `parola` or `anahtar`, when the value looks random enough;
+- a payment card number (a real card network and a valid check digit, written in
+  groups or after a word such as `card` or `kart`).
+
+It is built to stay quiet otherwise: laughs, hashes, UUIDs, commit ids, links and
+version numbers are left alone, and so is a password with no label next to it
+(`hunter22` on its own), because nothing can tell it from a word.
+
+A message that comes in from Telegram or Discord cannot show you that choice, so
+the daemon checks it again before it reaches the model: the suspected value is cut
+out, the rest of the message goes on, and the bot answers in the chat that it did
+so. Delete the original message in the chat yourself: Telegram or Discord keeps it.
+To give the bot a secret, store it in the vault in the desktop app.
 
 ## Prompt-injection evaluation pack
 
