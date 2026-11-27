@@ -628,6 +628,17 @@
     "summary": "Your bots run on the computer where you installed Praxi. They work while Praxi is open and your computer is awake."
   },
   {
+    "doc": "long-chats.md",
+    "title": "Long chats: how a bot keeps the thread",
+    "headings": [
+      "What happens",
+      "What the note is, and what it is not",
+      "Switch it off",
+      "Good to know"
+    ],
+    "summary": "In another language: Türkçe."
+  },
+  {
     "doc": "mcp-server.md",
     "title": "Use Praxi as an MCP server",
     "headings": [

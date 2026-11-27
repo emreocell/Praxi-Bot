@@ -51,6 +51,7 @@ mod shell_allow;
 mod site_profiles;
 pub mod spend;
 mod subagent;
+pub mod summary;
 mod taint;
 mod tiering;
 mod tool_guidance;
@@ -113,6 +114,8 @@ mod stop_approval_tests;
 #[cfg(test)]
 mod subagent_tests;
 #[cfg(test)]
+mod summary_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unattended_gate_tests;
@@ -127,8 +130,8 @@ pub use config::{
     DEFAULT_MAX_AUTO_RESUMES, DEFAULT_MAX_HANDOVERS_PER_RUN, DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
     DEFAULT_SCHEDULE_APPROVAL_TIMEOUT, DEFAULT_SECRET_REQUEST_TIMEOUT,
     DEFAULT_TRANSIENT_OUTAGE_BUDGET, DEFAULT_WAIT_FOR_PC_TIMEOUT, FullLaneSwitch, Guards,
-    JournalSlot, LoopConfig, MemoryConfig, ModelPrice, RedactorRefreshFn, SharedRedactor,
-    full_access_lane_switch, secret_variants,
+    HistorySummaryConfig, JournalSlot, LoopConfig, MemoryConfig, ModelPrice, RedactorRefreshFn,
+    SharedRedactor, full_access_lane_switch, secret_variants,
 };
 pub use control::{ControlGate, ControlRequest};
 pub use elicitation::ElicitationRefusal;

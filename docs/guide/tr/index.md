@@ -21,6 +21,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Zamanlanmış işler](schedules.md) | Bir botun belirli zamanlarda kendiliğinden çalışması. |
 | [Bot harcama sınırları](bot-spending-limits.md) | Günlük, haftalık ve aylık sınırlar. |
 | [Bellek](memory.md) | Botların neyi hatırladığını gör, düzelt, unutturup kapat. |
+| [Uzun sohbetler](long-chats.md) | Bir sohbeti haftalarca sürdür: kayan "bu sohbette daha önce" notu ve nasıl kapatılır. |
 | [Telegram](telegram.md) | Botlarınla telefonundan konuşmak. |
 | [Discord](discord.md) | Botlarınla Discord üzerinden konuşmak. |
 | [Takvim](calendar.md) | Botların CalDAV takviminde etkinlik okuması ve eklemesi. |

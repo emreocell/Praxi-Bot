@@ -124,6 +124,7 @@ export const CARD_META: Record<string, CardMeta> = {
   helpers: { page: "models", group: "models", advanced: true },
   providers: { page: "models", group: "models", advanced: true, risk: "providers", learn: "provider" },
   memory: { page: "models", group: "memory", learn: "memory", risk: "memory" },
+  historySummary: { page: "models", group: "memory", learn: "memory" },
   documents: { page: "models", group: "memory", learn: "folders" },
   knowledge: { page: "models", group: "memory", learn: "memory", advanced: true },
 

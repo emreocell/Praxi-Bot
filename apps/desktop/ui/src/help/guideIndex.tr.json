@@ -618,6 +618,17 @@
     "summary": "Botların, Praxi'yi kurduğun bilgisayarda çalışır. Praxi açıkken ve bilgisayarın uyanıkken çalışırlar."
   },
   {
+    "doc": "tr/long-chats.md",
+    "title": "Uzun sohbetler: bot konuyu nasıl kaybetmez",
+    "headings": [
+      "Ne olur",
+      "Not nedir, ne değildir",
+      "Kapat",
+      "Bilmekte fayda var"
+    ],
+    "summary": "Başka dilde: English."
+  },
+  {
     "doc": "tr/mcp-server.md",
     "title": "Praxi'yi MCP sunucusu olarak kullanma",
     "headings": [

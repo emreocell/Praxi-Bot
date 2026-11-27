@@ -4811,6 +4811,15 @@
       "tokensPerMinute": "Dakikadaki metin miktarı"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Uzun sohbetler: eski mesajlar kısa bir nota özetlenir, böylece bot konuyu kaybetmez.",
+    "hint": "Uzun bir sohbetin eski mesajları kısa bir nota özetlenir. Mesajlar kayıtlı ve aranabilir kalır.",
+    "label": "Uzun sohbetlerin eski mesajlarını özetle",
+    "noBot": "Önce bir bot oluştur.",
+    "note": "Bir sohbet çok uzayınca botun kendi modeli (özel veri varsa yalnızca o, yoksa daha ucuz yardımcı modeli) eski kısım için kısa bir not yazar. Bot da bu notu ve son mesajlarını okur. Not, güvenilmeyen metin olarak işaretlenir; asla senin sözün sayılmaz, web sayfası ya da postadan gelen yazı da öyle işaretli kalır. Asıl mesajlar değişmez ve silinmez. Kapalıyken bot, eskisi gibi yalnızca en yeni mesajları görür.",
+    "title": "Uzun sohbetler"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} bazı şeyleri kendine saklar: yürütme politikası, komut satırı araç sunucuları, beceriler ve kodlama CLI girişleri doğrudan {{name}} üzerinde değiştirilir. E-posta, arama ve dikte hesapları bu bilgisayardan bağlanabilir.",

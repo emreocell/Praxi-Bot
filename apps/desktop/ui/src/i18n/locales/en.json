@@ -4811,6 +4811,15 @@
       "tokensPerMinute": "Amount of text per minute"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Long chats: older messages are condensed into a short note so the bot keeps the thread.",
+    "hint": "Older messages of a long chat are condensed into a short note. The messages stay saved and searchable.",
+    "label": "Summarise older messages of long chats",
+    "noBot": "Create a bot first.",
+    "note": "When a chat gets very long, the bot's own model (or its cheaper helper model, unless private data is involved) writes a short note about the older part. The bot then reads that note plus your recent messages. The note is marked as untrusted text, never as your words, and text from web pages or mail stays marked as such. The original messages are not changed or deleted. Off: the bot only sees the newest messages, as before.",
+    "title": "Long chats"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} keeps some things to itself: the execution policy, command-line tool servers, skills and coding-CLI sign-ins are changed on {{name}} directly. Email, search and dictation accounts can be connected from this computer.",

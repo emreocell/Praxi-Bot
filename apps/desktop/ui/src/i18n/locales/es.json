@@ -4470,6 +4470,15 @@
       "tokensPerMinute": "Cantidad de texto por minuto"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Chats largos: los mensajes antiguos se resumen en una nota breve para que el bot no pierda el hilo.",
+    "hint": "Los mensajes antiguos de un chat largo se resumen en una nota breve. Los mensajes siguen guardados y se pueden buscar.",
+    "label": "Resumir los mensajes antiguos de los chats largos",
+    "noBot": "Crea primero un bot.",
+    "note": "Cuando un chat se hace muy largo, el modelo del propio bot (o su modelo auxiliar más barato, salvo que haya datos privados) escribe una nota breve sobre la parte antigua. Después el bot lee esa nota y tus mensajes recientes. La nota se marca como texto no fiable, nunca como palabras tuyas, y el texto de páginas web o correos sigue marcado así. Los mensajes originales no se modifican ni se borran. Desactivado: el bot solo ve los mensajes más recientes, como antes.",
+    "title": "Chats largos"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} se reserva algunas cosas: la política de ejecución, los servidores de herramientas de línea de comandos, las habilidades y las sesiones de los CLI de programación se configuran directamente en {{name}}. Las cuentas de correo, búsqueda y dictado se pueden conectar desde este equipo.",

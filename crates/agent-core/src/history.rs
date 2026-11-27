@@ -144,18 +144,33 @@ const NOT_EXECUTED: &str = "[not executed: the turn was stopped by a safety limi
 const MAX_HISTORY_MESSAGES: usize = 256;
 const MAX_HISTORY_BYTES: usize = 64 * 1024;
 const HISTORY_OMITTED_NOTE: &str = "Some older conversation exchanges were omitted to keep history bounded. \
-They remain in storage; do not infer their contents. A summary of older history is a follow-up if needed.";
+They remain in storage; do not infer their contents.";
+
+/// What the chat puts in front of the model besides the run's own steps.
+pub(crate) struct ChatContext {
+    /// Messages from earlier turns, oldest first.
+    pub messages: Vec<storage::Message>,
+    /// Older messages were left out, and are not covered by the summary either.
+    pub omitted: bool,
+    /// The rolling summary that stands in for the messages before the first one in
+    /// `messages` (see `summary`); `None`: the chat has none, or it is switched off.
+    pub summary: Option<storage::ChatSummary>,
+}
 
 /// Messages from earlier turns that [`build_messages`] will place in context,
 /// after the same bound and the same drop of a leading assistant fragment.
+/// With a summary, the messages it covers are not listed: it stands in for them.
 pub(crate) fn messages_in_context(
     storage: &Storage,
     chat: ChatId,
+    bot: BotId,
     exclude_run: Option<RunId>,
     own_schedule: Option<TaskId>,
-) -> Result<(Vec<storage::Message>, bool), storage::StorageError> {
-    let (history, omitted) = storage.list_messages_bounded(
+) -> Result<ChatContext, storage::StorageError> {
+    let summary = crate::summary::for_context(storage, chat, bot, own_schedule);
+    let (history, omitted) = storage.list_messages_bounded_after(
         chat,
+        summary.as_ref().map(storage::ChatSummary::cursor),
         exclude_run,
         MAX_HISTORY_MESSAGES,
         MAX_HISTORY_BYTES,
@@ -169,7 +184,11 @@ pub(crate) fn messages_in_context(
         .skip(start)
         .filter(|message| !message_from_schedule(storage, message, own_schedule))
         .collect();
-    Ok((history, omitted || start > 0))
+    Ok(ChatContext {
+        messages: history,
+        omitted: omitted || start > 0,
+        summary,
+    })
 }
 
 /// Earlier firings of this schedule. Their text is not put back in front of
@@ -210,36 +229,52 @@ pub(crate) struct ChatProvenance {
 pub(crate) fn chat_provenance(
     storage: &Storage,
     chat: ChatId,
+    bot: BotId,
     exclude_run: Option<RunId>,
     own_schedule: Option<TaskId>,
 ) -> ChatProvenance {
     let mut exposure = permission_engine::ContentExposure::clean();
     let mut sources = Vec::new();
     let mut private_texts = Vec::new();
-    let Ok((messages, _)) = messages_in_context(storage, chat, exclude_run, own_schedule) else {
+    let Ok(context) = messages_in_context(storage, chat, bot, exclude_run, own_schedule) else {
         return ChatProvenance {
             exposure,
             sources,
             private_texts,
         };
     };
-    for m in messages {
-        if m.exposure_untrusted || m.exposure_private {
-            exposure.observe(m.exposure_untrusted, m.exposure_private);
+    // The summary carries what the messages it replaced carried (it is derived from them),
+    // so it counts like one more message.
+    let summary = context.summary.iter().map(|s| {
+        (
+            s.exposure_untrusted,
+            s.exposure_private,
+            s.exposure_sources.clone(),
+            &s.content,
+        )
+    });
+    let messages = context.messages.iter().map(|m| {
+        (
+            m.exposure_untrusted,
+            m.exposure_private,
+            m.exposure_sources.clone(),
+            &m.content,
+        )
+    });
+    for (untrusted, private, labels, content) in summary.chain(messages) {
+        if untrusted || private {
+            exposure.observe(untrusted, private);
         }
-        if m.exposure_private
-            && !m.content.is_empty()
-            && m.exposure_sources.iter().any(|l| !l.starts_with("page "))
-        {
-            private_texts.push(m.content.clone());
+        if private && !content.is_empty() && labels.iter().any(|l| !l.starts_with("page ")) {
+            private_texts.push(content.clone());
         }
-        for label in m.exposure_sources {
+        for label in labels {
             // A stored label is a name, not a decision: the own-inbox label declassifies only
             // on a message that did NOT hold private data when it was stored (the bit comes
             // from `Shared::own_inbox_call`: identity and kind, at the call). On a private
             // message the same words are read as the owner's mailbox.
             let label = match label.strip_prefix(crate::taint::OWN_INBOX_LABEL_PREFIX) {
-                Some(rest) if m.exposure_private => format!("mailbox {rest}"),
+                Some(rest) if private => format!("mailbox {rest}"),
                 _ => label,
             };
             if !label.is_empty() && !sources.iter().any(|s| s == &label) {
@@ -262,10 +297,23 @@ fn append_chat_history(
     let Some(chat) = run.chat_id else {
         return Ok(());
     };
-    let (history, omitted) =
-        messages_in_context(storage, chat, Some(run.id), schedule_id_of(&run.kind))?;
+    let ChatContext {
+        messages: history,
+        omitted,
+        summary,
+    } = messages_in_context(
+        storage,
+        chat,
+        run.bot_id,
+        Some(run.id),
+        schedule_id_of(&run.kind),
+    )?;
     if omitted {
         out.push(Message::text(MessageRole::System, HISTORY_OMITTED_NOTE));
+    }
+    // Pinned first: the summary of everything older than the messages below.
+    if let Some(summary) = &summary {
+        out.push(crate::summary::note_message(summary));
     }
     let mut authors: HashMap<RunId, Option<BotId>> = HashMap::new();
     let mut attachment_budget = crate::attachments::MAX_BLOCKS_PER_RUN;
@@ -326,7 +374,7 @@ fn append_chat_history(
 /// names its author.
 /// The author's name of an imported assistant row that has no run to prove it is this
 /// computer's own bot (see the host import: `imported_foreign:<name>`).
-fn imported_foreign_author(storage: &Storage, m: &storage::Message) -> Option<String> {
+pub(crate) fn imported_foreign_author(storage: &Storage, m: &storage::Message) -> Option<String> {
     if m.run_id.is_some() {
         return None;
     }
@@ -338,7 +386,7 @@ fn imported_foreign_author(storage: &Storage, m: &storage::Message) -> Option<St
 }
 
 /// Whether a user row has no run and carries the `imported` source (chat import).
-fn imported_user_row(storage: &Storage, m: &storage::Message) -> bool {
+pub(crate) fn imported_user_row(storage: &Storage, m: &storage::Message) -> bool {
     m.run_id.is_none()
         && storage
             .message_source(m.id)

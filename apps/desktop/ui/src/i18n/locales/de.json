@@ -4470,6 +4470,15 @@
       "tokensPerMinute": "Textmenge pro Minute"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Lange Chats: ältere Nachrichten werden zu einer kurzen Notiz zusammengefasst, damit der Bot den Faden behält.",
+    "hint": "Ältere Nachrichten eines langen Chats werden zu einer kurzen Notiz zusammengefasst. Die Nachrichten bleiben gespeichert und durchsuchbar.",
+    "label": "Ältere Nachrichten langer Chats zusammenfassen",
+    "noBot": "Lege zuerst einen Bot an.",
+    "note": "Wird ein Chat sehr lang, schreibt das eigene Modell des Bots (oder sein günstigeres Hilfsmodell, außer wenn private Daten im Spiel sind) eine kurze Notiz über den älteren Teil. Der Bot liest dann diese Notiz und deine letzten Nachrichten. Die Notiz ist als nicht vertrauenswürdiger Text markiert, nie als deine Worte, und Text von Webseiten oder aus E-Mails bleibt so markiert. Die ursprünglichen Nachrichten werden nicht verändert oder gelöscht. Aus: Der Bot sieht wie bisher nur die neuesten Nachrichten.",
+    "title": "Lange Chats"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} behält einiges für sich: Die Ausführungsrichtlinie, Kommandozeilen-Werkzeugserver, Skills und Coding-CLI-Anmeldungen werden direkt auf {{name}} geändert. E-Mail-, Such- und Diktierkonten lassen sich von diesem Computer aus verbinden.",

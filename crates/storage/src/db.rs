@@ -834,6 +834,7 @@ impl Storage {
         if active > 0 {
             return Err(StorageError::Conflict("chat has an active run".into()));
         }
+        tx.execute("DELETE FROM chat_summaries WHERE chat_id = ?1", [&cid])?;
         tx.execute("DELETE FROM messages WHERE chat_id = ?1", [&cid])?;
         tx.execute("UPDATE runs SET chat_id = NULL WHERE chat_id = ?1", [&cid])?;
         let n = tx.execute("DELETE FROM chats WHERE id = ?1", [&cid])?;
@@ -979,6 +980,15 @@ impl Storage {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         for id in ids {
+            // A summary that holds a message the context now drops (or restores) no longer
+            // says what the chat says: drop it; a new one is written when the chat grows.
+            tx.execute(
+                "DELETE FROM chat_summaries WHERE chat_id IN (SELECT s.chat_id FROM messages m \
+                 JOIN chat_summaries s ON s.chat_id = m.chat_id WHERE m.id = ?1 \
+                 AND (m.created_at_ms < s.covered_until_ms \
+                      OR (m.created_at_ms = s.covered_until_ms AND m.id <= s.covered_until_id)))",
+                [id.to_string()],
+            )?;
             tx.execute(
                 "UPDATE messages SET superseded = ?2 WHERE id = ?1",
                 params![id.to_string(), i64::from(superseded)],
@@ -1113,17 +1123,37 @@ impl Storage {
         max_messages: usize,
         max_bytes: usize,
     ) -> Result<(Vec<Message>, bool)> {
+        self.list_messages_bounded_after(chat_id, None, exclude_run, max_messages, max_bytes)
+    }
+
+    /// [`Self::list_messages_bounded`], limited to the messages that sort after `after` (the
+    /// cursor of a chat summary; `None`: the whole chat). Older messages are neither returned
+    /// nor counted as omitted: a summary stands in for them.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn list_messages_bounded_after(
+        &self,
+        chat_id: ChatId,
+        after: Option<crate::Cursor>,
+        exclude_run: Option<RunId>,
+        max_messages: usize,
+        max_bytes: usize,
+    ) -> Result<(Vec<Message>, bool)> {
         let conn = self.conn();
         let mut st = conn.prepare(
             "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources, length(CAST(content AS BLOB)) \
              FROM messages WHERE chat_id = ?1 AND superseded = 0 AND (?2 IS NULL OR run_id IS NULL OR run_id <> ?2) \
+             AND (?4 IS NULL OR created_at_ms > ?4 OR (created_at_ms = ?4 AND id > ?5)) \
              ORDER BY created_at_ms DESC, id DESC LIMIT ?3",
         )?;
         let limit = i64::try_from(max_messages.saturating_add(1)).unwrap_or(i64::MAX);
         let mut rows = st.query(params![
             chat_id.to_string(),
             exclude_run.map(|r| r.to_string()),
-            limit
+            limit,
+            after.map(|c| c.0),
+            after.map(|c| c.1.to_string()),
         ])?;
         let mut messages = Vec::new();
         let mut used = 0usize;
@@ -2481,7 +2511,7 @@ fn chat_row(r: &Row<'_>) -> rusqlite::Result<Chat> {
     })
 }
 
-fn message_row(r: &Row<'_>) -> rusqlite::Result<Message> {
+pub(crate) fn message_row(r: &Row<'_>) -> rusqlite::Result<Message> {
     Ok(Message {
         id: uuid_at(r, 0)?,
         user_id: UserId(uuid_at(r, 1)?),
@@ -2975,6 +3005,129 @@ mod tests {
         assert_eq!(f.st.list_chats(other.id).unwrap().len(), 0);
         run(&f);
         assert_eq!(f.st.list_runs(other.id).unwrap().len(), 0);
+    }
+
+    fn dialogue(f: &Fx, n: u128) -> Vec<Uuid> {
+        (1..=n)
+            .map(|i| {
+                let id = Uuid::from_u128(i);
+                f.st.insert_message(&Message {
+                    id,
+                    user_id: f.user.id,
+                    chat_id: f.chat.id,
+                    run_id: None,
+                    role: if i % 2 == 1 { "user" } else { "assistant" }.into(),
+                    content: format!("m{i}"),
+                    // Two messages share a millisecond: the id breaks the tie.
+                    created_at_ms: i64::try_from(i / 2).unwrap(),
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
+                })
+                .unwrap();
+                id
+            })
+            .collect()
+    }
+
+    fn summary_of(f: &Fx, ids: &[Uuid], until: usize) -> crate::ChatSummary {
+        let last = f.st.get_message(ids[until]).unwrap().unwrap();
+        crate::ChatSummary {
+            chat_id: f.chat.id,
+            user_id: f.user.id,
+            content: "earlier".into(),
+            covered_until_ms: last.created_at_ms,
+            covered_until_id: last.id,
+            covered_messages: u32::try_from(until + 1).unwrap(),
+            rounds: 1,
+            first_message_ms: 0,
+            exposure_untrusted: true,
+            exposure_private: false,
+            exposure_sources: vec!["page example.com".into()],
+            model: "p/m".into(),
+            created_at_ms: 10,
+            updated_at_ms: 10,
+        }
+    }
+
+    #[test]
+    fn chat_summary_round_trips_and_a_round_replaces_the_row() {
+        let f = fx();
+        let ids = dialogue(&f, 6);
+        assert_eq!(f.st.get_chat_summary(f.chat.id).unwrap(), None);
+        let mut s = summary_of(&f, &ids, 2);
+        f.st.put_chat_summary(&s).unwrap();
+        assert_eq!(f.st.get_chat_summary(f.chat.id).unwrap(), Some(s.clone()));
+        s = crate::ChatSummary {
+            rounds: 2,
+            content: "later".into(),
+            ..summary_of(&f, &ids, 4)
+        };
+        f.st.put_chat_summary(&s).unwrap();
+        assert_eq!(f.st.get_chat_summary(f.chat.id).unwrap(), Some(s));
+        assert!(f.st.delete_chat_summary(f.chat.id).unwrap());
+        assert!(!f.st.delete_chat_summary(f.chat.id).unwrap());
+    }
+
+    #[test]
+    fn messages_after_the_cursor_are_listed_and_the_summarised_ones_stay_stored() {
+        let f = fx();
+        let ids = dialogue(&f, 6);
+        // The cursor sits on a message that shares its millisecond with the next one.
+        let s = summary_of(&f, &ids, 2);
+        let (tail, omitted) =
+            f.st.list_messages_bounded_after(f.chat.id, Some(s.cursor()), None, 10, 100)
+                .unwrap();
+        let texts: Vec<_> = tail.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(texts, ["m4", "m5", "m6"]);
+        assert!(!omitted, "older messages are replaced, not omitted");
+        // Without a cursor the whole chat is there.
+        assert_eq!(
+            f.st.list_messages_bounded(f.chat.id, None, 10, 100)
+                .unwrap()
+                .0
+                .len(),
+            6
+        );
+        assert_eq!(f.st.list_messages(f.chat.id).unwrap().len(), 6);
+        // The bound still applies after the cursor.
+        let (two, omitted) =
+            f.st.list_messages_bounded_after(f.chat.id, Some(s.cursor()), None, 2, 100)
+                .unwrap();
+        assert_eq!(two.len(), 2);
+        assert!(omitted);
+        assert_eq!(
+            f.st.dialogue_size_after(f.chat.id, Some(s.cursor()), None)
+                .unwrap(),
+            (3, 6)
+        );
+        let after =
+            f.st.list_dialogue_after(f.chat.id, Some(s.cursor()), 2)
+                .unwrap();
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0].content, "m4");
+    }
+
+    #[test]
+    fn superseding_a_summarised_message_drops_the_summary_but_a_newer_one_keeps_it() {
+        let f = fx();
+        let ids = dialogue(&f, 6);
+        f.st.put_chat_summary(&summary_of(&f, &ids, 2)).unwrap();
+        f.st.set_messages_superseded(&ids[4..], true).unwrap();
+        assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_some());
+        f.st.set_messages_superseded(&ids[2..3], true).unwrap();
+        assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn deleting_a_chat_deletes_its_summary_and_a_summary_needs_a_chat() {
+        let f = fx();
+        let ids = dialogue(&f, 4);
+        let s = summary_of(&f, &ids, 1);
+        f.st.put_chat_summary(&s).unwrap();
+        assert!(f.st.delete_chat(f.chat.id).unwrap());
+        assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_none());
+        assert!(f.st.put_chat_summary(&s).is_err());
     }
 
     #[test]
