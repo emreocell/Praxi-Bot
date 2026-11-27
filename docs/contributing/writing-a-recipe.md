@@ -28,8 +28,8 @@ versioned (`schema_version: 1`) and validated at load by `validateRecipe` in
 - Every localized object has an `en` entry. Other languages are optional and fall back to English;
   shipped recipes also have `tr` (a test checks it).
 - The `goal` uses an answer as `{{question_id}}`. Every placeholder must name a question and every
-  non-folder question must be used. Answers are inserted in one pass, so an answer that contains
-  `{{...}}` is never expanded again. An empty optional answer reads as "(nothing specified)".
+  non-folder question must be used. Answers are inserted in one pass, so an answer that itself
+  looks like a placeholder is never expanded again. An empty optional answer reads as "(nothing specified)".
 - Unknown keys are rejected.
 
 ## What the flow does
