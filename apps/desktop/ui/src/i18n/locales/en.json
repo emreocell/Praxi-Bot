@@ -7020,7 +7020,7 @@
         "tls": "The secure connection failed. Check the server name, the port and the security setting.",
         "unreachable": "The mail server could not be reached. Check your internet connection and the server names, then try again."
       },
-      "note": "Connect a mailbox to a bot and it can read and search that mail. It asks before sending, unless the bot is on Full access.",
+      "note": "A bot with a mailbox can read and search it. It asks before sending, unless it has Full access.",
       "onlyBot": "Only {{name}}",
       "passwordMissing": "No password saved.",
       "result": {

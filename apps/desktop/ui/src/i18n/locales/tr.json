@@ -7020,7 +7020,7 @@
         "tls": "Güvenli bağlantı kurulamadı. Sunucu adını, portu ve güvenlik ayarını kontrol et.",
         "unreachable": "Posta sunucusuna ulaşılamadı. İnternet bağlantını ve sunucu adlarını kontrol edip yeniden dene."
       },
-      "note": "Bir posta kutusunu bir bota bağla; bot o postaları okuyup arayabilir. Göndermeden önce sorar; Tam erişimdeki bot ise sormadan gönderir.",
+      "note": "Bağlı posta kutusunu bot okuyup arayabilir. Göndermeden önce sorar; Tam erişimde sormadan gönderir.",
       "onlyBot": "Yalnızca {{name}}",
       "passwordMissing": "Kayıtlı parola yok.",
       "result": {
