@@ -62,7 +62,17 @@ async fn headless_browser_follows_the_host_language_and_time_zone() {
         .unwrap();
     let env_tz = std::env::var("TZ").ok().filter(|t| !t.trim().is_empty());
     if let Some(want) = env_tz.or_else(browser_cdp::host::host_timezone) {
-        assert_eq!(zone, want.as_str());
+        // Chrome reports the canonical name of an alias ("Etc/UTC" is "UTC").
+        let canonical = |z: &str| match z {
+            "Etc/UTC" | "Etc/UCT" | "Etc/Universal" | "Etc/Zulu" | "Etc/GMT" | "GMT" | "UCT"
+            | "Universal" | "Zulu" => "UTC".to_owned(),
+            other => other.to_owned(),
+        };
+        assert_eq!(
+            canonical(zone.as_str().unwrap_or_default()),
+            canonical(&want),
+            "{zone}"
+        );
     }
     let width = p.evaluate("window.innerWidth").await.unwrap();
     assert_eq!(
