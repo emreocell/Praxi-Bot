@@ -46,7 +46,10 @@
     },
     "updater": {
       "pubkey": "",
-      "endpoints": [],
+      "endpoints": [
+        "https://github.com/emreocell/Praxi-Bot/releases/latest/download/latest.json"
+      ],
+      "praxiPreviewEndpoint": "https://raw.githubusercontent.com/emreocell/Praxi-Bot/update-feed/preview.json",
       "requireSignedVersion": true
     }
   },

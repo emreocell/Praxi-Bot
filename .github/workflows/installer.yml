@@ -11,7 +11,9 @@ on:
       - "scripts/installer/**"
       - "scripts/release/collect_sbom.py"
       - "scripts/release/verify-windows.ps1"
+      - "scripts/release/update_manifest.py"
       - "scripts/tests/test_windows_release.py"
+      - "scripts/tests/test_update_manifest.py"
       - ".github/workflows/installer.yml"
   workflow_dispatch:
   push:
@@ -60,6 +62,26 @@ jobs:
         shell: pwsh
         run: python -B scripts/release/check_version.py "$env:GITHUB_REF_NAME"
 
+      # In-app updates (docs/updates.md). A tag build is a real release: it must be signed with the
+      # owner's key (secret TAURI_SIGNING_PRIVATE_KEY, whose public half is in tauri.conf.json), or
+      # it would ship an app whose updates are silently off. Fail now, not after the long build.
+      # Other runs (pull requests, the weekly build, manual runs) rehearse the whole path with a
+      # throwaway key instead and never touch the real secret.
+      - name: Check the updater configuration and signing key
+        shell: pwsh
+        env:
+          HAVE_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          $checkArgs = @('check-config', '--config', 'apps/desktop/tauri.conf.json')
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:HAVE_UPDATER_KEY -ne 'true') {
+              throw "The repository secret TAURI_SIGNING_PRIVATE_KEY is not set, so this release could not sign its update. Run scripts/release/setup-updater-key.ps1 once (docs/updates.md), then run this workflow again."
+            }
+            $checkArgs += '--require-pubkey'
+          }
+          python -B scripts/release/update_manifest.py @checkArgs
+          if ($LASTEXITCODE -ne 0) { throw "tauri.conf.json is not ready for a signed release (see the message above)" }
+
       # rust-toolchain.toml pins channel = "stable" (+ rustfmt, clippy); rustup
       # honours it automatically once this installs stable.
       - name: Install Rust toolchain
@@ -81,6 +103,15 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Create a throwaway updater key (rehearsal, not a release)
+        if: github.ref_type != 'tag'
+        shell: pwsh
+        run: |
+          $key = Join-Path $env:RUNNER_TEMP 'rehearsal-updater.key'
+          pnpm exec tauri signer generate --ci -w $key
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$key.pub")) { throw "could not create the throwaway key" }
+          "PRAXI_REHEARSAL_UPDATER_KEY=$key" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       # Software bills of materials (CycloneDX 1.5) for what the installer ships: the `bot` daemon
       # sidecar and the desktop shell (Rust, from Cargo.lock + cargo metadata) and the UI bundle
@@ -135,29 +166,20 @@ jobs:
           Remove-Item $pfx
           "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
-      # In-app updates (docs/updates.md). Without the updater key the installer is built exactly
-      # as before and the app has updates switched off; no unsigned update can ever be produced.
+      # The installer is built WITHOUT the signing key: the private key is only given to the signing
+      # step below, never to the build scripts of the dependencies. The app trusts the public key in
+      # tauri.conf.json; a rehearsal build trusts its throwaway key instead.
       - name: Build installer
         shell: pwsh
-        env:
-          PRAXI_UPDATER_PUBKEY: ${{ vars.PRAXI_UPDATER_PUBKEY }}
-          PRAXI_UPDATER_ENDPOINT: ${{ vars.PRAXI_UPDATER_ENDPOINT }}
-          PRAXI_UPDATER_PREVIEW_ENDPOINT: ${{ vars.PRAXI_UPDATER_PREVIEW_ENDPOINT }}
-          PRAXI_UPDATER_ROLLBACK_ENDPOINT: ${{ vars.PRAXI_UPDATER_ROLLBACK_ENDPOINT }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           # Keep the prerelease suffix in the app version and signed update metadata.
           # Checked-in manifests intentionally keep only the numeric version.
           $desktopConfig = @{}
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $desktopConfig.version = $env:GITHUB_REF_NAME.Substring(1)
-          }
-          if ($env:TAURI_SIGNING_PRIVATE_KEY -and $env:PRAXI_UPDATER_PUBKEY) {
-            Write-Host "Updater signing key present: also producing signed update artifacts"
-            $desktopConfig.bundle = @{ createUpdaterArtifacts = $true }
           } else {
-            Write-Host "No updater signing key: building the installer without update artifacts"
+            $pub = (Get-Content -Raw -LiteralPath "$($env:PRAXI_REHEARSAL_UPDATER_KEY).pub").Trim()
+            $desktopConfig.plugins = @{ updater = @{ pubkey = $pub } }
           }
           $desktopConfigPath = Join-Path $env:RUNNER_TEMP 'praxi-desktop-build.json'
           $desktopConfig | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $desktopConfigPath -Encoding utf8
@@ -218,6 +240,49 @@ jobs:
           if ($u.ExitCode -ne 0) { throw "Silent all-users uninstall failed with exit code $($u.ExitCode)" }
           if (Test-Path $key) { throw "The machine-wide uninstall entry is still there after uninstalling" }
 
+      # Signs the installer (minisign, bound to this exact version, which the app requires) and writes
+      # the update feed `latest.json` that the app reads. The feed is checked here, offline, against
+      # the app's public key: a release whose update the app would refuse fails the build instead.
+      # The app still verifies the signature itself before installing anything.
+      - name: Sign the installer and write the update feed (latest.json)
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.ref_type == 'tag' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ github.ref_type == 'tag' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: |
+          $conf = Get-Content -Raw -LiteralPath apps/desktop/tauri.conf.json | ConvertFrom-Json
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tag = $env:GITHUB_REF_NAME
+            $keyArgs = @('--config', 'apps/desktop/tauri.conf.json')
+          } else {
+            $tag = "v$($conf.version)"
+            $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw -LiteralPath $env:PRAXI_REHEARSAL_UPDATER_KEY
+            $keyArgs = @('--pubkey-file', "$($env:PRAXI_REHEARSAL_UPDATER_KEY).pub")
+          }
+          $version = $tag.Substring(1)
+          # A trailing newline (pasted secret) would make the key unreadable.
+          $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
+          $installer = Get-ChildItem "target/release/bundle/nsis" -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "No NSIS installer found" }
+          pnpm exec tauri signer sign --app-version $version $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw "signing the installer failed" }
+          $sig = "$($installer.FullName).sig"
+          if (-not (Test-Path -LiteralPath $sig)) { throw "no signature file was written" }
+          New-Item -ItemType Directory -Force -Path update-assets | Out-Null
+          Copy-Item -LiteralPath $sig update-assets
+          $makeArgs = @('make', '--tag', $tag, '--version', $version, '--installer', $installer.FullName,
+            '--signature', $sig, '--pub-date', (git show -s --format=%cI $env:GITHUB_SHA), '--out', 'update-assets/latest.json') + $keyArgs
+          # Hand-written notes for a release (plain text, optional <!-- lang: xx --> blocks) are used when present.
+          $notes = "docs/release-notes/$tag.md"
+          if (Test-Path -LiteralPath $notes) { $makeArgs += @('--notes-file', $notes) }
+          python -B scripts/release/update_manifest.py @makeArgs
+          if ($LASTEXITCODE -ne 0) { throw "could not write the update feed" }
+          python -B scripts/release/update_manifest.py check --manifest update-assets/latest.json --tag $tag @keyArgs
+          if ($LASTEXITCODE -ne 0) { throw "the update feed does not pass its own check" }
+          if ($env:GITHUB_REF_TYPE -ne 'tag') {
+            Write-Host "::notice::Rehearsal: the feed was signed with a throwaway key. It is not a release feed."
+          }
+
       # Everything that is published for this build, in one folder: the installer, the daemon sidecar
       # it contains, the SBOMs, a note of the build environment, the verifier script and the
       # SHA-256 list. The next job attests every file in this folder.
@@ -233,6 +298,7 @@ jobs:
           Copy-Item $sidecar.FullName $out
           Copy-Item sbom/*.cdx.json $out
           Copy-Item scripts/release/verify-windows.ps1 $out
+          Copy-Item update-assets/* $out
 
           # What this build ran on, so that someone who wants to rebuild knows the inputs.
           # (Tool versions are not pinned: see "Can I rebuild it myself?" in docs/guide/verify-download.md.)

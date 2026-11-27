@@ -110,7 +110,7 @@ run on `main` in this repository, attests everything it publishes (SLSA build pr
 | Artifact | Contents |
 | --- | --- |
 | `praxi-bot-windows-installer` | the `*-setup.exe` only (as before) |
-| `praxi-bot-windows-release` | the installer, the `bot` sidecar it contains, three CycloneDX SBOMs, `build-info.txt`, `verify-windows.ps1` and `SHA256SUMS.txt` |
+| `praxi-bot-windows-release` | the installer, its update signature (`*-setup.exe.sig`) and the update feed `latest.json`, the `bot` sidecar it contains, three CycloneDX SBOMs, `build-info.txt`, `verify-windows.ps1` and `SHA256SUMS.txt` |
 | `praxi-bot-windows-provenance` | `praxi-bot-windows.sigstore.json`, the attestation bundle for every file of the release artifact |
 
 For a **pre-release tag** (`v1.2.3-alpha.1`) the last job, *Attach to the pre-release*, uploads
@@ -121,6 +121,14 @@ fails. If the release does not exist yet, the job summary prints the `gh run dow
 attached automatically: download both artifacts and attach them yourself with the same commands
 after the review. Do not attach only the installer: users are told to verify it with
 `SHA256SUMS.txt` and the bundle ([Check your download](../guide/verify-download.md)).
+
+**In-app updates.** A tag build signs the installer with the update key (`TAURI_SIGNING_PRIVATE_KEY`,
+set up once with `scripts/release/setup-updater-key.ps1`) and writes `latest.json`; without the secret
+or the public key in `tauri.conf.json` the tag build fails on purpose. For a **final tag** also attach
+`latest.json` and the `.sig` (they are part of the artifact set above), because GitHub's "latest
+release" address is the Stable feed, then run `gh workflow run update-feed.yml -f tag=<tag>` to move
+the Preview feed. Pre-release tags need nothing extra. Details and the one-time setup:
+[In-app updates](../updates.md).
 
 No signing certificate exists, so the installer itself is unsigned; provenance and checksums are
 the only integrity signal today. Builds are not bit-for-bit reproducible (see the page above for

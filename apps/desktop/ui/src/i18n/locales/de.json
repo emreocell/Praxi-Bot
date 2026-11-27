@@ -7444,6 +7444,7 @@
         "busy": "Ein Update läuft bereits.",
         "failed": "Das Update hat nicht funktioniert. Es wurde nichts verändert. Bitte versuchen Sie es später erneut.",
         "network": "Der Update-Server ist nicht erreichbar. Prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
+        "no_release": "Für diesen Kanal sind noch keine Update-Informationen veröffentlicht. Es wurde nichts verändert. Versuchen Sie es später erneut.",
         "no_rollback": "Es gibt keine frühere Version, zu der Sie zurückkehren können.",
         "not_configured": "Updates sind in dieser Version nicht eingerichtet.",
         "nothing_to_install": "Bitte suchen Sie zuerst nach Updates.",
@@ -7456,6 +7457,7 @@
         "working": "Wird aktualisiert…"
       },
       "notConfigured": "Updates sind nicht verfügbar: Für diesen Build ist kein Signaturschlüssel oder keine sichere Update-Quelle eingerichtet. Es wird nichts heruntergeladen oder installiert.",
+      "previewBuildHint": "Sie verwenden einen Vorschau-Build. Wählen Sie als Update-Kanal Vorschau, um dessen Updates zu erhalten.",
       "rollback": {
         "action": "Zur vorherigen Version zurückkehren",
         "description": "Version {{version}} ist nicht richtig gestartet. Sie können zur letzten funktionierenden Version zurückkehren.",

@@ -71,6 +71,13 @@ fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
 }
 
 fn mock_app_version(version: &str) -> tauri::App<tauri::test::MockRuntime> {
+    mock_app_with(version, false)
+}
+
+fn mock_app_with(
+    version: &str,
+    require_signed_version: bool,
+) -> tauri::App<tauri::test::MockRuntime> {
     let mut context = tauri::test::mock_context(tauri::test::noop_assets());
     context.package_info_mut().version = version.parse().expect("version");
     context.config_mut().plugins.0.insert(
@@ -78,6 +85,7 @@ fn mock_app_version(version: &str) -> tauri::App<tauri::test::MockRuntime> {
         serde_json::json!({
             "pubkey": "",
             "endpoints": [],
+            "requireSignedVersion": require_signed_version,
             "dangerousInsecureTransportProtocol": true
         }),
     );
@@ -232,4 +240,128 @@ async fn missing_signing_key_disables_checks_and_preview_has_no_stable_fallback(
     );
     assert_eq!(hits.load(Ordering::SeqCst), 0);
     assert_eq!(status(&rt, "en").unwrap().channel, UpdateChannel::Stable);
+}
+
+// ------------------------------------------------- real signatures (fixtures)
+
+/// Public keys and signatures made with two throwaway Tauri signing keys (private halves
+/// discarded), shared with `scripts/tests/test_update_manifest.py`. `installer_bytes` is the
+/// file every signature below was made for.
+fn fixtures() -> serde_json::Value {
+    serde_json::from_str(include_str!(
+        "../../../scripts/tests/fixtures/update_signatures.json"
+    ))
+    .expect("fixtures")
+}
+
+/// Serves a feed announcing `version` whose installer is `installer` with `signature`.
+fn signed_server(version: &'static str, signature: String, installer: Vec<u8>) -> Url {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 2048];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let (ctype, body) = if request.starts_with("GET /setup.exe") {
+                ("application/octet-stream", installer.clone())
+            } else {
+                let manifest = serde_json::json!({
+                    "version": version,
+                    "notes": BODY,
+                    "pub_date": "2026-11-27T08:15:00Z",
+                    "platforms": {
+                        "windows-x86_64": {
+                            "url": format!("http://127.0.0.1:{port}/setup.exe"),
+                            "signature": signature,
+                        }
+                    },
+                });
+                ("application/json", manifest.to_string().into_bytes())
+            };
+            let head = format!(
+                "HTTP/1.1 200 OK
+Content-Type: {ctype}
+Content-Length: {}
+Connection: close
+
+",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&body);
+        }
+    });
+    Url::parse(&format!("http://127.0.0.1:{port}/latest.json")).expect("url")
+}
+
+/// Runs the update flow up to (not including) the installer start, as the app does it.
+async fn download_from_feed(
+    pubkey_of: &str,
+    signature_of: &str,
+    announced: &'static str,
+) -> Result<Vec<u8>, String> {
+    let f = fixtures();
+    let installer = f["installer_bytes"]
+        .as_str()
+        .expect("bytes")
+        .as_bytes()
+        .to_vec();
+    let endpoint = signed_server(
+        announced,
+        f[signature_of].as_str().expect("sig").to_owned(),
+        installer,
+    );
+    let s = UpdateSettings {
+        pubkey: f[pubkey_of].as_str().expect("key").to_owned(),
+        endpoint: endpoint.clone(),
+        rollback_endpoint: None,
+        preview_endpoint: None,
+    };
+    let app = mock_app_with("0.1.0", true);
+    let update = check(app.handle(), &s, &endpoint, false)
+        .await
+        .map_err(|e| format!("check: {e}"))?
+        .ok_or("no update announced")?;
+    assert_eq!(update.version, announced);
+    update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tokio::test]
+async fn a_genuine_signed_update_downloads_and_the_feed_we_publish_is_accepted() {
+    // The signature in the feed was made by the key whose public half is built into the app,
+    // and is bound to the announced version: exactly what the release workflow publishes.
+    let bytes = download_from_feed("pub_a", "a_stable", "0.2.0")
+        .await
+        .expect("a valid update downloads");
+    assert_eq!(
+        bytes,
+        fixtures()["installer_bytes"].as_str().unwrap().as_bytes()
+    );
+}
+
+#[tokio::test]
+async fn a_signature_from_another_key_or_for_another_version_is_refused() {
+    // Another key (the right version): refused by the signature check.
+    let err = download_from_feed("pub_b", "a_stable", "0.2.0")
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_lowercase().contains("signature") || err.contains("key"),
+        "{err}"
+    );
+    // A genuine signature of an OLDER release, replayed under a newer announced version.
+    let err = download_from_feed("pub_a", "a_old", "0.2.0")
+        .await
+        .unwrap_err();
+    assert!(err.contains("signed for version"), "{err}");
+    // A signature that carries no version is refused because requireSignedVersion is on.
+    let err = download_from_feed("pub_a", "a_legacy", "0.2.0")
+        .await
+        .unwrap_err();
+    assert!(err.contains("requireSignedVersion"), "{err}");
 }

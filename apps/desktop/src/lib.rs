@@ -1279,7 +1279,10 @@ pub fn run() {
     let popout_for_exit = Arc::clone(&popout_state);
 
     let context = tauri::generate_context!();
-    let (update_plugin, update_runtime) = update::init(&context.package_info().version.to_string());
+    let (update_plugin, update_runtime) = update::init(
+        &context.package_info().version.to_string(),
+        context.config().plugins.0.get("updater"),
+    );
 
     #[cfg(any(windows, target_os = "linux"))]
     let cold_link = deep_link::from_argv(&std::env::args_os().collect::<Vec<_>>());

@@ -8111,6 +8111,7 @@
         "busy": "An update is already in progress.",
         "failed": "The update did not work. Nothing was changed. Please try again later.",
         "network": "Could not reach the update server. Check your internet connection and try again.",
+        "no_release": "No update information is published for this channel yet. Nothing was changed. Try again later.",
         "no_rollback": "No earlier version is available to go back to.",
         "not_configured": "Updates are not set up in this build.",
         "nothing_to_install": "Please check for updates first.",
@@ -8123,6 +8124,7 @@
         "working": "Updating…"
       },
       "notConfigured": "Updates are unavailable: this build has no updater signing key or secure update feed configured. Nothing will be downloaded or installed.",
+      "previewBuildHint": "You are using a preview build. Choose Preview as the update channel to receive its updates.",
       "rollback": {
         "action": "Go back to the previous version",
         "description": "Version {{version}} did not start properly. You can go back to the last version that worked.",

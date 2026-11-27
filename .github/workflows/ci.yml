@@ -89,6 +89,9 @@ jobs:
           python3 scripts/installer/generate_installer_assets.py --check
           python3 -B -m unittest discover -s scripts/tests -p test_installer_assets.py -v
 
+      - name: Test the in-app update feed generator and its checks
+        run: python3 -B -m unittest discover -s scripts/tests -p test_update_manifest.py -v
+
       - name: Check third-party notices consistency and dependency hygiene tests
         run: |
           python3 scripts/license_report.py --check-notices

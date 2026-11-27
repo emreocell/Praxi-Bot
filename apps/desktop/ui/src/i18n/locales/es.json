@@ -7444,6 +7444,7 @@
         "busy": "Ya hay una actualización en curso.",
         "failed": "La actualización no funcionó. No se cambió nada. Inténtalo de nuevo más tarde.",
         "network": "No se pudo contactar con el servidor de actualizaciones. Revisa tu conexión a internet y vuelve a intentarlo.",
+        "no_release": "Todavía no hay información de actualizaciones publicada para este canal. No se cambió nada. Inténtalo de nuevo más tarde.",
         "no_rollback": "No hay ninguna versión anterior a la que volver.",
         "not_configured": "Las actualizaciones no están configuradas en esta compilación.",
         "nothing_to_install": "Busca actualizaciones primero.",
@@ -7456,6 +7457,7 @@
         "working": "Actualizando…"
       },
       "notConfigured": "Las actualizaciones no están disponibles: esta compilación no tiene una clave de firma o una fuente segura de actualizaciones configurada. No se descargará ni instalará nada.",
+      "previewBuildHint": "Estás usando una compilación de vista previa. Elige Vista previa como canal de actualizaciones para recibir sus actualizaciones.",
       "rollback": {
         "action": "Volver a la versión anterior",
         "description": "La versión {{version}} no arrancó bien. Puedes volver a la última versión que funcionaba.",

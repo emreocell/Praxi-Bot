@@ -8111,6 +8111,7 @@
         "busy": "Bir güncelleme zaten sürüyor.",
         "failed": "Güncelleme çalışmadı. Hiçbir şey değişmedi. Lütfen daha sonra yeniden deneyin.",
         "network": "Güncelleme sunucusuna ulaşılamadı. İnternet bağlantınızı kontrol edip yeniden deneyin.",
+        "no_release": "Bu kanal için henüz yayımlanmış bir güncelleme bilgisi yok. Hiçbir şey değişmedi. Daha sonra yeniden deneyin.",
         "no_rollback": "Geri dönülebilecek daha eski bir sürüm yok.",
         "not_configured": "Bu sürümde güncelleme kurulu değil.",
         "nothing_to_install": "Lütfen önce güncellemeleri denetleyin.",
@@ -8123,6 +8124,7 @@
         "working": "Güncelleniyor…"
       },
       "notConfigured": "Güncellemeler kullanılamıyor: bu derlemede güncelleme imzalama anahtarı veya güvenli güncelleme kaynağı yapılandırılmamış. Hiçbir şey indirilmeyecek veya yüklenmeyecek.",
+      "previewBuildHint": "Önizleme sürümü kullanıyorsunuz. Güncellemelerini almak için güncelleme kanalı olarak Önizleme'yi seçin.",
       "rollback": {
         "action": "Önceki sürüme dön",
         "description": "{{version}} sürümü düzgün açılmadı. Çalışan son sürüme geri dönebilirsiniz.",
