@@ -674,3 +674,31 @@ async fn editing_a_summarised_message_drops_the_summary_and_the_window_takes_ove
     assert!(all.contains("q1 plain"));
     assert!(!all.contains("a1 plain"), "the replaced answer is gone");
 }
+
+#[test]
+fn a_scheduled_run_never_reads_the_summary() {
+    let env = setup();
+    let ids = seed(&env, pairs(3));
+    let last = env.storage.get_message(ids[3]).unwrap().unwrap();
+    env.storage
+        .put_chat_summary(&ChatSummary {
+            chat_id: env.chat,
+            user_id: env.user,
+            content: "notes".into(),
+            covered_until_ms: last.created_at_ms,
+            covered_until_id: last.id,
+            covered_messages: 4,
+            rounds: 1,
+            first_message_ms: T0,
+            exposure_untrusted: false,
+            exposure_private: false,
+            exposure_sources: vec![],
+            model: "fake/m".into(),
+            created_at_ms: T0,
+            updated_at_ms: T0,
+        })
+        .unwrap();
+    let read = |schedule| crate::summary::for_context(&env.storage, env.chat, env.bot, schedule);
+    assert!(read(None).is_some());
+    assert!(read(Some(protocol::TaskId::new())).is_none());
+}

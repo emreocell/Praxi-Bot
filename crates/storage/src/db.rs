@@ -3073,13 +3073,13 @@ mod tests {
     fn messages_after_the_cursor_are_listed_and_the_summarised_ones_stay_stored() {
         let f = fx();
         let ids = dialogue(&f, 6);
-        // The cursor sits on a message that shares its millisecond with the next one.
-        let s = summary_of(&f, &ids, 2);
+        // The cursor sits on m2, which shares its millisecond with m3: the id breaks the tie.
+        let s = summary_of(&f, &ids, 1);
         let (tail, omitted) =
             f.st.list_messages_bounded_after(f.chat.id, Some(s.cursor()), None, 10, 100)
                 .unwrap();
         let texts: Vec<_> = tail.iter().map(|m| m.content.as_str()).collect();
-        assert_eq!(texts, ["m4", "m5", "m6"]);
+        assert_eq!(texts, ["m3", "m4", "m5", "m6"]);
         assert!(!omitted, "older messages are replaced, not omitted");
         // Without a cursor the whole chat is there.
         assert_eq!(
@@ -3099,13 +3099,13 @@ mod tests {
         assert_eq!(
             f.st.dialogue_size_after(f.chat.id, Some(s.cursor()), None)
                 .unwrap(),
-            (3, 6)
+            (4, 8)
         );
         let after =
             f.st.list_dialogue_after(f.chat.id, Some(s.cursor()), 2)
                 .unwrap();
         assert_eq!(after.len(), 2);
-        assert_eq!(after[0].content, "m4");
+        assert_eq!(after[0].content, "m3");
     }
 
     #[test]
