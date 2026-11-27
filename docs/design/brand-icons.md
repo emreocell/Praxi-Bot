@@ -178,6 +178,7 @@ the test reads it). **Result** is `logo` (artwork bundled) or `initial` / `glyph
 | Goose | `goose` | glyph | none | [LF Projects trademark policy](https://lfprojects.org/policies/trademark-policy/) | Logos need written permission; the glyph is original project artwork | 2026-11-27 |
 | Groq | `groq` | initial | none | [groq.com/trademark-policy](https://groq.com/trademark-policy) | Logos in a UI need a licence from Groq | 2026-11-27 |
 | Together AI | `together` | initial | none | [together.ai/terms-of-service](https://www.together.ai/terms-of-service) | Logo use needs prior written consent | 2026-11-27 |
+| Meta Model API | `meta` | initial | none | [developers.meta.com](https://developers.meta.com/) | No redistribution grant for Meta marks verified | 2026-11-27 |
 | Playwright | `playwright` | initial | none | [microsoft/playwright](https://github.com/microsoft/playwright) | No trademark or logo grant found | 2026-11-27 |
 
 ## Open maintainer note
