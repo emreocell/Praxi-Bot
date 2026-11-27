@@ -877,6 +877,8 @@
     "title": "Web araçları: ara ve sayfa oku",
     "headings": [
       "Arama arka ucu",
+      "Sunucuda arama",
+      "Sunucuya SearXNG kur (tek komut)",
       "Gizlilik",
       "Güvenlik",
       "Bir botun sormadan çekmesine izin vermek",

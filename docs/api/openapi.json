@@ -36458,6 +36458,10 @@
             "type": "boolean",
             "description": "Whether the `DuckDuckGo` Lite fallback is enabled."
           },
+          "needs_provider": {
+            "type": "boolean",
+            "description": "`true` on a computer with no screen (a server or host) that has no search provider\n(Brave, Tavily or `SearXNG`): the free engines usually refuse such machines as robots, so\nthe Settings page asks the owner to add a provider."
+          },
           "order": {
             "type": "array",
             "items": {
@@ -36586,6 +36590,10 @@
               "null"
             ],
             "description": "Backend that answered (`null` when all failed)."
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "`true` when every engine that was tried refused this computer as a robot (a bot\nchallenge or a captcha page), the usual failure of the free engines on a server."
           },
           "elapsed_ms": {
             "type": "integer",

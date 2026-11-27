@@ -23,7 +23,7 @@ use tokio::time::Instant;
 use url::Url;
 
 use crate::error::WebError;
-use crate::http::{GetOptions, HTML_TYPES, HttpConfig, HttpFetcher, JSON_TYPES};
+use crate::http::{Fetched, GetOptions, HTML_TYPES, HttpConfig, HttpFetcher, JSON_TYPES};
 use crate::policy::{TrustedHostPolicy, UrlPolicy};
 
 /// Hard upper bound for results per query.
@@ -47,6 +47,13 @@ pub const KNOWN_BACKENDS: &[&str] = &[
     "duckduckgo_lite",
     "bing",
 ];
+
+/// Whether `name` is one of the keyless engines that scrape a public search page (and so get
+/// bot challenges from datacenter addresses).
+#[must_use]
+pub fn is_keyless_backend(name: &str) -> bool {
+    matches!(name, "duckduckgo" | "duckduckgo_lite" | "bing")
+}
 
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -186,6 +193,123 @@ fn browser_search_options(language: Option<&str>, timeout: Duration) -> GetOptio
     opts
 }
 
+// ------------------------------------------------------- bot challenge pages
+
+/// Markers that only a challenge or block page carries (script names, element ids, vendor
+/// paths). A result page never has them, so they count even next to parsed results.
+const CHALLENGE_STRUCTURE: &[&str] = &[
+    "anomaly-modal",
+    "anomaly.js",
+    "challenge-form",
+    "g-recaptcha",
+    "hcaptcha",
+    "cf-turnstile",
+    "challenge-platform",
+    "cf-chl",
+    "cf_chl_opt",
+    "cf-browser-verification",
+    "captcha-delivery",
+    "px-captcha",
+    "sec-if-cpt-container",
+    "_incapsula_resource",
+    "/sorry/index",
+];
+
+/// Sentences a challenge page shows. A result snippet can quote one of these, so they count only
+/// when no result could be read from the page.
+const CHALLENGE_PHRASES: &[&str] = &[
+    "unfortunately, bots use duckduckgo too",
+    "verify you are human",
+    "one more step",
+    "unusual traffic from your computer network",
+    "our systems have detected unusual traffic",
+    "checking your browser before accessing",
+    "enable javascript and cookies to continue",
+    "please complete the security check",
+    "access to this page has been denied",
+    "are you a robot",
+    "pardon our interruption",
+];
+
+/// Words that, as the whole page title, mark a challenge or block page.
+const CHALLENGE_TITLES: &[&str] = &[
+    "just a moment",
+    "attention required",
+    "access denied",
+    "robot check",
+    "are you a robot",
+    "verify you are human",
+    "security check",
+    "captcha",
+    "pardon our interruption",
+    "unusual traffic",
+];
+
+fn html_title(lower_html: &str) -> Option<&str> {
+    let start = lower_html.find("<title")?;
+    let open_end = lower_html[start..].find('>')? + start + 1;
+    let close = lower_html[open_end..].find("</title")? + open_end;
+    Some(lower_html[open_end..close].trim())
+}
+
+/// Whether a keyless engine answered with a bot challenge instead of results, and why in a few
+/// plain words. `has_results` is whether the caller could read any hit from the page.
+///
+/// Statuses that mean "go away" (`202` is `DuckDuckGo`'s way of serving the challenge) count on
+/// their own; so does any structural marker of a challenge page, even when the page also has
+/// hits. Sentences and a telling page title count only when no hit was readable, so a result
+/// snippet that quotes "verify you are human" is not mistaken for a block.
+fn detect_challenge(status: u16, html: &str, has_results: bool) -> Option<String> {
+    if matches!(status, 202 | 401 | 403 | 429 | 503) {
+        return Some(format!("it answered HTTP {status}"));
+    }
+    let lower = html.to_ascii_lowercase();
+    if CHALLENGE_STRUCTURE.iter().any(|m| lower.contains(m)) {
+        return Some("it showed a robot check page".to_string());
+    }
+    if has_results {
+        return None;
+    }
+    if CHALLENGE_PHRASES.iter().any(|m| lower.contains(m)) {
+        return Some("it showed a robot check page".to_string());
+    }
+    if let Some(title) = html_title(&lower)
+        && CHALLENGE_TITLES.iter().any(|t| title.contains(t))
+    {
+        return Some("it showed a block page".to_string());
+    }
+    None
+}
+
+/// The error for a keyless engine that refused this computer (the chain prefixes the engine).
+fn challenge_error(why: &str) -> WebError {
+    WebError::Challenge(format!("treated this computer as a robot ({why})"))
+}
+
+/// Fetch from a keyless engine; an error status that means "you are a robot" becomes a
+/// [`WebError::Challenge`] instead of a bare `server returned HTTP 403`.
+async fn get_keyless(
+    fetcher: &HttpFetcher,
+    url: &str,
+    opts: &GetOptions,
+) -> Result<Fetched, WebError> {
+    fetcher.get(url, opts).await.map_err(|e| match e {
+        WebError::Status(code @ (202 | 401 | 403 | 429 | 503)) => {
+            challenge_error(&format!("it answered HTTP {code}"))
+        }
+        other => other,
+    })
+}
+
+/// The "nothing readable" outcome of a keyless engine whose page had no hits and no challenge
+/// marker: a "no results" page is an empty answer, anything else is a block or a layout change.
+fn unreadable() -> WebError {
+    WebError::Challenge(
+        "gave a page with no results this program can read (probably a robot check or a layout change)"
+            .into(),
+    )
+}
+
 // ---------------------------------------------------------------- SearXNG
 
 /// Self-hosted `SearXNG` (needs `search.formats: [json]` enabled).
@@ -207,6 +331,10 @@ impl SearxngBackend {
 struct SearxResponse {
     #[serde(default)]
     results: Vec<SearxHit>,
+    /// `[engine, reason]` pairs of the engines `SearXNG` asked and could not use ("CAPTCHA",
+    /// "too many requests", "timeout", ...).
+    #[serde(default)]
+    unresponsive_engines: Vec<Vec<String>>,
 }
 #[derive(Deserialize)]
 struct SearxHit {
@@ -239,17 +367,46 @@ impl SearchBackend for SearxngBackend {
         }
         let mut opts = GetOptions::accepting(JSON_TYPES);
         opts.timeout = Some(search_timeout(&self.fetcher));
-        let page = self.fetcher.get(url.as_str(), &opts).await?;
+        let page = self
+            .fetcher
+            .get(url.as_str(), &opts)
+            .await
+            .map_err(|e| match e {
+                // The usual cause of a 403 from the owner's own server: JSON answers are off.
+                WebError::Status(403) => WebError::Search(
+                    "searxng refused the request (HTTP 403): `json` is probably missing from `search.formats` in its settings.yml"
+                        .into(),
+                ),
+                other => other,
+            })?;
         if page.truncated {
             return Err(WebError::Search("searxng response too large".into()));
         }
         let parsed: SearxResponse = serde_json::from_slice(&page.body)
             .map_err(|e| WebError::Search(format!("searxng: bad JSON ({e})")))?;
-        let hits = parsed
+        let hits: Vec<SearchResult> = parsed
             .results
             .iter()
             .filter_map(|h| make("searxng", &h.title, &h.url, &h.content))
             .collect();
+        if hits.is_empty() && !parsed.unresponsive_engines.is_empty() {
+            // No hits because the engines SearXNG asked refused it (a server address gets the
+            // same robot checks): say which, instead of a bare "no results".
+            let engines = parsed
+                .unresponsive_engines
+                .iter()
+                .filter_map(|p| match p.as_slice() {
+                    [name, reason, ..] => Some(format!("{name}: {reason}")),
+                    [name] => Some(name.clone()),
+                    [] => None,
+                })
+                .take(6)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(WebError::Search(format!(
+                "searxng answered but none of its engines did ({engines}); this is usually a robot check on the server's address, so try another engine list in its settings.yml"
+            )));
+        }
         Ok(finalize(hits, limit))
     }
 }
@@ -509,17 +666,6 @@ fn ddg_target(href: &str, base: &Url) -> Option<String> {
     Some(abs.to_string())
 }
 
-fn is_ddg_challenge(status: u16, html: &str) -> bool {
-    if matches!(status, 202 | 403 | 429) {
-        return true;
-    }
-    let lower = html.to_ascii_lowercase();
-    lower.contains("anomaly-modal")
-        || lower.contains("challenge-form")
-        || lower.contains("anomaly.js")
-        || lower.contains("unfortunately, bots use duckduckgo too")
-}
-
 fn is_ddg_no_results(html: &str) -> bool {
     html.contains("class=\"no-results\"")
         || html.contains("class='no-results'")
@@ -559,22 +705,17 @@ impl SearchBackend for DuckDuckGoBackend {
         let mut url = self.endpoint.clone();
         url.query_pairs_mut().append_pair("q", &q);
         let opts = browser_search_options(query.language.as_deref(), search_timeout(&self.fetcher));
-        let page = self.fetcher.get(url.as_str(), &opts).await?;
+        let page = get_keyless(&self.fetcher, url.as_str(), &opts).await?;
         let text = page.text();
-        if is_ddg_challenge(page.status, &text) {
-            return Err(WebError::Search(format!(
-                "duckduckgo returned a bot challenge (HTTP {})",
-                page.status
-            )));
-        }
         let hits = parse_ddg(&text, &page.url);
+        if let Some(why) = detect_challenge(page.status, &text, !hits.is_empty()) {
+            return Err(challenge_error(&why));
+        }
         if hits.is_empty() {
             if is_ddg_no_results(&text) {
                 return Ok(Vec::new());
             }
-            return Err(WebError::Search(
-                "duckduckgo returned no parsable results (possibly a bot challenge)".into(),
-            ));
+            return Err(unreadable());
         }
         Ok(finalize(hits, limit))
     }
@@ -666,22 +807,17 @@ impl SearchBackend for DuckDuckGoLiteBackend {
         let mut url = self.endpoint.clone();
         url.query_pairs_mut().append_pair("q", &q);
         let opts = browser_search_options(query.language.as_deref(), search_timeout(&self.fetcher));
-        let page = self.fetcher.get(url.as_str(), &opts).await?;
+        let page = get_keyless(&self.fetcher, url.as_str(), &opts).await?;
         let text = page.text();
-        if is_ddg_challenge(page.status, &text) {
-            return Err(WebError::Search(format!(
-                "duckduckgo_lite returned a bot challenge (HTTP {})",
-                page.status
-            )));
-        }
         let hits = parse_ddg_lite(&text, &page.url);
+        if let Some(why) = detect_challenge(page.status, &text, !hits.is_empty()) {
+            return Err(challenge_error(&why));
+        }
         if hits.is_empty() {
             if is_ddg_no_results(&text) {
                 return Ok(Vec::new());
             }
-            return Err(WebError::Search(
-                "duckduckgo_lite returned no parsable results (possibly a bot challenge)".into(),
-            ));
+            return Err(unreadable());
         }
         Ok(finalize(hits, limit))
     }
@@ -733,20 +869,6 @@ fn bing_target(href: &str, base: &Url) -> Option<String> {
     Some(abs.to_string())
 }
 
-fn is_bing_challenge(status: u16, html: &str) -> bool {
-    if matches!(status, 202 | 403 | 429) {
-        return true;
-    }
-    let lower = html.to_ascii_lowercase();
-    lower.contains("challenge-form")
-        || lower.contains("g-recaptcha")
-        || lower.contains("hcaptcha")
-        || lower.contains("cf-turnstile")
-        || lower.contains("challenge-platform")
-        || lower.contains("verify you are human")
-        || lower.contains("one more step")
-}
-
 /// Parse Bing `<li class="b_algo">` organic search results.
 fn parse_bing(html: &str, base: &Url) -> Vec<SearchResult> {
     let doc = Html::parse_document(html);
@@ -788,22 +910,17 @@ impl SearchBackend for BingBackend {
             }
         }
         let opts = browser_search_options(query.language.as_deref(), search_timeout(&self.fetcher));
-        let page = self.fetcher.get(url.as_str(), &opts).await?;
+        let page = get_keyless(&self.fetcher, url.as_str(), &opts).await?;
         let text = page.text();
-        if is_bing_challenge(page.status, &text) {
-            return Err(WebError::Search(format!(
-                "bing returned a bot challenge (HTTP {})",
-                page.status
-            )));
-        }
         let hits = parse_bing(&text, &page.url);
+        if let Some(why) = detect_challenge(page.status, &text, !hits.is_empty()) {
+            return Err(challenge_error(&why));
+        }
         if hits.is_empty() {
             if text.contains("b_no") || text.contains("There are no results for") {
                 return Ok(Vec::new());
             }
-            return Err(WebError::Search(
-                "bing returned no parsable results (possibly a bot challenge)".into(),
-            ));
+            return Err(unreadable());
         }
         Ok(finalize(hits, limit))
     }
@@ -821,6 +938,9 @@ pub struct SearchOutcome {
     /// `backend: error` lines for backends tried before the one that answered.
     pub fallback_errors: Vec<String>,
 }
+
+/// Cooldown reason for a keyless engine that refused this computer as a robot.
+const CHALLENGE_REASON: &str = "a robot check";
 
 #[derive(Clone, Debug)]
 struct CooldownEntry {
@@ -869,6 +989,7 @@ impl MultiSearch {
             return None;
         }
         match err {
+            WebError::Challenge(_) => Some((self.cooldown, CHALLENGE_REASON)),
             WebError::Status(202 | 401 | 403 | 429) => {
                 Some((self.cooldown, "bot challenge or rate limit"))
             }
@@ -929,6 +1050,8 @@ impl MultiSearch {
         }
         let forced_name = (only.is_some() && candidates.len() == 1).then(|| candidates[0].name());
         let mut errors = Vec::new();
+        // Backends that refused this computer as a robot (or are still cooling down after doing so).
+        let mut blocked: Vec<&'static str> = Vec::new();
         let now = Instant::now();
         for b in candidates {
             let name = b.name();
@@ -947,6 +1070,9 @@ impl MultiSearch {
                 }
             };
             if let Some((secs, reason)) = active_cd {
+                if reason == CHALLENGE_REASON {
+                    blocked.push(name);
+                }
                 errors.push(format!(
                     "{name}: skipped (cooling down for {secs}s after {reason})"
                 ));
@@ -963,6 +1089,9 @@ impl MultiSearch {
                 }
                 Ok(_) => errors.push(format!("{name}: no results")),
                 Err(e) => {
+                    if matches!(e, WebError::Challenge(_)) {
+                        blocked.push(name);
+                    }
                     if let Some((dur, reason)) = self.classify_cooldown(&e) {
                         self.cooldowns.lock().insert(
                             name.to_string(),
@@ -976,6 +1105,9 @@ impl MultiSearch {
                 }
             }
         }
+        // Every backend that was tried refused this computer as a robot: say so plainly, with
+        // the one fix (a forced backend keeps its own wording, which names the others).
+        let all_blocked = !blocked.is_empty() && blocked.len() == errors.len();
         let msg = if let Some(forced) = forced_name {
             let others: Vec<&str> = configured
                 .iter()
@@ -994,6 +1126,12 @@ impl MultiSearch {
                     others.join(", ")
                 )
             }
+        } else if all_blocked {
+            format!(
+                "{} refused this computer as a robot. Free web search is blocked here; this is common on servers and cloud machines. The owner fixes it once in Settings > Web search: add a Brave Search or Tavily key, or the address of a SearXNG server (docs/guide/web.md). Do not retry the same query or try other free engines; tell the owner this in plain words, and meanwhile open known addresses with web_extract. Details: {}",
+                blocked.join(", "),
+                errors.join("; ")
+            )
         } else {
             format!(
                 "all configured search backends ({}) failed ({}); do not retry the exact same query or invent another backend name—rephrase keywords, open a known URL with web_extract, or configure Brave/Tavily/SearXNG in Web Search settings",
@@ -1001,7 +1139,11 @@ impl MultiSearch {
                 errors.join("; ")
             )
         };
-        Err(WebError::Search(msg))
+        Err(if all_blocked {
+            WebError::Challenge(msg)
+        } else {
+            WebError::Search(msg)
+        })
     }
 }
 
@@ -1063,6 +1205,14 @@ impl Default for SearchConfig {
 }
 
 impl SearchConfig {
+    /// A search provider that does not scrape a public search page is configured: a `SearXNG`
+    /// address, a Brave key or a Tavily key. Without one, only the keyless engines are left, and
+    /// those block servers and cloud machines as robots.
+    #[must_use]
+    pub fn has_provider(&self) -> bool {
+        self.searxng_url.is_some() || self.brave_key.is_some() || self.tavily_key.is_some()
+    }
+
     /// Build the ordered backend chain.
     ///
     /// `public` is the policy-guarded fetcher used for public backends.
@@ -1211,12 +1361,16 @@ mod tests {
         </div></body></html>"#;
         let base = Url::parse("https://html.duckduckgo.com/html/?q=rust").unwrap();
         assert_eq!(parse_ddg(challenge_html, &base), Vec::new());
-        assert!(is_ddg_challenge(202, challenge_html));
-        assert!(is_ddg_challenge(200, challenge_html));
-        assert!(!is_ddg_challenge(
-            200,
-            "<html><body><div class=\"no-results\">No results.</div></body></html>"
-        ));
+        assert!(detect_challenge(202, challenge_html, false).is_some());
+        assert!(detect_challenge(200, challenge_html, false).is_some());
+        assert!(
+            detect_challenge(
+                200,
+                "<html><body><div class=\"no-results\">No results.</div></body></html>",
+                false
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1261,11 +1415,15 @@ mod tests {
         assert_eq!(r[0].snippet, "A systems programming language.");
         assert_eq!(r[0].source, "bing");
         assert_eq!(r[1].url, "https://doc.rust-lang.org/book/");
-        assert!(is_bing_challenge(429, "<html></html>"));
-        assert!(is_bing_challenge(
-            200,
-            "<html><div class=\"cf-turnstile\"></div></html>"
-        ));
+        assert!(detect_challenge(429, "<html></html>", false).is_some());
+        assert!(
+            detect_challenge(
+                200,
+                "<html><div class=\"cf-turnstile\"></div></html>",
+                false
+            )
+            .is_some()
+        );
     }
 
     #[test]
@@ -1295,8 +1453,8 @@ mod tests {
         );
         let bing_base = Url::parse("https://www.bing.com/search?q=x").unwrap();
         assert_eq!(parse_bing(&bing_mixed, &bing_base).len(), 1);
-        assert!(is_bing_challenge(202, &bing_mixed));
-        assert!(is_bing_challenge(200, &bing_mixed));
+        assert!(detect_challenge(202, &bing_mixed, true).is_some());
+        assert!(detect_challenge(200, &bing_mixed, true).is_some());
 
         let ddg_lite_mixed = r#"<html><body>
             <div class="anomaly-modal__modal"></div>
@@ -1304,7 +1462,215 @@ mod tests {
         </body></html>"#;
         let lite_base = Url::parse("https://lite.duckduckgo.com/lite/?q=x").unwrap();
         assert_eq!(parse_ddg_lite(ddg_lite_mixed, &lite_base).len(), 1);
-        assert!(is_ddg_challenge(200, ddg_lite_mixed));
+        assert!(detect_challenge(200, ddg_lite_mixed, true).is_some());
+    }
+
+    #[test]
+    fn challenge_detection_knows_the_common_block_pages() {
+        let cases = [
+            // Cloudflare interstitial
+            (
+                403,
+                "<html><head><title>Just a moment...</title></head><body><div id=\"cf-chl-widget\"></div></body></html>",
+            ),
+            (
+                200,
+                "<html><head><title>Attention Required! | Cloudflare</title></head><body></body></html>",
+            ),
+            // Google's "sorry" redirect and a captcha widget
+            (200, "<a href=\"/sorry/index?continue=x\">here</a>"),
+            (
+                200,
+                "<html><body>Our systems have detected unusual traffic from your computer network.</body></html>",
+            ),
+            (
+                200,
+                "<html><body><div class=\"h-captcha\" data-hcaptcha></div></body></html>",
+            ),
+            // DuckDuckGo's own HTTP 202 page, with or without a body
+            (202, ""),
+            // a vendor block page that only has a title
+            (
+                200,
+                "<html><head><title>Access Denied</title></head><body>You do not have permission</body></html>",
+            ),
+        ];
+        for (status, html) in cases {
+            assert!(
+                detect_challenge(status, html, false).is_some(),
+                "{status} {html}"
+            );
+        }
+        // a normal empty or result page is not a challenge
+        for html in [
+            "<html><head><title>rust at DuckDuckGo</title></head><body><div class=\"no-results\">No results.</div></body></html>",
+            "<html><head><title>rust - Bing</title></head><body><li class=\"b_no\">There are no results for x</li></body></html>",
+            "",
+        ] {
+            assert!(detect_challenge(200, html, false).is_none(), "{html}");
+        }
+    }
+
+    #[test]
+    fn challenge_sentences_and_titles_need_an_empty_result_page() {
+        let quoted = "<html><head><title>Captcha tips</title></head><body>verify you are human, one more step</body></html>";
+        // with readable hits the sentence and the title are just text of the results
+        assert!(detect_challenge(200, quoted, true).is_none());
+        // with nothing readable the same page is a block page
+        assert!(detect_challenge(200, quoted, false).is_some());
+        // a structural marker counts even next to hits
+        assert!(detect_challenge(200, "<div class=\"px-captcha\"></div>", true).is_some());
+    }
+
+    #[test]
+    fn keyless_backends_are_told_apart_from_providers() {
+        assert!(is_keyless_backend("duckduckgo"));
+        assert!(is_keyless_backend("duckduckgo_lite"));
+        assert!(is_keyless_backend("bing"));
+        for name in ["searxng", "brave", "tavily"] {
+            assert!(!is_keyless_backend(name));
+        }
+        let mut cfg = SearchConfig::default();
+        assert!(!cfg.has_provider());
+        cfg.searxng_url = Some("http://127.0.0.1:8080".into());
+        assert!(cfg.has_provider());
+        cfg.searxng_url = None;
+        cfg.brave_key = Some(SecretRef::new("web/brave").unwrap());
+        assert!(cfg.has_provider());
+    }
+
+    // ----------------------------------------------------- fake providers
+
+    type Reply = fn() -> Result<Vec<SearchResult>, WebError>;
+
+    /// A provider that answers with a scripted result and counts its calls.
+    struct Fake {
+        name: &'static str,
+        reply: Reply,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Fake {
+        fn backend(
+            name: &'static str,
+            reply: Reply,
+        ) -> (Arc<dyn SearchBackend>, Arc<std::sync::atomic::AtomicUsize>) {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let b = Arc::new(Self {
+                name,
+                reply,
+                calls: Arc::clone(&calls),
+            });
+            (b, calls)
+        }
+    }
+
+    #[async_trait]
+    impl SearchBackend for Fake {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        async fn search(&self, _: &SearchQuery) -> Result<Vec<SearchResult>, WebError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (self.reply)()
+        }
+    }
+
+    fn blocked() -> Result<Vec<SearchResult>, WebError> {
+        Err(challenge_error("it answered HTTP 403"))
+    }
+
+    #[allow(clippy::unnecessary_wraps)] // the scripted reply type of `Fake`
+    fn one_hit() -> Result<Vec<SearchResult>, WebError> {
+        Ok(vec![
+            make("brave", "Rust", "https://www.rust-lang.org/", "").unwrap(),
+        ])
+    }
+
+    fn key_rejected() -> Result<Vec<SearchResult>, WebError> {
+        Err(WebError::Search("brave rejected the API key".into()))
+    }
+
+    #[tokio::test]
+    async fn chain_of_blocked_engines_says_so_plainly_and_names_them() {
+        let (ddg, _) = Fake::backend("duckduckgo", blocked);
+        let (bing, _) = Fake::backend("bing", blocked);
+        let chain = MultiSearch::new(vec![ddg, bing]);
+        let err = chain
+            .search(&SearchQuery::new("backlink sites"), None)
+            .await
+            .unwrap_err();
+        let WebError::Challenge(msg) = err else {
+            panic!("expected a challenge error, got {err:?}");
+        };
+        assert!(
+            msg.starts_with("duckduckgo, bing refused this computer as a robot"),
+            "{msg}"
+        );
+        assert!(msg.contains("Settings > Web search"), "{msg}");
+        assert!(!msg.contains("all configured search backends"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn a_skipped_blocked_engine_still_counts_as_blocked() {
+        let (ddg, calls) = Fake::backend("duckduckgo", blocked);
+        let chain = MultiSearch::new(vec![ddg]);
+        let q = SearchQuery::new("x");
+        assert!(matches!(
+            chain.search(&q, None).await,
+            Err(WebError::Challenge(_))
+        ));
+        // second call: the engine is cooling down and is not asked again
+        let err = chain.search(&q, None).await.unwrap_err();
+        assert!(matches!(err, WebError::Challenge(_)), "{err:?}");
+        assert!(err.to_string().contains("cooling down"), "{err}");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_working_provider_after_blocked_engines_answers_and_keeps_the_notes() {
+        let (ddg, _) = Fake::backend("duckduckgo", blocked);
+        let (brave, _) = Fake::backend("brave", one_hit);
+        let chain = MultiSearch::new(vec![ddg, brave]);
+        let out = chain.search(&SearchQuery::new("rust"), None).await.unwrap();
+        assert_eq!(out.backend, "brave");
+        assert_eq!(out.fallback_errors.len(), 1);
+        assert!(
+            out.fallback_errors[0].starts_with("duckduckgo: treated this computer as a robot"),
+            "{:?}",
+            out.fallback_errors
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_key_is_not_reported_as_a_robot_check() {
+        let (ddg, _) = Fake::backend("duckduckgo", blocked);
+        let (brave, _) = Fake::backend("brave", key_rejected);
+        let chain = MultiSearch::new(vec![brave, ddg]);
+        let err = chain
+            .search(&SearchQuery::new("rust"), None)
+            .await
+            .unwrap_err();
+        let WebError::Search(msg) = err else {
+            panic!("a rejected key must stay a plain search error, got {err:?}");
+        };
+        assert!(msg.contains("brave rejected the API key"), "{msg}");
+        assert!(msg.contains("all configured search backends"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn a_forced_blocked_engine_keeps_naming_the_others() {
+        let (ddg, _) = Fake::backend("duckduckgo", blocked);
+        let (bing, _) = Fake::backend("bing", blocked);
+        let chain = MultiSearch::new(vec![ddg, bing]);
+        let err = chain
+            .search(&SearchQuery::new("rust"), Some("duckduckgo"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WebError::Challenge(_)), "{err:?}");
+        let msg = err.to_string();
+        assert!(msg.contains("search backend `duckduckgo` failed"), "{msg}");
+        assert!(msg.contains("other configured backends (bing)"), "{msg}");
     }
 
     #[test]

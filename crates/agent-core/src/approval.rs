@@ -87,14 +87,17 @@ pub(crate) const FULL_BROWSER_CALLS: [&str; 11] = [
 ];
 
 /// The public-web READ tools (`web-tools`): a search, a page, a feed, a sitemap, a page's
-/// metadata. They follow the same rule as `browser_open` in the Full level: no card for an
+/// metadata, and a page read through the optional scraping add-on (`web_scrape`: clean article
+/// text, a link list, a small crawl of ONE site; it exists only where the owner installed the
+/// add-on, and it obeys robots.txt, never logs in). They follow the same rule as `browser_open` in the Full level: no card for an
 /// owner-started run unless the run holds private data AND read untrusted content and the query
 /// or address carries a private word, a data shape or exceeds the budget. They fetch over HTTP
 /// with the tool's own address guard (private networks refused); they start no program and
 /// type nothing into a page.
-pub(crate) const FULL_WEB_READ_CALLS: [&str; 5] = [
+pub(crate) const FULL_WEB_READ_CALLS: [&str; 6] = [
     "web_search",
     "web_extract",
+    "web_scrape",
     "web_feed",
     "web_sitemap",
     "web_metadata",
@@ -1176,8 +1179,8 @@ impl Shared {
     ///   it is small (a form field under 40 characters) and the run's running total sent to
     ///   such places is under a budget. Otherwise it asks, as before.
     ///
-    /// The public-web read tools (`web_search`, `web_extract`, `web_feed`, `web_sitemap`,
-    /// `web_metadata`) follow the same rules as `browser_open`: a query or an address is judged
+    /// The public-web read tools (`web_search`, `web_extract`, `web_scrape`, `web_feed`,
+    /// `web_sitemap`, `web_metadata`) follow the same rules as `browser_open`: a query or an address is judged
     /// like the text and the URL of a browser call on a site the owner did not name (it is never
     /// "the owner's own page"), and a query of [`WEB_QUERY_LIMIT`] characters or more asks once
     /// the run holds private data and read untrusted content.

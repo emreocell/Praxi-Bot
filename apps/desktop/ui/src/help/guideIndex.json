@@ -901,6 +901,8 @@
     "title": "Web tools: search and read pages",
     "headings": [
       "Search backend",
+      "Search on a server",
+      "Install SearXNG on the server (one command)",
       "Privacy",
       "Safety",
       "Letting a bot fetch without asking",

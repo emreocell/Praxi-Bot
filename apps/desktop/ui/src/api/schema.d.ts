@@ -11974,6 +11974,12 @@ export interface components {
             /** @description Whether the `DuckDuckGo` Lite fallback is enabled. */
             duckduckgo_lite: boolean;
             /**
+             * @description `true` on a computer with no screen (a server or host) that has no search provider
+             *     (Brave, Tavily or `SearXNG`): the free engines usually refuse such machines as robots, so
+             *     the Settings page asks the owner to add a provider.
+             */
+            needs_provider?: boolean;
+            /**
              * @description Priority order of backend ids (`searxng`, `brave`, `tavily`,
              *     `duckduckgo`, `duckduckgo_lite`, `bing`).
              */
@@ -12027,6 +12033,11 @@ export interface components {
         WebSearchTestReport: {
             /** @description Backend that answered (`null` when all failed). */
             backend?: string | null;
+            /**
+             * @description `true` when every engine that was tried refused this computer as a robot (a bot
+             *     challenge or a captcha page), the usual failure of the free engines on a server.
+             */
+            blocked?: boolean;
             /**
              * Format: int64
              * @description Elapsed wall-clock time in milliseconds.

@@ -36,6 +36,11 @@ pub struct WebSearchConfigDto {
     /// loaded cleanly (the daemon fell back to defaults until saved).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_error: Option<String>,
+    /// `true` on a computer with no screen (a server or host) that has no search provider
+    /// (Brave, Tavily or `SearXNG`): the free engines usually refuse such machines as robots, so
+    /// the Settings page asks the owner to add a provider.
+    #[serde(default)]
+    pub needs_provider: bool,
 }
 
 /// Body of `PUT /v1/web/search`. Every field is optional: omitted fields keep
@@ -122,6 +127,10 @@ pub struct WebSearchTestReport {
     /// Errors from earlier backends in the chain before the answering one.
     #[serde(default)]
     pub fallback_errors: Vec<String>,
+    /// `true` when every engine that was tried refused this computer as a robot (a bot
+    /// challenge or a captcha page), the usual failure of the free engines on a server.
+    #[serde(default)]
+    pub blocked: bool,
 }
 
 /// Why a [`WebControl`] operation failed.

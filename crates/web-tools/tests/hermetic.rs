@@ -835,7 +835,7 @@ async fn keyless_fallback_chain_recovers_from_bot_challenge_and_cools_down() {
         .unwrap();
     let t = text(&out);
     assert!(t.contains("via bing"), "{t}");
-    assert!(t.contains("bot challenge"), "{t}");
+    assert!(t.contains("treated this computer as a robot"), "{t}");
     assert!(t.contains("https://example.org/rust"), "{t}");
 
     let reqs_after_first = server.received_requests().await.unwrap();
@@ -911,11 +911,102 @@ async fn all_backends_failing_returns_single_clear_error() {
     let err = call(&reg, "web_search", json!({"query": "hello"}))
         .await
         .unwrap_err();
+    // Only a robot check came back: say that in plain words, with the one fix.
     assert!(
-        err.contains("all configured search backends (duckduckgo) failed"),
+        err.contains("duckduckgo refused this computer as a robot"),
         "{err}"
     );
-    assert!(err.contains("do not retry the exact same query"), "{err}");
+    assert!(err.contains("Settings > Web search"), "{err}");
+    assert!(err.contains("Do not retry the same query"), "{err}");
+}
+
+/// The keyless engines as a datacenter address sees them: every one of them answers with its own
+/// kind of robot check (a `Cloudflare` 403, `DuckDuckGo`'s 202 page, a captcha on a 200).
+#[tokio::test]
+async fn a_server_with_only_keyless_engines_gets_one_plain_blocked_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/html/"))
+        .respond_with(ResponseTemplate::new(403).set_body_raw(
+            b"<html><head><title>Just a moment...</title></head><body><div id=\"cf-chl\"></div></body></html>"
+                .to_vec(),
+            "text/html",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/lite/"))
+        .respond_with(ResponseTemplate::new(202).set_body_raw(
+            b"<form id=\"challenge-form\" action=\"//duckduckgo.com/anomaly.js\"></form>".to_vec(),
+            "text/html",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(html(
+            "<html><head><title>Verify</title></head><body><div class=\"g-recaptcha\"></div></body></html>",
+        ))
+        .mount(&server)
+        .await;
+    let mut c = cfg(loopback_ok());
+    c.search.duckduckgo = true;
+    c.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+    c.search.duckduckgo_lite = true;
+    c.search.duckduckgo_lite_endpoint = Some(format!("{}/lite/", server.uri()));
+    c.search.bing = true;
+    c.search.bing_endpoint = Some(format!("{}/search", server.uri()));
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let err = call(&reg, "web_search", json!({"query": "backlink sites"}))
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("duckduckgo, duckduckgo_lite, bing refused this computer as a robot"),
+        "{err}"
+    );
+    assert!(err.contains("add a Brave Search or Tavily key"), "{err}");
+    assert!(err.contains("SearXNG"), "{err}");
+    // the HTTP error status is turned into the same plain wording
+    assert!(
+        err.contains("duckduckgo: treated this computer as a robot (it answered HTTP 403)"),
+        "{err}"
+    );
+    // the second try inside the cooldown does not hit the engines again, and still says why
+    let hits = server.received_requests().await.unwrap().len();
+    let again = call(&reg, "web_search", json!({"query": "backlink sites 2"}))
+        .await
+        .unwrap_err();
+    assert!(
+        again.contains("refused this computer as a robot"),
+        "{again}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), hits);
+}
+
+/// A result page that merely talks about captchas is not a block page.
+#[tokio::test]
+async fn a_result_that_quotes_a_challenge_sentence_is_not_a_block() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/html/"))
+        .respond_with(html(
+            r#"<div class="result"><a class="result__a" href="https://example.net/captcha">How to verify you are human</a>
+               <a class="result__snippet">Verify you are human: one more step, then you are in.</a></div>"#,
+        ))
+        .mount(&server)
+        .await;
+    let mut c = cfg(loopback_ok());
+    c.search.duckduckgo = true;
+    c.search.duckduckgo_endpoint = Some(format!("{}/html/", server.uri()));
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let out = call(&reg, "web_search", json!({"query": "verify you are human"}))
+        .await
+        .unwrap();
+    let t = text(&out);
+    assert!(t.contains("via duckduckgo"), "{t}");
+    assert!(t.contains("https://example.net/captcha"), "{t}");
 }
 
 #[tokio::test]
@@ -1184,11 +1275,11 @@ async fn challenge_markers_override_parsed_hits_and_trigger_cooldown() {
     assert!(t.contains("Real Result"), "{t}");
     assert!(!t.contains("Verify"), "challenge Verify hit leaked: {t}");
     assert!(
-        t.contains("bing: search failed: bing returned a bot challenge (HTTP 202)"),
+        t.contains("bing: treated this computer as a robot (it answered HTTP 202)"),
         "{t}"
     );
     assert!(
-        t.contains("duckduckgo: search failed: duckduckgo returned a bot challenge (HTTP 200)"),
+        t.contains("duckduckgo: treated this computer as a robot (it showed a robot check page)"),
         "{t}"
     );
 
@@ -1327,4 +1418,50 @@ async fn redirect_target_refuses_loopback_and_private_hops() {
             .await
             .is_err()
     );
+}
+
+/// `SearXNG` on a server asks the same engines from the same kind of address: when it has no hit
+/// because its engines were refused, the answer names them.
+#[tokio::test]
+async fn searxng_with_only_refused_engines_says_which_ones() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "results": [],
+            "unresponsive_engines": [["duckduckgo", "CAPTCHA"], ["google", "Suspended: too many requests"]]
+        })))
+        .mount(&server)
+        .await;
+    let mut c = cfg(loopback_ok());
+    c.search.searxng_url = Some(server.uri());
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let err = call(&reg, "web_search", json!({"query": "backlink sites"}))
+        .await
+        .unwrap_err();
+    assert!(err.contains("none of its engines did"), "{err}");
+    assert!(err.contains("duckduckgo: CAPTCHA"), "{err}");
+    assert!(
+        err.contains("google: Suspended: too many requests"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn searxng_403_points_at_the_json_setting() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let mut c = cfg(loopback_ok());
+    c.search.searxng_url = Some(server.uri());
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let err = call(&reg, "web_search", json!({"query": "rust"}))
+        .await
+        .unwrap_err();
+    assert!(err.contains("search.formats"), "{err}");
 }

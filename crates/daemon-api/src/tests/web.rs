@@ -42,6 +42,7 @@ impl FakeWeb {
                 duckduckgo_lite: true,
                 bing: true,
                 config_error: None,
+                needs_provider: false,
             }),
             brave_secret: Mutex::new(None),
             tavily_secret: Mutex::new(None),
@@ -138,6 +139,7 @@ impl WebControl for FakeWeb {
             elapsed_ms: 42,
             error: None,
             fallback_errors: vec!["duckduckgo: challenge".into()],
+            blocked: false,
         })
     }
 }
