@@ -32,6 +32,16 @@ test("sixteen browser steps fold into one group; a failure stays its own row", (
   assert.ok(last && last.kind === "group" && last.sameAction);
 });
 
+test("a completed approval stays a separate expandable step", () => {
+  const approved = step("playwright.browser_click");
+  assert.equal(approved.kind, "tool");
+  if (approved.kind !== "tool") return;
+  approved.tool.approvalDecision = { outcome: "approved", offsetMs: 1500 };
+  const rows = buildRows([step("playwright.browser_click"), approved, step("playwright.browser_click")]);
+  assert.deepEqual(rows.map((row) => row.kind), ["tool", "tool", "tool"]);
+  assert.equal(rows[1]?.kind === "tool" && rows[1].tool.approvalDecision?.offsetMs, 1500);
+});
+
 test("a collapsed finished chain shows only failures; a live one also its current step", () => {
   const rows = buildRows([step("playwright.a"), step("playwright.a"), step("playwright.b", "error"), step("gmail.send", "running")]);
   assert.equal(collapsedRows(rows, false).shown.length, 2); // error + still-running orphan is not hidden

@@ -42,7 +42,7 @@ export function groupKey(tool: ToolItem): string {
 
 /** Finished fine: the only status a group may absorb. */
 function isPlainDone(tool: ToolItem): boolean {
-  return tool.status === "done";
+  return tool.status === "done" && !tool.approvalDecision;
 }
 
 /** A call the owner must see even in a collapsed chain. */

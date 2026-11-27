@@ -2322,6 +2322,8 @@
     },
     "chain": {
       "allowed": "Allowed by you",
+      "approvedAt": "Approved · {{time}} into run",
+      "deniedAt": "Denied · {{time}} into run",
       "details": "Details",
       "groupApp": "{{app}} ×{{count}}",
       "groupSame": "{{what}} ×{{count}}",

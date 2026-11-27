@@ -130,7 +130,10 @@ function ToolStep({ tool, times, live }: { tool: ToolItem; times: MessageTimes; 
         : t(`chat.chain.reason.${reason.kind}`)
     : null;
   // The trace of an answered approval: what the owner allowed stays readable in the step line.
-  const allowed = !bad && tool.gated && tool.approvalDecision?.outcome === "approved";
+  const decision = tool.approvalDecision;
+  const decisionTime = decision && Number.isFinite(decision.offsetMs) && decision.offsetMs >= 0
+    ? formatSpan(t, Math.floor(decision.offsetMs / 1000))
+    : null;
   const site = label.chips.find((c) => c.icon === "globe");
   const timeText =
     ms !== undefined && showStepDuration(ms, state)
@@ -160,9 +163,9 @@ function ToolStep({ tool, times, live }: { tool: ToolItem; times: MessageTimes; 
             </span>
           ))
         )}
-        {allowed ? (
+        {decision && decisionTime !== null ? (
           <span className={styles.allowed} data-testid="step-allowed">
-            {t("chat.chain.allowed")}
+            {t(decision.outcome === "approved" ? "chat.chain.approvedAt" : "chat.chain.deniedAt", { time: decisionTime })}
           </span>
         ) : null}
         {reasonText && !open ? (

@@ -2322,6 +2322,8 @@
     },
     "chain": {
       "allowed": "İzin verdin",
+      "approvedAt": "Onaylandı · çalışma başladıktan {{time}} sonra",
+      "deniedAt": "Reddedildi · çalışma başladıktan {{time}} sonra",
       "details": "Ayrıntılar",
       "groupApp": "{{app}} ×{{count}}",
       "groupSame": "{{what}} ×{{count}}",
