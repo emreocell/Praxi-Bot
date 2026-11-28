@@ -7637,7 +7637,7 @@ export interface components {
             providers?: string[];
             /**
              * @description Also move the schedules and triggers of the moved bots (the local copies are then
-             *     disabled and marked "moved to <server>").
+             *     disabled and marked moved to the destination host).
              */
             schedules?: boolean;
             /**
@@ -10616,7 +10616,7 @@ export interface components {
             is_browser?: boolean;
             /** @description Tools cannot send data off the machine. Default `false`: every tool is egress. */
             local_only?: boolean;
-            /** @description Server name (the `<server>` of `mcp:<server>/<tool>`). */
+            /** @description Server name (the server segment of a qualified `mcp:…/…` tool name). */
             name: string;
             oauth?: null | components["schemas"]["McpOAuthConfig"];
             /** @description Tool results are public data. Default `false`: a result is a private read. */
@@ -10840,7 +10840,7 @@ export interface components {
             description: string;
             /** @description `read`, `write` or `destructive` (`destructive` unless the server is trusted). */
             effect: string;
-            /** @description Qualified tool name (`mcp:<server>/<tool>`). */
+            /** @description Qualified tool name (`mcp:server/tool`). */
             name: string;
         };
         /**

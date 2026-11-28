@@ -26430,7 +26430,7 @@
           },
           "schedules": {
             "type": "boolean",
-            "description": "Also move the schedules and triggers of the moved bots (the local copies are then\ndisabled and marked \"moved to <server>\")."
+            "description": "Also move the schedules and triggers of the moved bots (the local copies are then\ndisabled and marked moved to the destination host)."
           },
           "separate": {
             "type": "array",
@@ -34492,7 +34492,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Server name (the `<server>` of `mcp:<server>/<tool>`)."
+            "description": "Server name (the server segment of a qualified `mcp:…/…` tool name)."
           },
           "oauth": {
             "oneOf": [
@@ -35102,7 +35102,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Qualified tool name (`mcp:<server>/<tool>`)."
+            "description": "Qualified tool name (`mcp:server/tool`)."
           }
         }
       },
