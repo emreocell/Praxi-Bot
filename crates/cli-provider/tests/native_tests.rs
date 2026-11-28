@@ -382,6 +382,7 @@ async fn every_engine_runs_its_first_message_with_the_settings_the_picker_gives_
         let level = level_picker_starts_on(driver);
         let (dir, workspace, env) = setup();
         let env = match driver {
+            Driver::Agy => env.with_env_var("FAKE_MODE", "acp-list"),
             // `vibe-acp` is its own entry point and takes no arguments.
             Driver::Vibe => env.with_env_var("FAKE_DRIVER", "vibe"),
             _ => env,
