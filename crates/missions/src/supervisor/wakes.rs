@@ -34,7 +34,7 @@ pub struct WakePass {
     pub probes: u32,
     /// Missions moved back to `running`.
     pub released: u32,
-    /// Parked live hand-overs that ran out.
+    /// Parked live hand-overs that ran out, or that nothing waits on any more.
     pub handovers_expired: u32,
 }
 
@@ -81,7 +81,13 @@ impl Supervisor {
         // A CAPTCHA nobody finished on the page in time: its item fails, the page is let go.
         for h in self.store.expire_live_handovers(now)? {
             pass.handovers_expired += 1;
-            self.handover_ended(&h);
+            self.handover_ended(&h, false);
+        }
+        // One whose item the owner settled by hand, or whose mission ended: nothing waits on
+        // its page any more, so the bot's browser is not held (or locked) for it.
+        for (h, give_back) in self.store.settle_orphan_live_handovers()? {
+            pass.handovers_expired += 1;
+            self.handover_ended(&h, give_back);
         }
 
         for w in self.store.due_timers(now)? {

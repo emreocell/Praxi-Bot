@@ -294,12 +294,18 @@ impl AppState {
                 state.notify_mission_handover(n);
             }
         }));
-        // A parked CAPTCHA the supervisor expired (or a restart lost): its page is let go.
+        // A parked CAPTCHA the supervisor expired (or a restart lost, or the owner settled by
+        // hand): its page is let go.
         let ended = weak.clone();
-        supervisor.set_handover_ended_hook(Arc::new(move |h| {
+        supervisor.set_handover_ended_hook(Arc::new(move |h, give_back| {
             if let Some(state) = ended.upgrade() {
                 let call_id = h.call_id.clone();
-                tokio::spawn(async move { state.agent().release_parked_handover(&call_id).await });
+                tokio::spawn(async move {
+                    state
+                        .agent()
+                        .release_parked_handover(&call_id, give_back)
+                        .await;
+                });
             }
         }));
         supervisor.set_change_hook(Arc::new(move |id| {

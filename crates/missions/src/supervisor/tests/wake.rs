@@ -759,3 +759,71 @@ async fn without_a_mailbox_probe_a_mail_wait_only_times_out() {
     clock.0.fetch_add(31 * MIN, Ordering::SeqCst);
     assert_eq!(sup.wake_pass().await.unwrap().timed_out, 1);
 }
+
+#[tokio::test]
+async fn the_wake_pass_expires_parked_handovers_and_lets_go_of_pages_nothing_waits_on() {
+    let w = world(sites(2), Budgets::default(), signup_then_finish);
+    let ended: Arc<Mutex<Vec<(String, bool)>>> = Arc::default();
+    let seen = Arc::clone(&ended);
+    w.sup.set_handover_ended_hook(Arc::new(move |h, give_back| {
+        seen.lock().push((h.call_id.clone(), give_back));
+    }));
+    let now = w.clock.now_ms();
+    for (i, key) in ["site-0.example", "site-1.example"].into_iter().enumerate() {
+        w.store
+            .update_item(
+                &w.mission,
+                key,
+                &ItemUpdate {
+                    status: Some(ItemStatus::Doing),
+                    ..ItemUpdate::default()
+                },
+                false,
+                now,
+            )
+            .unwrap();
+        let call = format!("call-{i}");
+        let parked = w
+            .store
+            .park_live_handover(
+                &w.mission,
+                &crate::NewHandover {
+                    call_id: &call,
+                    bot_id: "b",
+                    run_id: "r",
+                    kind: "captcha",
+                    reason: "needs you on this page: a CAPTCHA",
+                    expires_at_ms: now + 60 * MIN,
+                },
+                2,
+                now,
+            )
+            .unwrap();
+        assert_eq!(parked, crate::Park::Parked(key.to_owned()));
+    }
+    assert_eq!(w.sup.wake_pass().await.unwrap().handovers_expired, 0);
+
+    // The owner skips one by hand: its page is closed at the next pass, the item stays skipped.
+    w.store
+        .update_item(
+            &w.mission,
+            "site-0.example",
+            &ItemUpdate {
+                status: Some(ItemStatus::Skipped),
+                ..ItemUpdate::default()
+            },
+            true,
+            now,
+        )
+        .unwrap();
+    assert_eq!(w.sup.wake_pass().await.unwrap().handovers_expired, 1);
+    assert_eq!(*ended.lock(), vec![("call-0".to_owned(), false)]);
+    assert_eq!(w.item("site-0.example").status, ItemStatus::Skipped);
+
+    // The other runs out: its item fails and its page is closed, by the supervisor alone.
+    w.advance(61 * MIN);
+    assert_eq!(w.sup.wake_pass().await.unwrap().handovers_expired, 1);
+    assert_eq!(ended.lock().last(), Some(&("call-1".to_owned(), false)));
+    assert_eq!(w.item("site-1.example").status, ItemStatus::Failed);
+    assert!(w.store.live_handover("call-1").unwrap().is_none());
+}

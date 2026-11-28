@@ -356,7 +356,15 @@ impl Tool for CaptchaTool {
     fn spec(&self) -> &ToolSpec {
         &self.0
     }
-    async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+        // As the real tool: the page is checked and the request armed for the run.
+        builtin_tools::handover_hub().arm(
+            &ctx.run_id,
+            Arc::new(CaptchaPage),
+            builtin_tools::HandoverKind::Captcha,
+            "https://signup.example",
+            "heading \"Sign up\"\ncheckbox \"I'm not a robot\"",
+        );
         Ok(ToolOutput {
             content: vec![ContentPart::Json {
                 data: builtin_tools::handover::browser_handover_card(
@@ -367,6 +375,61 @@ impl Tool for CaptchaTool {
             spill: None,
             exposure: None,
         })
+    }
+}
+
+/// The page the CAPTCHA is on. It cannot keep a page apart, so a parked CAPTCHA locks the
+/// bot's browser instead (see `HandoverHub::park`).
+struct CaptchaPage;
+
+#[async_trait]
+impl builtin_tools::BrowserDriver for CaptchaPage {
+    async fn open(&self, _: &str, _: Option<&str>) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn snapshot(&self, _: bool) -> Result<String, String> {
+        Ok("checkbox \"I'm not a robot\"".into())
+    }
+    async fn click(&self, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn fill(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn select(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn press(&self, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn scroll(&self, _: Option<&str>, _: f64, _: f64) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn wait(
+        &self,
+        _: builtin_tools::browser::Wait,
+        _: Option<std::time::Duration>,
+    ) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn back(&self) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn tabs(&self, _: Option<usize>) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn screenshot(
+        &self,
+        _: bool,
+        _: Option<&str>,
+    ) -> Result<(Vec<u8>, &'static str), String> {
+        Err("fake".into())
+    }
+    async fn eval(&self, _: &str) -> Result<Value, String> {
+        Err("fake".into())
+    }
+    async fn current_url(&self) -> Option<String> {
+        Some("https://signup.example/join".into())
     }
 }
 
@@ -641,7 +704,7 @@ async fn continues_without_asking_across_sessions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_captcha_gives_up_one_item_the_rest_continue_and_the_mission_finishes() {
+async fn a_captcha_parks_one_item_the_rest_continue_and_the_mission_waits_for_the_owner() {
     let dir = tempfile::tempdir().unwrap();
     let behaviour = Behaviour {
         plan: sites(5),
@@ -650,9 +713,10 @@ async fn a_captcha_gives_up_one_item_the_rest_continue_and_the_mission_finishes(
     };
     let w = world(dir.path(), &behaviour, 40, None);
     let id = start(&w, GOAL, Budgets::default());
-    // The CAPTCHA site is parked for the owner on the live page; the mission still finishes.
+    // The CAPTCHA site is parked for the owner on the live page; every other site is finished,
+    // then the mission waits for the owner (blocked) instead of giving that site up.
     let end = w.supervisor.drive(&id).await.unwrap();
-    assert_eq!(end, MissionState::Done);
+    assert_eq!(end, MissionState::Blocked);
     let p = w.store.progress(&id).unwrap();
     assert_eq!(
         (p.done, p.blocked, p.failed),
@@ -666,7 +730,16 @@ async fn a_captcha_gives_up_one_item_the_rest_continue_and_the_mission_finishes(
     let digest = m.digest.as_ref().unwrap();
     assert_eq!(digest.blocked.len(), 1, "the report lists the parked site");
     let audit = w.storage.list_audit(w.user).unwrap();
-    assert!(audit.iter().any(|a| a.action == "handover.parked"));
+    let parked = audit
+        .iter()
+        .find(|a| a.action == "handover.parked")
+        .expect("parked");
+    // The parked row outlives the sessions; the mission's supervisor expires it.
+    let call_id = parked.detail["call_id"].as_str().unwrap().to_owned();
+    assert!(w.store.live_handover(&call_id).unwrap().is_some());
+    builtin_tools::handover_hub()
+        .release_parked(&call_id, false)
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

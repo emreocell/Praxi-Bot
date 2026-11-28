@@ -2370,6 +2370,53 @@ mod tests {
     }
 
     #[test]
+    fn a_handover_whose_item_the_owner_settled_or_whose_mission_ended_lets_its_page_go() {
+        let s = store();
+        let m = s
+            .create(
+                &new_mission(&[("a.com", "A"), ("b.com", "B"), ("c.com", "C")]),
+                1,
+            )
+            .unwrap();
+        for (key, call) in [("a.com", "call-a"), ("b.com", "call-b")] {
+            status(&s, &m.id, key, ItemStatus::Doing, false).unwrap();
+            park(&s, &m.id, call, i64::MAX, 3);
+        }
+        assert_eq!(
+            s.settle_orphan_live_handovers().unwrap(),
+            vec![],
+            "both wait"
+        );
+        // The owner skips one: its page is closed, the other still waits.
+        status(&s, &m.id, "a.com", ItemStatus::Skipped, true).unwrap();
+        let settled = s.settle_orphan_live_handovers().unwrap();
+        assert_eq!(settled.len(), 1);
+        assert_eq!(settled[0].0.call_id, "call-a");
+        assert!(!settled[0].1, "a skipped item's page is closed");
+        assert!(s.live_handover("call-a").unwrap().is_none());
+        assert_eq!(item(&s, &m.id, "a.com").status, ItemStatus::Skipped);
+        // The owner puts one back to todo by hand: the page stays open for the bot.
+        status(&s, &m.id, "c.com", ItemStatus::Doing, false).unwrap();
+        park(&s, &m.id, "call-c", i64::MAX, 3);
+        status(&s, &m.id, "c.com", ItemStatus::Todo, true).unwrap();
+        let settled = s.settle_orphan_live_handovers().unwrap();
+        assert_eq!(settled.len(), 1);
+        assert!(settled[0].1, "an open item gets its page back");
+        // A claimed row is the answer's to finish, even when the mission ended meanwhile.
+        assert!(s.claim_live_handover("call-b", 20).unwrap().is_some());
+        s.set_state(&m.id, MissionState::Cancelled, None, 30)
+            .unwrap();
+        assert_eq!(s.settle_orphan_live_handovers().unwrap(), vec![]);
+        assert_eq!(
+            s.unclaim_live_handover("call-b", 40).unwrap(),
+            Unclaim::Restored
+        );
+        let settled = s.settle_orphan_live_handovers().unwrap();
+        assert_eq!(settled.len(), 1);
+        assert!(!settled[0].1, "the mission is over: the page is closed");
+    }
+
+    #[test]
     fn after_a_restart_parked_handovers_are_settled_from_their_rows() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("m.db");

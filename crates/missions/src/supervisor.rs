@@ -183,9 +183,11 @@ pub enum Step {
 /// Callback told that a mission changed (state, ledger, digest).
 pub type ChangeHook = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// Callback told that a parked live hand-over ended without an owner answer (it ran out, or a
-/// restart lost its page): whoever holds its browser page lets go of it.
-pub type HandoverEndedHook = Arc<dyn Fn(&crate::ParkedHandover) + Send + Sync>;
+/// Callback told that a parked live hand-over ended without an owner answer (it ran out, a
+/// restart lost its page, or the owner settled its item by hand): whoever holds its browser
+/// page lets go of it. The flag says whether the page goes back to the bot as an ordinary tab
+/// (`true`) or is closed.
+pub type HandoverEndedHook = Arc<dyn Fn(&crate::ParkedHandover, bool) + Send + Sync>;
 
 /// The supervisor.
 pub struct Supervisor {
@@ -254,9 +256,9 @@ impl Supervisor {
         *self.on_handover_ended.lock() = Some(hook);
     }
 
-    fn handover_ended(&self, h: &crate::ParkedHandover) {
+    fn handover_ended(&self, h: &crate::ParkedHandover, give_back: bool) {
         if let Some(hook) = self.on_handover_ended.lock().clone() {
-            hook(h);
+            hook(h, give_back);
         }
         self.changed(&h.mission_id);
     }
@@ -389,7 +391,7 @@ impl Supervisor {
             match this.store.recover_live_handovers(this.clock.now_ms()) {
                 Ok(settled) => {
                     for h in &settled {
-                        this.handover_ended(h);
+                        this.handover_ended(h, false);
                     }
                 }
                 Err(e) => tracing::warn!("missions: settling parked hand-overs failed: {e}"),

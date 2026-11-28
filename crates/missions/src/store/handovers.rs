@@ -395,6 +395,54 @@ impl MissionStore {
         Ok(due)
     }
 
+    /// Hand-overs nobody waits on any more: the owner settled the item by hand (skipped it)
+    /// or the mission ended. Each unclaimed such row is removed and returned with whether its
+    /// page goes back to the bot (`true`: the item is open or done again, the owner may have
+    /// moved on from that page) or is closed (the item was given up or the mission is over).
+    /// The item itself is left as the owner set it.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn settle_orphan_live_handovers(&self) -> Result<Vec<(ParkedHandover, bool)>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let orphans: Vec<(ParkedHandover, bool)> = {
+            let cols = COLS
+                .split(", ")
+                .map(|c| format!("h.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut stmt = tx.prepare(&format!(
+                "SELECT {cols}, i.status, m.state FROM mission_handovers h \
+                 JOIN missions m ON m.id = h.mission_id \
+                 LEFT JOIN mission_items i ON i.mission_id = h.mission_id AND i.key = h.item_key \
+                 WHERE h.claimed_at_ms IS NULL AND ( \
+                   m.state IN ('done', 'failed', 'cancelled') \
+                   OR i.key IS NULL OR i.status != 'blocked' OR i.live_only = 0)"
+            ))?;
+            stmt.query_map([], |r| {
+                let h = parked_of(r)?;
+                let item: Option<String> = r.get(7)?;
+                let mission: String = r.get(8)?;
+                let open = matches!(
+                    item.as_deref().and_then(ItemStatus::parse),
+                    Some(ItemStatus::Todo | ItemStatus::Doing | ItemStatus::Done)
+                );
+                let over = MissionState::parse(&mission).is_none_or(MissionState::is_terminal);
+                Ok((h, open && !over))
+            })?
+            .collect::<rusqlite::Result<_>>()?
+        };
+        for (h, _) in &orphans {
+            tx.execute(
+                "DELETE FROM mission_handovers WHERE call_id = ?1",
+                [&h.call_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(orphans)
+    }
+
     /// After a restart no browser page survives, so no parked hand-over can be answered any
     /// more: one that ran out fails, the others go back to `todo` (the next session opens the
     /// site again and, if the CAPTCHA is still there, parks a fresh hand-over). Returns every

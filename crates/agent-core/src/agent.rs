@@ -2341,11 +2341,12 @@ impl AgentLoop {
             .ok_or(LoopError::NoPendingApproval(call_id))
     }
 
-    /// A mission's parked CAPTCHA ended without an answer (the supervisor expired it, or a
-    /// restart lost it): let go of its page.
-    pub async fn release_parked_handover(&self, call_id: &str) {
+    /// A mission's parked CAPTCHA ended without an answer (the supervisor expired it, a
+    /// restart lost it, or the owner settled its item by hand): let go of its page
+    /// (`give_back`: it stays open as an ordinary tab of the bot, otherwise it is closed).
+    pub async fn release_parked_handover(&self, call_id: &str, give_back: bool) {
         builtin_tools::handover_hub()
-            .release_parked(call_id, false)
+            .release_parked(call_id, give_back)
             .await;
     }
 

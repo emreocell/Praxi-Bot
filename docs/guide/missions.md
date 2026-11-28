@@ -100,12 +100,23 @@ answer for each (or skip it) and send them all with one button. When nothing
 else is left to do, the mission waits for you and the report lists what is
 blocked.
 
-A **CAPTCHA** (or a phone/SMS check the bot cannot complete) is **parked** as
-**needs you on this page**: the browser tab stays open for several hours, you get
-a notice with a link to **Live view**, you **Take control**, solve the check, press
-**Done** on the hand-over card, and the mission tries that site again in a later
-session from the same page. If nobody answers in time, the item is **given up**
-as before, with the reason in the report.
+A **CAPTCHA** is **parked** as **needs you on this page**. The bot never tries to
+solve it. The page moves to a tab of its own that the bot's other items and runs
+cannot see or use, and that tab stays open for up to 8 hours. You get at most one
+notice per mission an hour. Open **Live view**, press **Take control**, solve the check, then press
+**Done** on the hand-over card. The item goes back to the list, and a later session
+continues on that page. If nobody answers in time, the item is **given up** with the
+reason in the report. If you skip the item, or the mission ends, the tab is closed.
+After a restart of Praxi the kept page is gone, so the item goes back to the list
+and the bot opens the site again later. If the browser cannot keep a page apart,
+the bot's browser is **locked** until you answer, and the notice says so.
+
+One mission keeps one such page at a time, each bot keeps one, and the app keeps at
+most four. A CAPTCHA over these limits gives its item up, as before.
+
+A **phone or SMS check** the bot cannot complete is parked for you the same way,
+but without a held tab: finish that step yourself on the site, then skip the item.
+Only you can move such an item on. The bot cannot take it up again by itself.
 
 An **approval card** nobody answers (for example for money) stays open for five
 minutes. After that only the item it belongs to is parked ("needs your approval")
