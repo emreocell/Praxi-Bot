@@ -34,17 +34,15 @@ test("the selected bot shows no unread dot: its selected background already says
   assert.match(app, /unreadBots\.has\(bot\.id\) && routeBotId !== bot\.id/);
 });
 
-test("the profile button is as wide as the name, has no up/down chevron, and its menu is narrower", () => {
+test("the profile button fills the rail row before Apps, has no chevron, and its menu is 272px", () => {
   assert.doesNotMatch(accountTsx, /ChevronsUpDown|chevron/i);
   assert.doesNotMatch(accountCss, /\.chevron/);
-  assert.match(block(accountCss, ".trigger"), /width:\s*fit-content/);
-  assert.match(block(accountCss, ".trigger"), /max-width:\s*100%/);
-  assert.doesNotMatch(block(accountCss, ".name"), /flex:\s*1/);
-  assert.match(block(appCss, ".footRow > :first-child"), /flex:\s*0 1 auto/);
-  // Apps stays at the rail's edge even though the profile no longer fills the row.
+  assert.match(block(accountCss, ".trigger"), /width:\s*100%/);
+  assert.match(block(accountCss, ".name"), /flex:\s*1/);
+  assert.match(block(appCss, ".footRow > :first-child"), /flex:\s*1 1 0/);
   assert.match(block(appCss, ".footRow > :last-child"), /margin-left:\s*auto/);
   const width = Number(/const MENU_WIDTH = (\d+)/.exec(accountTsx)?.[1]);
-  assert.ok(width > 0 && width < 272, `menu width ${width} is narrower than the old 272`);
+  assert.equal(width, 272);
   assert.match(accountTsx, /width=\{MENU_WIDTH\}/);
 });
 

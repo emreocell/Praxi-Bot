@@ -1,8 +1,9 @@
 /*
  * The Apps button sits immediately to the right of the profile row (App.module.css .footRow) and keeps
  * its own size there.  What it shows depends on the rail's width tier (data-rail-tier on the rail, see
- * `railTier` in lib/shellLayout.ts): the icon on a narrow or medium rail, icon and label from "large",
- * plus up to three connected apps' logos on a wide rail.  The name is always in the tooltip.
+ * `railTier` in lib/shellLayout.ts): the grid icon on mini and narrow; from medium, three monochrome
+ * preview logos (Discord, Gmail, GitHub) in one compact pill; the word "Apps" from large.  The name is
+ * always in the tooltip.
  */
 .pill {
   display: inline-flex;
@@ -64,12 +65,28 @@
   gap: var(--space-1);
 }
 
-.stack > :nth-child(n + 4) {
-  display: none;
+:global([data-rail-tier="medium"]) .pill,
+:global([data-rail-tier="large"]) .pill,
+:global([data-rail-tier="wide"]) .pill {
+  background-color: color-mix(in srgb, var(--color-text) 5%, transparent);
 }
 
+:global([data-rail-tier="medium"]) .pill:hover,
+:global([data-rail-tier="large"]) .pill:hover,
+:global([data-rail-tier="wide"]) .pill:hover {
+  background-color: var(--state-hover);
+}
+
+:global([data-rail-tier="medium"]) .stack,
+:global([data-rail-tier="large"]) .stack,
 :global([data-rail-tier="wide"]) .stack {
   display: flex;
+}
+
+:global([data-rail-tier="medium"]) .stack ~ .icon,
+:global([data-rail-tier="large"]) .stack ~ .icon,
+:global([data-rail-tier="wide"]) .stack ~ .icon {
+  display: none;
 }
 
 /* Collapsed to icons: a square icon button above the avatar. */

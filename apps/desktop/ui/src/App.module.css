@@ -629,9 +629,8 @@
   padding: var(--space-3);
 }
 
-/* The profile row with the Apps button to its right, at every rail width: the profile button is only
-   as wide as its name (which truncates when the rail is narrow), Apps keeps its own size (see
-   AppsPill.module.css) and stays at the rail's right edge. */
+/* The profile row with the Apps button to its right: the profile trigger fills the space before Apps
+   (name truncates with ellipsis); Apps keeps its own size (see AppsPill.module.css). */
 .footRow {
   display: flex;
   flex-direction: row;
@@ -641,7 +640,7 @@
 }
 
 .footRow > :first-child {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
 }
 

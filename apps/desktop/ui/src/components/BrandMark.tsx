@@ -10,14 +10,14 @@ const MULTICOLOR = ["gmail", "googledrive", "googlecalendar", "figma"];
  * text colour on the theme where they would vanish (`data-tone`). Engine/provider
  * marks follow the text colour in every theme. The wrapper names the artwork.
  */
-export function BrandMark({ name, size = 16 }: { name: string; size?: number }) {
+export function BrandMark({ name, size = 16, monochrome = false }: { name: string; size?: number; monochrome?: boolean }) {
   const brand = brandIcon(name);
   const key = name.toLowerCase().replace(/[^a-z]/g, "");
   const style = { "--brand-color": brand.color, width: size, height: size } as CSSProperties;
   const tone = brand.monochrome || !brand.known ? "mono" : brightness(brand.color) > 200 ? "light" : brightness(brand.color) < 70 ? "dark" : "mid";
   const accessible = { role: "img", "aria-label": brand.name };
 
-  if (MULTICOLOR.includes(key)) {
+  if (MULTICOLOR.includes(key) && !monochrome) {
     return (
       <span className={styles.mark} style={style} {...accessible}>
         <img src={`/brands/${key}.svg`} alt="" draggable={false} />

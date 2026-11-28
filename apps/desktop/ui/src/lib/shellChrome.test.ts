@@ -7,6 +7,7 @@ const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8"
 const app = read("../App.tsx");
 const css = read("../App.module.css");
 const appsPillCss = read("../components/AppsPill.module.css");
+const appsPillTsx = read("../components/AppsPill.tsx");
 const sidebarCss = read("../../../../../packages/ui/src/components/Sidebar.module.css");
 const block = (source: string, selector: string) => {
   const start = source.indexOf(`${selector} {`);
@@ -44,10 +45,16 @@ test("Apps sits immediately to the right of the profile row at every rail width 
   assert.match(block(css, ".railMini .footRow"), /flex-direction:\s*column-reverse/);
 });
 
-test("the Apps button: label from the large rail tier, logos only on a wide rail, never wraps", () => {
+test("the Apps button previews Discord, Gmail and GitHub on the rail", () => {
+  assert.match(appsPillTsx, /"discord",\s*"gmail",\s*"github"/);
+  assert.match(appsPillTsx, /monochrome/);
+});
+
+test("the Apps button: grid icon on a narrow rail, three preview logos from medium, label from large", () => {
   assert.match(appsPillCss, /\.label \{[^}]*display:\s*none/);
   assert.match(appsPillCss, /\[data-rail-tier="large"\]\) \.label,\s*:global\(\[data-rail-tier="wide"\]\) \.label \{\s*display:\s*inline/);
-  assert.match(appsPillCss, /\[data-rail-tier="wide"\]\) \.stack \{\s*display:\s*flex/);
+  assert.match(appsPillCss, /\[data-rail-tier="medium"\]\) \.stack,\s*\n:global\(\[data-rail-tier="large"\]\) \.stack/);
+  assert.match(appsPillCss, /\[data-rail-tier="medium"\]\) \.stack ~ \.icon,\s*\n:global\(\[data-rail-tier="large"\]\) \.stack ~ \.icon/);
   assert.match(block(appsPillCss, ".pill"), /white-space:\s*nowrap/);
 });
 
