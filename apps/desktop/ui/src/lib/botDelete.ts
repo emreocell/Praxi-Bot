@@ -4,6 +4,15 @@ import type { BotDeletePreview, BotDeleteReport, Run } from "../api/types.ts";
 
 export type DeleteStep = "review" | "confirm";
 
+/**
+ * Where focus goes when the dialog shows `to` after `from`: the name box on step 2; back on step 1
+ * (Back, or a refusal) the Cancel button, as the control that had focus is gone with step 2.
+ */
+export function focusAfterStep(from: DeleteStep | null, to: DeleteStep): "name" | "cancel" | null {
+  if (to === "confirm") return "name";
+  return from === "confirm" ? "cancel" : null;
+}
+
 /** The guide page that says how to make an encrypted backup first. */
 export const BACKUP_GUIDE_URL = "https://github.com/emreocell/Praxi-Bot/blob/main/docs/guide/backup.md";
 

@@ -8,6 +8,7 @@ import {
   deleteBlock,
   deleteOptions,
   deletedCounts,
+  focusAfterStep,
   keptMailboxes,
   leftovers,
   nameMatches,
@@ -184,6 +185,18 @@ test("Back from step 2 clears the typed name, and the name to type is the one th
   assert.match(src, /const name = preview\?\.name \?\? bot\.name;/);
   // "Stop it first" also cancels a waiting mission.
   assert.match(src, /STOPPED_MISSION_STATES\.has\(m\.state\)/);
+});
+
+test("focus moves to the name box on step 2 and back to Cancel on the way back to step 1", () => {
+  assert.equal(focusAfterStep("review", "confirm"), "name");
+  assert.equal(focusAfterStep("confirm", "review"), "cancel");
+  // Opening on step 1 leaves it to the dialog's own autofocus.
+  assert.equal(focusAfterStep(null, "review"), null);
+  assert.equal(focusAfterStep("review", "review"), null);
+  const src = read("../components/DeleteBotDialog.tsx");
+  assert.match(src, /focusAfterStep\(shownStep\.current, step\)/);
+  assert.match(src, /if \(target === "cancel"\) cancelButton\.current\?\.focus\(\);/);
+  assert.match(src, /<Button ref=\{cancelButton\} variant="ghost"[^>]*onClick=\{onClose\}/);
 });
 
 // ---- the dialog and its wiring --------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   deletableInboxes,
   deleteOptions,
   deletedCounts,
+  focusAfterStep,
   keptMailboxes,
   leftovers,
   nameMatches,
@@ -65,6 +66,8 @@ export function DeleteBotDialog({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameInput = useRef<HTMLInputElement | null>(null);
+  const cancelButton = useRef<HTMLButtonElement | null>(null);
+  const shownStep = useRef<DeleteStep | null>(null);
 
   const load = useCallback(async (): Promise<BotDeletePreview | null> => {
     if (!client) return null;
@@ -91,7 +94,10 @@ export function DeleteBotDialog({
   }, [open, load]);
 
   useEffect(() => {
-    if (step === "confirm") nameInput.current?.focus();
+    const target = focusAfterStep(shownStep.current, step);
+    shownStep.current = step;
+    if (target === "name") nameInput.current?.focus();
+    if (target === "cancel") cancelButton.current?.focus();
   }, [step]);
 
   const block = preview ? deleteBlock(preview) : null;
@@ -301,7 +307,7 @@ export function DeleteBotDialog({
         )}
       </DialogBody>
       <DialogFooter landmark={false}>
-        <Button variant="ghost" disabled={busy} data-autofocus onClick={onClose}>
+        <Button ref={cancelButton} variant="ghost" disabled={busy} data-autofocus onClick={onClose}>
           {t("common.cancel")}
         </Button>
         <Button
