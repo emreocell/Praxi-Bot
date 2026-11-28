@@ -420,7 +420,11 @@ async fn minisign_download_boundaries_and_install_refusal() {
                 "{signature}, tampered file: {tampered_file}"
             );
             let rt = UpdateRuntime::detached(Some(s), "0.1.0");
-            assert!(install(&rt, &update).await.is_err(), "{signature}");
+            assert_eq!(
+                install(&rt, &update).await.unwrap_err(),
+                "signature",
+                "{signature}"
+            );
             assert_eq!(rt.pending(), None, "{signature}");
         }
     }
