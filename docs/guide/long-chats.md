@@ -30,5 +30,7 @@ Open **Settings → AI and memory → Long chats**, choose a bot and turn **Summ
 ## Good to know
 
 * A scheduled task does not read the note (nor its own earlier runs), as before.
+* The note belongs to the chat's own bot (its switch, its model and spending limits). A bot you call into the chat with `@name` neither writes nor reads it: it sees the newest messages only. Replies of other bots count as untrusted when the note is written. The note is written after a turn of the chat's own bot.
+* A message added to the chat with a date inside the part the note covers (an import) drops the note, like an edit.
 * A bot that runs through a coding CLI engine keeps its own session history and gets no note.
 * The note is only as good as the model that wrote it. Anything important, say it again, or ask the bot to search the earlier chat: the originals are all there.

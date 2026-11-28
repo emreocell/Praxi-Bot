@@ -6,7 +6,7 @@
 //! private content), so the note inherits it.
 
 use protocol::{ChatId, RunId, UserId};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::db::Storage;
@@ -96,6 +96,82 @@ impl ChatSummary {
     }
 }
 
+fn upsert(conn: &Connection, s: &ChatSummary) -> Result<()> {
+    conn.execute(
+        &format!(
+            "INSERT INTO chat_summaries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+             ON CONFLICT(chat_id) DO UPDATE SET content = excluded.content, \
+             covered_until_ms = excluded.covered_until_ms, covered_until_id = excluded.covered_until_id, \
+             covered_messages = excluded.covered_messages, rounds = excluded.rounds, \
+             first_message_ms = excluded.first_message_ms, exposure_untrusted = excluded.exposure_untrusted, \
+             exposure_private = excluded.exposure_private, exposure_sources = excluded.exposure_sources, \
+             model = excluded.model, updated_at_ms = excluded.updated_at_ms"
+        ),
+        params![
+            s.chat_id.to_string(),
+            s.user_id.to_string(),
+            s.content,
+            s.covered_until_ms,
+            s.covered_until_id.to_string(),
+            i64::from(s.covered_messages),
+            i64::from(s.rounds),
+            s.first_message_ms,
+            i64::from(s.exposure_untrusted),
+            i64::from(s.exposure_private),
+            serde_json::to_string(&s.exposure_sources)?,
+            s.model,
+            s.created_at_ms,
+            s.updated_at_ms,
+        ],
+    )?;
+    Ok(())
+}
+
+fn dialogue_after(
+    conn: &Connection,
+    chat: ChatId,
+    after: Option<Cursor>,
+    limit: usize,
+) -> Result<Vec<Message>> {
+    let mut st = conn.prepare(
+        "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources \
+         FROM messages WHERE chat_id = ?1 AND superseded = 0 AND role IN ('user', 'assistant') \
+         AND (?2 IS NULL OR created_at_ms > ?2 OR (created_at_ms = ?2 AND id > ?3)) \
+         ORDER BY created_at_ms, id LIMIT ?4",
+    )?;
+    let rows = st.query_map(
+        params![
+            chat.to_string(),
+            after.map(|c| c.0),
+            after.map(|c| c.1.to_string()),
+            i64::try_from(limit).unwrap_or(i64::MAX),
+        ],
+        crate::db::message_row,
+    )?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+fn round_current(
+    conn: &Connection,
+    chat: ChatId,
+    prior: Option<&ChatSummary>,
+    seen: &[Uuid],
+) -> Result<bool> {
+    let row = |s: &ChatSummary| (s.cursor(), s.updated_at_ms);
+    let now = conn
+        .query_row(
+            &format!("SELECT {COLUMNS} FROM chat_summaries WHERE chat_id = ?1"),
+            [chat.to_string()],
+            summary_row,
+        )
+        .optional()?;
+    if now.as_ref().map(row) != prior.map(row) {
+        return Ok(false);
+    }
+    let live = dialogue_after(conn, chat, prior.map(ChatSummary::cursor), seen.len())?;
+    Ok(live.len() == seen.len() && live.iter().zip(seen).all(|(a, b)| a.id == *b))
+}
+
 impl Storage {
     /// The rolling summary of a chat, if it has one.
     ///
@@ -117,34 +193,48 @@ impl Storage {
     /// # Errors
     /// Fails on SQLite errors, including an unknown chat or user.
     pub fn put_chat_summary(&self, s: &ChatSummary) -> Result<()> {
-        self.conn().execute(
-            &format!(
-                "INSERT INTO chat_summaries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
-                 ON CONFLICT(chat_id) DO UPDATE SET content = excluded.content, \
-                 covered_until_ms = excluded.covered_until_ms, covered_until_id = excluded.covered_until_id, \
-                 covered_messages = excluded.covered_messages, rounds = excluded.rounds, \
-                 first_message_ms = excluded.first_message_ms, exposure_untrusted = excluded.exposure_untrusted, \
-                 exposure_private = excluded.exposure_private, exposure_sources = excluded.exposure_sources, \
-                 model = excluded.model, updated_at_ms = excluded.updated_at_ms"
-            ),
-            params![
-                s.chat_id.to_string(),
-                s.user_id.to_string(),
-                s.content,
-                s.covered_until_ms,
-                s.covered_until_id.to_string(),
-                i64::from(s.covered_messages),
-                i64::from(s.rounds),
-                s.first_message_ms,
-                i64::from(s.exposure_untrusted),
-                i64::from(s.exposure_private),
-                serde_json::to_string(&s.exposure_sources)?,
-                s.model,
-                s.created_at_ms,
-                s.updated_at_ms,
-            ],
-        )?;
-        Ok(())
+        upsert(&self.conn(), s)
+    }
+
+    /// Store a round's summary only if the chat still is what the round planned from, checked
+    /// and written in ONE immediate transaction: an edit or a regenerate that lands between
+    /// the check and the write cannot have its dropped summary overwritten by the stale one.
+    /// `prior` is the summary the round started from, `seen` the live messages after its cursor
+    /// that the plan read, in order (see [`Storage::chat_summary_round_current`]). False (and
+    /// nothing written) when the chat changed.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors, including an unknown chat or user.
+    pub fn put_chat_summary_if_unchanged(
+        &self,
+        s: &ChatSummary,
+        prior: Option<&ChatSummary>,
+        seen: &[Uuid],
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if !round_current(&tx, s.chat_id, prior, seen)? {
+            return Ok(false);
+        }
+        upsert(&tx, s)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Whether the chat still is what a round planned from: the same summary row (any edit in
+    /// the chat drops it) and, after its cursor, exactly the live messages the plan read, in
+    /// the same order. Messages appended after those are fine; a replaced, restored or
+    /// inserted one anywhere in that range is not.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn chat_summary_round_current(
+        &self,
+        chat: ChatId,
+        prior: Option<&ChatSummary>,
+        seen: &[Uuid],
+    ) -> Result<bool> {
+        round_current(&self.conn(), chat, prior, seen)
     }
 
     /// Drop a chat's summary; the messages are untouched. True when there was one.
@@ -169,23 +259,7 @@ impl Storage {
         after: Option<Cursor>,
         limit: usize,
     ) -> Result<Vec<Message>> {
-        let conn = self.conn();
-        let mut st = conn.prepare(
-            "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources \
-             FROM messages WHERE chat_id = ?1 AND superseded = 0 AND role IN ('user', 'assistant') \
-             AND (?2 IS NULL OR created_at_ms > ?2 OR (created_at_ms = ?2 AND id > ?3)) \
-             ORDER BY created_at_ms, id LIMIT ?4",
-        )?;
-        let rows = st.query_map(
-            params![
-                chat.to_string(),
-                after.map(|c| c.0),
-                after.map(|c| c.1.to_string()),
-                i64::try_from(limit).unwrap_or(i64::MAX),
-            ],
-            crate::db::message_row,
-        )?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        dialogue_after(&self.conn(), chat, after, limit)
     }
 
     /// How many live user and assistant messages of `chat` sort after `after`, and their

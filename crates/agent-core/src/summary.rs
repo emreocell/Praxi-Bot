@@ -123,15 +123,25 @@ pub(crate) fn enabled_for_bot(storage: &Storage, bot: BotId) -> bool {
     matches!(storage.get_bot(bot), Ok(Some(b)) if enabled_in_config(&b.config))
 }
 
+/// Whether `bot` is the bot of the chat. A chat's summary belongs to the chat's own bot: its
+/// switch, its model and budget, and its view of which replies are its own. A bot that
+/// `@mention` runs in someone else's chat neither writes nor reads it. Unreadable: no.
+pub(crate) fn is_chat_bot(storage: &Storage, chat: ChatId, bot: BotId) -> bool {
+    matches!(storage.get_chat(chat), Ok(Some(c)) if c.bot_id == bot)
+}
+
 /// The summary a run puts in front of the model, if any. A scheduled run reads neither its own
-/// earlier firings (they are filtered from the history) nor a summary that may hold them.
+/// earlier firings (they are filtered from the history) nor a summary that may hold them. A
+/// mentioned bot (not the chat's own) reads none: the notes were written for, and by the view
+/// of, the chat's bot, under its opt-out.
 pub(crate) fn for_context(
     storage: &Storage,
     chat: ChatId,
     bot: BotId,
     own_schedule: Option<TaskId>,
 ) -> Option<ChatSummary> {
-    if own_schedule.is_some() || !enabled_for_bot(storage, bot) {
+    if own_schedule.is_some() || !is_chat_bot(storage, chat, bot) || !enabled_for_bot(storage, bot)
+    {
         return None;
     }
     storage.get_chat_summary(chat).ok().flatten()
@@ -252,16 +262,22 @@ pub(crate) fn plan(
 
 // ---- what the summariser reads ----
 
-/// Where a message came from, as far as the summariser needs to tell.
-fn origin(storage: &Storage, bot: BotId, m: &storage::Message) -> (String, bool) {
+/// Where a message came from, as far as the summariser needs to tell. Fails closed: a message
+/// whose origin cannot be established (a storage error, a reply no run vouches for, a mission
+/// brief that carries ledger text from the web or mail) is untrusted.
+pub(crate) fn origin(storage: &Storage, bot: BotId, m: &storage::Message) -> (String, bool) {
     let untrusted = |what: &str| (what.to_owned(), true);
     if m.role == "user" {
         if crate::history::imported_user_row(storage, m) {
             return untrusted("UNTRUSTED data: a message from an imported chat file");
         }
         return match storage.message_source(m.id) {
+            Ok(s) if s == "mission_brief" => {
+                untrusted("UNTRUSTED data: a mission brief, which can repeat web or mail text")
+            }
             Ok(s) if !s.is_empty() && s != "owner" => (format!("user (via {s})"), false),
-            _ => ("user".to_owned(), false),
+            Ok(_) => ("user".to_owned(), false),
+            Err(_) => untrusted("UNTRUSTED data: a message of unknown origin"),
         };
     }
     if let Some(who) = crate::history::imported_foreign_author(storage, m) {
@@ -269,12 +285,13 @@ fn origin(storage: &Storage, bot: BotId, m: &storage::Message) -> (String, bool)
             "UNTRUSTED data: a reply by {who}, another assistant"
         ));
     }
-    let foreign = m
+    // Only a reply a run of this very bot vouches for is its own.
+    let own = m
         .run_id
         .and_then(|r| storage.get_run(r).ok().flatten())
-        .is_some_and(|r| r.bot_id != bot);
-    if foreign {
-        return untrusted("UNTRUSTED data: a reply by a different bot");
+        .is_some_and(|r| r.bot_id == bot);
+    if !own {
+        return untrusted("UNTRUSTED data: a reply by a different or unknown author");
     }
     let mut who = "assistant".to_owned();
     if m.exposure_untrusted || m.exposure_private {
@@ -350,9 +367,18 @@ impl Carried {
 
 /// `text` without anything the redactor knows (registered values, key shapes) and without
 /// labelled secrets and card numbers: what the summariser reads and what a summary keeps.
+///
+/// The detectors do not read a line break, a tab or a NUL as the gap in `password:\nvalue` or
+/// `4111\t1111\t...`, but [`clean_item`] turns those into spaces, which they do read: the
+/// flattened text is screened as well, and wins when it finds more.
 fn scrub(r: &SharedRedactor, text: &str) -> String {
-    let masked = r.redact(text);
-    secret_store::screen_inbound(&masked).map_or(masked, |s| s.text)
+    let once = |t: &str| {
+        let masked = r.redact(t);
+        secret_store::screen_inbound(&masked).map_or(masked, |s| s.text)
+    };
+    let first = once(text);
+    let flat = flatten(&first);
+    secret_store::screen_inbound(&r.redact(&flat)).map_or(first, |s| s.text)
 }
 
 fn strip_attachments(text: &str) -> &str {
@@ -391,12 +417,10 @@ fn input_json(
             m.exposure_private,
             &m.exposure_sources,
         );
-        let text = scrub(
-            redactor,
-            &cut_chars(strip_attachments(&m.content), MESSAGE_CAP),
-        );
+        // Scrubbed whole, then cut: a secret that straddles the cap is masked, not halved.
+        let text = cut_chars(&scrub(redactor, strip_attachments(&m.content)), MESSAGE_CAP);
         if owner_typed(storage, m)
-            && let Some(quote) = clean_item(&text)
+            && let Some(quote) = clean_item(&text, |t| scrub(redactor, t))
         {
             quotes.push(cut_chars(&quote, QUOTE_CHARS));
         }
@@ -446,12 +470,20 @@ struct Sections {
     outside: Vec<String>,
 }
 
-fn clean_item(s: &str) -> Option<String> {
-    let one_line = s
+/// Control characters (line breaks, tabs, NUL) as spaces, runs of whitespace as one.
+fn flatten(s: &str) -> String {
+    let spaced = s
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect::<String>();
-    let one_line = one_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    spaced.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// One line of a summary: flattened, then `clean`ed (secret scrubbing) on that flat text, and
+/// only then cut, so nothing that was hidden behind a control character survives and no
+/// secret is halved by the cut.
+fn clean_item(s: &str, clean: impl Fn(&str) -> String) -> Option<String> {
+    let one_line = flatten(&clean(&flatten(s)));
     (!one_line.is_empty()).then(|| cut_chars(&one_line, MAX_ITEM_CHARS))
 }
 
@@ -483,7 +515,7 @@ pub(crate) fn render(
         .into_iter()
         .map(|l| {
             l.iter()
-                .filter_map(|s| clean_item(&clean(s)))
+                .filter_map(|s| clean_item(s, &clean))
                 .take(MAX_ITEMS)
                 .collect()
         })
@@ -628,9 +660,11 @@ async fn round(sh: &Arc<Shared>, ctx: &RunCtx) -> Round {
     let Some(redactor) = sh.cfg.redactor.as_ref() else {
         return Round::Idle;
     };
-    if !enabled_for_bot(&sh.storage, bot) {
+    if !is_chat_bot(&sh.storage, chat, bot) || !enabled_for_bot(&sh.storage, bot) {
         return Round::Idle;
     }
+    // A secret added or rotated since the last poll counts from this round on.
+    sh.refresh_redactor();
     let prior = match sh.storage.get_chat_summary(chat) {
         Ok(p) => p,
         Err(e) => return Round::Failed(e.to_string()),
@@ -668,31 +702,12 @@ async fn round(sh: &Arc<Shared>, ctx: &RunCtx) -> Round {
     ) else {
         return Round::Failed("the summariser did not return a usable summary".into());
     };
-    // What the model wrote was scrubbed item by item; nothing the redactor knows is stored.
-    if redactor.contains_secret(&content) {
+    // What the model wrote was scrubbed item by item; nothing the redactor or the detectors
+    // know is stored.
+    if redactor.contains_secret(&content) || secret_store::screen_inbound(&content).is_some() {
         return Round::Failed("the summary still held a secret".into());
     }
     store(sh, ctx, prior.as_ref(), &plan, carried, content, &model)
-}
-
-/// Whether the chat still is what the round planned from: the same summary row (any edit in
-/// the chat drops it) and, after its cursor, exactly the live messages the plan read, in the
-/// same order. Messages appended after those are fine (they stay after the new cursor); a
-/// replaced, restored or inserted one anywhere in that range drops the round.
-pub(crate) fn unchanged(
-    storage: &Storage,
-    chat: ChatId,
-    prior: Option<&ChatSummary>,
-    seen: &[Uuid],
-) -> bool {
-    let row = |s: &ChatSummary| (s.cursor(), s.updated_at_ms);
-    let now = storage.get_chat_summary(chat).ok().flatten();
-    now.as_ref().map(row) == prior.map(row)
-        && storage
-            .list_dialogue_after(chat, prior.map(ChatSummary::cursor), seen.len())
-            .is_ok_and(|live| {
-                live.len() == seen.len() && live.iter().zip(seen).all(|(a, b)| a.id == *b)
-            })
 }
 
 /// Write the round's summary, unless the chat changed while the model worked: then the text no
@@ -708,9 +723,6 @@ fn store(
 ) -> Round {
     let chat = ctx.chat_id;
     let fold = &plan.fold;
-    if !unchanged(&sh.storage, chat, prior, &plan.seen) {
-        return Round::Idle;
-    }
     let (first, last) = (&fold[0], &fold[fold.len() - 1]);
     if prior.is_some_and(|p| !storage::sorts_after((last.created_at_ms, last.id), p.cursor())) {
         return Round::Failed("the summary cursor did not move forward".into());
@@ -735,8 +747,14 @@ fn store(
         created_at_ms: prior.map_or(ms, |p| p.created_at_ms),
         updated_at_ms: ms,
     };
-    if let Err(e) = sh.storage.put_chat_summary(&summary) {
-        return Round::Failed(e.to_string());
+    // Checked and written in one transaction: an edit between the two cannot be overwritten.
+    match sh
+        .storage
+        .put_chat_summary_if_unchanged(&summary, prior, &plan.seen)
+    {
+        Ok(true) => {}
+        Ok(false) => return Round::Idle,
+        Err(e) => return Round::Failed(e.to_string()),
     }
     // What was folded, never its text: the audit shows when and how much, the chat has the rest.
     let _ = sh.storage.append_audit(
@@ -760,12 +778,16 @@ fn store(
     Round::Done
 }
 
-/// Whether a round could be useful after this turn: there is a redactor, the switch is on and
-/// the chat is over a threshold. Cheap (one count query). Whether a round already runs or is
+/// Whether a round could be useful after this turn: there is a redactor, `bot` is the chat's
+/// own bot (a mentioned bot's turn never starts one), its switch is on and the chat is over a
+/// threshold. Cheap (one count query). Whether a round already runs or is
 /// paused is [`claim`]'s question.
 pub(crate) fn due(sh: &Shared, chat: ChatId, bot: BotId) -> bool {
     let cfg = &sh.cfg.history_summary;
-    if sh.cfg.redactor.is_none() || !enabled_for_bot(&sh.storage, bot) {
+    if sh.cfg.redactor.is_none()
+        || !is_chat_bot(&sh.storage, chat, bot)
+        || !enabled_for_bot(&sh.storage, bot)
+    {
         return false;
     }
     let after = sh

@@ -848,7 +848,9 @@ impl Storage {
     /// # Errors
     /// Fails on SQLite errors.
     pub fn insert_message(&self, m: &Message) -> Result<()> {
-        self.conn().execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO messages (id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 m.id.to_string(),
@@ -863,6 +865,15 @@ impl Storage {
                 serde_json::to_string(&m.exposure_sources)?,
             ],
         )?;
+        // A row that sorts at or before a summary's cursor (an import, a backfill) would sit
+        // inside the part the summary stands in for and never be shown: drop the summary, as
+        // an edit does. A normal append sorts after the cursor and keeps it.
+        tx.execute(
+            "DELETE FROM chat_summaries WHERE chat_id = ?1 \
+             AND (?2 < covered_until_ms OR (?2 = covered_until_ms AND ?3 <= covered_until_id))",
+            params![m.chat_id.to_string(), m.created_at_ms, m.id.to_string()],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 

@@ -30,5 +30,7 @@ Not **alıntılanmış veridir**, asla senin sesin değildir:
 ## Bilmekte fayda var
 
 * Zamanlanmış görev notu okumaz (kendi önceki çalışmalarını da okumaz), eskiden olduğu gibi.
+* Not, sohbetin kendi botuna aittir (onun düğmesi, modeli ve harcama sınırları). Sohbete `@isim` ile çağırdığın bir bot notu ne yazar ne okur; yalnızca en yeni mesajları görür. Not yazılırken başka botların yanıtları güvenilmeyen sayılır. Not, sohbetin kendi botunun bir turundan sonra yazılır.
+* Sohbete, notun kapsadığı kısmın içinde kalan bir tarihle eklenen mesaj (örneğin içe aktarma) notu, düzenleme gibi atar.
 * Kodlama CLI motoruyla çalışan bot kendi oturum geçmişini tutar ve not almaz.
 * Not, onu yazan model kadar iyidir. Önemli bir şeyi tekrar söyle ya da bottan önceki sohbeti aramasını iste: asıllar hep orada.

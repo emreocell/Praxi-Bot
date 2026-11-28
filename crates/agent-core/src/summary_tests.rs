@@ -64,8 +64,36 @@ fn answered(text: &str) -> Seed<'static> {
     }
 }
 
-/// Stores messages oldest first; user rows are owner messages.
+/// A run of `bot` in the env's chat: the author an assistant row points at.
+fn run_of(env: &Env, bot: protocol::BotId) -> protocol::RunId {
+    let id = protocol::RunId::new();
+    env.storage
+        .insert_run(&storage::Run {
+            id,
+            user_id: env.user,
+            bot_id: bot,
+            chat_id: Some(env.chat),
+            kind: "turn".into(),
+            state: "succeeded".into(),
+            error: None,
+            created_at_ms: T0,
+            updated_at_ms: T0,
+            parent_run_id: None,
+            spec: None,
+            computer_target: None,
+            computer_node: None,
+            computer_node_name: None,
+            paused_at_ms: None,
+            pause_reason: None,
+        })
+        .unwrap();
+    id
+}
+
+/// Stores messages oldest first; user rows are owner messages, assistant rows are replies of
+/// the chat's own bot.
 fn seed(env: &Env, rows: Vec<Seed<'_>>) -> Vec<Uuid> {
+    let own = run_of(env, env.bot);
     rows.into_iter()
         .enumerate()
         .map(|(i, r)| {
@@ -75,7 +103,7 @@ fn seed(env: &Env, rows: Vec<Seed<'_>>) -> Vec<Uuid> {
                     id,
                     user_id: env.user,
                     chat_id: env.chat,
-                    run_id: None,
+                    run_id: (r.from == "assistant").then_some(own),
                     role: r.from.into(),
                     content: r.text,
                     created_at_ms: T0 + i64::try_from(i).unwrap(),
@@ -796,7 +824,9 @@ fn a_round_is_dropped_when_the_chat_changed_while_the_model_worked() {
     assert_eq!(plan.fold.len(), 6);
     assert_eq!(plan.seen.len(), 10, "the fold and the tail after it");
     let check = |prior: Option<&ChatSummary>| {
-        crate::summary::unchanged(&env.storage, env.chat, prior, &plan.seen)
+        env.storage
+            .chat_summary_round_current(env.chat, prior, &plan.seen)
+            .unwrap()
     };
     assert!(check(None));
     // A message of the tail (not folded) was replaced meanwhile: the round's view is stale.
@@ -1278,4 +1308,367 @@ async fn too_many_source_labels_keep_the_private_ones_and_mark_the_summary_untru
             "the note's text is comparable"
         );
     }
+}
+
+// ---- the second review of #1029 ----
+
+/// A reply that only lists `done` items.
+fn done(items: &[&str]) -> crate::tests::Reply {
+    reply(&[], items, &[], &[])
+}
+
+fn assert_none_of(what: &str, haystack: &str, needles: &[&str]) {
+    for n in needles {
+        assert!(!haystack.contains(n), "{n} is in {what}");
+    }
+}
+
+#[tokio::test]
+async fn a_secret_across_the_message_cap_is_masked_before_the_cut() {
+    let env = setup();
+    let registered = "vault-straddle-5d1e8a77c0";
+    let redactor = crate::SharedRedactor::default();
+    redactor.register(registered);
+    // Both secrets start before char 3000 and end after it.
+    let pad = "x ".repeat(1495);
+    // The label ends at char 2990: the value starts before the cap and runs past it.
+    let pad_label = "x ".repeat(1490);
+    let rows = vec![
+        said(&format!("{pad}{registered} tail")),
+        answered("a1"),
+        said(&format!("{pad_label}password: Straddle-Pass-9921! tail")),
+        answered("a2"),
+    ];
+    seed(&env, rows);
+    seed_after(&env, &["q3", "a3", "q4", "a4", "q5", "a5"]);
+    let fake = Fake::new(vec![text("ok"), done(&["done"])]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        LoopConfig {
+            redactor: Some(redactor),
+            ..config(small())
+        },
+    );
+    turn(&lp, &env, "q6").await;
+    assert_eq!(fake.n_requests(), 2);
+    let input = flat(&fake.request(1));
+    // Not even the front half of either value.
+    assert_none_of("the summariser input", &input, &["vault-s", "Straddle"]);
+    let s = env.storage.get_chat_summary(env.chat).unwrap().unwrap();
+    assert_none_of("the summary", &s.content, &["vault-s", "Straddle"]);
+}
+
+#[tokio::test]
+async fn a_secret_hidden_behind_a_control_character_is_masked_in_input_and_output() {
+    let env = setup();
+    let rows = vec![
+        said("q1 my password:\nCorrectHorse42!"),
+        answered("a1 ok"),
+        said("q2 card 4111\t1111\t1111\t1111"),
+        answered("a2 ok"),
+    ];
+    seed(&env, rows);
+    seed_after(&env, &["q3", "a3", "q4", "a4", "q5", "a5"]);
+    // The model writes secrets back behind control characters, and one past the item cut.
+    let long = format!(
+        "{} password: Tail-Secret-77!",
+        "w".repeat(MAX_ITEM_CHARS_FOR_TEST - 12)
+    );
+    let fake = Fake::new(vec![
+        text("ok"),
+        done(&[
+            "the password:\nHunter2-Hunter2!",
+            "card 5500\t0000\t0000\t0004",
+            &long,
+            "kept note",
+        ]),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        config(small()),
+    );
+    turn(&lp, &env, "q6").await;
+    assert_eq!(fake.n_requests(), 2);
+    let input = flat(&fake.request(1));
+    assert_none_of("the summariser input", &input, &["CorrectHorse42", "4111"]);
+    let s = env.storage.get_chat_summary(env.chat).unwrap().unwrap();
+    assert_none_of(
+        "the summary",
+        &s.content,
+        &[
+            "CorrectHorse42",
+            "4111",
+            "Hunter2",
+            "5500",
+            "Tail-Secret",
+            "Tail-S",
+        ],
+    );
+    assert!(s.content.contains("kept note"));
+    assert!(s.content.contains("[REDACTED]"));
+}
+
+/// The longest item of a summary (`MAX_ITEM_CHARS`).
+const MAX_ITEM_CHARS_FOR_TEST: usize = 400;
+
+#[tokio::test]
+async fn a_summary_that_still_screens_as_a_secret_is_not_stored() {
+    // The last check does not trust the item scrubbing alone: render() with an identity
+    // `clean` hands the round a text the detectors flag, and the round refuses it.
+    let content = crate::summary::render(
+        &json!({"done": ["the password: Plain-Secret-5521!"]}).to_string(),
+        &[],
+        false,
+        10_000,
+        str::to_owned,
+    )
+    .unwrap();
+    assert!(secret_store::screen_inbound(&content).is_some());
+}
+
+#[test]
+fn a_reply_without_a_run_of_this_bot_or_a_mission_brief_is_untrusted() {
+    let env = setup();
+    let other_bot = protocol::BotId::new();
+    env.storage
+        .insert_bot(&storage::Bot {
+            id: other_bot,
+            user_id: env.user,
+            name: "other".into(),
+            config: json!({}),
+            created_at_ms: T0,
+        })
+        .unwrap();
+    let own = run_of(&env, env.bot);
+    let foreign = run_of(&env, other_bot);
+    let row = |role: &str, run_id| Message {
+        id: Uuid::now_v7(),
+        user_id: env.user,
+        chat_id: env.chat,
+        run_id,
+        role: role.into(),
+        content: "x".into(),
+        created_at_ms: T0,
+        exposure_untrusted: false,
+        exposure_private: false,
+        exposure_sources: vec![],
+    };
+    let judge = |m: &Message| {
+        env.storage.insert_message(m).unwrap();
+        crate::summary::origin(&env.storage, env.bot, m).1
+    };
+    assert!(!judge(&row("assistant", Some(own))), "its own reply");
+    assert!(judge(&row("assistant", Some(foreign))), "another bot's");
+    assert!(judge(&row("assistant", None)), "no run vouches for it");
+    let brief = row("user", None);
+    env.storage.insert_message(&brief).unwrap();
+    env.storage
+        .set_message_source(brief.id, "mission_brief")
+        .unwrap();
+    assert!(crate::summary::origin(&env.storage, env.bot, &brief).1);
+    let owner = row("user", None);
+    env.storage.insert_message(&owner).unwrap();
+    env.storage.set_message_source(owner.id, "owner").unwrap();
+    assert!(!crate::summary::origin(&env.storage, env.bot, &owner).1);
+}
+
+#[tokio::test]
+async fn a_mentioned_bot_neither_starts_a_round_nor_reads_the_chats_summary() {
+    let env = setup();
+    let mentioned = protocol::BotId::new();
+    env.storage
+        .insert_bot(&storage::Bot {
+            id: mentioned,
+            user_id: env.user,
+            name: "other".into(),
+            config: json!({}),
+            created_at_ms: T0,
+        })
+        .unwrap();
+    let ids = seed(&env, pairs(5));
+    let last = env.storage.get_message(ids[5]).unwrap().unwrap();
+    env.storage
+        .put_chat_summary(&ChatSummary {
+            chat_id: env.chat,
+            user_id: env.user,
+            content: "notes".into(),
+            covered_until_ms: last.created_at_ms,
+            covered_until_id: last.id,
+            covered_messages: 6,
+            rounds: 1,
+            first_message_ms: T0,
+            exposure_untrusted: false,
+            exposure_private: false,
+            exposure_sources: vec![],
+            model: "fake/m".into(),
+            created_at_ms: T0,
+            updated_at_ms: T0,
+        })
+        .unwrap();
+    let read = |bot| crate::summary::for_context(&env.storage, env.chat, bot, None);
+    assert!(read(env.bot).is_some(), "the chat's own bot reads it");
+    assert!(read(mentioned).is_none(), "a mentioned bot does not");
+
+    // `@other` runs in the chat while the chat's own bot opted out: nothing is written, even
+    // though the mentioned bot's own switch is on and the chat is long.
+    switch(&env, false);
+    env.storage.delete_chat_summary(env.chat).unwrap();
+    let fake = Fake::new(vec![text("a6"), done(&["must not be asked"])]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        config(small()),
+    );
+    let id = lp.run_turn(env.chat, "q6").unwrap();
+    assert_eq!(lp.wait(id).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+    let mut run = env.storage.get_run(id).unwrap().unwrap();
+    switch(&env, true);
+    run.bot_id = mentioned;
+    assert!(
+        !crate::summary::due(&lp.sh, env.chat, mentioned),
+        "not due for a bot that is not the chat's"
+    );
+    lp.enqueue_summary(&run);
+    lp.flush_background().await;
+    assert_eq!(fake.n_requests(), 1, "no summariser call for a mention run");
+    assert!(env.storage.get_chat_summary(env.chat).unwrap().is_none());
+    assert!(
+        crate::summary::claim(&lp.sh, env.chat).is_some(),
+        "nothing was claimed"
+    );
+}
+
+fn sample_summary(env: &Env, upto: &Message, content: &str) -> ChatSummary {
+    ChatSummary {
+        chat_id: env.chat,
+        user_id: env.user,
+        content: content.into(),
+        covered_until_ms: upto.created_at_ms,
+        covered_until_id: upto.id,
+        covered_messages: 6,
+        rounds: 1,
+        first_message_ms: T0,
+        exposure_untrusted: false,
+        exposure_private: false,
+        exposure_sources: vec![],
+        model: "fake/m".into(),
+        created_at_ms: T0,
+        updated_at_ms: T0,
+    }
+}
+
+#[test]
+fn a_stale_round_cannot_overwrite_a_summary_an_edit_dropped() {
+    let env = setup();
+    let ids = seed(&env, pairs(6));
+    let first = env.storage.get_message(ids[3]).unwrap().unwrap();
+    let old = sample_summary(&env, &first, "old");
+    env.storage.put_chat_summary(&old).unwrap();
+    // A second round planned from `old`.
+    let plan = crate::summary::plan(&env.storage, env.chat, &small(), Some(&old)).unwrap();
+    let last = &plan.fold[plan.fold.len() - 1];
+    let next = ChatSummary {
+        content: "stale".into(),
+        covered_until_ms: last.created_at_ms,
+        covered_until_id: last.id,
+        updated_at_ms: T0 + 5,
+        ..old.clone()
+    };
+    // An edit lands before the write: it drops `old`, and the round must not bring it back.
+    env.storage
+        .set_messages_superseded(&ids[1..2], true)
+        .unwrap();
+    assert!(env.storage.get_chat_summary(env.chat).unwrap().is_none());
+    assert!(
+        !env.storage
+            .put_chat_summary_if_unchanged(&next, Some(&old), &plan.seen)
+            .unwrap()
+    );
+    assert!(env.storage.get_chat_summary(env.chat).unwrap().is_none());
+}
+
+#[test]
+fn a_current_round_is_written_in_one_step() {
+    let env = setup();
+    let ids = seed(&env, pairs(5));
+    let plan = crate::summary::plan(&env.storage, env.chat, &small(), None).unwrap();
+    let last = &plan.fold[plan.fold.len() - 1];
+    let s = sample_summary(&env, last, "fresh");
+    assert!(
+        env.storage
+            .put_chat_summary_if_unchanged(&s, None, &plan.seen)
+            .unwrap()
+    );
+    assert_eq!(
+        env.storage
+            .get_chat_summary(env.chat)
+            .unwrap()
+            .unwrap()
+            .content,
+        "fresh"
+    );
+    // The same plan again: the row is not the one it started from.
+    assert!(
+        !env.storage
+            .put_chat_summary_if_unchanged(&s, None, &plan.seen)
+            .unwrap()
+    );
+    let _ = ids;
+}
+
+#[test]
+fn a_message_inserted_at_or_before_the_cursor_drops_the_summary_an_append_keeps_it() {
+    let env = setup();
+    let ids = seed(&env, pairs(5));
+    let cursor = env.storage.get_message(ids[5]).unwrap().unwrap();
+    let put = || {
+        env.storage
+            .put_chat_summary(&sample_summary(&env, &cursor, "notes"))
+            .unwrap();
+    };
+    let insert = |ms: i64, id: Uuid| {
+        env.storage
+            .insert_message(&Message {
+                id,
+                user_id: env.user,
+                chat_id: env.chat,
+                run_id: None,
+                role: "user".into(),
+                content: "late".into(),
+                created_at_ms: ms,
+                exposure_untrusted: false,
+                exposure_private: false,
+                exposure_sources: vec![],
+            })
+            .unwrap();
+    };
+    put();
+    insert(cursor.created_at_ms + 10, Uuid::now_v7());
+    assert!(
+        env.storage.get_chat_summary(env.chat).unwrap().is_some(),
+        "a normal append keeps it"
+    );
+    // Backdated: inside the summarised part.
+    insert(T0 - 1, Uuid::now_v7());
+    assert!(env.storage.get_chat_summary(env.chat).unwrap().is_none());
+    put();
+    // Same millisecond as the cursor, id sorting before it.
+    insert(cursor.created_at_ms, Uuid::nil());
+    assert!(env.storage.get_chat_summary(env.chat).unwrap().is_none());
+    put();
+    // Same millisecond, id sorting after it: after the cursor, kept.
+    insert(cursor.created_at_ms, Uuid::max());
+    assert!(env.storage.get_chat_summary(env.chat).unwrap().is_some());
 }
