@@ -705,6 +705,19 @@ pub struct HandoverInfo {
     pub deadline: tokio::time::Instant,
 }
 
+impl HandoverInfo {
+    /// The key the [`builtin_tools::HandoverHub`] knows this request by: a mission's parked
+    /// CAPTCHA by its call id (no run waits on it), a waiting run's request by the run id.
+    #[must_use]
+    pub fn hub_key(&self, call_id: ToolCallId) -> String {
+        if self.mission.is_some() {
+            call_id.0.to_string()
+        } else {
+            self.run_id.to_string()
+        }
+    }
+}
+
 /// What the daemon hears when a mission parks a step for the owner on the live page.
 #[derive(Debug, Clone)]
 pub struct MissionHandoverNotice {
@@ -716,8 +729,11 @@ pub struct MissionHandoverNotice {
     pub bot_id: String,
     /// Tool call the hand-over card answers.
     pub call_id: ToolCallId,
-    /// Origin the browser reported.
+    /// Origin the browser reported, redacted.
     pub site: String,
+    /// The page could not be kept on a tab of its own, so the bot's browser is locked until
+    /// the owner answers or the hand-over expires.
+    pub browser_locked: bool,
 }
 
 /// Daemon hook when a mission parks a CAPTCHA or phone step for the owner on the live page.

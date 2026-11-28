@@ -183,6 +183,10 @@ pub enum Step {
 /// Callback told that a mission changed (state, ledger, digest).
 pub type ChangeHook = Arc<dyn Fn(&str) + Send + Sync>;
 
+/// Callback told that a parked live hand-over ended without an owner answer (it ran out, or a
+/// restart lost its page): whoever holds its browser page lets go of it.
+pub type HandoverEndedHook = Arc<dyn Fn(&crate::ParkedHandover) + Send + Sync>;
+
 /// The supervisor.
 pub struct Supervisor {
     store: Arc<MissionStore>,
@@ -198,6 +202,7 @@ pub struct Supervisor {
     on_change: Mutex<Option<ChangeHook>>,
     /// Looks into the bot's own mailbox for the wake loop (none: mail waits only time out).
     mail: Mutex<Option<Arc<dyn MailProbe>>>,
+    on_handover_ended: Mutex<Option<HandoverEndedHook>>,
     /// When the wake loop last pruned old waits and wakes (`i64::MIN`: never).
     last_prune_ms: AtomicI64,
 }
@@ -229,6 +234,7 @@ impl Supervisor {
             wake: Notify::new(),
             on_change: Mutex::new(None),
             mail: Mutex::new(None),
+            on_handover_ended: Mutex::new(None),
             last_prune_ms: AtomicI64::new(i64::MIN),
         }
     }
@@ -241,6 +247,18 @@ impl Supervisor {
     /// Be told when a mission changes.
     pub fn set_change_hook(&self, hook: ChangeHook) {
         *self.on_change.lock() = Some(hook);
+    }
+
+    /// Be told when a parked live hand-over ends without an owner answer.
+    pub fn set_handover_ended_hook(&self, hook: HandoverEndedHook) {
+        *self.on_handover_ended.lock() = Some(hook);
+    }
+
+    fn handover_ended(&self, h: &crate::ParkedHandover) {
+        if let Some(hook) = self.on_handover_ended.lock().clone() {
+            hook(h);
+        }
+        self.changed(&h.mission_id);
     }
 
     /// The store.
@@ -366,6 +384,15 @@ impl Supervisor {
                     }
                 }
                 Err(e) => tracing::warn!("missions: recovery failed: {e}"),
+            }
+            // No browser page outlives a restart: the hand-overs parked on one are settled.
+            match this.store.recover_live_handovers(this.clock.now_ms()) {
+                Ok(settled) => {
+                    for h in &settled {
+                        this.handover_ended(h);
+                    }
+                }
+                Err(e) => tracing::warn!("missions: settling parked hand-overs failed: {e}"),
             }
             // Timers, timeouts and mailboxes of waiting items, on their own task: a slow mailbox
             // never delays the start of a session.

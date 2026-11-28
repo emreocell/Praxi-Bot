@@ -4073,12 +4073,32 @@ fn handover_outcome(kind: HandoverKind, done: bool, why: &str) -> (String, bool)
     }
 }
 
+/// What the model reads when a CAPTCHA ends the work on an item of a mission and no page can
+/// be kept for the owner (the mission or the app already keeps as many as allowed): the item is
+/// given up, the session moves on.
+fn mission_give_up_text(key: Option<&str>, reason: &str) -> String {
+    match key {
+        Some(key) => format!(
+            "Not waiting: this is a mission, so a person is not asked right now. Item {key:?} is given up ({reason}); the report lists it. Do not retry the site. Take the next open item now."
+        ),
+        None => format!(
+            "Not waiting: this is a mission, so a person is not asked right now. Mark the item you are working on as failed with mission_item (error: {reason}), do not retry the site, and take the next open item now."
+        ),
+    }
+}
+
 impl Shared {
     /// A CAPTCHA or 2FA in a mission session blocks only the item it stops: nobody
     /// waits for the owner. The item the bot is working on is parked in the ledger
     /// (the owner finds it in the blocked list and the digest) and the session moves on.
-    #[allow(clippy::too_many_lines)] // Park ledger item, hold browser, notify owner, arm expiry.
-    fn park_item_for_handover(
+    ///
+    /// A CAPTCHA is parked for the owner on the live page: the ledger row (keyed by the call
+    /// id, see [`missions::MissionStore::park_live_handover`]) outlives the session and a
+    /// restart, and the supervisor expires it; the page moves to a tab no run of the bot can
+    /// reach (or the bot's browser is locked, see [`builtin_tools::HandoverHub::park`]). Over
+    /// the caps the item is given up instead. A code is never parked with a card: the owner
+    /// finishes that step on the site.
+    async fn park_item_for_handover(
         self: &Arc<Self>,
         ctx: &RunCtx,
         call_id: ToolCallId,
@@ -4086,60 +4106,133 @@ impl Shared {
         kind: HandoverKind,
         card: &builtin_tools::HandoverCard,
     ) -> (String, bool) {
+        let hub = builtin_tools::handover_hub();
         let site = truncate_utf8(&card.site, 80);
-        let limit = self.cfg.mission_handover_timeout;
-        let deadline = tokio::time::Instant::now() + limit;
-        let reason = match kind {
-            HandoverKind::Captcha => format!("needs you on this page: a CAPTCHA on {site}"),
-            HandoverKind::Code => format!(
-                "a 2FA / verification code for {site} is needed; Praxi never stores it or shows it to the bot, so finish this step yourself on the site, or skip the item"
-            ),
-        };
         let store = self.mission_store.read().clone();
-        let key = store.and_then(|s| {
-            s.block_sole_doing_item(mission, &reason, true, storage::now_ms())
-                .ok()
-                .flatten()
-        });
         if kind == HandoverKind::Code {
-            builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
+            // A one-time code is never typed into a mission answer (it would sit in the ledger
+            // and reach the model): the owner finishes this step live on the site or skips it.
+            hub.disarm(&ctx.run_id.to_string());
+            let reason = format!(
+                "a 2FA / verification code for {site} is needed; Praxi never stores it or shows it to the bot, so finish this step yourself on the site, or skip the item"
+            );
+            let key = store.and_then(|s| {
+                s.block_sole_doing_item(mission, &reason, true, storage::now_ms())
+                    .ok()
+                    .flatten()
+            });
+            self.audit(
+                ctx,
+                "system",
+                "handover.parked",
+                &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": key}),
+            );
+            return (mission_park_text(key.as_deref(), &reason), true);
         }
+        let limit = self.cfg.mission_handover_timeout;
+        let reason = format!("needs you on this page: a CAPTCHA on {site}");
+        let now = storage::now_ms();
+        let expires_at_ms =
+            now.saturating_add(i64::try_from(limit.as_millis()).unwrap_or(i64::MAX));
+        let (call, run, bot) = (
+            call_id.0.to_string(),
+            ctx.run_id.to_string(),
+            ctx.bot_id.to_string(),
+        );
+        let parked = store.as_ref().map(|s| {
+            s.park_live_handover(
+                mission,
+                &missions::NewHandover {
+                    call_id: &call,
+                    bot_id: &bot,
+                    run_id: &run,
+                    kind: "captcha",
+                    reason: &reason,
+                    expires_at_ms,
+                },
+                self.cfg.max_parked_handovers_per_mission,
+                now,
+            )
+        });
+        let give_up = |why: &str| {
+            hub.disarm(&run);
+            let reason = format!("a CAPTCHA on {site}; {why}");
+            let key = store.as_ref().and_then(|s| {
+                s.give_up_sole_doing_item(mission, &reason, storage::now_ms())
+                    .ok()
+                    .flatten()
+            });
+            self.audit(
+                ctx,
+                "system",
+                "handover.given_up",
+                &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": key, "reason": why}),
+            );
+            (mission_give_up_text(key.as_deref(), &reason), true)
+        };
+        let item = match parked {
+            Some(Ok(missions::Park::Parked(item))) => item,
+            Some(Ok(missions::Park::NoSoleItem)) => {
+                // The page can only be kept for the item it stops: the model names it first.
+                hub.disarm(&run);
+                return (
+                    "Not waiting: this is a mission, and no single item is marked doing, so this CAPTCHA could not be parked for the owner. Mark the item of this site as doing with mission_item, then call browser_handover once more; if that is refused again, mark the item failed with the CAPTCHA as the error and take the next open item. Never try to solve the CAPTCHA.".to_owned(),
+                    true,
+                );
+            }
+            Some(Ok(missions::Park::OverCap)) => {
+                return give_up("this mission already has a page waiting for the owner");
+            }
+            Some(Err(_)) | None => return give_up("the page could not be kept for the owner"),
+        };
+        let until = std::time::Instant::now() + limit;
+        let page = match hub.park(&run, &call, &bot, until).await {
+            Ok(page) => page,
+            Err(refused) => {
+                // Nothing holds the page: the parked row is settled again, the item given up.
+                let why = match refused {
+                    builtin_tools::ParkRefused::BotBusy => {
+                        "this bot already keeps a page waiting for the owner"
+                    }
+                    builtin_tools::ParkRefused::Full => {
+                        "the app already keeps as many pages for the owner as it allows"
+                    }
+                    builtin_tools::ParkRefused::NotArmed => {
+                        "the page could not be kept for the owner"
+                    }
+                };
+                let reason = format!("a CAPTCHA on {site}; {why}");
+                if let Some(s) = &store {
+                    let _ = s.claim_live_handover(&call, now);
+                    let _ = s.finish_live_handover(&call, false, &reason, storage::now_ms());
+                }
+                self.audit(
+                    ctx,
+                    "system",
+                    "handover.given_up",
+                    &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": item, "reason": why}),
+                );
+                return (mission_give_up_text(Some(&item), &reason), true);
+            }
+        };
+        let locked = page == builtin_tools::ParkedPage::Locked;
         self.audit(
             ctx,
             "system",
             "handover.parked",
-            &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": key}),
-        );
-        let Some(item) = key else {
-            return (mission_park_text(None, &reason), true);
-        };
-        if let Some(profiles) = self.browser_profiles.get() {
-            let bot = ctx.bot_id.to_string();
-            let _ = profiles.hold_session_for_owner(&bot, limit);
-        }
-        self.handovers.lock().insert(
-            call_id,
-            crate::shared::HandoverInfo {
-                run_id: ctx.run_id,
-                kind,
-                bot_id: ctx.bot_id.to_string(),
-                mission: Some(crate::shared::MissionTarget {
-                    mission_id: mission.to_owned(),
-                    item: item.clone(),
-                }),
-                deadline,
-            },
+            &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": item, "browser_locked": locked}),
         );
         let tainted = self
             .root_run_id(ctx)
             .is_none_or(|r| self.router.tainted_runs.lock().contains(&r));
+        let site_shown = self.redact(card.site.clone());
         self.emit(
             ctx,
             Event::HandoverRequested(protocol::event::HandoverRequested {
                 run_id: ctx.run_id,
                 call_id,
                 kind,
-                site: self.redact(card.site.clone()),
+                site: site_shown.clone(),
                 untrusted_content: tainted,
                 expires_in_secs: limit.as_secs(),
                 parked: true,
@@ -4149,44 +4242,17 @@ impl Shared {
             hook(crate::shared::MissionHandoverNotice {
                 mission_id: mission.to_owned(),
                 item: item.clone(),
-                bot_id: ctx.bot_id.to_string(),
+                bot_id: bot,
                 call_id,
-                site: card.site.clone(),
+                site: site_shown,
+                browser_locked: locked,
             });
         }
-        let this = Arc::downgrade(self);
-        let (user_id, run_id, bot_id) = (ctx.user_id, ctx.run_id, ctx.bot_id.to_string());
-        let parked_item = item.clone();
-        let parked_mission = mission.to_owned();
-        let fail_reason = reason.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep_until(deadline).await;
-            let Some(this) = this.upgrade() else {
-                return;
-            };
-            if this.handovers.lock().remove(&call_id).is_none() {
-                return;
-            }
-            builtin_tools::handover_hub().disarm(&run_id.to_string());
-            builtin_tools::handover_hub().clear_browser_hold(&bot_id);
-            if let Some(store) = this.mission_store.read().clone() {
-                let error = format!("{fail_reason} (timed out waiting for the owner)");
-                let _ = store.fail_live_blocked(
-                    &parked_mission,
-                    &parked_item,
-                    &error,
-                    storage::now_ms(),
-                );
-            }
-            let _ = this.storage.append_audit(
-                user_id,
-                Some(run_id),
-                "system",
-                "handover.expired",
-                &json!({"call_id": call_id, "mission_item": parked_item}),
-            );
-        });
-        (mission_park_text(Some(&item), &reason), true)
+        let mut text = mission_park_text(Some(&item), &reason);
+        if locked {
+            text.push_str(" The browser is held for the owner until then: do not use it; take an item that needs no browser, or end the session.");
+        }
+        (text, true)
     }
 
     /// An approval nobody gave in time in a mission session: the call is denied and the item
@@ -4405,7 +4471,9 @@ impl Shared {
             }
         }
         if let Some(mission) = mission_park.as_deref() {
-            return self.park_item_for_handover(ctx, call_id, mission, kind, card);
+            return self
+                .park_item_for_handover(ctx, call_id, mission, kind, card)
+                .await;
         }
         let tainted = self
             .root_run_id(ctx)

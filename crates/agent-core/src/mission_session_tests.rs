@@ -36,7 +36,15 @@ impl Tool for CaptchaTool {
     fn spec(&self) -> &ToolSpec {
         &self.0
     }
-    async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+        // As the real tool: the page is checked and the request armed for the run.
+        builtin_tools::handover_hub().arm(
+            &ctx.run_id,
+            Arc::new(CaptchaPage),
+            builtin_tools::HandoverKind::Captcha,
+            "https://signup.example",
+            "heading \"Sign up\"\ncheckbox \"I'm not a robot\"",
+        );
         Ok(ToolOutput {
             content: vec![ContentPart::Json {
                 data: builtin_tools::handover::browser_handover_card(
@@ -47,6 +55,61 @@ impl Tool for CaptchaTool {
             spill: None,
             exposure: None,
         })
+    }
+}
+
+/// The page the CAPTCHA is on. It cannot keep a page apart, so a parked CAPTCHA locks the
+/// bot's browser instead (see `HandoverHub::park`).
+struct CaptchaPage;
+
+#[async_trait]
+impl builtin_tools::BrowserDriver for CaptchaPage {
+    async fn open(&self, _: &str, _: Option<&str>) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn snapshot(&self, _: bool) -> Result<String, String> {
+        Ok("checkbox \"I'm not a robot\"".into())
+    }
+    async fn click(&self, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn fill(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn select(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn press(&self, _: &str) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn scroll(&self, _: Option<&str>, _: f64, _: f64) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn wait(
+        &self,
+        _: builtin_tools::browser::Wait,
+        _: Option<std::time::Duration>,
+    ) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn back(&self) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn tabs(&self, _: Option<usize>) -> Result<String, String> {
+        Err("fake".into())
+    }
+    async fn screenshot(
+        &self,
+        _: bool,
+        _: Option<&str>,
+    ) -> Result<(Vec<u8>, &'static str), String> {
+        Err("fake".into())
+    }
+    async fn eval(&self, _: &str) -> Result<Value, String> {
+        Err("fake".into())
+    }
+    async fn current_url(&self) -> Option<String> {
+        Some("https://signup.example/join".into())
     }
 }
 
@@ -1282,11 +1345,42 @@ async fn a_captcha_parks_only_that_item_and_the_session_carries_on() {
         "{tools:?}"
     );
     let audit = w.env.storage.list_audit(w.env.user).unwrap();
-    assert!(audit.iter().any(|a| a.action == "handover.parked"));
+    let parked = audit
+        .iter()
+        .find(|a| a.action == "handover.parked")
+        .expect("parked");
+    // The ledger row keyed by the call id outlives the session that asked.
+    let call_id = parked.detail["call_id"].as_str().unwrap().to_owned();
+    let row = w.store.live_handover(&call_id).unwrap().expect("row");
+    assert_eq!(
+        (row.item.as_str(), row.kind.as_str()),
+        ("a.example", "captcha")
+    );
+    // This fake browser cannot keep a page apart, so the bot's browser is locked (and the
+    // model was told so) until the owner answers.
+    assert_eq!(parked.detail["browser_locked"], true);
+    assert!(builtin_tools::handover_hub().browser_locked(&w.env.bot.to_string()));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.contains("browser is held for the owner")),
+        "{tools:?}"
+    );
+    // The session ended: the parked request is still armed under its call id.
+    assert!(
+        lp.handover(protocol::ToolCallId(
+            uuid::Uuid::parse_str(&call_id).unwrap()
+        ))
+        .is_some()
+    );
+    builtin_tools::handover_hub()
+        .release_parked(&call_id, false)
+        .await;
+    assert!(!builtin_tools::handover_hub().browser_locked(&w.env.bot.to_string()));
 }
 
 #[tokio::test]
-async fn captcha_give_ups_never_use_up_the_per_run_handover_limit() {
+async fn captcha_parks_never_use_up_the_per_run_handover_limit_and_are_capped_per_mission() {
     let keys = ["a.example", "b.example", "c.example", "d.example"];
     let w = world(&keys);
     // Every site throws a CAPTCHA; the limit allows two handovers per run.
@@ -1310,21 +1404,37 @@ async fn captcha_give_ups_never_use_up_the_per_run_handover_limit() {
         .run_mission_session(w.env.chat, &w.mission, "brief")
         .unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // One page per mission waits for the owner; the other CAPTCHA sites are given up (the
+    // report lists them) instead of piling up held pages and notices.
     let blocked = w
         .store
         .items(&w.mission, Some(ItemStatus::Blocked))
         .unwrap();
-    assert_eq!(blocked.len(), 4, "{blocked:?}");
-    assert!(blocked.iter().all(|i| i.live_only));
+    assert_eq!(blocked.len(), 1, "{blocked:?}");
+    assert!(blocked[0].live_only);
+    let failed = w.store.items(&w.mission, Some(ItemStatus::Failed)).unwrap();
+    assert_eq!(failed.len(), 3, "{failed:?}");
+    assert!(failed.iter().all(|i| {
+        i.last_error
+            .as_deref()
+            .unwrap()
+            .contains("already has a page waiting")
+    }));
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(8)));
     assert!(
         !tools.iter().any(|t| t.contains("asked for help too often")),
         "{tools:?}"
     );
+    let audit = w.env.storage.list_audit(w.env.user).unwrap();
+    for a in audit.iter().filter(|a| a.action == "handover.parked") {
+        builtin_tools::handover_hub()
+            .release_parked(a.detail["call_id"].as_str().unwrap(), false)
+            .await;
+    }
 }
 
 #[tokio::test]
-async fn without_a_single_doing_item_the_model_is_told_to_park_it_itself() {
+async fn without_a_single_doing_item_the_model_is_told_to_name_the_item_and_hand_over_again() {
     let w = world(&["a.example", "b.example"]);
     let fake = Fake::new(vec![
         calls(&[("c1", "browser_handover", json!({"kind": "captcha"}))]),
@@ -1345,7 +1455,7 @@ async fn without_a_single_doing_item_the_model_is_told_to_park_it_itself() {
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(1)));
     assert!(
         tools.iter().any(|t| {
-            t.contains("Mark the item you are working on as blocked") && t.contains("mission_item")
+            t.contains("as doing with mission_item") && t.contains("browser_handover once more")
         }),
         "{tools:?}"
     );

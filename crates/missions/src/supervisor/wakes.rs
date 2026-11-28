@@ -34,6 +34,8 @@ pub struct WakePass {
     pub probes: u32,
     /// Missions moved back to `running`.
     pub released: u32,
+    /// Parked live hand-overs that ran out.
+    pub handovers_expired: u32,
 }
 
 /// What a mailbox look decided about a wait.
@@ -75,6 +77,12 @@ impl Supervisor {
         // An item that waits for nothing would wait for ever.
         self.store.requeue_orphan_waiting(now)?;
         self.prune_old(now);
+
+        // A CAPTCHA nobody finished on the page in time: its item fails, the page is let go.
+        for h in self.store.expire_live_handovers(now)? {
+            pass.handovers_expired += 1;
+            self.handover_ended(&h);
+        }
 
         for w in self.store.due_timers(now)? {
             if self

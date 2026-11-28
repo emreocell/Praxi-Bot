@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -48,6 +48,8 @@ struct Page {
 #[derive(Default)]
 struct State {
     page: Option<Page>,
+    /// Pages held for the owner (a parked CAPTCHA), by hand-over key: no tool reaches them.
+    held: HashMap<String, Page>,
     /// What was typed or ticked, by ref.
     typed: HashMap<String, String>,
     history: Vec<Url>,
@@ -465,6 +467,77 @@ impl BrowserDriver for SiteBrowser {
 
     async fn current_tab_id(&self) -> Option<String> {
         Some("tab-1".into())
+    }
+
+    async fn hold_page(&self, key: &str) -> Result<Arc<dyn BrowserDriver>, String> {
+        let mut st = self.state.lock();
+        let page = st.page.take().ok_or("no page is open")?;
+        st.typed.clear();
+        st.held.insert(key.to_owned(), page.clone());
+        Ok(Arc::new(HeldPage { page }))
+    }
+
+    async fn release_held_page(&self, key: &str, _give_back: bool) {
+        self.state.lock().held.remove(key);
+    }
+}
+
+impl SiteBrowser {
+    /// Keys of the pages held for the owner right now.
+    pub fn held_pages(&self) -> Vec<String> {
+        self.state.lock().held.keys().cloned().collect()
+    }
+}
+
+/// A page held for the owner: it can only be looked at.
+struct HeldPage {
+    page: Page,
+}
+
+#[async_trait]
+impl BrowserDriver for HeldPage {
+    async fn open(&self, _: &str, _: Option<&str>) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn snapshot(&self, _: bool) -> Result<String, String> {
+        Ok(render(&self.page, &HashMap::new()))
+    }
+    async fn click(&self, _: &str) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn fill(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn select(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn press(&self, _: &str) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn scroll(&self, _: Option<&str>, _: f64, _: f64) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn wait(&self, _: Wait, _: Option<Duration>) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn back(&self) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn tabs(&self, _: Option<usize>) -> Result<String, String> {
+        Err("held".into())
+    }
+    async fn screenshot(
+        &self,
+        _: bool,
+        _: Option<&str>,
+    ) -> Result<(Vec<u8>, &'static str), String> {
+        Err("held".into())
+    }
+    async fn eval(&self, _: &str) -> Result<Value, String> {
+        Err("held".into())
+    }
+    async fn current_url(&self) -> Option<String> {
+        Some(self.page.url.to_string())
     }
 }
 

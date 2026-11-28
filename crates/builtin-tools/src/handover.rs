@@ -512,6 +512,8 @@ impl std::fmt::Display for HandoverError {
 #[derive(Clone)]
 struct Armed {
     driver: Arc<dyn BrowserDriver>,
+    /// The subagent lane whose tab showed the prompt (`None`: the shared tab).
+    lane: Option<String>,
     kind: HandoverKind,
     origin: String,
     fingerprint: u64,
@@ -519,6 +521,43 @@ struct Armed {
     /// Fingerprint of the page at the owner's last "Done" that found the check still
     /// there: pressing Done again on the very same page is the owner's own confirmation.
     unconfirmed: Arc<Mutex<Option<u64>>>,
+}
+
+/// A mission's CAPTCHA parked for the owner under its tool call id: no run waits on it, so
+/// it outlives the run that asked ([`HandoverHub::forget`] leaves it alone).
+struct Parked {
+    armed: Armed,
+    bot_id: String,
+    until: std::time::Instant,
+    /// The bot's browser the page was taken from, while the page is held on its own tab.
+    /// `None`: the page could not be kept apart (or is being moved), so the whole browser of
+    /// the bot is locked until the hand-over ends.
+    source: Option<Arc<dyn BrowserDriver>>,
+}
+
+/// Pages held for the owner across all bots at once: each keeps a browser open and out of
+/// the idle reaper's and the peer reclaim's reach.
+pub const MAX_HELD_PAGES: usize = 4;
+
+/// How a parked CAPTCHA keeps its page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParkedPage {
+    /// On a tab of its own that no run of the bot can see or reach.
+    Tab,
+    /// The bot's browser could not keep a page apart: it is locked for the bot until the
+    /// owner answers or the hand-over expires.
+    Locked,
+}
+
+/// Why [`HandoverHub::park`] kept nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParkRefused {
+    /// The run has no armed CAPTCHA (the tool did not check a page).
+    NotArmed,
+    /// This bot already keeps a page for the owner (one live view per bot).
+    BotBusy,
+    /// [`MAX_HELD_PAGES`] pages are held already.
+    Full,
 }
 
 /// How a CAPTCHA handover was settled.
@@ -565,8 +604,8 @@ fn fingerprint(snapshot: &str) -> u64 {
 #[derive(Default)]
 pub struct HandoverHub {
     armed: Mutex<HashMap<String, Armed>>,
-    /// Keep a bot's browser session open until the owner may finish a step on the page.
-    browser_holds: Mutex<HashMap<String, std::time::Instant>>,
+    /// Mission CAPTCHAs parked for the owner, keyed by tool call id.
+    parked: Mutex<HashMap<String, Parked>>,
     /// Own action budgets per ROOT run.
     seen: Mutex<HashMap<String, CaptchaBudget>>,
     /// Subagent run -> root run of its family.
@@ -631,8 +670,12 @@ impl HandoverHub {
         f(seen.entry(root).or_default())
     }
 
-    /// Clear the budget of one site after the owner's "Done".
+    /// Clear the budget of one site after the owner's "Done" (a parked mission CAPTCHA has
+    /// no run budget: its run is long over).
     fn clear_captcha(&self, run_id: &str, origin: &str) {
+        if self.parked().contains_key(run_id) {
+            return;
+        }
         let key = site_key(Some(origin));
         self.with_budget(run_id, |b| {
             b.attempts.remove(&key);
@@ -713,38 +756,120 @@ impl HandoverHub {
             .insert(run_id.to_owned(), Arc::downgrade(driver));
     }
 
-    /// Keep the managed browser of `bot_id` from idle-closing until `until`.
-    pub fn hold_browser(&self, bot_id: &str, until: std::time::Instant) {
-        self.browser_holds
+    fn parked(&self) -> std::sync::MutexGuard<'_, HashMap<String, Parked>> {
+        self.parked
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(bot_id.to_owned(), until);
     }
 
-    /// Drop a browser hold early (the owner finished or gave up).
-    pub fn clear_browser_hold(&self, bot_id: &str) {
-        self.browser_holds
+    /// Park the CAPTCHA `run_id` armed under `call_id` until `until`: the page moves to a tab
+    /// of its own that no run of the bot can see or navigate (see
+    /// [`BrowserDriver::hold_page`]), or, when the browser cannot keep a page apart, the bot's
+    /// whole browser is locked until the hand-over ends. At most one page per bot (it has one
+    /// live view) and [`MAX_HELD_PAGES`] in all.
+    ///
+    /// # Errors
+    /// See [`ParkRefused`]; nothing is kept then and the run's armed request is dropped.
+    pub async fn park(
+        &self,
+        run_id: &str,
+        call_id: &str,
+        bot_id: &str,
+        until: std::time::Instant,
+    ) -> Result<ParkedPage, ParkRefused> {
+        let armed = self
+            .armed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(bot_id);
+            .remove(run_id)
+            .filter(|a| a.kind == HandoverKind::Captcha)
+            .ok_or(ParkRefused::NotArmed)?;
+        let driver = Arc::clone(&armed.driver);
+        let lane = armed.lane.clone();
+        {
+            // Reserve the slot first (the page is moved outside the lock): it already counts,
+            // and the bot's browser is locked while the page moves.
+            let mut parked = self.parked();
+            let now = std::time::Instant::now();
+            if parked.values().any(|p| p.bot_id == bot_id && p.until > now) {
+                armed.cancelled.store(true, Ordering::SeqCst);
+                return Err(ParkRefused::BotBusy);
+            }
+            if parked.values().filter(|p| p.until > now).count() >= MAX_HELD_PAGES {
+                armed.cancelled.store(true, Ordering::SeqCst);
+                return Err(ParkRefused::Full);
+            }
+            parked.insert(
+                call_id.to_owned(),
+                Parked {
+                    armed,
+                    bot_id: bot_id.to_owned(),
+                    until,
+                    source: None,
+                },
+            );
+        }
+        let held = crate::browser::in_lane(lane, driver.hold_page(call_id)).await;
+        let kept = {
+            let mut parked = self.parked();
+            match (parked.get_mut(call_id), held) {
+                (Some(p), Ok(page)) => {
+                    p.armed.driver = page;
+                    p.source = Some(Arc::clone(&driver));
+                    Some(ParkedPage::Tab)
+                }
+                (Some(_), Err(_)) => Some(ParkedPage::Locked),
+                (None, held) => {
+                    if held.is_ok() {
+                        None
+                    } else {
+                        return Err(ParkRefused::NotArmed);
+                    }
+                }
+            }
+        };
+        match kept {
+            Some(page) => Ok(page),
+            None => {
+                // Released while the page moved: give the page up again.
+                driver.release_held_page(call_id, false).await;
+                Err(ParkRefused::NotArmed)
+            }
+        }
     }
 
-    /// Whether a mission hand-over still needs the page open for `bot_id`.
+    /// End the parked CAPTCHA under `call_id`: its request is invalidated and its page let go
+    /// (`give_back`: the owner finished, the tab returns to the bot; otherwise it is closed).
+    /// Returns how the page was kept, `None` when nothing was parked under the id.
+    pub async fn release_parked(&self, call_id: &str, give_back: bool) -> Option<ParkedPage> {
+        let p = self.parked().remove(call_id)?;
+        p.armed.cancelled.store(true, Ordering::SeqCst);
+        match p.source {
+            Some(source) => {
+                source.release_held_page(call_id, give_back).await;
+                Some(ParkedPage::Tab)
+            }
+            None => Some(ParkedPage::Locked),
+        }
+    }
+
+    /// Whether a parked CAPTCHA still needs `bot_id`'s browser kept open.
     #[must_use]
     pub fn browser_hold_active(&self, bot_id: &str) -> bool {
-        let mut holds = self
-            .browser_holds
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(until) = holds.get(bot_id) else {
-            return false;
-        };
-        if std::time::Instant::now() >= *until {
-            holds.remove(bot_id);
-            false
-        } else {
-            true
-        }
+        let now = std::time::Instant::now();
+        self.parked()
+            .values()
+            .any(|p| p.bot_id == bot_id && p.until > now)
+    }
+
+    /// Whether `bot_id`'s browser is locked for a parked CAPTCHA whose page could not be kept
+    /// apart (or is being moved right now): no browser call of the bot may run.
+    #[must_use]
+    pub fn browser_locked(&self, bot_id: &str) -> bool {
+        let now = std::time::Instant::now();
+        self.parked()
+            .values()
+            .any(|p| p.bot_id == bot_id && p.until > now && p.source.is_none())
     }
 
     /// Whether a CAPTCHA is on the page of this run's VISIBLE managed browser right now
@@ -777,6 +902,17 @@ impl HandoverHub {
         };
         if !driver.on_desktop() {
             return false;
+        }
+        // A page held for the owner in this very browser is still a window on the desktop.
+        let same =
+            |d: &Arc<dyn BrowserDriver>| std::ptr::addr_eq(Arc::as_ptr(d), Arc::as_ptr(&driver));
+        if self.parked().values().any(|p| {
+            p.until > std::time::Instant::now()
+                && p.source
+                    .as_ref()
+                    .map_or_else(|| same(&p.armed.driver), same)
+        }) {
+            return true;
         }
         driver
             .snapshot(false)
@@ -851,6 +987,7 @@ impl HandoverHub {
                 run_id.to_owned(),
                 Armed {
                     driver,
+                    lane: crate::browser::current_lane(),
                     kind,
                     origin: origin.to_owned(),
                     fingerprint: self::fingerprint(fingerprint),
@@ -894,16 +1031,35 @@ impl HandoverHub {
         }
     }
 
-    fn get(&self, run_id: &str, kind: HandoverKind) -> Result<Armed, HandoverError> {
-        let armed = self
-            .armed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let a = armed.get(run_id).ok_or(HandoverError::NotArmed)?;
+    /// The request under `key`: a parked mission CAPTCHA's call id, or a waiting run's id.
+    fn get(&self, key: &str, kind: HandoverKind) -> Result<Armed, HandoverError> {
+        let parked = self.parked().get(key).map(|p| p.armed.clone());
+        let a = match parked {
+            Some(a) => a,
+            None => self
+                .armed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(key)
+                .cloned()
+                .ok_or(HandoverError::NotArmed)?,
+        };
         if a.kind != kind {
             return Err(HandoverError::NotArmed);
         }
-        Ok(a.clone())
+        Ok(a)
+    }
+
+    /// Whether `cancelled` is still the token of the request under `key`.
+    fn current(&self, key: &str, cancelled: &Arc<AtomicBool>) -> bool {
+        let same = |a: &Armed| Arc::ptr_eq(&a.cancelled, cancelled);
+        self.parked().get(key).is_some_and(|p| same(&p.armed))
+            || self
+                .armed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(key)
+                .is_some_and(same)
     }
 
     /// Type the owner's one-time `code` into the page of `run_id`.
@@ -941,13 +1097,7 @@ impl HandoverHub {
         };
         let want = origin.clone();
         let accept = |o: Option<String>| {
-            let armed = self
-                .armed
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            armed
-                .get(run_id)
-                .is_some_and(|a| Arc::ptr_eq(&a.cancelled, &cancelled))
+            self.current(run_id, &cancelled)
                 && !cancelled.load(Ordering::SeqCst)
                 && o.as_deref().and_then(crate::browser::origin_of).as_deref()
                     == Some(want.as_str())

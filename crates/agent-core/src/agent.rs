@@ -2225,27 +2225,31 @@ impl AgentLoop {
     /// `None` when none waits under `call_id`.
     #[must_use]
     pub fn handover(&self, call_id: ToolCallId) -> Option<crate::HandoverInfo> {
-        self.sh.handovers.lock().get(&call_id).cloned()
+        if let Some(info) = self.sh.handovers.lock().get(&call_id).cloned() {
+            return Some(info);
+        }
+        let store = self.sh.mission_store.read().clone()?;
+        let row = store.live_handover(&call_id.0.to_string()).ok().flatten()?;
+        Some(mission_handover_info(&row, storage::now_ms()))
     }
 
     /// Claim a waiting handover for an answer: exactly one caller gets it. Put it
     /// back with [`Self::restore_handover`] when the answer failed (a wrong code
     /// field, a CAPTCHA that is still there) so the owner can try again.
+    ///
+    /// A mission's parked CAPTCHA is claimed in the mission ledger (it outlives the run that
+    /// asked): only before it expires, and never while the supervisor expires it.
     #[must_use]
     pub fn claim_handover(&self, call_id: ToolCallId) -> Option<crate::HandoverInfo> {
-        let mut handovers = self.sh.handovers.lock();
-        let info = handovers.get(&call_id)?;
-        if tokio::time::Instant::now() >= info.deadline {
-            return None;
+        if !self.sh.handovers.lock().contains_key(&call_id) {
+            let store = self.sh.mission_store.read().clone()?;
+            let now = storage::now_ms();
+            let row = store
+                .claim_live_handover(&call_id.0.to_string(), now)
+                .ok()
+                .flatten()?;
+            return Some(mission_handover_info(&row, now));
         }
-        if let Some(target) = &info.mission {
-            if !self.mission_open(&target.mission_id) {
-                handovers.remove(&call_id);
-                return None;
-            }
-            return handovers.remove(&call_id);
-        }
-        drop(handovers);
         self.refuse_if_stopped(call_id).ok()?;
         let pending = self.sh.pending.lock();
         if pending.get(&call_id)?.kind != PendingKind::Handover {
@@ -2258,11 +2262,22 @@ impl AgentLoop {
         handovers.remove(&call_id)
     }
 
-    /// Undo [`Self::claim_handover`] after a failed answer.
+    /// Undo [`Self::claim_handover`] after a failed answer. A mission's CAPTCHA that ran out
+    /// meanwhile is not put back: its item fails now and its page is let go.
     pub fn restore_handover(&self, call_id: ToolCallId, info: crate::HandoverInfo) {
         if info.mission.is_some() {
-            if tokio::time::Instant::now() < info.deadline {
-                self.sh.handovers.lock().insert(call_id, info);
+            let Some(store) = self.sh.mission_store.read().clone() else {
+                return;
+            };
+            let key = call_id.0.to_string();
+            if let Ok(missions::Unclaim::Expired(_)) =
+                store.unclaim_live_handover(&key, storage::now_ms())
+            {
+                tokio::spawn(async move {
+                    builtin_tools::handover_hub()
+                        .release_parked(&key, false)
+                        .await;
+                });
             }
             return;
         }
@@ -2271,20 +2286,14 @@ impl AgentLoop {
         }
     }
 
-    /// End a handover: `done` after the daemon typed the code or saw the page move
-    /// on, otherwise the owner gave up. The model learns only which one.
+    /// End a handover a run waits on: `done` after the daemon typed the code or saw the page
+    /// move on, otherwise the owner gave up. The model learns only which one. A mission's
+    /// parked CAPTCHA ends through [`Self::finish_parked_handover`] instead.
     ///
     /// # Errors
     /// [`LoopError::NoPendingApproval`] if the request already ended.
     pub fn finish_handover(&self, call_id: ToolCallId, done: bool, by: UserId) -> Result<()> {
-        let info = self.sh.handovers.lock().remove(&call_id);
-        if let Some(info) = info.as_ref().filter(|i| i.mission.is_some()) {
-            builtin_tools::handover_hub().clear_browser_hold(&info.bot_id);
-            if !done {
-                builtin_tools::handover_hub().disarm(&info.run_id.to_string());
-            }
-            return Ok(());
-        }
+        self.sh.handovers.lock().remove(&call_id);
         let verdict = if done {
             Verdict::HandoverDone
         } else {
@@ -2298,6 +2307,46 @@ impl AgentLoop {
             .tx
             .send(verdict)
             .map_err(|_| LoopError::NoPendingApproval(call_id))
+    }
+
+    /// End a mission's parked CAPTCHA claimed with [`Self::claim_handover`]: `done` gives the
+    /// page back to the bot and its item back to `todo` (a later session continues on that
+    /// page), otherwise the page is closed and the item fails. Returns the mission to resume.
+    ///
+    /// # Errors
+    /// [`LoopError::NoPendingApproval`] when nothing is claimed under `call_id`.
+    pub async fn finish_parked_handover(&self, call_id: ToolCallId, done: bool) -> Result<String> {
+        let key = call_id.0.to_string();
+        let page = builtin_tools::handover_hub()
+            .release_parked(&key, done)
+            .await;
+        let note = if !done {
+            "the owner cancelled the hand-over on the page"
+        } else if page == Some(builtin_tools::ParkedPage::Tab) {
+            "The owner finished the CAPTCHA on the page. That page is open again as one of your browser tabs (browser_tabs lists it): switch to it and take a fresh browser_snapshot; do not open the site from scratch."
+        } else {
+            "The owner finished the CAPTCHA on the page. Take a fresh browser_snapshot and continue from that page; do not open the site from scratch."
+        };
+        let store = self
+            .sh
+            .mission_store
+            .read()
+            .clone()
+            .ok_or(LoopError::NoPendingApproval(call_id))?;
+        store
+            .finish_live_handover(&key, done, note, storage::now_ms())
+            .ok()
+            .flatten()
+            .map(|row| row.mission_id)
+            .ok_or(LoopError::NoPendingApproval(call_id))
+    }
+
+    /// A mission's parked CAPTCHA ended without an answer (the supervisor expired it, or a
+    /// restart lost it): let go of its page.
+    pub async fn release_parked_handover(&self, call_id: &str) {
+        builtin_tools::handover_hub()
+            .release_parked(call_id, false)
+            .await;
     }
 
     /// The [`tool_registry::Elicitor`] to install into the MCP bridge: a server's
@@ -4200,5 +4249,20 @@ mod emit_tests {
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].seq, 0);
         assert_eq!(log[1].seq, 1);
+    }
+}
+
+/// The facts of a mission's parked CAPTCHA, read from its ledger row.
+fn mission_handover_info(row: &missions::ParkedHandover, now_ms: i64) -> crate::HandoverInfo {
+    let left = u64::try_from(row.expires_at_ms.saturating_sub(now_ms)).unwrap_or(0);
+    crate::HandoverInfo {
+        run_id: RunId(uuid::Uuid::parse_str(&row.run_id).unwrap_or_default()),
+        kind: protocol::event::HandoverKind::Captcha,
+        bot_id: row.bot_id.clone(),
+        mission: Some(crate::MissionTarget {
+            mission_id: row.mission_id.clone(),
+            item: row.item.clone(),
+        }),
+        deadline: tokio::time::Instant::now() + std::time::Duration::from_millis(left),
     }
 }

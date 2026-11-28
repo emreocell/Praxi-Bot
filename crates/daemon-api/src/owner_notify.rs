@@ -53,6 +53,8 @@ const FINISHED_COALESCE_MS: i64 = 15 * 60 * 1000;
 const FAILED_COALESCE_MS: i64 = 5 * 60 * 1000;
 /// A standing order that reports the same problem again notifies at most this often.
 const NEEDS_OWNER_COALESCE_MS: i64 = 60 * 60 * 1000;
+/// One "a CAPTCHA needs you" notice per mission in this window.
+const HANDOVER_COALESCE_MS: i64 = 60 * 60 * 1000;
 /// What the notice says when a standing order ended without a clear `OK` or `NEEDS_OWNER(...)`.
 const STANDING_UNCLEAR: &str =
     "The check ended without a clear OK or NEEDS_OWNER answer. Open the run to see what it found.";
@@ -540,11 +542,17 @@ fn clip(text: &str, max: usize) -> String {
     out
 }
 
+/// Text the bot wrote, maybe repeating a page or a mail (an item title, a blocked reason):
+/// without hidden and control characters, and bounded.
+fn scrubbed(text: &str, max: usize) -> String {
+    clip(&protocol::approval_text::scrub(text, false), max)
+}
+
 fn item_of(i: &missions::DigestItem) -> NoticeItem {
     NoticeItem {
-        key: i.key.clone(),
-        title: clip(&i.title, 80),
-        text: i.text.as_deref().map(|t| clip(t, TEXT_MAX)),
+        key: scrubbed(&i.key, 80),
+        title: scrubbed(&i.title, 80),
+        text: i.text.as_deref().map(|t| scrubbed(t, TEXT_MAX)),
     }
 }
 
@@ -572,7 +580,7 @@ pub(crate) fn mission_draft(
     d.reason = m
         .state_reason
         .as_deref()
-        .map(|r| clip(r, TEXT_MAX))
+        .map(|r| scrubbed(r, TEXT_MAX))
         .filter(|r| !r.is_empty());
     d.progress = Some(NoticeProgress {
         total: digest.progress.total,
@@ -584,13 +592,13 @@ pub(crate) fn mission_draft(
     d.done = digest.done_sample.iter().take(3).map(item_of).collect();
     d.failed = digest.failed.iter().take(5).map(item_of).collect();
     for it in blocked {
-        let reason = it.blocked_reason.as_deref().map(|t| clip(t, TEXT_MAX));
+        let reason = it.blocked_reason.as_deref().map(|t| scrubbed(t, TEXT_MAX));
         if it.live_only {
             // A one-time code is never typed into a chat: the owner finishes that step live.
             d.app_only.push(clip(
                 &format!(
                     "{}: {}",
-                    it.title,
+                    scrubbed(&it.title, 80),
                     reason.as_deref().unwrap_or("needs you live in the app")
                 ),
                 TEXT_MAX,
@@ -598,7 +606,7 @@ pub(crate) fn mission_draft(
         } else {
             d.questions.push(NoticeItem {
                 key: it.key.clone(),
-                title: clip(&it.title, 80),
+                title: scrubbed(&it.title, 80),
                 text: reason,
             });
         }
@@ -699,7 +707,10 @@ impl AppState {
         }
     }
 
-    /// A mission parked a CAPTCHA or phone check: tell the owner to open live view.
+    /// A mission parked a CAPTCHA for the owner on the live page: tell the owner to open the
+    /// live view. One notice per mission and window, however many sites throw one; the item
+    /// key and the site the browser reported (both scrubbed) are all the page-influenced text
+    /// it carries.
     pub(crate) fn notify_mission_handover(&self, notice: agent_core::MissionHandoverNotice) {
         let Ok(store) = self.mission_store() else {
             return;
@@ -711,24 +722,15 @@ impl AppState {
             return;
         };
         let bot = BotId(Uuid::parse_str(&notice.bot_id).unwrap_or_default());
-        let title = store
-            .items(&notice.mission_id, None)
-            .ok()
-            .and_then(|items| {
-                items
-                    .into_iter()
-                    .find(|i| i.key == notice.item)
-                    .map(|i| i.title)
-            })
-            .unwrap_or_else(|| notice.item.clone());
+        let bot_name = self.bot_name(bot);
         let mut d = Draft::new(
             NoticeKind::Blocked,
             NoticeSource::Mission,
-            clip(&m.title, 90),
+            scrubbed(&m.title, 90),
         );
-        self.bot_name(bot).clone_into(&mut d.bot_name);
+        bot_name.clone_into(&mut d.bot_name);
         d.bot_id = Some(notice.bot_id);
-        d.mission_id = Some(notice.mission_id);
+        d.mission_id = Some(notice.mission_id.clone());
         d.chat_id = Some(m.chat_id.clone());
         d.progress = Some(NoticeProgress {
             total: p.total,
@@ -737,13 +739,22 @@ impl AppState {
             failed: p.failed,
             skipped: p.skipped,
         });
+        let locked = if notice.browser_locked {
+            " The bot's browser is locked until you answer."
+        } else {
+            ""
+        };
         d.app_only.push(clip(
             &format!(
-                "{title}: needs you on this page ({}) — open Live view for {} and press Take control, then press Done on the hand-over card",
-                clip(&notice.site, 80),
-                self.bot_name(bot)
+                "{}: a CAPTCHA needs you on the page ({}). Open Live view for {bot_name}, press Take control, solve it, then press Done on the hand-over card.{locked}",
+                scrubbed(&notice.item, 80),
+                scrubbed(&notice.site, 80),
             ),
             TEXT_MAX,
+        ));
+        d.coalesce = Some((
+            format!("{}:handover", notice.mission_id),
+            HANDOVER_COALESCE_MS,
         ));
         self.owner_notify().publish(d, storage::now_ms());
     }

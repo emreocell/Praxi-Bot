@@ -123,6 +123,10 @@ impl World {
         assert_eq!(parked.len(), 1, "{parked:#?}");
         assert_eq!(parked[0].detail["item"], CAPTCHA);
         assert_eq!(parked[0].detail["kind"], "captcha");
+        assert_eq!(
+            parked[0].detail["browser_locked"], false,
+            "the page moved to its own tab: the bot keeps its browser"
+        );
         for a in &audit {
             let decided = a.action.starts_with("approval.") || a.action.starts_with("secret.");
             assert!(

@@ -100,7 +100,7 @@ pub use files::{
 pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
 pub use handover::{
     BROWSER_HANDOVER, CAPTCHA_OWN_ATTEMPTS, HANDOVER_CARD_KIND, HandoverCard, HandoverError,
-    HandoverHub, HandoverKind, SolvedBy, handover_hub,
+    HandoverHub, HandoverKind, MAX_HELD_PAGES, ParkRefused, ParkedPage, SolvedBy, handover_hub,
 };
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use notes::NOTES_TOOL_NAMES;

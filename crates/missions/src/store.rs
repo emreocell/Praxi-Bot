@@ -39,9 +39,16 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0004_sent_chars",
         include_str!("../migrations/0004_sent_chars.sql"),
     ),
+    (
+        "0005_handovers",
+        include_str!("../migrations/0005_handovers.sql"),
+    ),
 ];
 
+mod handovers;
 mod waits;
+
+pub use handovers::{CLAIM_STALE_MS, NewHandover, Park, ParkedHandover, Unclaim};
 
 /// A mission to create.
 #[derive(Debug, Clone)]
@@ -598,6 +605,13 @@ impl MissionStore {
                 "an item is parked for a wake only through mission_wait (a timer, a mail or a webhook)".into(),
             ));
         }
+        // A step only the owner can do on the page (a CAPTCHA, a phone check, a code): the bot
+        // cannot take the item up again by itself, the owner's answer or edit releases it.
+        if !by_owner && cur.status == ItemStatus::Blocked && cur.live_only && to != cur.status {
+            return Err(MissionError::Invalid(format!(
+                "item {key:?} waits for the owner to finish a step on the site; only the owner can release it. Do not retry it: take the next item"
+            )));
+        }
         if !by_owner && !model_item_transition_ok(cur.status, to) {
             return Err(MissionError::Invalid(format!(
                 "item {key:?} is {} and cannot become {to}; finished items stay finished",
@@ -866,79 +880,6 @@ impl MissionStore {
         let counts = requeue_in(&tx, id, max_attempts, left, now)?;
         tx.commit()?;
         Ok(counts)
-    }
-
-    /// The owner finished a live step on the page (a CAPTCHA, phone verification): release one
-    /// blocked `live_only` item back to `todo` with a daemon-written note in `owner_answer`.
-    ///
-    /// # Errors
-    /// Unknown mission or item, SQLite failure.
-    pub fn release_live_blocked(&self, id: &str, key: &str, note: &str, now: i64) -> Result<bool> {
-        let mut conn = self.conn();
-        let tx = conn.transaction()?;
-        let note = check_text("answer", note, MAX_TEXT_CHARS)?;
-        let n = tx.execute(
-            "UPDATE mission_items SET status = 'todo', owner_answer = ?3, live_only = 0, attempts = 0, cuts = 0, updated_at_ms = ?4 \
-             WHERE mission_id = ?1 AND key = ?2 AND status = 'blocked' AND live_only = 1",
-            params![id, key, note, now],
-        )?;
-        if n > 0 {
-            event(
-                &tx,
-                id,
-                now,
-                "item",
-                Some(key),
-                &json!({"from": "blocked", "to": "todo", "by": "owner_live"}),
-            )?;
-            bump(&tx, id, now)?;
-            let state: String =
-                tx.query_row("SELECT state FROM missions WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })?;
-            if matches!(
-                MissionState::parse(&state),
-                Some(MissionState::Blocked | MissionState::Waiting)
-            ) {
-                transition_in(
-                    &tx,
-                    id,
-                    MissionState::Running,
-                    Some("the owner finished on the page"),
-                    now,
-                )?;
-            }
-        }
-        tx.commit()?;
-        Ok(n > 0)
-    }
-
-    /// A live hand-over timed out or the owner gave up: mark one blocked `live_only` item failed.
-    ///
-    /// # Errors
-    /// SQLite failure.
-    pub fn fail_live_blocked(&self, id: &str, key: &str, error: &str, now: i64) -> Result<bool> {
-        let mut conn = self.conn();
-        let tx = conn.transaction()?;
-        let error = check_text("error", error, MAX_TEXT_CHARS)?;
-        let n = tx.execute(
-            "UPDATE mission_items SET status = 'failed', last_error = ?3, blocked_reason = NULL, live_only = 0, updated_at_ms = ?4 \
-             WHERE mission_id = ?1 AND key = ?2 AND status = 'blocked' AND live_only = 1",
-            params![id, key, error, now],
-        )?;
-        if n > 0 {
-            event(
-                &tx,
-                id,
-                now,
-                "item",
-                Some(key),
-                &json!({"from": "blocked", "to": "failed", "by": "handover_timeout"}),
-            )?;
-            bump(&tx, id, now)?;
-        }
-        tx.commit()?;
-        Ok(n > 0)
     }
 
     /// A CAPTCHA stopped the work on the site the bot is on and nobody can solve it (a mission
@@ -2275,5 +2216,178 @@ mod tests {
         };
         let s = MissionStore::open(&path).unwrap();
         assert_eq!(s.progress(&id).unwrap().total, 1);
+    }
+
+    fn park(s: &MissionStore, id: &str, call: &str, expires: i64, cap: u32) -> Park {
+        s.park_live_handover(
+            id,
+            &NewHandover {
+                call_id: call,
+                bot_id: "b",
+                run_id: "00000000-0000-0000-0000-000000000001",
+                kind: "captcha",
+                reason: "needs you on this page: a CAPTCHA on https://a.com",
+                expires_at_ms: expires,
+            },
+            cap,
+            10,
+        )
+        .unwrap()
+    }
+
+    fn item(s: &MissionStore, id: &str, key: &str) -> Item {
+        s.items(id, None)
+            .unwrap()
+            .into_iter()
+            .find(|i| i.key == key)
+            .unwrap()
+    }
+
+    #[test]
+    fn a_parked_handover_is_claimed_once_and_only_the_owner_moves_its_item() {
+        let s = store();
+        let m = s
+            .create(&new_mission(&[("a.com", "A"), ("b.com", "B")]), 1)
+            .unwrap();
+        assert_eq!(park(&s, &m.id, "call-1", 1000, 1), Park::NoSoleItem);
+        status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
+        assert_eq!(
+            park(&s, &m.id, "call-1", 1000, 1),
+            Park::Parked("a.com".into())
+        );
+        let a = item(&s, &m.id, "a.com");
+        assert_eq!(a.status, ItemStatus::Blocked);
+        assert!(a.live_only);
+        // The bot cannot take the item up again, finish it or give it up by itself.
+        for to in [
+            ItemStatus::Todo,
+            ItemStatus::Doing,
+            ItemStatus::Done,
+            ItemStatus::Failed,
+            ItemStatus::Skipped,
+        ] {
+            let e = status(&s, &m.id, "a.com", to, false).unwrap_err();
+            assert!(e.to_string().contains("only the owner"), "{to}: {e}");
+        }
+        // One answer claims it; a second answer, or the claim after the expiry, gets nothing.
+        assert!(s.claim_live_handover("call-1", 20).unwrap().is_some());
+        assert!(s.claim_live_handover("call-1", 21).unwrap().is_none());
+        // Expiry leaves a claimed row alone; the failed check puts it back.
+        assert!(s.expire_live_handovers(2000).unwrap().is_empty());
+        assert_eq!(
+            s.unclaim_live_handover("call-1", 30).unwrap(),
+            Unclaim::Restored
+        );
+        assert!(
+            s.claim_live_handover("call-1", 1000).unwrap().is_none(),
+            "expired"
+        );
+        // Solved: the item goes back to todo with the note, the row is gone.
+        assert!(s.claim_live_handover("call-1", 40).unwrap().is_some());
+        let row = s
+            .finish_live_handover("call-1", true, "continue on that page", 50)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.item, "a.com");
+        let a = item(&s, &m.id, "a.com");
+        assert_eq!(a.status, ItemStatus::Todo);
+        assert!(!a.live_only);
+        assert_eq!(a.owner_answer.as_deref(), Some("continue on that page"));
+        assert!(s.live_handover("call-1").unwrap().is_none());
+        assert!(
+            s.finish_live_handover("call-1", true, "again", 60)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_handover_that_runs_out_fails_its_item_also_when_it_was_being_checked() {
+        let s = store();
+        let m = s
+            .create(&new_mission(&[("a.com", "A"), ("b.com", "B")]), 1)
+            .unwrap();
+        status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
+        park(&s, &m.id, "call-a", 100, 2);
+        status(&s, &m.id, "b.com", ItemStatus::Doing, false).unwrap();
+        park(&s, &m.id, "call-b", 100, 2);
+        // The supervisor's pass: unclaimed rows past their time fail their item.
+        assert!(s.claim_live_handover("call-b", 50).unwrap().is_some());
+        let expired = s.expire_live_handovers(100).unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].call_id, "call-a");
+        let a = item(&s, &m.id, "a.com");
+        assert_eq!(a.status, ItemStatus::Failed);
+        assert!(a.last_error.as_deref().unwrap().contains("in time"));
+        // A check that failed after the time: the item fails then, it never stays blocked.
+        let Unclaim::Expired(row) = s.unclaim_live_handover("call-b", 120).unwrap() else {
+            panic!("expired");
+        };
+        assert_eq!(row.item, "b.com");
+        assert_eq!(item(&s, &m.id, "b.com").status, ItemStatus::Failed);
+        // A claim nobody finished is taken back by the expiry after a while.
+        status(&s, &m.id, "a.com", ItemStatus::Todo, true).unwrap();
+        status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
+        park(&s, &m.id, "call-c", i64::MAX, 2);
+        assert!(s.claim_live_handover("call-c", 200).unwrap().is_some());
+        assert!(s.expire_live_handovers(201).unwrap().is_empty());
+        assert_eq!(
+            s.expire_live_handovers(200 + CLAIM_STALE_MS).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_mission_keeps_at_most_its_cap_of_pages_waiting_and_a_settled_item_frees_one() {
+        let s = store();
+        let m = s
+            .create(&new_mission(&[("a.com", "A"), ("b.com", "B")]), 1)
+            .unwrap();
+        status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
+        park(&s, &m.id, "call-a", 1000, 1);
+        status(&s, &m.id, "b.com", ItemStatus::Doing, false).unwrap();
+        assert_eq!(park(&s, &m.id, "call-b", 1000, 1), Park::OverCap);
+        assert_eq!(
+            item(&s, &m.id, "b.com").status,
+            ItemStatus::Doing,
+            "untouched"
+        );
+        // The owner skips the waiting item by hand: its slot is free again.
+        status(&s, &m.id, "a.com", ItemStatus::Skipped, true).unwrap();
+        assert_eq!(
+            park(&s, &m.id, "call-b", 1000, 1),
+            Park::Parked("b.com".into())
+        );
+    }
+
+    #[test]
+    fn after_a_restart_parked_handovers_are_settled_from_their_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("m.db");
+        let id = {
+            let s = MissionStore::open(&path).unwrap();
+            let m = s
+                .create(&new_mission(&[("a.com", "A"), ("b.com", "B")]), 1)
+                .unwrap();
+            status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
+            park(&s, &m.id, "call-a", 100, 2);
+            status(&s, &m.id, "b.com", ItemStatus::Doing, false).unwrap();
+            park(&s, &m.id, "call-b", 10_000, 2);
+            m.id
+        };
+        let s = MissionStore::open(&path).unwrap();
+        assert!(
+            s.live_handover("call-a").unwrap().is_some(),
+            "the rows survive"
+        );
+        let settled = s.recover_live_handovers(500).unwrap();
+        assert_eq!(settled.len(), 2);
+        // Ran out while the daemon was down: failed. Still in time: the page is lost, so the
+        // site is tried again by a later session.
+        assert_eq!(item(&s, &id, "a.com").status, ItemStatus::Failed);
+        let b = item(&s, &id, "b.com");
+        assert_eq!(b.status, ItemStatus::Todo);
+        assert!(b.owner_answer.as_deref().unwrap().contains("restarted"));
+        assert!(s.live_handover("call-b").unwrap().is_none());
     }
 }

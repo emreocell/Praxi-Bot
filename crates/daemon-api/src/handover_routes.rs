@@ -25,7 +25,7 @@ use crate::AppState;
 use crate::error::{ApiError, ErrorBody};
 use crate::fill_routes::audit;
 use crate::live_view::Actor;
-use agent_core::MissionTarget;
+use agent_core::HandoverInfo;
 
 /// Body of `POST /v1/handovers/{call_id}/code`.
 #[derive(Deserialize, ToSchema)]
@@ -68,32 +68,28 @@ fn not_ready(e: &HandoverError) -> ApiError {
     )
 }
 
-/// A mission asked: no run waits, so the owner's answer releases the parked item instead.
-fn release_mission_handover(s: &AppState, target: &MissionTarget, solved: bool) -> bool {
-    let Ok(supervisor) = s.mission_supervisor() else {
-        return false;
-    };
-    let Ok(store) = s.mission_store() else {
-        return false;
-    };
-    let now = storage::now_ms();
-    if solved {
-        let note = "The owner finished on the page (CAPTCHA or verification solved). Take a fresh browser_snapshot and continue from this tab; do not reopen the site from scratch.";
-        return store
-            .release_live_blocked(&target.mission_id, &target.item, note, now)
-            .ok()
-            .unwrap_or(false)
-            && supervisor.resume(&target.mission_id).is_ok();
+/// End an answered request. A run waiting on it learns the outcome; a mission's parked CAPTCHA
+/// (no run waits) gives its page and item back on `done`, or closes the page and fails the
+/// item, and a released mission runs again.
+async fn finish(s: &AppState, id: ToolCallId, info: &HandoverInfo, done: bool) -> bool {
+    if info.mission.is_none() {
+        return s.agent().finish_handover(id, done, s.user_id()).is_ok();
     }
-    store
-        .fail_live_blocked(
-            &target.mission_id,
-            &target.item,
-            "the owner cancelled the hand-over",
-            now,
-        )
-        .ok()
-        .unwrap_or(false)
+    let Ok(mission) = s.agent().finish_parked_handover(id, done).await else {
+        return false;
+    };
+    if !done {
+        return true;
+    }
+    s.mission_supervisor().is_ok_and(|sup| {
+        // `finish_live_handover` already let a blocked or waiting mission run again.
+        sup.wake();
+        sup.store()
+            .get(&mission)
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.state == missions::MissionState::Running)
+    })
 }
 
 fn call_id(raw: &str) -> Result<ToolCallId, ApiError> {
@@ -147,7 +143,7 @@ pub(crate) async fn submit_handover_code(
         ));
     }
     let typed = handover_hub()
-        .type_code(&info.run_id.to_string(), &input.code)
+        .type_code(&info.hub_key(id), &input.code)
         .await;
     drop(input);
     if let Err(e) = typed {
@@ -159,14 +155,7 @@ pub(crate) async fn submit_handover_code(
     }
     // The audit row names the kind only: never the code.
     audit(&s, &actor, "handover.code_typed", &json!({"kind": "code"}))?;
-    let mission = info.mission.clone();
-    let run_notified = if let Some(target) = &mission {
-        let ok = release_mission_handover(&s, target, true);
-        let _ = s.agent().finish_handover(id, true, s.user_id());
-        ok
-    } else {
-        s.agent().finish_handover(id, true, s.user_id()).is_ok()
-    };
+    let run_notified = finish(&s, id, &info, true).await;
     Ok(Json(HandoverAnswer {
         call_id: id.0,
         outcome: "done".into(),
@@ -197,7 +186,7 @@ pub(crate) async fn finish_handover_done(
             "this request asks for a code, not a CAPTCHA",
         ));
     }
-    let solved = match handover_hub().verify_solved(&info.run_id.to_string()).await {
+    let solved = match handover_hub().verify_solved(&info.hub_key(id)).await {
         Ok(by) => by,
         Err(e) => {
             s.agent().restore_handover(id, info);
@@ -214,14 +203,7 @@ pub(crate) async fn finish_handover_done(
             SolvedBy::OwnerConfirmed => "owner_confirmed",
         }}),
     )?;
-    let mission = info.mission.clone();
-    let run_notified = if let Some(target) = &mission {
-        let ok = release_mission_handover(&s, target, true);
-        let _ = s.agent().finish_handover(id, true, s.user_id());
-        ok
-    } else {
-        s.agent().finish_handover(id, true, s.user_id()).is_ok()
-    };
+    let run_notified = finish(&s, id, &info, true).await;
     Ok(Json(HandoverAnswer {
         call_id: id.0,
         outcome: "done".into(),
@@ -244,14 +226,7 @@ pub(crate) async fn cancel_handover(
     local(&actor)?;
     let id = call_id(&call)?;
     let info = s.agent().claim_handover(id).ok_or_else(gone)?;
-    let mission = info.mission.clone();
-    let run_notified = if let Some(target) = &mission {
-        let ok = release_mission_handover(&s, target, false);
-        let _ = s.agent().finish_handover(id, false, s.user_id());
-        ok
-    } else {
-        s.agent().finish_handover(id, false, s.user_id()).is_ok()
-    };
+    let run_notified = finish(&s, id, &info, false).await;
     Ok(Json(HandoverAnswer {
         call_id: id.0,
         outcome: "cancelled".into(),

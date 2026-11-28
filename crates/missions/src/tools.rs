@@ -21,7 +21,7 @@ use crate::brief::data_value;
 use crate::error::MissionError;
 use crate::model::{
     DEFAULT_TIMEOUT_MINUTES, ItemStatus, MAX_AFTER_SECS, MAX_TIMEOUT_MINUTES, MIN_AFTER_SECS,
-    Mission, MissionState, clip, needs_owner_on_page,
+    Mission, MissionState, clip, mentions_captcha, needs_owner_on_page,
 };
 use crate::store::{ItemUpdate, MissionStore, NewItem};
 use crate::supervisor::Clock;
@@ -102,7 +102,7 @@ pub fn tools(
         "status":{"type":"string","enum":["doing","done","blocked","failed","skipped","todo"]},
         "result":{"type":"string","description":"Evidence of what was achieved (done)."},
         "error":{"type":"string","description":"What went wrong (failed)."},
-        "reason":{"type":"string","description":"What the owner must do or answer (blocked): 2FA code, payment, a question. A CAPTCHA or phone/SMS verification needs the owner on the page: mark blocked with that reason (the app opens live view); do not mark failed."}
+        "reason":{"type":"string","description":"What the owner must do or answer (blocked): 2FA code, payment, a question. A CAPTCHA is handed to the owner with browser_handover, not marked here. Phone/SMS verification needs the owner on the page: mark blocked with that reason."}
     },"required":["key","status"]});
     let note_schema = json!({"type":"object","properties":{
         "kind":{"type":"string","enum":["decision","learned","warning"]},
@@ -384,6 +384,14 @@ impl MissionTool {
             )
         })?;
         let (error, reason) = (i.error, i.reason);
+        // A CAPTCHA waits for the owner only on a page kept for them, with a hand-over that
+        // expires (browser_handover parks it): a ledger mark alone would leave the item blocked
+        // with nothing the owner can act on.
+        if status == ItemStatus::Blocked && reason.as_deref().is_some_and(mentions_captcha) {
+            return Err(ToolError::InvalidInput(
+                "a CAPTCHA is handed to the owner with browser_handover while its page is open (it parks this item for them); do not try to solve it. If the page is gone, mark the item failed with the CAPTCHA as the error".into(),
+            ));
+        }
         let live_page =
             status == ItemStatus::Blocked && reason.as_deref().is_some_and(needs_owner_on_page);
         let it = self
@@ -754,7 +762,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_captcha_blocked_reason_parks_live_for_the_owner_on_the_page() {
+    async fn a_captcha_blocked_reason_is_sent_to_browser_handover_and_a_phone_check_parks_live() {
         let f = fixture();
         call(
             &f,
@@ -764,22 +772,41 @@ mod tests {
         )
         .await
         .unwrap();
-        let r = call(
+        // No page kept and no expiry: a CAPTCHA mark alone is refused and changes nothing.
+        let err = call(
             &f,
             "mission_item",
             "run-1",
             json!({"key":"a.com","status":"blocked","reason":"hCaptcha on the sign-up form"}),
         )
         .await
-        .unwrap();
-        assert!(
-            r.contains("live view") || r.contains("Live view") || r.contains("owner"),
-            "{r}"
-        );
+        .unwrap_err();
+        assert!(err.to_string().contains("browser_handover"), "{err}");
         let items = f.store.items(&f.mission, None).unwrap();
-        assert_eq!(items[0].status, ItemStatus::Blocked);
-        assert!(items[0].live_only);
-        assert_eq!(f.store.progress(&f.mission).unwrap().blocked, 1);
+        assert_eq!(items[0].status, ItemStatus::Todo);
+        assert!(!items[0].live_only);
+        let r = call(
+            &f,
+            "mission_item",
+            "run-1",
+            json!({"key":"b.com","status":"blocked","reason":"phone verification by SMS"}),
+        )
+        .await
+        .unwrap();
+        assert!(r.contains("live view") && r.contains("next item"), "{r}");
+        let items = f.store.items(&f.mission, None).unwrap();
+        assert_eq!(items[1].status, ItemStatus::Blocked);
+        assert!(items[1].live_only);
+        // Only the owner releases it.
+        let err = call(
+            &f,
+            "mission_item",
+            "run-1",
+            json!({"key":"b.com","status":"doing"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("only the owner"), "{err}");
     }
 
     #[tokio::test]

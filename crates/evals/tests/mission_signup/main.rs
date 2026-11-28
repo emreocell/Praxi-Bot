@@ -79,6 +79,12 @@ async fn a_full_mission_registers_on_four_sites_with_its_own_mailbox_and_reports
         end["mission"]["progress"]["blocked"], 1,
         "the CAPTCHA site waits for the owner on the page"
     );
+    // The session is over, yet the page stays kept for the owner on a tab of its own.
+    assert_eq!(
+        w.browser.held_pages().len(),
+        1,
+        "the CAPTCHA page outlives the session"
+    );
 
     // ---- what the sites saw ----
     {

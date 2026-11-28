@@ -37,6 +37,7 @@ mod capture;
 pub mod files;
 #[cfg(test)]
 mod files_tests;
+mod held;
 pub(crate) mod payment;
 mod pointer;
 #[cfg(test)]
@@ -436,6 +437,16 @@ pub trait BrowserDriver: Send + Sync {
     fn live_view_attached(&self) -> Option<bool> {
         None
     }
+    /// Take the page this call is on away from the bot into a tab held under `key` (a
+    /// mission's CAPTCHA waiting for the owner): it leaves the tab list of every run of this
+    /// bot, the bot goes on in a fresh tab, and the live view shows the held page. The returned
+    /// driver reaches only the held page. `Err`: this browser cannot keep a page apart.
+    async fn hold_page(&self, _key: &str) -> Result<Arc<dyn BrowserDriver>, String> {
+        Err("this browser cannot keep a page apart".into())
+    }
+    /// Let go of the page held under `key`: `give_back` makes it an ordinary tab of the bot
+    /// again (the owner finished on it), otherwise it is closed.
+    async fn release_held_page(&self, _key: &str, _give_back: bool) {}
 }
 
 /// The last line of a browser tool result: whether the user can see the page.
@@ -521,6 +532,9 @@ struct Session {
     /// first. The top-level run keeps `page`; a lane's page is swapped into
     /// `page` for the length of one driver call (see [`with_session!`]).
     lanes: Vec<(String, Page)>,
+    /// Pages held for the owner under a hand-over key (see [`BrowserDriver::hold_page`]):
+    /// no run's tab list or browser call reaches them.
+    held: Vec<(String, Page)>,
     profile: Option<String>,
     headless: bool,
     last_work: tokio::time::Instant,
@@ -869,6 +883,7 @@ impl CdpDriver {
                 headless,
                 last_work: tokio::time::Instant::now(),
                 lanes: Vec::new(),
+                held: Vec::new(),
                 extra: SessionExtra::default(),
             });
         }
@@ -902,6 +917,7 @@ impl CdpDriver {
             headless,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         })
     }
@@ -1125,6 +1141,8 @@ impl CdpDriver {
             }
         }
         pages.sort_by_key(|t| order.iter().position(|id| *id == t.target_id));
+        // A page held for the owner is nobody's tab.
+        pages.retain(|t| !sess.held.iter().any(|(_, p)| p.target_id() == t.target_id));
         if current_lane().is_some() {
             let own = sess.page.target_id().to_string();
             pages.retain(|t| t.target_id == own);
@@ -1277,7 +1295,7 @@ pub(crate) async fn in_lane<T>(
     BROWSER_LANE.scope(lane, fut).await
 }
 
-fn current_lane() -> Option<String> {
+pub(crate) fn current_lane() -> Option<String> {
     BROWSER_LANE.try_with(Clone::clone).ok().flatten()
 }
 
@@ -1335,6 +1353,14 @@ macro_rules! with_session {
 
 #[async_trait]
 impl BrowserDriver for CdpDriver {
+    async fn hold_page(&self, key: &str) -> Result<Arc<dyn BrowserDriver>, String> {
+        self.hold_current_page(key).await
+    }
+
+    async fn release_held_page(&self, key: &str, give_back: bool) {
+        self.release_held(key, give_back).await;
+    }
+
     fn on_desktop(&self) -> bool {
         // The owner's own browser is a window on their desktop, whatever this bot's mode says.
         self.is_attached() || (!self.desired_headless() && browser_cdp::host::has_display())
@@ -4235,6 +4261,17 @@ impl BrowserTool {
     }
 
     async fn call_in_lane(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        // A mission's CAPTCHA waits for the owner on this bot's page and the browser could not
+        // keep that page apart: nothing of the bot may touch the browser until it ends.
+        if ctx
+            .bot_id
+            .as_deref()
+            .is_some_and(|bot| crate::handover::handover_hub().browser_locked(bot))
+        {
+            return Err(exec_err(
+                "the browser is held for the owner, who has to finish a CAPTCHA on its page; do not use the browser until then: work on something that needs no browser, or end this session",
+            ));
+        }
         if self
             .shared
             .control
@@ -6410,6 +6447,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         });
         let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -6493,6 +6531,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_held_page_leaves_every_tab_list_and_the_bot_goes_on_in_a_fresh_tab() {
+        let server = FakeCdp::start();
+        let dir = tempfile::tempdir().unwrap();
+        let driver = CdpDriver::new(BrowserSettings::isolated(dir.path()));
+        *driver.session.lock().await = Some(session_for(&server).await);
+        let current = async || -> String {
+            let id: Result<String, String> = async {
+                with_session!(driver, None, false, |sess| {
+                    Ok::<String, browser_cdp::Error>(sess.page.target_id().to_string())
+                })
+            }
+            .await;
+            id.unwrap()
+        };
+        assert_eq!(current().await, "t1");
+        let held = driver.hold_page("call-1").await.unwrap();
+        // The bot is on a fresh tab now; the held one is in nobody's list.
+        let fresh = current().await;
+        assert_ne!(fresh, "t1");
+        {
+            let mut guard = driver.session.lock().await;
+            let sess = guard.as_mut().unwrap();
+            let listed = driver.tab_pages(sess).await.unwrap();
+            assert!(listed.iter().all(|t| t.target_id != "t1"), "{listed:?}");
+            assert_eq!(sess.held.len(), 1);
+            assert_eq!(sess.extra.home_tab.as_deref(), Some(fresh.as_str()));
+        }
+        // The held page's handle reads it but cannot act on it.
+        assert!(held.capture_epoch().await.is_some());
+        assert!(held.click("e1").await.is_err());
+        assert!(held.open("https://example.com", None).await.is_err());
+        assert!(
+            driver.hold_page("call-1").await.is_err(),
+            "one page per key"
+        );
+        // Given back, it is an ordinary tab of the bot again.
+        driver.release_held_page("call-1", true).await;
+        assert!(
+            driver
+                .session
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .held
+                .is_empty()
+        );
+        assert!(held.capture_epoch().await.is_none(), "the handle is dead");
+        server.kill();
+    }
+
+    #[tokio::test]
     async fn read_only_browser_calls_cannot_implicitly_launch_outside_admission() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("launches.txt");
@@ -6548,6 +6638,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         });
         driver.set_takeover_pin(true);
@@ -6596,6 +6687,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         });
         // Connected over real I/O; from here the clock is frozen and advanced by hand.
@@ -6654,6 +6746,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         });
         tokio::time::pause();
@@ -6726,6 +6819,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         });
         let tools = tools(drv, dir.path(), None);
@@ -6783,6 +6877,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         });
         let tools = tools(
@@ -6864,6 +6959,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            held: Vec::new(),
             extra: SessionExtra::default(),
         }
     }
@@ -7044,6 +7140,7 @@ mod tests {
                 headless: true,
                 last_work: tokio::time::Instant::now(),
                 lanes: Vec::new(),
+                held: Vec::new(),
                 extra: SessionExtra::default(),
             });
             // Delete the bot.

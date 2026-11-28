@@ -1254,3 +1254,290 @@ async fn script_and_data_addresses_are_refused_with_or_without_a_captcha() {
         handover_hub().forget(run);
     }
 }
+
+/// A browser that keeps a page apart like the managed one: the held page is a copy only the
+/// returned driver reaches, the bot's own page goes blank.
+struct Holding {
+    page: Arc<Page>,
+    released: StdMutex<Vec<(String, bool)>>,
+}
+
+impl Holding {
+    fn new(snapshot: &str, url: &str) -> Arc<Self> {
+        Arc::new(Self {
+            page: Page::new(snapshot, url),
+            released: StdMutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl BrowserDriver for Holding {
+    async fn open(&self, u: &str, p: Option<&str>) -> Result<String, String> {
+        self.page.open(u, p).await
+    }
+    async fn snapshot(&self, i: bool) -> Result<String, String> {
+        self.page.snapshot(i).await
+    }
+    async fn click(&self, r: &str) -> Result<String, String> {
+        self.page.click(r).await
+    }
+    async fn fill(&self, r: &str, t: &str) -> Result<String, String> {
+        self.page.fill(r, t).await
+    }
+    async fn select(&self, r: &str, v: &str) -> Result<String, String> {
+        self.page.select(r, v).await
+    }
+    async fn press(&self, k: &str) -> Result<String, String> {
+        self.page.press(k).await
+    }
+    async fn scroll(&self, r: Option<&str>, x: f64, y: f64) -> Result<String, String> {
+        self.page.scroll(r, x, y).await
+    }
+    async fn wait(&self, c: Wait, t: Option<Duration>) -> Result<String, String> {
+        self.page.wait(c, t).await
+    }
+    async fn back(&self) -> Result<String, String> {
+        self.page.back().await
+    }
+    async fn tabs(&self, s: Option<usize>) -> Result<String, String> {
+        self.page.tabs(s).await
+    }
+    async fn screenshot(
+        &self,
+        f: bool,
+        e: Option<&str>,
+    ) -> Result<(Vec<u8>, &'static str), String> {
+        self.page.screenshot(f, e).await
+    }
+    async fn eval(&self, js: &str) -> Result<Value, String> {
+        self.page.eval(js).await
+    }
+    async fn current_url(&self) -> Option<String> {
+        self.page.current_url().await
+    }
+    async fn hold_page(&self, _key: &str) -> Result<Arc<dyn BrowserDriver>, String> {
+        let snap = self.page.snapshot.lock().unwrap().clone();
+        let url = self.page.url.lock().unwrap().clone().unwrap_or_default();
+        self.page.show("# New tab (about:blank)", "about:blank");
+        Ok(Page::new(&snap, &url))
+    }
+    async fn release_held_page(&self, key: &str, give_back: bool) {
+        self.released
+            .lock()
+            .unwrap()
+            .push((key.to_owned(), give_back));
+    }
+}
+
+fn until() -> std::time::Instant {
+    std::time::Instant::now() + Duration::from_secs(3600)
+}
+
+#[tokio::test]
+async fn a_parked_captcha_lives_on_its_own_tab_under_its_call_id_and_outlives_the_run() {
+    let hub = HandoverHub::default();
+    let browser = Holding::new(HOLD_PAGE, "https://shop.example/x");
+    hub.arm(
+        "run-p1",
+        browser.clone(),
+        HandoverKind::Captcha,
+        "https://shop.example:443",
+        HOLD_PAGE,
+    );
+    assert_eq!(
+        hub.park("run-p1", "call-p1", "bot-p1", until()).await,
+        Ok(ParkedPage::Tab)
+    );
+    // The bot goes on in a fresh tab; the run ends; the parked request stays.
+    assert!(
+        browser
+            .page
+            .snapshot
+            .lock()
+            .unwrap()
+            .contains("about:blank")
+    );
+    hub.forget("run-p1");
+    assert!(hub.browser_hold_active("bot-p1"));
+    assert!(!hub.browser_locked("bot-p1"), "the bot keeps its browser");
+    assert_eq!(
+        hub.verify_solved("run-p1").await,
+        Err(HandoverError::NotArmed)
+    );
+    // The check is read from the held page, not from whatever the bot opened since.
+    assert_eq!(
+        hub.verify_solved("call-p1").await,
+        Err(HandoverError::StillThere)
+    );
+    assert_eq!(
+        hub.release_parked("call-p1", true).await,
+        Some(ParkedPage::Tab)
+    );
+    assert_eq!(
+        *browser.released.lock().unwrap(),
+        vec![("call-p1".to_owned(), true)]
+    );
+    assert_eq!(
+        hub.verify_solved("call-p1").await,
+        Err(HandoverError::NotArmed)
+    );
+    assert!(!hub.browser_hold_active("bot-p1"));
+}
+
+#[tokio::test]
+async fn two_parked_captchas_of_one_run_never_overwrite_each_other() {
+    let hub = HandoverHub::default();
+    for (n, bot) in ["bot-q1", "bot-q2"].iter().enumerate() {
+        let browser = Holding::new(HOLD_PAGE, "https://shop.example/x");
+        hub.arm(
+            "run-q",
+            browser,
+            HandoverKind::Captcha,
+            "https://shop.example:443",
+            HOLD_PAGE,
+        );
+        hub.park("run-q", &format!("call-q{n}"), bot, until())
+            .await
+            .unwrap();
+    }
+    assert!(hub.get("call-q0", HandoverKind::Captcha).is_ok());
+    assert!(hub.get("call-q1", HandoverKind::Captcha).is_ok());
+}
+
+#[tokio::test]
+async fn one_held_page_per_bot_and_a_cap_on_held_pages_in_all() {
+    let hub = HandoverHub::default();
+    let park = async |run: &str, call: &str, bot: &str| {
+        hub.arm(
+            run,
+            Holding::new(HOLD_PAGE, "https://shop.example/x"),
+            HandoverKind::Captcha,
+            "https://shop.example:443",
+            HOLD_PAGE,
+        );
+        hub.park(run, call, bot, until()).await
+    };
+    assert!(park("run-c0", "call-c0", "bot-c0").await.is_ok());
+    assert_eq!(
+        park("run-c0b", "call-c0b", "bot-c0").await,
+        Err(ParkRefused::BotBusy)
+    );
+    for n in 1..MAX_HELD_PAGES {
+        assert!(
+            park(
+                &format!("run-c{n}"),
+                &format!("call-c{n}"),
+                &format!("bot-c{n}")
+            )
+            .await
+            .is_ok()
+        );
+    }
+    assert_eq!(
+        park("run-full", "call-full", "bot-full").await,
+        Err(ParkRefused::Full)
+    );
+    // A refused park drops the run's request: nothing is left armed for it.
+    assert_eq!(
+        hub.verify_solved("run-full").await,
+        Err(HandoverError::NotArmed)
+    );
+    hub.release_parked("call-c0", false).await;
+    assert!(park("run-again", "call-again", "bot-c0").await.is_ok());
+}
+
+#[tokio::test]
+async fn a_browser_that_cannot_keep_a_page_apart_is_locked_until_the_handover_ends() {
+    let hub = HandoverHub::default();
+    let page = Page::new(HOLD_PAGE, "https://shop.example/x");
+    hub.arm(
+        "run-l1",
+        page,
+        HandoverKind::Captcha,
+        "https://shop.example:443",
+        HOLD_PAGE,
+    );
+    assert_eq!(
+        hub.park("run-l1", "call-l1", "bot-l1", until()).await,
+        Ok(ParkedPage::Locked)
+    );
+    assert!(hub.browser_locked("bot-l1"));
+    assert_eq!(
+        hub.release_parked("call-l1", false).await,
+        Some(ParkedPage::Locked)
+    );
+    assert!(!hub.browser_locked("bot-l1"));
+    // An expired lock frees the browser even before anyone releases it.
+    hub.arm(
+        "run-l2",
+        Page::new(HOLD_PAGE, "https://shop.example/x"),
+        HandoverKind::Captcha,
+        "https://shop.example:443",
+        HOLD_PAGE,
+    );
+    hub.park("run-l2", "call-l2", "bot-l2", std::time::Instant::now())
+        .await
+        .unwrap();
+    assert!(!hub.browser_locked("bot-l2"));
+}
+
+#[tokio::test]
+async fn a_code_request_is_never_parked() {
+    let hub = HandoverHub::default();
+    hub.arm(
+        "run-k1",
+        Holding::new(CODE_PAGE, "https://bank.example/2fa"),
+        HandoverKind::Code,
+        "https://bank.example:443",
+        CODE_PAGE,
+    );
+    assert_eq!(
+        hub.park("run-k1", "call-k1", "bot-k1", until()).await,
+        Err(ParkRefused::NotArmed)
+    );
+}
+
+#[tokio::test]
+async fn every_browser_tool_of_a_locked_bot_is_refused() {
+    let page = Page::new(LOGIN_PAGE, "https://shop.example/account");
+    let hub = handover_hub();
+    hub.arm(
+        "run-lock-tools",
+        Page::new(HOLD_PAGE, "https://shop.example/x"),
+        HandoverKind::Captcha,
+        "https://shop.example:443",
+        HOLD_PAGE,
+    );
+    hub.park(
+        "run-lock-tools",
+        "call-lock-tools",
+        "bot-lock-tools",
+        until(),
+    )
+    .await
+    .unwrap();
+    let mut c = ctx("run-other");
+    c.bot_id = Some("bot-lock-tools".into());
+    let err = tool(&page, "browser_snapshot")
+        .call(&c, json!({}))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("held for the owner"), "{err}");
+    // Another bot's browser is not affected.
+    c.bot_id = Some("bot-free".into());
+    assert!(
+        tool(&page, "browser_snapshot")
+            .call(&c, json!({}))
+            .await
+            .is_ok()
+    );
+    hub.release_parked("call-lock-tools", false).await;
+    c.bot_id = Some("bot-lock-tools".into());
+    assert!(
+        tool(&page, "browser_snapshot")
+            .call(&c, json!({}))
+            .await
+            .is_ok()
+    );
+}

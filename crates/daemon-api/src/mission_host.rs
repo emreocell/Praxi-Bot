@@ -294,6 +294,14 @@ impl AppState {
                 state.notify_mission_handover(n);
             }
         }));
+        // A parked CAPTCHA the supervisor expired (or a restart lost): its page is let go.
+        let ended = weak.clone();
+        supervisor.set_handover_ended_hook(Arc::new(move |h| {
+            if let Some(state) = ended.upgrade() {
+                let call_id = h.call_id.clone();
+                tokio::spawn(async move { state.agent().release_parked_handover(&call_id).await });
+            }
+        }));
         supervisor.set_change_hook(Arc::new(move |id| {
             if let Some(state) = weak.upgrade() {
                 state.notify_mission_changed(id);
