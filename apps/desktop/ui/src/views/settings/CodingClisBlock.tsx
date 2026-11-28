@@ -149,7 +149,7 @@ function CodingCliRow({
               <span className={styles.miniChip}>{t("settingsModal.ai.detected.experimentalChip")}</span>
             ) : null}
           </span>
-          <span className={styles.sub} data-testid={`coding-cli-places-${row.id}`}>
+          <span className={`${styles.sub} ${styles.cliPlaces}`} data-testid={`coding-cli-places-${row.id}`}>
             {placeLabel(t, row, serverName, showServer)}
           </span>
           {meta ? <span className={styles.sub}>{meta}</span> : null}
