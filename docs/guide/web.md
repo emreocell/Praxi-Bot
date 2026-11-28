@@ -12,6 +12,8 @@ login or clicking around.
 | `web_feed` | Fetch and parse an RSS, RDF or Atom feed. |
 | `web_sitemap` | Fetch and parse a `sitemap.xml`, sitemap index or text sitemap. |
 | `web_metadata` | Page title, description, canonical URL, OpenGraph, Twitter card, feeds and JSON-LD. |
+| `web_research` | One bounded research pass: searches for each sub-question, drops duplicate pages, reads the best sources and returns them numbered. See [Research reports](#research-reports). |
+| `web_research_report` | Saves a cited answer as a Markdown report in the bot's workspace (`research/` folder). It is a file write, so it follows the bot's file permissions. |
 
 An optional [web scraping add-on](web-scraping.md) adds `web_scrape` for cleaner
 article text, link lists and small crawls of one site; it is not installed by default.
@@ -23,6 +25,46 @@ needs a real browser.
 Bots made from the "General assistant" and "Browser researcher" presets can use
 these tools. For a bot with its own `[tools] allow` list, add `"web_*"` (see
 [Bots and profiles](bots-and-profiles.md)).
+
+## Research reports
+
+For a question that needs several sources ("compare...", "what is the current state of...",
+"research...") a bot can write a sourced report instead of a loose answer. Ask for it in plain
+words ("research X and give me a report with sources"), use the **Research** recipe under
+**Start from a goal**, or let the bundled `research` [skill](skills.md) load by itself. The
+bot works in three steps:
+
+1. **It plans.** The bot splits your question into three to six focused search queries.
+2. **`web_research` gathers.** One call searches for each query, removes duplicate and
+   near-duplicate pages (the same article under another address, a syndicated copy), reads the
+   best sources and numbers them `[1]`, `[2]`... It only reads: search queries and page fetches,
+   nothing is sent out, and the tool takes no web address from the bot, so the pages it reads
+   are the ones the search engine returned. Every address and redirect goes through the same
+   network limits and your site rules as `web_extract`.
+3. **It writes and saves.** The bot writes the answer with a `[n]` after every claim that came
+   from a page, then `web_research_report` checks every number against what was really read,
+   renumbers them in order of use, adds the **Sources** list itself and saves
+   `research/<date>-<title>-<id>.md` in the bot's workspace. You get a short summary and the file
+   path. A number the research did not have is refused, so a made-up source cannot get into
+   the list.
+
+Limits, whatever the bot asks for: at most 15 sources (8 by default), 10 to 240 seconds
+(90 by default), 4,000 to 80,000 characters of page text in total (36,000 by default, about 9,000
+tokens) and eight searches. A page with next to no readable text (a login wall, a page built by
+script) is listed as not used so the bot can open it with the browser. If no page could be read,
+the bot is told to say so rather than answer from memory.
+
+Page text is untrusted: it comes back between begin and end lines that carry a random marker, so
+a page cannot close the fence, and the bot treats it as evidence, never as instructions. Like
+`web_extract`, `web_research` asks before it runs unless you granted it to the bot (see
+[Letting a bot fetch without asking](#letting-a-bot-fetch-without-asking)); at the **Full**
+level it follows the same rules as the other web reads, so it also works inside
+[missions](missions.md) and scheduled runs. A bot without a workspace folder gets the finished
+report in its answer instead of a file. Reports are your files: they follow the bot's file
+permissions and are marked as coming from outside content, like anything written after reading a
+page.
+
+Check important claims at the source: the report is only as good as the pages behind it.
 
 ## Search backend
 
@@ -126,7 +168,9 @@ Search queries go to the configured backend that handles them (your SearXNG inst
     tainted, unless the bot's "allow sending data after reads" setting is on.
   - `web_extract`, `web_feed`, `web_sitemap` and `web_metadata` contact any
     address the model picks, so they **ask for approval on every call under the
-    default policy**, exactly like `browser_open`. After the run has read
+    default policy**, exactly like `browser_open`. `web_research` takes no
+    address, but it reads the pages a search returns, so it asks the same way
+    (one question per research pass, not per page). After the run has read
     untrusted or private content they ask even under a grant or the `full`
     preset, unless that bot setting is on.
   - `web_scrape` (only where the optional add-on is installed) is treated like

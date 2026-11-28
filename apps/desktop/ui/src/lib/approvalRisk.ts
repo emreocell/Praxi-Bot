@@ -24,6 +24,7 @@ const READ_ONLY = new Set([
   "fs_stat",
   "fs_search",
   "web_search",
+  "web_research",
   "web_extract",
   "web_feed",
   "web_metadata",

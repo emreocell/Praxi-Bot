@@ -870,6 +870,37 @@ allow = [\"fs_*\", \"web_*\"]
     }
 }
 
+#[test]
+fn the_report_tool_needs_fs_write_to_be_allowed_for_the_bot() {
+    let report = builtin_tools::WEB_RESEARCH_REPORT;
+    let cat = tool_registry::PermissionCategory::Fs;
+    let web_only = profile(
+        "[tools]
+allow = [\"web_*\"]
+",
+    );
+    assert!(web_only.tool_visible(report));
+    assert!(
+        !web_only.spec_visible(report, cat),
+        "no fs_write, no report file"
+    );
+    assert!(web_only.spec_visible("web_research", cat));
+    let no_write = profile(
+        "[tools]
+exclude = [\"fs_write\"]
+",
+    );
+    assert!(!no_write.spec_visible(report, cat));
+    assert!(no_write.spec_visible("fs_read", cat));
+    let both = profile(
+        "[tools]
+allow = [\"fs_write\", \"web_*\"]
+",
+    );
+    assert!(both.spec_visible(report, cat));
+    assert!(profile("").spec_visible(report, cat));
+}
+
 #[tokio::test]
 async fn independent_reads_run_concurrently_in_one_step() {
     let env = setup();

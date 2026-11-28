@@ -977,6 +977,7 @@
     "doc": "tr/web.md",
     "title": "Web araçları: ara ve sayfa oku",
     "headings": [
+      "Araştırma raporları",
       "Arama arka ucu",
       "Sunucuda arama",
       "Sunucuya SearXNG kur (tek komut)",

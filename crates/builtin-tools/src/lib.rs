@@ -41,6 +41,7 @@ pub mod pc;
 pub mod provenance;
 pub mod pty_shell;
 pub mod pure_tools;
+mod research_report;
 pub mod schedule;
 pub mod script;
 pub mod secret_request;
@@ -105,6 +106,7 @@ pub use handover::{
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use notes::NOTES_TOOL_NAMES;
 pub use pure_tools::PURE_TOOL_NAMES;
+pub use research_report::WEB_RESEARCH_REPORT;
 pub use schedule::{
     PreviousSchedule, SCHEDULE_TOOL_NAMES, ScheduleCaller, ScheduleChange, ScheduleHost,
     SchedulePreview, ScheduleRequest, ScheduleView,
@@ -338,6 +340,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         ));
     }
     let file_gate = Some(Arc::new(file_gate));
+    let report_gate = file_gate.clone();
     if let Some(driver) = cfg.browser {
         all.extend(browser::tools_with_files(
             driver,
@@ -379,6 +382,20 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         }
     }
     all.extend(fs_tools);
+    // Where `web_research` keeps its source lists: a protected folder of the data directory
+    // (the file tools may not read it), never under `spill/`, which they may.
+    let research_dir = cfg
+        .web
+        .as_ref()
+        .and_then(|w| w.research_dir.clone())
+        .unwrap_or_else(|| web_tools::research::pack_dir(&cfg.data_dir));
+    if let Some(gate) = report_gate {
+        all.push(research_report::tool(
+            registry.clone(),
+            gate,
+            research_dir.clone(),
+        ));
+    }
     if cfg.optional_tools != OptionalTools::default() {
         all.extend(files::guarded_tools(
             &cfg.data_dir,
@@ -450,7 +467,8 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.web.as_ref().map(|w| Arc::clone(&w.policy)),
         Some(&cfg.data_dir),
     ));
-    if let Some(web) = cfg.web.clone() {
+    if let Some(mut web) = cfg.web.clone() {
+        web.research_dir = Some(research_dir);
         match web_tools::tools(web) {
             Ok(tools) => all.extend(tools),
             Err(e) => tracing::warn!("web tools not available: {e}"),
@@ -566,11 +584,12 @@ mod tests {
         // to 28 000 when `browser_upload`, `browser_downloads`, `browser_reload` and
         // `browser_forward` (together about 2 KB, with the longer `browser_tabs`) joined, and
         // to 30 000 because that left no room at all: the next tool must not trip it.
-        // and to 31 000 when `browser_capture_secret` (about 1 KB) joined.
-        assert!(total < 31_000, "tool list grew to {total} bytes");
+        // and to 31 000 when `browser_capture_secret` (about 1 KB) joined,
+        // and to 32 000 when `web_research_report` (about 0.7 KB) joined.
+        assert!(total < 32_000, "tool list grew to {total} bytes");
         assert!(
-            total + 1_000 < 31_000,
-            "tool list is {total} bytes: no room left below the 31 000 ceiling, raise it with the next tool"
+            total + 1_000 < 32_000,
+            "tool list is {total} bytes: no room left below the 32 000 ceiling, raise it with the next tool"
         );
     }
 
@@ -757,6 +776,7 @@ mod tests {
             ("calculate", R, Me),
             ("email_wait_for", R, Ms),
             ("tool_self_check", R, Me),
+            ("web_research_report", W, Fs),
         ]
     }
 
@@ -1384,7 +1404,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 48 + 4 + 1 + 8 + 2 + 2 + 1 + 1 + 1 + 1);
+        assert_eq!(added, 48 + 4 + 1 + 8 + 2 + 2 + 1 + 1 + 1 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg

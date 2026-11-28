@@ -75,6 +75,14 @@ const queryChip = (i: Record<string, unknown>): StepChip[] => {
   const q = str(i.query) ?? str(i.q);
   return q ? [{ text: clip(q) }] : [];
 };
+const questionChip = (i: Record<string, unknown>): StepChip[] => {
+  const q = str(i.question);
+  return q ? [{ text: clip(q) }] : [];
+};
+const titleChip = (i: Record<string, unknown>): StepChip[] => {
+  const t = str(i.title);
+  return t ? [{ text: clip(t) }] : [];
+};
 const urlChip = (i: Record<string, unknown>): StepChip[] => {
   const u = str(i.url);
   const host = u ? hostOf(u) : null;
@@ -98,6 +106,8 @@ const secondsChip = (i: Record<string, unknown>): StepChip[] => {
  */
 const TABLE: Record<string, Entry> = {
   web_search: { id: "web_search", icon: "search", chips: queryChip },
+  web_research: { id: "web_research", icon: "search", chips: questionChip },
+  web_research_report: { id: "research_report", icon: "file", chips: titleChip },
   web_extract: { id: "web_read", icon: "globe", chips: urlChip },
   web_scrape: { id: "web_read", icon: "globe", chips: urlChip },
   web_feed: { id: "web_read", icon: "globe", chips: urlChip },

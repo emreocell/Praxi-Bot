@@ -398,7 +398,7 @@ ask about every page. In a run that **you started yourself** (typed in the
 desktop app, sent from your own admin desktop, or written from **your own paired Telegram chat** to your bot), reading web pages does not
 make the bot ask again for each further step in the managed browser **or in the
 public-web read tools** (`web_search`, `web_extract`, `web_feed`, `web_sitemap`,
-`web_metadata`, and `web_scrape` where the optional scraping add-on is installed): a
+`web_metadata`, `web_research`, and `web_scrape` where the optional scraping add-on is installed): a
 search, a page, a feed or a sitemap on a new site follows the
 same rule as opening that site in the browser. Opening a
 page already counts as "read something untrusted"; what decides whether the bot

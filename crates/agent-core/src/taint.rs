@@ -618,6 +618,7 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         // until `Shared::own_inbox_call` (identity and kind) says the inbox is the bot's own.
         "email_wait_for" => "mailbox INBOX".to_owned(),
         "web_search" => format!("page {}", str_field("query").unwrap_or("a search")),
+        "web_research" => format!("page {}", str_field("question").unwrap_or("a research")),
         "web_extract"
         | "web_scrape"
         | "web_feed"
@@ -740,6 +741,8 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
             search_host(input.get("backend").and_then(Value::as_str)),
             "query",
         ),
+        // Questions go to the search provider; the pages read are the ones it returns.
+        "web_research" => (search_host(None), "query"),
         "web_extract" | "web_scrape" | "web_feed" | "web_sitemap" | "web_metadata"
         | "browser_open" => (host_of_url(&str_field("url")), "url"),
         // A new tab on an address is an open: the card names the site it goes to.

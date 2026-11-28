@@ -6524,6 +6524,8 @@ mod tests {
             "runs",
             "skills",
             "workflows",
+            // The sources of `web_research` (see `web_tools::research::pack_dir`).
+            "research-packs",
             "future-trusted-store",
         ] {
             let file = d.path().join(dir).join("x.toml");

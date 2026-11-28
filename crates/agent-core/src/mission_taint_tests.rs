@@ -76,6 +76,15 @@ impl Kit {
                     ContentClass::untrusted_egress(),
                     "A directory of web design agencies with a free listing.",
                 )),
+                // The bounded research pass, as `web-tools` declares it: a fetch tool (Write) that
+                // brings untrusted text in and reads only.
+                Arc::new(with_class(
+                    "web_research",
+                    Effect::Write,
+                    b,
+                    ContentClass::untrusted_egress(),
+                    "Source [1] A directory of web design agencies with a free listing.",
+                )),
                 real("browser_open", Effect::Write, b, "opened"),
                 real("browser_fill", Effect::Write, b, "ok"),
                 real("browser_click", Effect::Write, b, "ok"),
@@ -488,6 +497,69 @@ async fn real_private_data_in_a_mission_still_asks_before_it_leaves() {
         1,
         "the own address needed no card"
     );
+}
+
+#[tokio::test]
+async fn a_research_pass_runs_in_a_mission_without_a_card() {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[(
+            "r1",
+            "web_research",
+            json!({
+                "question": "Which free directories list web design agencies?",
+                "sub_questions": ["free web design agency directories", "directory listing rules"],
+                "max_sources": 6
+            }),
+        )]),
+        calls(&[(
+            "r2",
+            "web_research",
+            json!({"question": "directory submission guidelines"}),
+        )]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, own_inbox);
+    assert_eq!(run_to_card(&lp, &w, "brief").await, None);
+    assert_eq!(kit.count("web_research"), 2);
+}
+
+#[tokio::test]
+async fn a_research_pass_asks_when_a_question_would_carry_a_word_of_the_private_list_out() {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[("r", "fs_read", json!({"path": "customers.csv"}))]),
+        calls(&[("x", "web_extract", json!({"url": "https://dir-0.example/"}))]),
+        // Plain questions still go through after the private read and the page.
+        calls(&[(
+            "q1",
+            "web_research",
+            json!({"question": "free web design directories"}),
+        )]),
+        // A word of the private list inside a sub-question goes to the search provider.
+        calls(&[(
+            "q2",
+            "web_research",
+            json!({
+                "question": "free web design directories",
+                "sub_questions": ["directories", "tail4242 directories"]
+            }),
+        )]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, own_inbox);
+    let card = run_to_card(&lp, &w, "brief").await;
+    assert_eq!(
+        card.as_ref().map(|c| c.0.as_str()),
+        Some("web_research"),
+        "{card:?}"
+    );
+    assert_eq!(card.unwrap().1["question"], "free web design directories");
+    assert_eq!(kit.count("web_research"), 1, "only the plain question ran");
 }
 
 #[tokio::test]

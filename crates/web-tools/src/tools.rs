@@ -39,6 +39,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "web_feed",
     "web_sitemap",
     "web_metadata",
+    crate::research::RESEARCH_TOOL,
 ];
 
 /// Longest URL a web tool accepts, in characters. Damps bulk data exfiltration
@@ -71,6 +72,10 @@ pub struct WebToolsConfig {
     pub secrets: Option<Arc<dyn SecretStore>>,
     /// Directory for spilled large outputs. `None`: oversized output is truncated only.
     pub spill_dir: Option<PathBuf>,
+    /// Directory for the source lists `web_research` remembers (see
+    /// [`crate::research::pack_dir`]). It must be a protected folder the file tools cannot read,
+    /// not the spill directory. `None`: they are kept in memory only.
+    pub research_dir: Option<PathBuf>,
     /// The optional web scraping add-on. `Some` registers `web_scrape`; the embedder sets it only
     /// when the add-on is installed on this computer.
     pub scrape: Option<crate::scrape::ScrapeConfig>,
@@ -84,6 +89,7 @@ impl Default for WebToolsConfig {
             search: SearchConfig::default(),
             secrets: None,
             spill_dir: None,
+            research_dir: None,
             scrape: None,
         }
     }
@@ -96,12 +102,14 @@ enum Kind {
     Feed,
     Sitemap,
     Metadata,
+    Research,
 }
 
 struct Shared {
     fetcher: HttpFetcher,
     search: MultiSearch,
     spill_dir: Option<PathBuf>,
+    research_dir: Option<PathBuf>,
 }
 
 struct WebTool {
@@ -131,6 +139,7 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
         fetcher,
         search,
         spill_dir: cfg.spill_dir,
+        research_dir: cfg.research_dir,
     });
     let make = |name: &str, desc: &str, schema: Value, kind: Kind| -> Arc<dyn Tool> {
         Arc::new(WebTool {
@@ -232,6 +241,19 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
             "Fetch a page and return its metadata: title, description, canonical URL, OpenGraph, Twitter card, feeds and JSON-LD.",
             json!({"type":"object","required":["url"],"properties":{"url":{"type":"string"}}}),
             Kind::Metadata,
+        ),
+        make(
+            crate::research::RESEARCH_TOOL,
+            "Research a question on the public web in one bounded call. First plan 3 to 6 focused sub-questions (different angles: definition, current facts and numbers, opposing views, how recent, official sources). This runs one search per sub-question, drops duplicate and near-duplicate pages, reads the best sources (never more than max_sources) and returns them numbered [1], [2], ... as excerpts fenced as untrusted page text, plus a research_id. Then write your answer from those excerpts with the number of the supporting source after each claim, and save it with web_research_report. Only reads: search queries and page fetches, nothing is sent out. Prefer this over many separate web_search and web_extract calls for any question that needs several sources.",
+            json!({"type":"object","required":["question"],"properties":{
+                "question":{"type":"string","description":"The question to answer (max 400 characters)"},
+                "sub_questions":{"type":"array","maxItems":crate::research::MAX_SUB_QUESTIONS,"items":{"type":"string"},"description":"Focused search queries, one search each (default: the question itself)"},
+                "max_sources":{"type":"integer","minimum":1,"maximum":crate::research::MAX_SOURCES,"description":"Most pages to read (default 8)"},
+                "max_seconds":{"type":"integer","minimum":crate::research::MIN_SECONDS,"maximum":crate::research::MAX_SECONDS,"description":"Time limit for the whole call (default 90)"},
+                "max_chars":{"type":"integer","minimum":crate::research::MIN_CHARS,"maximum":crate::research::MAX_CHARS,"description":"Most characters of page text returned in total (default 36000)"},
+                "language":{"type":"string","description":"Preferred result language, e.g. en or tr"}
+            }}),
+            Kind::Research,
         ),
     ];
     all.extend(scrape);
@@ -445,6 +467,15 @@ struct ExtractIn {
     max_chars: Option<usize>,
 }
 #[derive(Deserialize)]
+struct ResearchIn {
+    question: String,
+    sub_questions: Option<Vec<String>>,
+    max_sources: Option<usize>,
+    max_seconds: Option<u64>,
+    max_chars: Option<usize>,
+    language: Option<String>,
+}
+#[derive(Deserialize)]
 struct UrlLimitIn {
     url: String,
     limit: Option<usize>,
@@ -557,6 +588,84 @@ impl WebTool {
         Ok(finish_text(ctx, self.shared.spill_dir.as_deref(), text))
     }
 
+    async fn research(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        use crate::research as r;
+        let i: ResearchIn = parse(input)?;
+        let question = i.question.trim().to_owned();
+        if question.is_empty() {
+            return Err(ToolError::InvalidInput("question is empty".into()));
+        }
+        check_len("question", &question, r::MAX_QUESTION_CHARS)?;
+        let mut subs: Vec<String> = Vec::new();
+        for q in i.sub_questions.unwrap_or_default() {
+            let q = q.trim().to_owned();
+            check_len("sub-question", &q, r::MAX_QUESTION_CHARS)?;
+            if !q.is_empty() && !subs.contains(&q) {
+                subs.push(q);
+            }
+        }
+        subs.truncate(r::MAX_SUB_QUESTIONS);
+        if subs.is_empty() {
+            subs.push(question.clone());
+        }
+        let req = r::Request {
+            question,
+            sub_questions: subs,
+            max_sources: i
+                .max_sources
+                .unwrap_or(r::DEFAULT_MAX_SOURCES)
+                .clamp(1, r::MAX_SOURCES),
+            max_chars: i
+                .max_chars
+                .unwrap_or(r::DEFAULT_MAX_CHARS)
+                .clamp(r::MIN_CHARS, r::MAX_CHARS),
+            max_time: std::time::Duration::from_secs(
+                i.max_seconds
+                    .unwrap_or(r::DEFAULT_MAX_SECONDS)
+                    .clamp(r::MIN_SECONDS, r::MAX_SECONDS),
+            ),
+            language: i.language,
+        };
+        let gathered = r::gather(
+            &self.shared.search,
+            &r::HttpPages(&self.shared.fetcher),
+            &req,
+        )
+        .await
+        .map_err(tool_err)?;
+        let id = r::new_id();
+        r::put_pack(
+            self.shared.research_dir.as_deref(),
+            &gathered.pack(&id, &req.question, ctx.bot_id.as_deref()),
+        );
+        let text = r::render(&id, &req, &gathered);
+        let mut out = finish_text(ctx, self.shared.spill_dir.as_deref(), text);
+        // The machine-readable copy is small by construction (at most MAX_SOURCES sources and
+        // MAX_NOT_USED notes of capped length), and it is added only when it fits what is left
+        // of the inline budget, so it can never push the result past `max_inline_bytes`.
+        let data = json!({
+            "untrusted_external_content": true,
+            "research_id": id,
+            "sources": gathered.sources.iter().map(|s| json!({
+                "n": s.n, "url": s.url, "title": s.title, "found_for": s.found_for,
+            })).collect::<Vec<_>>(),
+            "not_used": gathered.skipped.iter().take(r::MAX_NOT_USED).collect::<Vec<_>>(),
+            "timed_out": gathered.timed_out,
+        });
+        let inline: usize = out
+            .content
+            .iter()
+            .map(|p| match p {
+                ContentPart::Text { text } => text.len(),
+                _ => 0,
+            })
+            .sum();
+        if inline.saturating_add(json_len(&data)) <= ctx.max_inline_bytes {
+            out.content.push(ContentPart::Json { data });
+        }
+        Ok(out)
+    }
+
     async fn feed(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: UrlLimitIn = parse(input)?;
         check_len("url", &i.url, MAX_URL_CHARS)?;
@@ -658,6 +767,7 @@ impl Tool for WebTool {
             Kind::Feed => self.feed(ctx, input).await,
             Kind::Sitemap => self.sitemap(ctx, input).await,
             Kind::Metadata => self.metadata(ctx, input).await,
+            Kind::Research => self.research(ctx, input).await,
         }
     }
 }

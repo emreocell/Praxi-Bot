@@ -229,7 +229,7 @@ fn is_page_text_tool(name: &str, label: &str, text: &str) -> bool {
     base.starts_with("browser_")
         || matches!(
             base,
-            "web_extract" | "web_search" | "email_read" | "email_search"
+            "web_extract" | "web_search" | "web_research" | "email_read" | "email_search"
         )
         || label.starts_with("page ")
         || label.starts_with("mailbox ")
