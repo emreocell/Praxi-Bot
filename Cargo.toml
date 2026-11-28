@@ -51,6 +51,7 @@ members = [
     "crates/process-guard",
     "crates/pty-session",
     "crates/missions",
+    "crates/liveness",
     "crates/embedding-hub",
     "apps/cli",
     "apps/desktop",

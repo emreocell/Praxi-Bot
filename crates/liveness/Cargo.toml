@@ -1,0 +1,21 @@
+[package]
+name = "liveness"
+description = "Keeps the daemon's background loops alive: restart on panic with backoff, a degraded state, and the systemd watchdog heartbeat."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+futures.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

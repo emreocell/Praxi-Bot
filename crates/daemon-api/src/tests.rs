@@ -48,6 +48,7 @@ mod incoming_webhook;
 mod knowledge;
 mod knowledge_brain;
 mod logs;
+mod loops;
 mod mcp;
 mod memory;
 mod memory_controls;

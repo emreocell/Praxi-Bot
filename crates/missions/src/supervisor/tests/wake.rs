@@ -759,3 +759,67 @@ async fn without_a_mailbox_probe_a_mail_wait_only_times_out() {
     clock.0.fetch_add(31 * MIN, Ordering::SeqCst);
     assert_eq!(sup.wake_pass().await.unwrap().timed_out, 1);
 }
+
+#[tokio::test]
+async fn a_panic_in_either_loop_restarts_it_and_the_waiting_mission_still_finishes() {
+    use liveness::Fault;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(crate::DB_FILE);
+    let clock = Arc::new(ManualClock(AtomicI64::new(2_000)));
+    let mission;
+    {
+        let store = Arc::new(MissionStore::open(&path).unwrap());
+        mission = new_mission(&store, Budgets::default(), sites(1));
+        let w = world_over(
+            store,
+            mission.clone(),
+            Arc::clone(&clock),
+            signup_then_finish(Arc::clone(&clock)),
+        );
+        w.sup.step(&mission).await.unwrap();
+        assert_eq!(w.state(), MissionState::Waiting);
+    }
+    let store = Arc::new(MissionStore::open(&path).unwrap());
+    let finish: Box<Script> = Box::new(|_, req, store| {
+        set(
+            store,
+            &req.mission_id,
+            "site-0.example",
+            ItemStatus::Done,
+            None,
+        );
+        ok(1)
+    });
+    let w = world_over(store, mission.clone(), Arc::clone(&clock), finish);
+    w.inbox.deliver(
+        clock.now_ms() + 5 * MIN,
+        "site-0.example",
+        json!({"codes": ["424242"]}),
+    );
+    clock.0.fetch_add(6 * MIN, Ordering::SeqCst);
+
+    // The wake loop panics in a pass, the drivers loop dies at its start: both come back.
+    w.sup.guard().inject_panic(WAKE_LOOP, Fault::Pass, 1);
+    w.sup.guard().inject_panic(DRIVER_LOOP, Fault::Task, 1);
+    let handle = w.sup.spawn();
+    until("the mission to finish after both loops crashed", || {
+        w.state() == MissionState::Done
+    })
+    .await;
+    let restarts: Vec<_> = w
+        .sup
+        .guard()
+        .statuses()
+        .into_iter()
+        .map(|s| (s.name, s.restarts))
+        .collect();
+    assert_eq!(
+        restarts,
+        vec![(DRIVER_LOOP, 1), (WAKE_LOOP, 1)],
+        "each loop crashed once and was restarted"
+    );
+    assert!(!w.sup.guard().is_degraded());
+    w.shutdown.cancel();
+    handle.await.unwrap();
+}

@@ -2099,6 +2099,7 @@ dependencies = [
  "http-body-util",
  "iana-time-zone",
  "live-view",
+ "liveness",
  "mcp-bridge",
  "memory-store",
  "missions",
@@ -4940,6 +4941,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "liveness"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "parking_lot",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5306,6 +5318,7 @@ name = "missions"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "liveness",
  "parking_lot",
  "protocol",
  "rusqlite",
@@ -7941,6 +7954,7 @@ dependencies = [
  "globset",
  "hex",
  "hmac 0.12.1",
+ "liveness",
  "parking_lot",
  "proptest",
  "protocol",

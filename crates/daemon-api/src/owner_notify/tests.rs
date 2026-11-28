@@ -512,3 +512,135 @@ async fn only_a_bounded_number_of_runs_are_batched_at_once() {
     assert!(watched.wants(RunId::new()).is_some());
     assert!(!watched.full_warned);
 }
+
+// ---- the notices survive a restart
+
+fn titles(hub: &Hub) -> Vec<String> {
+    hub.recent(0).into_iter().map(|n| n.title).collect()
+}
+
+#[test]
+fn notices_and_their_numbering_survive_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load(dir.path());
+    hub.publish(draft(NoticeKind::Finished), DAY).unwrap();
+    let second = hub.publish(draft(NoticeKind::Failed), DAY + 1).unwrap();
+    drop(hub);
+    let hub = Hub::load(dir.path());
+    assert_eq!(hub.recent(0).len(), 2);
+    assert_eq!(hub.get(&second.id).unwrap().kind, NoticeKind::Failed);
+    let third = hub.publish(draft(NoticeKind::Finished), DAY + 2).unwrap();
+    assert_eq!(
+        third.seq, 3,
+        "the numbering goes on, a bridge's cursor stays valid"
+    );
+    // A bridge that reconnects with its cursor gets what it missed.
+    let (replay, _rx) = hub.subscribe_push(Some(1));
+    assert_eq!(replay.iter().map(|n| n.seq).collect::<Vec<_>>(), vec![2, 3]);
+}
+
+#[test]
+fn a_notice_held_by_quiet_hours_is_pushed_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load(dir.path());
+    hub.set_settings(window("22:00", "08:00", "UTC"), DAY)
+        .unwrap();
+    let night = DAY + 23 * HOUR;
+    hub.publish(draft(NoticeKind::Blocked), night).unwrap();
+    drop(hub);
+    // The daemon restarts inside the window: the notice is still held, not lost.
+    let hub = Hub::load(dir.path());
+    let (_, mut rx) = hub.subscribe_push(None);
+    hub.release_held(night + 1000);
+    assert!(rx.try_recv().is_err(), "still quiet");
+    hub.release_held(DAY + 32 * HOUR);
+    let late = rx.try_recv().unwrap();
+    assert!(late.late);
+    assert_eq!(late.kind, NoticeKind::Blocked);
+}
+
+#[test]
+fn a_notice_no_bridge_was_handed_goes_to_the_first_bridge_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load(dir.path());
+    let now = storage::now_ms();
+    let seen = hub.publish(draft(NoticeKind::Finished), now).unwrap();
+    hub.mark_delivered(seen.seq);
+    let unsent = hub.publish(draft(NoticeKind::Failed), now).unwrap();
+    let mut old = draft(NoticeKind::Failed);
+    old.title = "Last week".into();
+    hub.publish(old, now - 2 * 24 * HOUR).unwrap();
+    drop(hub);
+    let hub = Hub::load(dir.path());
+    let (replay, _rx) = hub.subscribe_push(None);
+    let ids: Vec<_> = replay.iter().map(|n| n.id.clone()).collect();
+    assert_eq!(
+        ids,
+        vec![unsent.id],
+        "only what was not handed over, and not what is days old"
+    );
+}
+
+#[test]
+fn a_first_start_has_nothing_to_replay() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load(dir.path());
+    hub.publish(draft(NoticeKind::Failed), storage::now_ms())
+        .unwrap();
+    let (replay, _rx) = hub.subscribe_push(None);
+    assert!(
+        replay.is_empty(),
+        "without an earlier run a bridge starts with what is new"
+    );
+}
+
+#[test]
+fn the_saved_notices_are_bounded_and_a_broken_file_starts_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load(dir.path());
+    let now = storage::now_ms();
+    for i in 0..(LOG_MAX + 40) {
+        let mut d = draft(NoticeKind::Finished);
+        d.title = format!("n{i}");
+        hub.publish(d, now + i64::try_from(i).unwrap()).unwrap();
+    }
+    drop(hub);
+    let hub = Hub::load(dir.path());
+    let titles = titles(&hub);
+    assert_eq!(titles.len(), LOG_MAX);
+    assert_eq!(titles.last().unwrap(), &format!("n{}", LOG_MAX + 39));
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join(NOTICES_FILE)).unwrap()).unwrap();
+    assert!(saved["pushed"].as_array().unwrap().len() <= PUSH_MAX);
+    assert!(saved["held"].as_array().unwrap().len() <= HELD_MAX);
+    std::fs::write(dir.path().join(NOTICES_FILE), b"{ not json").unwrap();
+    assert_eq!(Hub::load(dir.path()).recent(0), Vec::new());
+}
+
+#[cfg(unix)]
+#[test]
+fn only_the_daemons_user_can_read_the_saved_notices() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load(dir.path());
+    hub.publish(draft(NoticeKind::Finished), DAY).unwrap();
+    let mode = std::fs::metadata(dir.path().join(NOTICES_FILE))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o077, 0);
+}
+
+#[test]
+fn an_answered_notice_stays_answered_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load(dir.path());
+    let n = hub.publish(draft(NoticeKind::Blocked), DAY).unwrap();
+    hub.claim_answers(&n).unwrap();
+    drop(hub);
+    let hub = Hub::load(dir.path());
+    assert!(
+        hub.claim_answers(&n).is_err(),
+        "single use, also across a restart"
+    );
+}

@@ -414,6 +414,21 @@ type UrlParts = (
     Option<String>,
 );
 
+/// Record the verdict of an approval. "Already decided" (the answer arrived through another route
+/// first) is normal. Any other failure (disk full, lock timeout) leaves the card pending in the
+/// app and the run waiting on a row nobody will answer, so it is logged.
+pub(crate) fn settle_approval(storage: &storage::Storage, id: Uuid, decision: &str) {
+    match storage.decide_approval(id, decision) {
+        Ok(()) | Err(storage::StorageError::NotFound(_)) => {}
+        Err(error) => tracing::warn!(
+            approval_id = %id,
+            decision,
+            %error,
+            "could not record the approval verdict; the card may stay pending"
+        ),
+    }
+}
+
 impl Shared {
     /// Resolve policy + grants for one call.
     pub(crate) fn decide(
@@ -2883,8 +2898,9 @@ impl Shared {
         if let Ok(Some(run)) = self.storage.get_run(run_id)
             && let Some(from) = RunState::parse(&run.state)
             && can_transition(from, to)
+            && let Err(error) = self.storage.update_run_state(run_id, to.as_str(), None)
         {
-            let _ = self.storage.update_run_state(run_id, to.as_str(), None);
+            tracing::warn!(%run_id, %error, state = to.as_str(), "could not record the run state; the timeline may be stale");
         }
     }
 
@@ -3510,11 +3526,11 @@ impl Shared {
         let verdict = match waited {
             Waited::Verdict(v) => v,
             Waited::Paused => {
-                let _ = self.storage.decide_approval(approval_id, "expired");
+                settle_approval(&self.storage, approval_id, "expired");
                 return Err(Some("nobody approved in time; the run is paused".into()));
             }
             Waited::Parked => {
-                let _ = self.storage.decide_approval(approval_id, "expired");
+                settle_approval(&self.storage, approval_id, "expired");
                 self.emit(
                     ctx,
                     Event::ToolCallDenied(ToolCallDenied {
@@ -3532,7 +3548,7 @@ impl Shared {
                 )));
             }
             Waited::Expired => {
-                let _ = self.storage.decide_approval(approval_id, "expired");
+                settle_approval(&self.storage, approval_id, "expired");
                 self.emit(
                     ctx,
                     Event::ToolCallDenied(ToolCallDenied {
@@ -3594,7 +3610,7 @@ impl Shared {
                 })
             }
             Ok(Verdict::Denied { by, reason }) => {
-                let _ = self.storage.decide_approval(approval_id, "denied");
+                settle_approval(&self.storage, approval_id, "denied");
                 self.audit(
                     ctx,
                     "user",
@@ -3658,7 +3674,7 @@ impl Shared {
         name: &str,
         by: protocol::UserId,
     ) {
-        let _ = self.storage.decide_approval(approval_id, "denied");
+        settle_approval(&self.storage, approval_id, "denied");
         self.audit(
             ctx,
             "user",
@@ -3765,23 +3781,23 @@ impl Shared {
         let verdict = match waited {
             Waited::Verdict(v) => v,
             Waited::Paused | Waited::Parked => {
-                let _ = self.storage.decide_approval(approval_id, "expired");
+                settle_approval(&self.storage, approval_id, "expired");
                 return Err(Some("nobody answered in time; the run is paused".into()));
             }
             Waited::Expired => {
                 // The question card closes with its call: the tool completes with this reason.
-                let _ = self.storage.decide_approval(approval_id, "expired");
+                settle_approval(&self.storage, approval_id, "expired");
                 return Err(Some(EXPIRED_REASON.into()));
             }
         };
         match verdict {
             Ok(Verdict::Answered { answer, .. }) => {
-                let _ = self.storage.decide_approval(approval_id, "answered");
+                settle_approval(&self.storage, approval_id, "answered");
                 self.audit(ctx, "user", "question.answered", &json!({}));
                 Ok(answer)
             }
             Ok(Verdict::Denied { reason, .. }) => {
-                let _ = self.storage.decide_approval(approval_id, "declined");
+                settle_approval(&self.storage, approval_id, "declined");
                 Err(reason)
             }
             Ok(
@@ -3791,7 +3807,7 @@ impl Shared {
                 | Verdict::Elicited(_),
             )
             | Err(_) => {
-                let _ = self.storage.decide_approval(approval_id, "declined");
+                settle_approval(&self.storage, approval_id, "declined");
                 Err(Some("question was dropped".into()))
             }
         }
@@ -3997,7 +4013,7 @@ impl Shared {
             Err(_) => (false, "the owner did not answer in time", "expired"),
             _ => (false, "the owner cancelled", "declined"),
         };
-        let _ = self.storage.decide_approval(approval_id, decision);
+        settle_approval(&self.storage, approval_id, decision);
         if !stored {
             let action = if decision == "expired" {
                 "secret_request.expired"
@@ -4417,7 +4433,7 @@ impl Shared {
             Err(_) => (false, "the owner did not answer in time", "expired"),
             _ => (false, "the owner cancelled", "declined"),
         };
-        let _ = self.storage.decide_approval(approval_id, decision);
+        settle_approval(&self.storage, approval_id, decision);
         self.audit(
             ctx,
             "user",

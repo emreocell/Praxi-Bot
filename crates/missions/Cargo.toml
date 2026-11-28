@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+liveness = { path = "../liveness", version = "0.1.0" }
 parking_lot.workspace = true
 protocol.workspace = true
 rusqlite.workspace = true

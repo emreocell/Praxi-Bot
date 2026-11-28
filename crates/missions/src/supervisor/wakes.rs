@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::{Supervisor, budget_block};
+use liveness::Verdict;
+
+use super::{Supervisor, WAKE_LOOP, budget_block};
 use crate::error::Result;
 use crate::model::{MAX_WAKE_PAYLOAD_CHARS, MissionState};
 use crate::wake::{
@@ -52,8 +54,17 @@ impl Supervisor {
     /// Run [`Self::wake_pass`] every `wake_poll` until shutdown.
     pub(super) async fn wake_loop(&self) {
         while !self.shutdown.is_cancelled() {
-            if let Err(e) = self.wake_pass().await {
-                tracing::warn!("missions: wake pass failed: {e}");
+            match self.guard.guarded(WAKE_LOOP, self.wake_pass()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::warn!("missions: wake pass failed: {e}"),
+                Err(Verdict::GiveUp) => return,
+                Err(Verdict::Retry(wait)) => {
+                    tokio::select! {
+                        () = self.shutdown.cancelled() => break,
+                        () = tokio::time::sleep(wait) => {}
+                    }
+                    continue;
+                }
             }
             tokio::select! {
                 () = self.shutdown.cancelled() => break,

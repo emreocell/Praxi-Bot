@@ -262,7 +262,7 @@ impl Shared {
             // Stop, a deny through another route, or a dropped card.
             Waited::Verdict(_) => (ElicitationAnswer::Cancel, "cancelled"),
         };
-        let _ = self.storage.decide_approval(approval_id, outcome);
+        crate::approval::settle_approval(&self.storage, approval_id, outcome);
         self.audit(
             ctx,
             "user",
