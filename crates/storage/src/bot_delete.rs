@@ -852,7 +852,7 @@ mod tests {
             .unwrap()
             .unwrap()
             .cleanup;
-        assert!(c.email_sources.is_empty());
+        assert_eq!(c.email_sources, Vec::<String>::new());
         c.delete_inbox = true;
         c.email_sources = vec!["praxi".into()];
         assert!(st.save_bot_delete_cleanup(&c).unwrap());
