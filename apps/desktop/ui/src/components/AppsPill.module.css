@@ -2,7 +2,7 @@
  * The Apps button sits immediately to the right of the profile row (App.module.css .footRow) and keeps
  * its own size there.  What it shows depends on the rail's width tier (data-rail-tier on the rail, see
  * `railTier` in lib/shellLayout.ts): the grid icon on mini and narrow; from medium, three monochrome
- * preview logos (Discord, Gmail, GitHub) in one compact pill; the word "Apps" from large.  The name is
+ * preview logos (Discord, Gmail, GitHub) in one compact pill; the word "Apps" from wide.  The name is
  * always in the tooltip.
  */
 .pill {
@@ -54,7 +54,6 @@
   display: none;
 }
 
-:global([data-rail-tier="large"]) .label,
 :global([data-rail-tier="wide"]) .label {
   display: inline;
 }
@@ -65,16 +64,22 @@
   gap: var(--space-1);
 }
 
-:global([data-rail-tier="medium"]) .pill,
-:global([data-rail-tier="large"]) .pill,
-:global([data-rail-tier="wide"]) .pill {
-  background-color: color-mix(in srgb, var(--color-text) 5%, transparent);
+:global([data-rail-tier="medium"]) :where(.pill),
+:global([data-rail-tier="large"]) :where(.pill),
+:global([data-rail-tier="wide"]) :where(.pill) {
+  background-color: color-mix(in srgb, var(--color-text) 4%, transparent);
 }
 
-:global([data-rail-tier="medium"]) .pill:hover,
-:global([data-rail-tier="large"]) .pill:hover,
-:global([data-rail-tier="wide"]) .pill:hover {
+:global([data-rail-tier="medium"]) :where(.pill:hover),
+:global([data-rail-tier="large"]) :where(.pill:hover),
+:global([data-rail-tier="wide"]) :where(.pill:hover) {
   background-color: var(--state-hover);
+}
+
+:global([data-rail-tier="medium"]) :where(.pill:active),
+:global([data-rail-tier="large"]) :where(.pill:active),
+:global([data-rail-tier="wide"]) :where(.pill:active) {
+  background-color: var(--state-pressed);
 }
 
 :global([data-rail-tier="medium"]) .stack,
@@ -83,9 +88,9 @@
   display: flex;
 }
 
-:global([data-rail-tier="medium"]) .stack ~ .icon,
-:global([data-rail-tier="large"]) .stack ~ .icon,
-:global([data-rail-tier="wide"]) .stack ~ .icon {
+:global([data-rail-tier="medium"]) .icon,
+:global([data-rail-tier="large"]) .icon,
+:global([data-rail-tier="wide"]) .icon {
   display: none;
 }
 

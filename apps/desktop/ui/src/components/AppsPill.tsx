@@ -7,7 +7,7 @@ import styles from "./AppsPill.module.css";
 const RAIL_PREVIEW_MARKS = ["discord", "gmail", "github"] as const;
 
 /** Apps button right of the profile row: grid icon on the icon rail; three preview logos from medium up. */
-export function AppsPill({ onClick }: { connected?: readonly string[]; onClick: () => void }) {
+export function AppsPill({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation();
   const label = t("sidebar.apps");
   return (

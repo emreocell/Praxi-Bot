@@ -14,7 +14,7 @@ export function BrandMark({ name, size = 16, monochrome = false }: { name: strin
   const brand = brandIcon(name);
   const key = name.toLowerCase().replace(/[^a-z]/g, "");
   const style = { "--brand-color": brand.color, width: size, height: size } as CSSProperties;
-  const tone = brand.monochrome || !brand.known ? "mono" : brightness(brand.color) > 200 ? "light" : brightness(brand.color) < 70 ? "dark" : "mid";
+  const tone = monochrome || brand.monochrome || !brand.known ? "mono" : brightness(brand.color) > 200 ? "light" : brightness(brand.color) < 70 ? "dark" : "mid";
   const accessible = { role: "img", "aria-label": brand.name };
 
   if (MULTICOLOR.includes(key) && !monochrome) {
@@ -31,7 +31,7 @@ export function BrandMark({ name, size = 16, monochrome = false }: { name: strin
       </span>
     );
   }
-  if (key === "slack") {
+  if (key === "slack" && !monochrome) {
     return (
       <span className={styles.mark} style={style} {...accessible}>
         <svg viewBox="0 0 24 24">

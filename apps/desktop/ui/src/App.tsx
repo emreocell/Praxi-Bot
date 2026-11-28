@@ -57,7 +57,6 @@ import {
   screenPanelStep,
   type SidePanelMode
 } from "./lib/sidePanelState";
-import { useMcp } from "./state/useMcp";
 import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { MessageSearch } from "./components/MessageSearch";
 import { botDotStatus, railNavIndex } from "./lib/railNav";
@@ -376,7 +375,6 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const [newChatError, setNewChatError] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchSeed, setSearchSeed] = useState<SearchRequest | null>(null);
-  const { servers: appServers } = useMcp(true);
   const [helpOpen, setHelpOpen] = useState(false);
   // The offline demo: `null` task = closed. It lives only here, never as a chat.
   const [demo, setDemo] = useState<{ task: DemoTaskId | null } | null>(null);
@@ -1473,7 +1471,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             {import.meta.env.DEV && new URLSearchParams(window.location.search).get("dev") === "1" ? <Button variant="ghost" onClick={handleSimulateBotRun}><FlaskConical />{mini ? null : t("dev.simulateBotRun")}</Button> : null}
             <div className={styles.footRow}>
               <AccountMenu name={settings.accountName} computerTarget={settings.computerTarget} compact={mini} onAction={handleAccountAction} />
-              <AppsPill connected={appServers.filter(s => s.status === "connected").map(s => s.name)} onClick={() => setAppsOpen(true)} />
+              <AppsPill onClick={() => setAppsOpen(true)} />
             </div>
           </SidebarFooter>
         </Sidebar>

@@ -50,11 +50,13 @@ test("the Apps button previews Discord, Gmail and GitHub on the rail", () => {
   assert.match(appsPillTsx, /monochrome/);
 });
 
-test("the Apps button: grid icon on a narrow rail, three preview logos from medium, label from large", () => {
+test("the Apps button: grid icon on a narrow rail, three preview logos from medium, label from wide", () => {
   assert.match(appsPillCss, /\.label \{[^}]*display:\s*none/);
-  assert.match(appsPillCss, /\[data-rail-tier="large"\]\) \.label,\s*:global\(\[data-rail-tier="wide"\]\) \.label \{\s*display:\s*inline/);
+  assert.match(appsPillCss, /\[data-rail-tier="wide"\]\) \.label \{\s*display:\s*inline/);
+  assert.doesNotMatch(appsPillCss, /\[data-rail-tier="large"\]\) \.label/);
   assert.match(appsPillCss, /\[data-rail-tier="medium"\]\) \.stack,\s*\n:global\(\[data-rail-tier="large"\]\) \.stack/);
-  assert.match(appsPillCss, /\[data-rail-tier="medium"\]\) \.stack ~ \.icon,\s*\n:global\(\[data-rail-tier="large"\]\) \.stack ~ \.icon/);
+  assert.match(appsPillCss, /\[data-rail-tier="medium"\]\) \.icon,\s*\n:global\(\[data-rail-tier="large"\]\) \.icon/);
+  assert.doesNotMatch(appsPillCss, /\.stack ~ \.icon/);
   assert.match(block(appsPillCss, ".pill"), /white-space:\s*nowrap/);
 });
 
