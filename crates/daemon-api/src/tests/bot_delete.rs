@@ -7,6 +7,7 @@ use axum::http::{Method, StatusCode};
 use memory_store::{Kind, NewMemory};
 use parking_lot::Mutex;
 use protocol::{BotId, ChatId, RunId};
+use secret_store::SecretStore as _;
 use serde_json::{Value, json};
 
 use super::{PROFILE, T, call, call_token_only, make_chat, setup};
@@ -1130,4 +1131,248 @@ async fn the_last_bot_can_be_deleted_too() {
         call(&t, Method::GET, "/v1/bots", None).await.json(),
         json!([])
     );
+}
+
+// ---- second review round ------------------------------------------------------------------
+
+/// Another bot answering an `@mention` in this bot's chat runs under its own id; while that run
+/// is unfinished the chat's bot is not deleted (its chat, messages and attachments would go
+/// under the running answer).
+#[tokio::test]
+async fn another_bots_run_in_the_bots_chat_refuses_the_delete_until_it_has_stopped() {
+    let t = setup();
+    let (owner, chat) = make_chat(&t).await;
+    let (guest, _) = make_chat(&t).await;
+    history(&t, &owner, &chat, "quokka");
+    let mention = history(&t, &guest, &chat, "wombat");
+    t.state
+        .storage()
+        .update_run_state(mention, "running", None)
+        .unwrap();
+    let chat_id = ChatId(chat.parse().unwrap());
+
+    let p = call(&t, Method::GET, &preview_path(&owner), None)
+        .await
+        .json();
+    assert_eq!(p["active_runs"], 1);
+    let r = call(&t, Method::DELETE, &delete_path(&owner), None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("run in progress")
+    );
+    assert_eq!(t.state.storage().list_messages(chat_id).unwrap().len(), 4);
+    assert!(!t.state.storage().is_retired(bot_id(&owner)));
+
+    t.state
+        .storage()
+        .update_run_state(mention, "succeeded", None)
+        .unwrap();
+    let r = call(&t, Method::DELETE, &delete_path(&owner), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    // The other bot and its run stay; the run only loses the link to the chat that went.
+    let kept = t.state.storage().get_run(mention).unwrap().unwrap();
+    assert_eq!((kept.bot_id, kept.chat_id), (bot_id(&guest), None));
+    assert!(t.state.storage().get_bot(bot_id(&guest)).unwrap().is_some());
+}
+
+/// While one cleanup of a deleted bot runs (here: claimed, as by a delete between its commit and
+/// its last step), a second `DELETE` is refused and the daemon start leaves it alone. An inbox
+/// choice made on a retry is remembered for the next one even when that retry fails.
+#[tokio::test]
+async fn a_cleanup_runs_once_at_a_time_and_a_later_inbox_choice_is_remembered() {
+    let (t, bot, _other, mail) = with_mail().await;
+    let id = bot_id(&bot);
+    inject(id, Fault::Step(BotDeleteStep::Mailboxes), true);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!(["mailboxes"]));
+    let marker = |t: &T| t.state.storage().bot_delete_cleanup(id).unwrap();
+    assert!(!marker(&t).unwrap().delete_inbox);
+
+    // Asked again with the inbox, and failing again: the choice is kept in the marker.
+    let with_inbox = format!("{}?delete_inbox=true", delete_path(&bot));
+    let r = call(&t, Method::DELETE, &with_inbox, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!(["mailboxes"]));
+    assert!(marker(&t).unwrap().delete_inbox);
+    inject(id, Fault::Step(BotDeleteStep::Mailboxes), false);
+
+    // Someone else is running it: refused, and the daemon start skips it.
+    assert!(t.state.storage().claim_bot_delete_cleanup(id));
+    let r = call(&t, Method::DELETE, &with_inbox, None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("already being deleted")
+    );
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        1
+    );
+    assert!(mail.forgotten.lock().is_empty(), "no step ran beside it");
+    assert!(marker(&t).is_some());
+    t.state.storage().release_bot_delete_cleanup(id);
+
+    // The daemon start finishes it with the remembered choice: the inbox goes at the provider.
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        0
+    );
+    assert_eq!(*mail.removed.lock(), vec![("praxi".to_owned(), true)]);
+    assert!(marker(&t).is_none());
+}
+
+/// Two requests for the same gone bot at once: one runs the cleanup, the other is refused or
+/// finds nothing left; the steps never run twice side by side.
+#[tokio::test]
+async fn concurrent_retries_of_a_cleanup_do_not_run_it_twice() {
+    let (t, bot, _other, mail) = with_mail().await;
+    let id = bot_id(&bot);
+    inject(id, Fault::Step(BotDeleteStep::Files), true);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.json()["cleanup_pending"], json!(["files"]));
+    inject(id, Fault::Step(BotDeleteStep::Files), false);
+    let before = mail.forgotten.lock().len();
+    let path = delete_path(&bot);
+    let (a, b, _) = tokio::join!(
+        call(&t, Method::DELETE, &path, None),
+        call(&t, Method::DELETE, &path, None),
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state),
+    );
+    for r in [&a, &b] {
+        assert!(
+            [StatusCode::OK, StatusCode::CONFLICT, StatusCode::NOT_FOUND].contains(&r.status),
+            "{:?}",
+            r.json()
+        );
+    }
+    // Each run of the cleanup forgets the mailboxes once.
+    assert_eq!(
+        mail.forgotten.lock().len() - before,
+        1,
+        "the cleanup ran once"
+    );
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+}
+
+/// A step whose store or host this daemon does not have right now (no secret store for the
+/// webhook secrets, missions off with a mission ledger on disk, mail settings without the mail
+/// host) is left pending, not counted as done; once they are there, the retry finishes it.
+#[tokio::test]
+async fn a_store_that_is_not_there_leaves_its_step_pending() {
+    let t = setup();
+    let (bot, _chat) = make_chat(&t).await;
+    let id = bot_id(&bot);
+    let hook = uuid::Uuid::now_v7();
+    t.state
+        .storage()
+        .insert_incoming_webhook(&storage::IncomingWebhook {
+            id: hook,
+            user_id: t.state.user_id(),
+            bot_id: id,
+            name: "hook".into(),
+            instruction: "do it".into(),
+            enabled: true,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            last_fired_at_ms: None,
+        })
+        .unwrap();
+    let dir = t.state.data_dir();
+    std::fs::write(dir.join("email.toml"), "").unwrap();
+    std::fs::write(dir.join(missions::DB_FILE), "").unwrap();
+
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(
+        r.json()["cleanup_pending"],
+        json!(["secrets", "missions", "mailboxes"])
+    );
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        1
+    );
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_some());
+
+    let secrets = Arc::new(secret_store::MemoryStore::new());
+    secrets
+        .set(&crate::incoming_webhook::secret_name(hook), "s")
+        .unwrap();
+    t.state.set_secret_store(secrets.clone());
+    t.state.enable_missions().unwrap();
+    std::fs::remove_file(dir.join("email.toml")).unwrap();
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        0
+    );
+    assert!(
+        secrets
+            .get(&crate::incoming_webhook::secret_name(hook))
+            .unwrap()
+            .is_none()
+    );
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+}
+
+/// The mail host removed the bot's account, then revoking its knowledge sources failed: the
+/// account name stays in the marker (the account itself is gone) and the retry revokes it.
+#[tokio::test]
+async fn a_failed_mail_source_revocation_is_finished_by_the_retry() {
+    let (t, bot, _other, mail) = with_mail().await;
+    let id = bot_id(&bot);
+    inject(id, Fault::RevokeMail, true);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!(["mailboxes"]));
+    assert_eq!(r.json()["mailboxes_removed"], 1);
+    assert!(!mail.accounts.lock().iter().any(|a| a.name == "praxi"));
+    let left = t.state.storage().bot_delete_cleanup(id).unwrap().unwrap();
+    assert_eq!(left.email_sources, vec!["praxi".to_owned()]);
+
+    // Still failing at the daemon start: still remembered.
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        1
+    );
+    let left = t.state.storage().bot_delete_cleanup(id).unwrap().unwrap();
+    assert_eq!(left.email_sources, vec!["praxi".to_owned()]);
+
+    inject(id, Fault::RevokeMail, false);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!([]));
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+}
+
+/// A chat's attachment folder that is an NTFS junction to a folder outside is refused like a
+/// symbolic link: what it points at stays and the step is reported.
+#[cfg(windows)]
+#[tokio::test]
+async fn the_file_cleanup_never_follows_a_junction() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    history(&t, &bot, &chat, "quokka");
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("keep.txt"), "x").unwrap();
+    let attachments = t.state.data_dir().join("attachments");
+    std::fs::create_dir_all(&attachments).unwrap();
+    let junction = attachments.join(&chat);
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(outside.path())
+        .status()
+        .unwrap();
+    assert!(made.success(), "mklink /J failed");
+
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!(["files"]));
+    assert!(outside.path().join("keep.txt").exists());
+    assert!(junction.symlink_metadata().is_ok(), "the junction stays");
 }

@@ -143,6 +143,9 @@ pub struct Storage {
     /// Bots being deleted: no new chat, run or webhook is inserted for them
     /// ([`Storage::retire_bot`]).
     retired: Mutex<std::collections::HashSet<BotId>>,
+    /// Deleted bots whose cleanup is running in this process
+    /// ([`Storage::claim_bot_delete_cleanup`]).
+    cleaning: Mutex<std::collections::HashSet<BotId>>,
 }
 
 impl Storage {
@@ -249,6 +252,7 @@ impl Storage {
             conn: Mutex::new(conn),
             data_dir,
             retired: Mutex::default(),
+            cleaning: Mutex::default(),
         })
     }
 
@@ -294,6 +298,32 @@ impl Storage {
             return Err(StorageError::Conflict("the bot is being deleted".into()));
         }
         Ok(())
+    }
+
+    /// [`Self::refuse_retired`] for the bot whose chat `chat` is (another bot may run in it).
+    fn refuse_retired_chat(&self, conn: &Connection, chat: ChatId) -> Result<()> {
+        if self.retired_bots().is_empty() {
+            return Ok(());
+        }
+        let owner: Option<String> = conn
+            .query_row(
+                "SELECT bot_id FROM chats WHERE id = ?1",
+                [chat.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match owner.and_then(|b| Uuid::parse_str(&b).ok()) {
+            Some(owner) => self.refuse_retired(BotId(owner)),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn cleaning_bots(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::HashSet<BotId>> {
+        self.cleaning
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     // ---- users ----
@@ -1259,10 +1289,15 @@ impl Storage {
     /// Insert a run.
     ///
     /// # Errors
-    /// Fails on SQLite errors; [`StorageError::Conflict`] while the bot is being deleted.
+    /// Fails on SQLite errors; [`StorageError::Conflict`] while the bot, or the bot whose chat
+    /// the run is in, is being deleted.
     pub fn insert_run(&self, r: &Run) -> Result<()> {
         self.refuse_retired(r.bot_id)?;
-        self.conn().execute(
+        let conn = self.conn();
+        if let Some(chat) = r.chat_id {
+            self.refuse_retired_chat(&conn, chat)?;
+        }
+        conn.execute(
             "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason, computer_node, computer_node_name, paused_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 r.id.to_string(),

@@ -865,11 +865,17 @@ impl AgentLoop {
     }
 
     /// Whether a run of `bot_id` is alive in this loop right now (a turn, a subagent, a
-    /// native-tools engine process), whatever its database row says. Deleting the bot waits
-    /// for it.
+    /// native-tools engine process), or a run of any bot in one of its `chats` (another bot
+    /// answering an `@mention` there), whatever its database row says. Deleting the bot waits
+    /// for it. Takes no lock that is held across a storage call (the delete asks from inside
+    /// its write transaction).
     #[must_use]
-    pub fn bot_has_live_run(&self, bot_id: BotId) -> bool {
-        self.sh.runs.lock().values().any(|ctx| ctx.bot_id == bot_id)
+    pub fn bot_has_live_run(&self, bot_id: BotId, chats: &[ChatId]) -> bool {
+        self.sh
+            .runs
+            .lock()
+            .values()
+            .any(|ctx| ctx.bot_id == bot_id || chats.contains(&ctx.chat_id))
             || self
                 .sh
                 .native_runs

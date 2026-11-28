@@ -9153,6 +9153,52 @@ async fn settle(lp: &AgentLoop, env: &Env, runs: usize) {
     );
 }
 
+/// A mentioned bot's run alive in the chat counts as a live run of the chat's own bot when its
+/// chats are named (deleting that bot waits for it), and only then.
+#[tokio::test]
+async fn a_live_mention_run_counts_for_the_bot_whose_chat_it_is_in() {
+    let env = setup();
+    let guest = BotId::new();
+    env.storage
+        .insert_bot(&Bot {
+            id: guest,
+            user_id: env.user,
+            name: "Atlas".into(),
+            config: json!({}),
+            created_at_ms: now_ms(),
+        })
+        .unwrap();
+    let fake = Fake::new(vec![text("from atlas")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    lp.add_profile(guest, profile(""));
+    let Delivery::NewTurn(run) = lp
+        .send_user_message(env.chat, "@Atlas check this", MessageMode::Queue)
+        .unwrap()
+    else {
+        panic!("expected a new turn")
+    };
+    lp.wait(run).await.unwrap();
+    assert!(!lp.bot_has_live_run(env.bot, &[env.chat]));
+    // The same run, alive in the loop again (as while it is answering).
+    let row = env.storage.get_run(run).unwrap().unwrap();
+    assert_eq!(row.bot_id, guest);
+    lp.sh.ctx(&row).unwrap();
+    assert!(lp.bot_has_live_run(guest, &[]));
+    assert!(lp.bot_has_live_run(env.bot, &[env.chat]));
+    assert!(
+        !lp.bot_has_live_run(env.bot, &[]),
+        "not the chat bot's own run"
+    );
+    lp.sh.runs.lock().remove(&run);
+}
+
 #[tokio::test]
 async fn mention_chain_alternates_authors_and_foreign_replies_are_untrusted_data() {
     let env = setup();

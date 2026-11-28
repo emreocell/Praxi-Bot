@@ -9,16 +9,19 @@
 //!    webhook's), mission, mission session or mailbox share starts for it from here on.
 //! 2. **Check and commit.** In one step, while the mission store is held: the delete is refused
 //!    (`409`) while a mission of the bot is running, waiting (it would wake on its own) or holds
-//!    a session, a run of the bot is unfinished in the database, or a run of it is alive in the
-//!    loop. Otherwise its missions and its rows in the main database go, and the main database's
+//!    a session, a run of the bot (or any run in one of its chats: another bot answering an
+//!    `@mention` there) is unfinished in the database, or such a run is alive in the loop.
+//!    Otherwise its missions and its rows in the main database go, and the main database's
 //!    transaction ([`storage::Storage::delete_bot_cascade`]) is the commit point. When it fails,
 //!    nothing at all is deleted and the bot works again.
 //! 3. **Clean up.** What cannot be rolled back runs after the commit: knowledge index and
 //!    grants, memories and chat search text, event logs and attachments (never through a link),
 //!    webhook secrets, schedules, MCP/app/channel links. A cleanup marker, written in the commit,
-//!    stays until every step is done; a step that fails is reported (`cleanup_pending`) and
-//!    retried by `DELETE /v1/bots/{id}` again, and once when the daemon starts
-//!    ([`spawn_pending_cleanups`]).
+//!    stays until every step is done; a step that fails, or that needs a store or host this
+//!    daemon does not have right now, is reported (`cleanup_pending`) and retried by
+//!    `DELETE /v1/bots/{id}` again, and once when the daemon starts ([`spawn_pending_cleanups`]).
+//!    One cleanup of a bot runs at a time ([`CleanupClaim`]); another request for it meanwhile
+//!    is refused (`409`).
 //! 4. **Mailboxes last.** Accounts only this bot could use are removed (shared ones pass to the
 //!    first bot they were shared with); with `delete_inbox=true` the `AgentMail` inbox goes at
 //!    the provider, only if it is still the bot's alone, decided under the mail host's lock.
@@ -202,6 +205,8 @@ const MISSION_RUNNING: &str =
     "the bot leads a mission that is running: stop the mission first, then delete the bot";
 const MISSION_WAITING: &str = "the bot leads a mission that is waiting for a timer, a mail or a webhook and would wake on its own: cancel it first, then delete the bot";
 const ALREADY_DELETING: &str = "this bot is already being deleted";
+/// The mail settings of `bot serve` in the data directory.
+const EMAIL_FILE: &str = "email.toml";
 
 fn same(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
@@ -444,9 +449,9 @@ struct Committed {
 fn check_and_commit(s: &AppState, bot: &Bot, delete_inbox: bool) -> Result<Committed, ApiError> {
     let delete_rows = |_missions: u64| -> Result<BotCascade, CommitError> {
         s.storage()
-            .delete_bot_cascade(bot.user_id, bot.id, "user", delete_inbox, || {
+            .delete_bot_cascade(bot.user_id, bot.id, "user", delete_inbox, |chats| {
                 fault(bot.id, Fault::LiveRun)?;
-                if s.agent().bot_has_live_run(bot.id) {
+                if s.agent().bot_has_live_run(bot.id, chats) {
                     return Err(StorageError::Conflict("a run of the bot is alive".into()));
                 }
                 Ok(())
@@ -489,11 +494,15 @@ async fn erase_bot(
     bot: &Bot,
     delete_inbox: bool,
 ) -> Result<BotDeleteReport, ApiError> {
-    // 1. Nothing new starts for the bot from here on.
+    // 1. Nothing new starts for the bot from here on. Its cleanup is this request's until it
+    // returns, so a retry can not run the same steps beside it.
     let lock = BotLock::take(s, bot.id)?;
+    let _claim = CleanupClaim::take(s, bot.id)?;
     // A clear answer for what is already known; step 2 decides again, atomically.
     refuse_while_busy(&preview_of(s, bot)?)?;
-    if s.agent().bot_has_live_run(bot.id) {
+    if s.agent()
+        .bot_has_live_run(bot.id, &s.storage().bot_chat_ids(bot.id)?)
+    {
         return Err(ApiError::conflict(RUN_ACTIVE));
     }
 
@@ -517,11 +526,13 @@ async fn erase_bot(
     .await?;
     lock.keep();
 
-    // 3. and 4. What cannot be rolled back, now that the bot is gone.
+    // 3. and 4. What cannot be rolled back, now that the bot is gone. With missions off here
+    // a ledger may still hold the bot's missions: the cleanup looks.
+    let missions_left = committed.missions.is_none() || s.mission_store().is_err();
     let cleaned = clean_up(
         s,
         &committed.cascade.cleanup,
-        committed.missions.is_none(),
+        missions_left,
         Some(knowledge),
     )
     .await;
@@ -541,6 +552,8 @@ async fn retry_cleanup(
     bot: BotId,
     delete_inbox: bool,
 ) -> Result<Option<BotDeleteReport>, ApiError> {
+    // Claimed before the marker is read: a cleanup that just finished is not run again.
+    let _claim = CleanupClaim::take(s, bot)?;
     let Some(mut left) = s
         .storage()
         .bot_delete_cleanup(bot)?
@@ -548,9 +561,14 @@ async fn retry_cleanup(
     else {
         return Ok(None);
     };
-    // A gone bot stays retired, in case a stale request tries to give it something.
-    s.storage().retire_bot(bot);
-    left.delete_inbox |= delete_inbox;
+    // A gone bot stays retired, in case a stale request tries to give it something (`false`
+    // when it already was: nothing to undo).
+    let _ = s.storage().retire_bot(bot);
+    // Asked now to delete the inbox as well: remembered for the next retry before anything runs.
+    if delete_inbox && !left.delete_inbox {
+        left.delete_inbox = true;
+        s.storage().save_bot_delete_cleanup(&left)?;
+    }
     let cleaned = clean_up(s, &left, true, None).await;
     Ok(Some(cleaned.report(left.name.clone())))
 }
@@ -573,8 +591,8 @@ pub fn spawn_pending_cleanups(state: AppState) {
     });
 }
 
-/// Every unfinished cleanup of this owner's deleted bots, retried once. Returns how many are
-/// still unfinished.
+/// Every unfinished cleanup of this owner's deleted bots, retried once; one that a request is
+/// running right now is left to it. Returns how many are still unfinished.
 pub(crate) async fn finish_pending_cleanups(s: &AppState) -> usize {
     let pending = match s.storage().bot_delete_cleanups() {
         Ok(list) => list,
@@ -585,13 +603,49 @@ pub(crate) async fn finish_pending_cleanups(s: &AppState) -> usize {
     };
     let mut left = 0;
     for c in pending.into_iter().filter(|c| c.user_id == s.user_id()) {
-        s.storage().retire_bot(c.bot_id);
+        let Ok(_claim) = CleanupClaim::take(s, c.bot_id) else {
+            left += 1;
+            continue;
+        };
+        // Read again under the claim: it may have finished meanwhile.
+        let c = match s.storage().bot_delete_cleanup(c.bot_id) {
+            Ok(Some(c)) => c,
+            Ok(None) => continue,
+            Err(e) => {
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: warning: the bot delete marker: {e}");
+                left += 1;
+                continue;
+            }
+        };
+        let _ = s.storage().retire_bot(c.bot_id);
         let cleaned = clean_up(s, &c, true, None).await;
         if !cleaned.pending.is_empty() {
             left += 1;
         }
     }
     left
+}
+
+/// The cleanup of a deleted bot (steps 3 and 4) is being run by its holder: a delete from before
+/// the commit until it returns, or a retry. Nobody else runs it meanwhile.
+struct CleanupClaim {
+    s: AppState,
+    bot: BotId,
+}
+
+impl CleanupClaim {
+    fn take(s: &AppState, bot: BotId) -> Result<Self, ApiError> {
+        if !s.storage().claim_bot_delete_cleanup(bot) {
+            return Err(ApiError::conflict(ALREADY_DELETING));
+        }
+        Ok(Self { s: s.clone(), bot })
+    }
+}
+
+impl Drop for CleanupClaim {
+    fn drop(&mut self) {
+        self.s.storage().release_bot_delete_cleanup(self.bot);
+    }
 }
 
 /// What the cleanup removed, and the steps that did not finish.
@@ -688,6 +742,10 @@ async fn clean_up(
                 Ok(store) => store
                     .delete_for_bot(&c.bot_id.to_string())
                     .map_err(|e| e.to_string()),
+                // Missions are off here, but a ledger with the bot's missions may still exist.
+                Err(e) if s.data_dir().join(missions::DB_FILE).exists() => {
+                    Err(e.message().to_owned())
+                }
                 Err(_) => Ok(0),
             }
         })();
@@ -697,13 +755,10 @@ async fn clean_up(
     // A job of a deleted bot could only fail on every due time.
     let schedules = (|| {
         fault(c.bot_id, Fault::Step(BotDeleteStep::Schedules)).map_err(|e| e.to_string())?;
-        match s.schedule_store() {
-            Ok(store) => store
-                .delete_by_bot(c.bot_id)
-                .map(|n| n as u64)
-                .map_err(|e| format!("{e:?}")),
-            Err(_) => Ok(0),
-        }
+        s.schedule_store()
+            .and_then(|store| store.delete_by_bot(c.bot_id))
+            .map(|n| n as u64)
+            .map_err(|e| format!("{e:?}"))
     })();
     out.schedules = out.step(BotDeleteStep::Schedules, schedules).unwrap_or(0);
 
@@ -756,8 +811,11 @@ async fn clean_up(
 /// The signing secrets of the bot's webhooks, which live in the secret store.
 fn remove_webhook_secrets(s: &AppState, c: &BotDeleteCleanup) -> Result<(), String> {
     fault(c.bot_id, Fault::Step(BotDeleteStep::Secrets)).map_err(|e| e.to_string())?;
-    let Some(store) = s.secret_store() else {
+    if c.webhook_ids.is_empty() {
         return Ok(());
+    }
+    let Some(store) = s.secret_store() else {
+        return Err("the secret store is not available".into());
     };
     for hook in &c.webhook_ids {
         store
@@ -793,46 +851,106 @@ fn remove_knowledge(s: &AppState, bot: &Bot) -> Result<(), String> {
 }
 
 /// Step 4: the bot's mailboxes, and with `delete_inbox` its own inbox at the provider; then the
-/// knowledge sources read from removed accounts and the mail tools of the bots that keep one.
-/// `None` without a mail host.
+/// mail tools of the bots that keep or lose an account, and the knowledge sources read from
+/// removed accounts. `None` when there is nothing to do: no mail host, no mail settings and no
+/// sources left to revoke. Without the mail host while mail settings exist, the step stays
+/// pending.
 async fn forget_mailboxes(
     s: &AppState,
     c: &BotDeleteCleanup,
 ) -> Option<Result<ForgottenMailboxes, String>> {
-    let email = s.email()?;
+    let email = s.email();
+    if email.is_none() && c.email_sources.is_empty() && !s.data_dir().join(EMAIL_FILE).exists() {
+        return None;
+    }
     Some(
         async {
             fault(c.bot_id, Fault::Step(BotDeleteStep::Mailboxes)).map_err(|e| e.to_string())?;
+            let Some(email) = email else {
+                revoke_mail_sources(s, c, &[]).await?;
+                if s.data_dir().join(EMAIL_FILE).exists() {
+                    return Err("the mail host is not available".into());
+                }
+                return Ok(ForgottenMailboxes::default());
+            };
             let id = c.bot_id.to_string();
             let before = email.list();
             let out = email
                 .forget_bot_mailboxes(&id, c.delete_inbox)
                 .await
                 .map_err(|e| e.to_string())?;
-            for name in &out.removed {
-                let permit =
-                    crate::knowledge::worker_permit(s.data_dir()).map_err(|e| e.to_string())?;
-                let _authority = crate::knowledge::email_authorities(s, name)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let state = s.clone();
-                let account = name.clone();
-                crate::knowledge::blocking_with_permit(permit, move || {
-                    crate::knowledge::revoke_email_sources(&state, &account)
-                })
-                .await
-                .map_err(|e| e.to_string())?;
-            }
+            // The mail host saved the change: the tools follow it whatever fails below.
             let affected: BTreeSet<String> = before
                 .iter()
                 .filter(|a| out.removed.contains(&a.name) || out.kept.contains(&a.name))
                 .flat_map(crate::email_bot_tools::bots_of)
                 .collect();
             crate::email_bot_tools::sync(s, &email.list(), &affected);
+            revoke_mail_sources(s, c, &out.removed).await?;
             Ok::<_, String>(out)
         }
         .await,
     )
+}
+
+/// The knowledge sources read from the mail accounts the delete removed (`removed` now, and those
+/// a failed earlier attempt left in the marker). The accounts still to revoke are saved in the
+/// marker before any is revoked and after, so a failure or a stop here is retried though the
+/// accounts themselves are gone.
+async fn revoke_mail_sources(
+    s: &AppState,
+    c: &BotDeleteCleanup,
+    removed: &[String],
+) -> Result<(), String> {
+    let save = |l: &BotDeleteCleanup| {
+        s.storage()
+            .save_bot_delete_cleanup(l)
+            .map(|_| ())
+            .map_err(|e| format!("the bot delete marker: {e}"))
+    };
+    let mut left = c.clone();
+    for name in removed {
+        if !left.email_sources.contains(name) {
+            left.email_sources.push(name.clone());
+        }
+    }
+    let mut saved = c.email_sources.clone();
+    if left.email_sources != saved {
+        match save(&left) {
+            Ok(()) => saved.clone_from(&left.email_sources),
+            Err(e) => {
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: warning: {e}");
+            }
+        }
+    }
+    let mut first_error = None;
+    for name in left.email_sources.clone() {
+        match revoke_mail_source(s, c.bot_id, &name).await {
+            Ok(()) => left.email_sources.retain(|n| *n != name),
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    if left.email_sources != saved {
+        save(&left)?;
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+async fn revoke_mail_source(s: &AppState, bot: BotId, account: &str) -> Result<(), String> {
+    fault(bot, Fault::RevokeMail).map_err(|e| e.to_string())?;
+    let permit = crate::knowledge::worker_permit(s.data_dir()).map_err(|e| e.to_string())?;
+    let _authority = crate::knowledge::email_authorities(s, account)
+        .await
+        .map_err(|e| e.to_string())?;
+    let state = s.clone();
+    let account = account.to_owned();
+    crate::knowledge::blocking_with_permit(permit, move || {
+        crate::knowledge::revoke_email_sources(&state, &account)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// The event logs of the bot's runs and the attachments of its chats. Opened from the data
@@ -876,7 +994,15 @@ fn remove_in(
             Ok(m) if m.file_type().is_symlink() => Err(std::io::Error::other(format!(
                 "{folder}/{name} is a link; it was not followed"
             ))),
-            Ok(m) if tree && m.is_dir() => dir.remove_dir_all(name),
+            // The folder is opened without following a link and removed through that handle, so
+            // a junction (a reparse point that may not read as a link) or a link swapped in after
+            // the check is refused, not followed.
+            Ok(m) if tree && m.is_dir() => match dir.open_dir_nofollow(name) {
+                Ok(sub) => sub.remove_open_dir_all(),
+                Err(e) => Err(std::io::Error::other(format!(
+                    "{folder}/{name} could not be opened without following a link: {e}"
+                ))),
+            },
             Ok(m) if !tree && m.is_file() => dir.remove_file(name),
             Ok(_) => Err(std::io::Error::other(format!(
                 "{folder}/{name} is not what the bot left there"
@@ -897,6 +1023,8 @@ pub(crate) enum Fault {
     LiveRun,
     /// A cleanup step fails.
     Step(BotDeleteStep),
+    /// Revoking the knowledge sources of a removed mail account fails.
+    RevokeMail,
 }
 
 #[cfg(test)]

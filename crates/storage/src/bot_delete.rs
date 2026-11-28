@@ -34,7 +34,8 @@ pub struct BotDataCounts {
     pub approvals: u64,
     /// Incoming webhooks bound to the bot.
     pub webhooks: u64,
-    /// Runs that have not finished (running, queued, paused, waiting).
+    /// Runs that have not finished (running, queued, paused, waiting): the bot's own, and
+    /// another bot's run in one of its chats (an `@mention` answers there).
     pub active_runs: u64,
 }
 
@@ -57,6 +58,10 @@ pub struct BotDeleteCleanup {
     pub chat_ids: Vec<ChatId>,
     /// Webhooks that were removed (their signing secrets live in the secret store).
     pub webhook_ids: Vec<Uuid>,
+    /// Mail accounts removed with the bot whose knowledge sources are not revoked yet. Saved
+    /// ([`Storage::save_bot_delete_cleanup`]) once the mail host removed them, so a retry still
+    /// revokes them though the accounts are gone.
+    pub email_sources: Vec<String>,
 }
 
 /// What [`Storage::delete_bot_cascade`] removed, and the cleanup it left to do.
@@ -99,7 +104,9 @@ fn counts(tx: &Transaction<'_>, bid: &str) -> Result<BotDataCounts> {
         )?,
         active_runs: count(
             tx,
-            &format!("SELECT COUNT(*) FROM runs WHERE bot_id = ?1 AND state NOT IN {FINISHED}"),
+            &format!(
+                "SELECT COUNT(*) FROM runs WHERE (bot_id = ?1 OR chat_id IN (SELECT id FROM chats WHERE bot_id = ?1)) AND state NOT IN {FINISHED}"
+            ),
             bid,
         )?,
     })
@@ -150,23 +157,36 @@ fn parse_cleanup(
         run_ids: uuids(&detail, "run_ids").into_iter().map(RunId).collect(),
         chat_ids: uuids(&detail, "chat_ids").into_iter().map(ChatId).collect(),
         webhook_ids: uuids(&detail, "webhook_ids"),
+        email_sources: detail
+            .get("email_sources")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
+}
+
+fn detail_of(c: &BotDeleteCleanup) -> Result<String> {
+    Ok(serde_json::to_string(&json!({
+        "run_ids": c.run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "chat_ids": c.chat_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "webhook_ids": c.webhook_ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
+        "email_sources": c.email_sources,
+    }))?)
 }
 
 /// Record what a deleted bot left outside the database, in the delete's own transaction.
 fn write_marker(tx: &Transaction<'_>, c: &BotDeleteCleanup) -> Result<()> {
-    let files = json!({
-        "run_ids": c.run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
-        "chat_ids": c.chat_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
-        "webhook_ids": c.webhook_ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
-    });
     tx.execute(
         "INSERT OR REPLACE INTO bot_delete_cleanup (bot_id, user_id, name, detail_json, delete_inbox, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             c.bot_id.to_string(),
             c.user_id.to_string(),
             &c.name,
-            serde_json::to_string(&files)?,
+            detail_of(c)?,
             c.delete_inbox,
             now_ms()
         ],
@@ -189,10 +209,11 @@ impl Storage {
 
     /// Delete a bot and everything only it owns, atomically, whatever chats and runs it has.
     ///
-    /// Refused with [`StorageError::Conflict`] while a run of the bot is still alive. `still_idle`
-    /// runs inside the transaction after that check and before anything is deleted (the caller's
-    /// own liveness checks, e.g. runs held in memory); if it fails nothing is deleted. It must
-    /// not reenter this storage connection. Other bots' rows are never touched: a stray link
+    /// Refused with [`StorageError::Conflict`] while a run of the bot, or any run in one of its
+    /// chats (another bot's `@mention` answer), is still alive. `still_idle` runs inside the
+    /// transaction after that check and before anything is deleted, with the bot's chats (the
+    /// caller's own liveness checks, e.g. runs held in memory); if it fails nothing is deleted.
+    /// It must not reenter this storage connection. Other bots' rows are never touched: a stray link
     /// from another bot's row to this bot's chat or run is cleared, not followed. The bot's
     /// workspace folder name stays reserved (so a new bot can not take over its files by taking
     /// its name) but its size limits go. An audit entry `bot.deleted` records the counts; earlier
@@ -210,7 +231,7 @@ impl Storage {
         bot: BotId,
         actor: &str,
         delete_inbox: bool,
-        still_idle: impl FnOnce() -> Result<()>,
+        still_idle: impl FnOnce(&[ChatId]) -> Result<()>,
     ) -> Result<Option<BotCascade>> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -225,9 +246,12 @@ impl Storage {
         if removed.active_runs > 0 {
             return Err(StorageError::Conflict("bot has an active run".into()));
         }
-        still_idle()?;
+        let chat_ids: Vec<ChatId> = ids(&tx, "SELECT id FROM chats WHERE bot_id = ?1", &bid)?
+            .into_iter()
+            .map(ChatId)
+            .collect();
+        still_idle(&chat_ids)?;
         let run_ids = ids(&tx, "SELECT id FROM runs WHERE bot_id = ?1", &bid)?;
-        let chat_ids = ids(&tx, "SELECT id FROM chats WHERE bot_id = ?1", &bid)?;
         let webhook_ids = ids(
             &tx,
             "SELECT id FROM incoming_webhooks WHERE bot_id = ?1",
@@ -304,12 +328,54 @@ impl Storage {
             name,
             delete_inbox,
             run_ids: run_ids.into_iter().map(RunId).collect(),
-            chat_ids: chat_ids.into_iter().map(ChatId).collect(),
+            chat_ids,
             webhook_ids,
+            email_sources: Vec::new(),
         };
         write_marker(&tx, &cleanup)?;
         tx.commit()?;
         Ok(Some(BotCascade { removed, cleanup }))
+    }
+
+    /// The chats of a bot.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn bot_chat_ids(&self, bot: BotId) -> Result<Vec<ChatId>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        Ok(ids(
+            &tx,
+            "SELECT id FROM chats WHERE bot_id = ?1",
+            &bot.to_string(),
+        )?
+        .into_iter()
+        .map(ChatId)
+        .collect())
+    }
+
+    /// Update the unfinished cleanup of a deleted bot (the inbox choice, the mail accounts still
+    /// to revoke). Returns `false`, changing nothing, when its marker is already gone.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn save_bot_delete_cleanup(&self, c: &BotDeleteCleanup) -> Result<bool> {
+        let n = self.conn().execute(
+            "UPDATE bot_delete_cleanup SET detail_json = ?2, delete_inbox = ?3 WHERE bot_id = ?1",
+            params![c.bot_id.to_string(), detail_of(c)?, c.delete_inbox],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Claim the cleanup of a deleted bot for this caller: `false` while another one runs it.
+    /// Released with [`Storage::release_bot_delete_cleanup`].
+    pub fn claim_bot_delete_cleanup(&self, bot: BotId) -> bool {
+        self.cleaning_bots().insert(bot)
+    }
+
+    /// The cleanup claimed with [`Storage::claim_bot_delete_cleanup`] is over (done or not).
+    pub fn release_bot_delete_cleanup(&self, bot: BotId) {
+        self.cleaning_bots().remove(&bot);
     }
 
     /// The unfinished cleanup of a deleted bot, if any.
@@ -568,7 +634,7 @@ mod tests {
         let tables_before = table_counts(&st);
 
         let out = st
-            .delete_bot_cascade(user, gone.bot.id, "owner", true, || Ok(()))
+            .delete_bot_cascade(user, gone.bot.id, "owner", true, |_| Ok(()))
             .unwrap()
             .expect("the bot existed");
         assert_eq!(out.removed, counts_before);
@@ -659,7 +725,7 @@ mod tests {
         let before = table_counts(&st);
         let mut asked = false;
         let err = st
-            .delete_bot_cascade(user, o.bot.id, "owner", false, || {
+            .delete_bot_cascade(user, o.bot.id, "owner", false, |_| {
                 asked = true;
                 Ok(())
             })
@@ -675,7 +741,7 @@ mod tests {
         let (st, user) = setup();
         let o = populate(&st, user, "rollback", 1);
         let before = table_counts(&st);
-        let err = st.delete_bot_cascade(user, o.bot.id, "owner", false, || {
+        let err = st.delete_bot_cascade(user, o.bot.id, "owner", false, |_| {
             Err(StorageError::Conflict("a run is alive in memory".into()))
         });
         assert!(matches!(err, Err(StorageError::Conflict(_))));
@@ -689,10 +755,10 @@ mod tests {
         let (st, user) = setup();
         let a = populate(&st, user, "a", 1);
         let b = populate(&st, user, "b", 2);
-        st.delete_bot_cascade(user, a.bot.id, "owner", false, || Ok(()))
+        st.delete_bot_cascade(user, a.bot.id, "owner", false, |_| Ok(()))
             .unwrap()
             .unwrap();
-        st.delete_bot_cascade(user, b.bot.id, "owner", true, || Ok(()))
+        st.delete_bot_cascade(user, b.bot.id, "owner", true, |_| Ok(()))
             .unwrap()
             .unwrap();
         let all = st.bot_delete_cleanups().unwrap();
@@ -712,6 +778,100 @@ mod tests {
         assert_eq!(st.bot_delete_cleanups().unwrap().len(), 1);
         // Finishing twice is harmless.
         st.finish_bot_delete_cleanup(a.bot.id).unwrap();
+    }
+
+    /// Another bot answering an `@mention` in this bot's chat runs under its own id: its live
+    /// run refuses the delete all the same, and while the delete runs no such run can start.
+    #[test]
+    fn another_bots_live_run_in_the_bots_chat_refuses_the_delete() {
+        let (st, user) = setup();
+        let owner = populate(&st, user, "owner", 1);
+        let guest = populate(&st, user, "guest", 2);
+        let mut mention = guest.run.clone();
+        mention.id = RunId::new();
+        mention.chat_id = Some(owner.chat.id);
+        mention.state = "running".into();
+        st.insert_run(&mention).unwrap();
+        assert_eq!(st.bot_data_counts(owner.bot.id).unwrap().active_runs, 1);
+        let before = table_counts(&st);
+        let err = st
+            .delete_bot_cascade(user, owner.bot.id, "owner", false, |_| Ok(()))
+            .unwrap_err();
+        assert!(matches!(err, StorageError::Conflict(_)));
+        assert_eq!(table_counts(&st), before);
+        assert_eq!(
+            st.get_run(mention.id).unwrap().unwrap().chat_id,
+            Some(owner.chat.id)
+        );
+
+        // Finished, it no longer holds the delete; the liveness check is given the bot's chats.
+        st.conn()
+            .execute(
+                "UPDATE runs SET state = 'succeeded' WHERE id = ?1",
+                [mention.id.to_string()],
+            )
+            .unwrap();
+        let mut seen = Vec::new();
+        st.delete_bot_cascade(user, owner.bot.id, "owner", false, |chats| {
+            seen = chats.to_vec();
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(seen, vec![owner.chat.id]);
+        assert_eq!(st.get_run(mention.id).unwrap().unwrap().chat_id, None);
+    }
+
+    #[test]
+    fn no_run_of_another_bot_starts_in_the_chat_of_a_bot_being_deleted() {
+        let (st, user) = setup();
+        let owner = populate(&st, user, "owner", 1);
+        let guest = populate(&st, user, "guest", 2);
+        assert!(st.retire_bot(owner.bot.id));
+        let mut mention = guest.run.clone();
+        mention.id = RunId::new();
+        mention.chat_id = Some(owner.chat.id);
+        assert!(matches!(
+            st.insert_run(&mention),
+            Err(StorageError::Conflict(_))
+        ));
+        // In its own chat the other bot is not held up.
+        let mut own = guest.run.clone();
+        own.id = RunId::new();
+        st.insert_run(&own).unwrap();
+        st.restore_bot(owner.bot.id);
+        st.insert_run(&mention).unwrap();
+    }
+
+    #[test]
+    fn the_marker_keeps_an_upgraded_inbox_choice_and_the_mail_sources_left() {
+        let (st, user) = setup();
+        let o = populate(&st, user, "gone", 1);
+        let mut c = st
+            .delete_bot_cascade(user, o.bot.id, "owner", false, |_| Ok(()))
+            .unwrap()
+            .unwrap()
+            .cleanup;
+        assert!(c.email_sources.is_empty());
+        c.delete_inbox = true;
+        c.email_sources = vec!["praxi".into()];
+        assert!(st.save_bot_delete_cleanup(&c).unwrap());
+        assert_eq!(st.bot_delete_cleanup(o.bot.id).unwrap(), Some(c.clone()));
+        // A finished marker is not brought back.
+        st.finish_bot_delete_cleanup(o.bot.id).unwrap();
+        assert!(!st.save_bot_delete_cleanup(&c).unwrap());
+        assert!(st.bot_delete_cleanup(o.bot.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_cleanup_is_claimed_by_one_caller_at_a_time() {
+        let (st, _) = setup();
+        let bot = BotId::new();
+        assert!(st.claim_bot_delete_cleanup(bot));
+        assert!(!st.claim_bot_delete_cleanup(bot));
+        assert!(st.claim_bot_delete_cleanup(BotId::new()));
+        st.release_bot_delete_cleanup(bot);
+        assert!(st.claim_bot_delete_cleanup(bot));
     }
 
     #[test]
@@ -758,7 +918,7 @@ mod tests {
     fn deleting_a_missing_bot_is_none() {
         let (st, user) = setup();
         assert!(
-            st.delete_bot_cascade(user, BotId::new(), "owner", false, || Ok(()))
+            st.delete_bot_cascade(user, BotId::new(), "owner", false, |_| Ok(()))
                 .unwrap()
                 .is_none()
         );
@@ -775,7 +935,7 @@ mod tests {
         child.chat_id = Some(a.chat.id);
         child.parent_run_id = Some(a.run.id);
         st.insert_run(&child).unwrap();
-        st.delete_bot_cascade(user, a.bot.id, "owner", false, || Ok(()))
+        st.delete_bot_cascade(user, a.bot.id, "owner", false, |_| Ok(()))
             .unwrap()
             .unwrap();
         let kept = st.get_run(child.id).unwrap().unwrap();
