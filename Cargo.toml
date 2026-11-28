@@ -47,6 +47,7 @@ members = [
     "crates/web-tools",
     "crates/openapi-tools",
     "crates/composio",
+    "crates/account-health",
     "crates/process-guard",
     "crates/pty-session",
     "crates/missions",

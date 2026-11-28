@@ -6904,6 +6904,7 @@
       "allGood": "Todo parece estar bien",
       "checkedAt": "Última comprobación a las {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Navegador",
         "capabilities": "Capacidades",
         "catalog_freshness": "Actualidad del catálogo de modelos",
@@ -6928,6 +6929,7 @@
       "description": "Comprueba por qué el bot podría no funcionar y arregla los problemas comunes.",
       "empty": "No se devolvió ninguna comprobación",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Instala Chrome, Edge o Chromium (no el paquete snap).",
         "catalog_freshness": "La lista de modelos seleccionados tiene más de 90 días; actualiza Praxi o ejecuta `bot catalog check` para revisar los modelos actuales.",
         "cli_accounts": "Abre una terminal una vez e inicia sesión en la CLI (por ejemplo `claude` o `codex login`).",

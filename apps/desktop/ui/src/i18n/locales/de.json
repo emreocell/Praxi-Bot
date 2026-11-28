@@ -6904,6 +6904,7 @@
       "allGood": "Alles sieht gut aus",
       "checkedAt": "Zuletzt geprüft um {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Browser",
         "capabilities": "Fähigkeiten",
         "catalog_freshness": "Aktualität des Modellkatalogs",
@@ -6928,6 +6929,7 @@
       "description": "Prüft, warum der Bot möglicherweise nicht funktioniert, und behebt häufige Probleme.",
       "empty": "Es wurden keine Prüfungen zurückgegeben",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Installiere Chrome, Edge oder Chromium (nicht das Snap-Paket).",
         "catalog_freshness": "Die kuratierte Modellliste ist älter als 90 Tage; aktualisiere Praxi oder führe `bot catalog check` aus, um aktuelle Modelle zu prüfen.",
         "cli_accounts": "Öffne einmal ein Terminal und melde dich bei der CLI an (zum Beispiel `claude` oder `codex login`).",

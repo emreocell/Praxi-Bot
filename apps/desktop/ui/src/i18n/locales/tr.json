@@ -7594,6 +7594,7 @@
       "allGood": "Her şey yolunda görünüyor",
       "checkedAt": "Son kontrol: {{time}}",
       "checks": {
+        "account_health": "Hesap oturumları",
         "browser": "Tarayıcı",
         "capabilities": "Yetenekler",
         "catalog_freshness": "Model kataloğu güncelliği",
@@ -7618,6 +7619,7 @@
       "description": "Botun neden çalışmadığını kontrol eder ve sık görülen sorunları düzeltir.",
       "empty": "Hiç denetim sonucu gelmedi",
       "hints": {
+        "account_health": "Bildirimde listelenen posta, Composio uygulamaları veya site oturumları için Uygulamalar ya da bot tarayıcı profilinden yeniden bağlan.",
         "browser": "Chrome, Edge ya da Chromium kur (snap paketini değil).",
         "catalog_freshness": "Önerilen model listesi 90 günden eski; güncel modelleri görmek için Praxi'yi güncelleyin veya `bot catalog check` çalıştırın.",
         "cli_accounts": "Bir kez terminal açıp CLI'da oturum aç (örneğin `claude` ya da `codex login`).",

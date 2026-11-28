@@ -18,6 +18,7 @@ base64.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
+account-health = { path = "../account-health", version = "0.1.0" }
 browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
 connector-email = { path = "../connector-email", version = "0.1.0" }
 desktop-api = { path = "../desktop-api", version = "0.1.0" }
