@@ -919,6 +919,23 @@ fn load_global(
     })
 }
 
+/// The `type` tag of the event inside a serialized [`Envelope`], read without
+/// building a `serde_json::Value` of the whole payload.
+fn event_type_of(envelope_json: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Tagged<'a> {
+        #[serde(borrow, rename = "type")]
+        kind: std::borrow::Cow<'a, str>,
+    }
+    #[derive(Deserialize)]
+    struct Wrapper<'a> {
+        #[serde(borrow)]
+        event: Tagged<'a>,
+    }
+    let w: Wrapper<'_> = serde_json::from_str(envelope_json).ok()?;
+    Some(w.event.kind.into_owned())
+}
+
 fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
     let env: &Envelope = &item.envelope;
     let id = if scoped {
@@ -926,15 +943,19 @@ fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
     } else {
         item.gseq.to_string()
     };
-    let name = serde_json::to_value(&env.event)
-        .ok()
-        .and_then(|v| v["type"].as_str().map(str::to_owned))
+    let Ok(data) = serde_json::to_string(env) else {
+        return SseEvent::default().comment("unserialisable event");
+    };
+    let name = event_type_of(&data)
+        .or_else(|| {
+            serde_json::to_value(&env.event)
+                .ok()?
+                .get("type")?
+                .as_str()
+                .map(str::to_owned)
+        })
         .unwrap_or_else(|| "event".to_owned());
-    SseEvent::default()
-        .id(id)
-        .event(name)
-        .json_data(env)
-        .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event"))
+    SseEvent::default().id(id).event(name).data(data)
 }
 
 /// How much authority a run event needs before a stream may carry it.
@@ -1301,6 +1322,43 @@ mod tests {
                 text: format!("{seq}"),
             }),
         )
+    }
+
+    #[test]
+    fn event_name_comes_from_the_serialized_tag() {
+        let run = RunId::new();
+        let mut events = decision_events(run, protocol::ToolCallId::new());
+        events.push(Event::MessageDelta(protocol::event::MessageDelta {
+            run_id: run,
+            // A payload that mentions the tag must not confuse the lookup.
+            text: r#""type":"run_finished""#.into(),
+        }));
+        for (seq, event) in events.into_iter().enumerate() {
+            let tag = serde_json::to_value(&event).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let data = serde_json::to_string(&Envelope::new(seq as u64, event)).unwrap();
+            assert_eq!(event_type_of(&data).as_deref(), Some(tag.as_str()));
+        }
+        for (data, expected) in [
+            (
+                r#"{"event":{"payload":[null,{"type":"nested"}],"type":"tool_call_requested"}}"#,
+                "tool_call_requested",
+            ),
+            (
+                r#"{"event":{"type":"escaped\u005ftag","text":"\"type\":\"wrong\""}}"#,
+                "escaped_tag",
+            ),
+            (
+                r#"{"event":{"type":"error","details":{"x":[1,true,null]}}}"#,
+                "error",
+            ),
+        ] {
+            assert_eq!(event_type_of(data).as_deref(), Some(expected));
+        }
+        assert_eq!(event_type_of("not json"), None);
+        assert_eq!(event_type_of(r#"{"event":{"no":"tag"}}"#), None);
     }
 
     fn decision_events(run: RunId, call_id: protocol::ToolCallId) -> Vec<Event> {

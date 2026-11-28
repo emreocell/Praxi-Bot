@@ -241,10 +241,9 @@ fn write_summary(sh: &Shared, id: RunId) -> storage::Result<()> {
     let Some(run) = sh.storage.get_run(id)? else {
         return Ok(());
     };
-    let rows = sh.storage.list_audit(run.user_id)?;
-    if rows
-        .iter()
-        .any(|a| a.run_id == Some(id) && a.action == "run.usage_summary")
+    if sh
+        .storage
+        .run_has_audit_action(run.user_id, id, "run.usage_summary")?
     {
         return Ok(());
     }
@@ -257,6 +256,12 @@ fn write_summary(sh: &Shared, id: RunId) -> storage::Result<()> {
             }
         }
     }
+    let included_runs: Vec<RunId> = included.iter().copied().collect();
+    let rows = sh.storage.list_audit_for_runs(
+        run.user_id,
+        &included_runs,
+        &["llm.call_started", "usage"],
+    )?;
     let mut totals: BTreeMap<CallPurpose, Totals> = BTreeMap::new();
     for (run_id, calls) in calls_from_audit(&rows) {
         if !included.contains(&run_id) {

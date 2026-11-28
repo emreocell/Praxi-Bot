@@ -336,6 +336,18 @@ impl SecretStore for EncryptedFileStore {
         let _transaction = self.lock()?;
         Ok(self.load()?.into_names())
     }
+
+    fn all_values(&self) -> Result<Vec<SecretValue>, SecretError> {
+        let _transaction = self.lock()?;
+        let mut map = self.load()?;
+        Ok(std::mem::take(&mut map.0)
+            .into_iter()
+            .map(|(mut name, value)| {
+                wipe::wipe_string(&mut name);
+                SecretValue::new(value)
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -366,6 +378,22 @@ mod tests {
         assert_eq!(s2.list_names().unwrap(), ["a", "b"]);
         assert!(s2.delete("a").unwrap());
         assert!(s2.get("a").unwrap().is_none());
+    }
+
+    #[test]
+    fn snapshot_sees_same_length_rotations_and_new_values() {
+        let d = tempfile::tempdir().unwrap();
+        let first = store(d.path(), "pw");
+        let second = store(d.path(), "pw");
+        first.set("a", "alpha").unwrap();
+        assert_eq!(first.all_values().unwrap()[0].expose(), "alpha");
+        second.set("a", "bravo").unwrap();
+        second.set("b", "new value").unwrap();
+        let values = first.all_values().unwrap();
+        assert_eq!(
+            values.iter().map(SecretValue::expose).collect::<Vec<_>>(),
+            ["bravo", "new value"]
+        );
     }
 
     #[test]

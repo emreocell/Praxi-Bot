@@ -229,6 +229,20 @@ pub trait SecretStore: Send + Sync {
     /// # Errors
     /// Backend failures.
     fn list_names(&self) -> Result<Vec<String>, SecretError>;
+
+    /// Read all values for redaction. Backends may provide a consistent snapshot.
+    ///
+    /// # Errors
+    /// Backend failures while reading secrets.
+    fn all_values(&self) -> Result<Vec<SecretValue>, SecretError> {
+        let mut values = Vec::new();
+        for name in self.list_names()? {
+            if let Some(value) = self.get(&name)? {
+                values.push(value);
+            }
+        }
+        Ok(values)
+    }
 }
 
 /// Resolve a [`SecretRef`] to its value. Call only at the provider / MCP boundary.

@@ -314,10 +314,8 @@ impl SharedRedactor {
     ) -> Result<(), secret_store::SecretError> {
         let mut r = Redactor::new();
         if let Some(s) = store {
-            for name in s.list_names()? {
-                if let Some(v) = s.get(&name)? {
-                    add_with_variants(&mut r, v.expose());
-                }
+            for value in s.all_values()? {
+                add_with_variants(&mut r, value.expose());
             }
         }
         for e in extra {
