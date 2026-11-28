@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { deleteBlock, dirtySections, editorProblems, parseFallbackInput } from "./botEditor.ts";
+import { dirtySections, editorProblems, parseFallbackInput } from "./botEditor.ts";
 import { draftFromBot } from "./botProfile.ts";
 import { isTabStop, trapTarget } from "./focusTrap.ts";
 import { createLeaveRegistry } from "./leaveGuard.ts";
@@ -95,16 +95,13 @@ test("Check, Back, edit, close: the stale 'installed' result no longer protects 
 
 // --- 12 / 20: Delete -----------------------------------------------------------------------------------
 
-test("Delete is blocked by chats or any retained run, with the right reason; unknown runs leave it to the daemon", () => {
-  assert.equal(deleteBlock(0, 0), null);
-  assert.equal(deleteBlock(2, 0), "chats");
-  assert.equal(deleteBlock(0, 3), "runs"); // a run-only bot (e.g. a finished scheduled run)
-  assert.equal(deleteBlock(2, 3), "chats");
-  assert.equal(deleteBlock(0, null), null); // run list not loaded: the server's 409 is shown
+test("Delete is always available: it opens the two-step dialog, nothing blocks the button", () => {
   const fields = read("../components/BotEditorFields.tsx");
-  assert.match(fields, /disabled=\{deleteBlocked !== null\}/);
-  assert.match(fields, /botEdit\.deleteBlockedRuns/);
-  assert.match(read("../views/BotEditModal.tsx"), /client\s*\.listRuns\(\)/);
+  assert.doesNotMatch(fields, /deleteBlocked/);
+  assert.match(fields, /data-testid="bot-edit-delete"/);
+  const modal = read("../views/BotEditModal.tsx");
+  assert.match(modal, /<DeleteBotDialog/);
+  assert.doesNotMatch(modal, /client\s*\.listRuns\(\)/);
 });
 
 // --- 17: typed-but-not-added fallback text -----------------------------------------------------------

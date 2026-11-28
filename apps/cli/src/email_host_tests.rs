@@ -230,6 +230,22 @@ async fn deleting_a_bot_removes_its_accounts_and_never_widens_access() {
 }
 
 #[tokio::test]
+async fn an_account_shared_with_another_bot_is_handed_over_not_removed() {
+    let f = fixture();
+    let mut shared = input("team-mail", Some(BOT_A));
+    shared.shared_with = vec![BOT_B.to_owned()];
+    f.host.add(shared).await.unwrap();
+    assert_eq!(f.host.forget_bot(BOT_A).await.unwrap(), 0);
+    let accounts = f.host.list();
+    assert_eq!(accounts.len(), 1);
+    // The sharing bot now owns it; the deleted bot is in no list, nobody gained access.
+    assert_eq!(accounts[0].bot.as_deref(), Some(BOT_B));
+    assert_eq!(accounts[0].shared_with, Vec::<String>::new());
+    assert!(f.store.get("email/team-mail/password").unwrap().is_some());
+    assert!(!file(&f).contains(BOT_A));
+}
+
+#[tokio::test]
 async fn a_hand_named_password_secret_is_not_deleted_with_the_account() {
     let dir = tempfile::tempdir().unwrap();
     let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());

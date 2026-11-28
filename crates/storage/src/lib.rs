@@ -5,6 +5,7 @@
 //! NDJSON event logs live in [`event_log`].  `audit_log` is append-only both in
 //! the API (no update/delete) and via schema triggers.
 
+mod bot_delete;
 pub mod db;
 pub mod error;
 pub mod event_log;
@@ -14,6 +15,7 @@ pub mod migrate;
 pub mod paths;
 pub mod records;
 
+pub use bot_delete::{BotCascade, BotDataCounts};
 pub use db::{SearchFilter, SkillAssignmentLookup, Storage, is_valid_skill_name, now_ms};
 pub use error::{Result, StorageError};
 pub use event_log::{EventLogWriter, event_log_path, read_event_log};

@@ -32,12 +32,7 @@ async fn delete_empty_bot(t: &T) {
         })
         .unwrap();
     let response = request(t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
-    assert_eq!(
-        response.status,
-        StatusCode::NO_CONTENT,
-        "{}",
-        response.json()
-    );
+    assert_eq!(response.status, StatusCode::OK, "{}", response.json());
 }
 
 #[tokio::test]

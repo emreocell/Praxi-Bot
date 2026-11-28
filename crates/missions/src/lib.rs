@@ -30,7 +30,8 @@ pub use model::{
     can_transition,
 };
 pub use store::{
-    Event, ItemUpdate, Leftover, MissionStore, NewItem, NewMission, SessionEndRecord, UpsertReport,
+    BotMissionCounts, Event, ItemUpdate, Leftover, MissionStore, NewItem, NewMission,
+    SessionEndRecord, UpsertReport,
 };
 pub use wake::{MailFilter, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason};
 

@@ -154,21 +154,6 @@ export function closeAction(dirty: boolean, saving: boolean): "close" | "confirm
   return dirty ? "confirm" : "close";
 }
 
-// --- deleting a bot --------------------------------------------------------
-
-export type DeleteBlock = "chats" | "runs" | null;
-
-/**
- * Why Delete is unavailable: the daemon refuses a bot that still has chats or ANY retained run
- * (finished and scheduled runs included).  `runs` is `null` while the run list has not loaded:
- * Delete stays available then and the daemon's own `409` is shown.
- */
-export function deleteBlock(chatCount: number, runCount: number | null): DeleteBlock {
-  if (chatCount > 0) return "chats";
-  if (runCount !== null && runCount > 0) return "runs";
-  return null;
-}
-
 // --- fallback models -------------------------------------------------------
 
 /** The stored comma list as ordered, de-duplicated refs. */

@@ -87,6 +87,36 @@ try {
     process.stdout.write('SKIP mission: /mission is not listed by the mock composer\n');
   }
 
+  // Delete a bot for good, in two steps: what goes and what stays, then the typed name.
+  await page.goto(`${base}/?${query}&screen=botform`, { waitUntil: 'load', timeout: T.timeout });
+  await page.getByTestId('bot-edit-dialog').waitFor(T);
+  const deleteButton = page.getByTestId('bot-edit-delete');
+  assert.equal(await deleteButton.isEnabled(), true, 'Delete is always enabled');
+  await deleteButton.click();
+  const dialog = page.getByTestId('delete-bot-dialog');
+  await dialog.waitFor(T);
+  assert.equal(await dialog.getAttribute('data-step'), 'review');
+  await page.getByTestId('delete-bot-counts').waitFor(T);
+  await page.getByTestId('delete-bot-stays').waitFor(T);
+  assert.ok(await page.getByTestId('delete-bot-backup').isVisible(), 'the backup advice is shown');
+  const botName = (await dialog.getByRole('heading', { level: 2 }).first().innerText()).replace(/^Delete\s+|\?$/g, '').trim();
+  // The inbox choice (when this bot owns one) is off by default.
+  if (await page.getByTestId('delete-bot-inbox').count()) {
+    assert.equal(await page.getByTestId('delete-bot-inbox').isChecked(), false, 'the inbox is kept unless ticked');
+  }
+  await page.getByTestId('delete-bot-continue').click();
+  assert.equal(await dialog.getAttribute('data-step'), 'confirm');
+  const red = page.getByTestId('delete-bot-confirm-button');
+  assert.equal(await red.isDisabled(), true, 'the red button waits for the name');
+  await page.getByTestId('delete-bot-name').fill(`${botName}x`);
+  assert.equal(await red.isDisabled(), true, 'a wrong name does not enable it');
+  await page.getByTestId('delete-bot-name').fill(botName);
+  assert.equal(await red.isEnabled(), true, 'the exact name enables it');
+  await red.click();
+  await dialog.waitFor({ state: 'detached', ...T });
+  await page.getByTestId('bot-edit-dialog').waitFor({ state: 'detached', ...T });
+  process.stdout.write('PASS delete bot: review, type the name, delete, back to the home screen\n');
+
   process.stdout.write('mock flows OK\n');
 } finally {
   try { await browser?.close(); } catch { /* ignore */ }

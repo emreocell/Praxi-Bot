@@ -148,9 +148,11 @@ allowed_senders = ["alice@example.com", "@corp.example"]   # who may reach a bot
   yourself; if you switched the tools off by hand an account edit does not switch them on
   again. Only the app (with the owner key) can bind an account, so a bot cannot give
   itself mail tools. Sending is unchanged: the identity's send mode and the approval card.
-- Deleting a bot **removes** the accounts bound to it, together with the
-  passwords the daemon stored for them. They are never turned into shared
-  accounts, which would give every bot access to that mailbox. If a stored
+- Deleting a bot **removes** the accounts only it used, together with the
+  passwords the daemon stored for them. An account that other bots were given a share of is
+  not removed: it passes to the first of them, with the same bots as before (minus the
+  deleted one). Nothing is turned into a shared-with-everyone account, which would give every
+  bot access to that mailbox. If a stored
   password cannot be deleted at that moment, its name is kept in
   `email-secret-cleanup.json` and deleted on the next start.
 - Bundle exports with "all secrets" leave out `email/<account>/password`
@@ -292,6 +294,7 @@ and API key. Praxi-Bot holds no key of its own and runs no relay.
   `message_id` (shown by `email_search`) instead of an IMAP `uid`; folders and drafts are
   not supported and say so.
 - Removing an account (or deleting a bot) only forgets it locally. The inbox at AgentMail is
-  deleted only when you ask: `bot email rm <name> --delete-inbox`, or the checkbox in the app.
+  deleted only when you ask: `bot email rm <name> --delete-inbox`, the checkbox in the app, or
+  "Also delete the inbox" when you delete the bot.
 - At the time of writing the free plan allows 3 inboxes, 3,000 e-mails a month and 100 a day;
   see their [pricing](https://agentmail.to/pricing). Cold outreach is prohibited on the shared domain.

@@ -1566,6 +1566,75 @@
     "description": "While the bot uses your computer or its browser, it draws a pointer of its own, with a ripple where it clicks, so you can see where it is about to act. Your own pointer is never moved. Turn this off to hide it everywhere.",
     "title": "Show the bot's pointer"
   },
+  "botDelete": {
+    "back": "Back",
+    "backup": {
+      "body": "Deleting cannot be undone. If you may want its chats or memory later, make an encrypted backup first. It is not required.",
+      "link": "How to make a backup",
+      "title": "Make a backup first (recommended)"
+    },
+    "confirm": {
+      "button": "Delete bot",
+      "hint": "The red button works only when the name matches exactly.",
+      "inbox": "The inbox {{address}} will also be deleted at AgentMail, with all the mail in it.",
+      "label": "Type {{name}} to confirm",
+      "nothingElse": "its settings",
+      "subtitle": "One more step: this cannot be undone.",
+      "title": "Are you sure?",
+      "warn": "{{name}} will be deleted for good, together with: {{items}}.",
+      "warnTitle": "This cannot be undone"
+    },
+    "continue": "Continue",
+    "deleting": "Deleting…",
+    "done": "{{name}} was deleted. Removed: {{items}}.",
+    "doneEmpty": "{{name}} was deleted.",
+    "doneInbox": "Inbox deleted at AgentMail: {{list}}",
+    "goes": {
+      "settings": "Its settings, skills, app access, saved permissions and knowledge index",
+      "title": "Will be deleted"
+    },
+    "hint": "Removes the bot and everything only it owns, chats and runs included. You see what goes before anything is deleted.",
+    "inbox": {
+      "hint": "Off by default. This deletes the inbox at AgentMail and all the mail in it for good.",
+      "label": "Also delete the inbox {{address}}"
+    },
+    "item": {
+      "channels": "Telegram and Discord chats set to this bot",
+      "chats": "Chats",
+      "grants": "Always-allow rules",
+      "mailboxes": "Mail accounts",
+      "memories": "Memories only this bot knew",
+      "messages": "Messages",
+      "missions": "Missions",
+      "runs": "Runs",
+      "schedules": "Schedules and triggers",
+      "webhooks": "Webhooks"
+    },
+    "loadFailed": "Could not check what would be deleted",
+    "loading": "Checking what belongs to this bot…",
+    "mailbox": {
+      "handed_over": "{{address}}: shared with another bot, so it stays and passes to that bot.",
+      "removed": "{{address}}: removed from this app with its stored password or key. The mailbox itself is not touched.",
+      "unlinked": "{{address}}: belongs to others, so it is only unlinked from this bot."
+    },
+    "retry": "Try again",
+    "stays": {
+      "audit": "The activity log: it keeps its past entries and gets a “bot deleted” entry.",
+      "files": "Files the bot saved in your folders are never deleted.",
+      "filesWithFolder": "Files the bot saved in your folders, and its workspace folder ({{folder}}), are never deleted. Delete them yourself if you no longer need them.",
+      "shared": "Memories shared with your other bots.",
+      "title": "Stays"
+    },
+    "subtitle": "Everything that belongs only to this bot is deleted with it.",
+    "title": "Delete {{name}}?",
+    "working": {
+      "mission": "{{name}} leads a mission that is running. Stop it first, then delete the bot.",
+      "run": "{{name}} has a run in progress. Stop it first, then delete the bot.",
+      "stop": "Stop it",
+      "stopping": "Stopping…",
+      "title": "This bot is working right now"
+    }
+  },
   "botEdit": {
     "addFallback": "Add a fallback",
     "allSaved": "No unsaved changes",
@@ -1612,14 +1681,7 @@
     "customTitle": "Custom model id",
     "dangerTitle": "Danger zone",
     "delete": "Delete bot",
-    "deleteBlocked": "This bot still has chats ({{count}}), so it cannot be deleted. Only a bot without chats or runs can be removed.",
-    "deleteBlockedRuns": "This bot still has {{count}} retained runs, so it cannot be deleted. Only a bot without chats or runs can be removed.",
-    "deleteBlockedRuns_one": "This bot still has {{count}} retained run, so it cannot be deleted. Only a bot without chats or runs can be removed.",
-    "deleteConfirmBody": "The bot, its access to apps and its e-mail accounts will be removed, and the memories only this bot learned are erased for good. Memories shared with your other bots stay. This cannot be undone. A bot that still has chats or runs cannot be deleted: in that case nothing is removed and you will see why.",
-    "deleteConfirmTitle": "Delete {{name}}?",
-    "deleteHint": "Removes the bot, its access to apps, its e-mail accounts and the memories only it learned. Only possible while it has no chats or runs. This cannot be undone.",
     "deleteTitle": "Delete this bot",
-    "deleted": "{{name}} was deleted.",
     "discard": "Discard",
     "discardBody": "You have unsaved changes. If you close now, they are lost.",
     "discardTitle": "Discard your changes?",

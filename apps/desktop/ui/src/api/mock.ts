@@ -18,6 +18,8 @@ import type {
   BotSpendLimits,
   CreateMission,
   BotCursorSettings,
+  BotDeletePreview,
+  BotDeleteReport,
   OwnerNotifySettings,
   MissionAnswer,
   BrowserProfileStatus,
@@ -1719,6 +1721,42 @@ export class MockApiClient extends ApiClient {
     return this.liveView.openStream(sessionId, signal);
   }
 
+  /** What deleting a bot would remove, from the demo data (the real one is the daemon's). */
+  private mockBotDeletePreview(botId: string): BotDeletePreview {
+    const bot = this.bots.find((b) => b.id === botId);
+    if (!bot) throw new ApiError(404, "not_found", `bot ${botId} not found`);
+    const chats = this.chats.filter((c) => c.bot_id === botId);
+    const messages = chats.reduce((n, c) => n + (this.messages.get(c.id)?.length ?? (c.id === CHAT_ID ? 2 : 0)), 0);
+    const mailboxes = this.emailAccounts
+      .filter((a) => a.bot === botId)
+      .map((a) => ({
+        name: a.name,
+        address: a.address,
+        provider: a.provider,
+        fate: "removed" as const,
+        inbox_deletable: a.provider === "agentmail"
+      }));
+    return {
+      bot_id: botId,
+      name: bot.name,
+      chats: chats.length,
+      messages,
+      runs: chats.length,
+      run_steps: chats.length * 3,
+      approvals: 0,
+      schedules: this.schedules.filter((x) => x.bot_id === botId).length,
+      webhooks: this.incomingWebhooks.get(botId)?.length ?? 0,
+      missions: 0,
+      memories: this.memories.filter((m) => m.bot_id === botId).length,
+      grants: this.botGrants.get(botId)?.length ?? 0,
+      channels: [],
+      mailboxes,
+      active_runs: 0,
+      running_missions: 0,
+      workspace_folder: null
+    };
+  }
+
   protected override async request<T>(
     method: string,
     path: string,
@@ -2173,6 +2211,9 @@ export class MockApiClient extends ApiClient {
         if (seg[1] && seg[2] === "site-rules") {
           return ok([]);
         }
+        if (seg[1] && seg[2] === "delete-preview") {
+          return ok(this.mockBotDeletePreview(seg[1]));
+        }
         if (seg[1] && seg[2] === "workspace") {
           return ok(this.mockGetBotWorkspace(seg[1], opts.query));
         }
@@ -2227,6 +2268,32 @@ export class MockApiClient extends ApiClient {
             list.filter((g) => JSON.stringify(g.target) !== key)
           );
           return ok(undefined);
+        }
+        if (seg[1] && !seg[2]) {
+          const preview = this.mockBotDeletePreview(seg[1]);
+          if (preview.active_runs > 0 || preview.running_missions > 0) {
+            throw new ApiError(409, "conflict", "the bot has a run in progress: stop it first, then delete it");
+          }
+          const alsoInbox = opts.query?.delete_inbox === "true";
+          const inboxes = preview.mailboxes.filter((m) => m.inbox_deletable).map((m) => m.address);
+          const gone = new Set(preview.mailboxes.filter((m) => m.fate === "removed").map((m) => m.name));
+          for (let i = this.emailAccounts.length - 1; i >= 0; i--) if (gone.has(this.emailAccounts[i]!.name)) this.emailAccounts.splice(i, 1);
+          for (const chat of this.chats.filter((c) => c.bot_id === seg[1])) this.messages.delete(chat.id);
+          for (let i = this.chats.length - 1; i >= 0; i--) if (this.chats[i]!.bot_id === seg[1]) this.chats.splice(i, 1);
+          const at = this.bots.findIndex((b) => b.id === seg[1]);
+          if (at >= 0) this.bots.splice(at, 1);
+          return ok({
+            name: preview.name,
+            chats: preview.chats,
+            messages: preview.messages,
+            runs: preview.runs,
+            schedules: preview.schedules,
+            missions: preview.missions,
+            memories: preview.memories,
+            mailboxes_removed: gone.size,
+            mailboxes_kept: preview.mailboxes.length - gone.size,
+            inboxes_deleted: alsoInbox ? inboxes : []
+          } satisfies BotDeleteReport);
         }
         throw new ApiError(404, "not_found", `mock: ${method} ${path}`);
       case "GET /chats":

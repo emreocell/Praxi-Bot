@@ -1228,11 +1228,33 @@ impl EmailControl for EmailHost {
     async fn forget_bot(&self, bot_id: &str) -> Result<usize, EmailControlError> {
         let _guard = self.ops.lock().await;
         let list = self.connector.accounts();
-        let (gone, mut rest): (Vec<_>, Vec<_>) = list.into_iter().partition(|a| {
+        let (owned, mut rest): (Vec<_>, Vec<_>) = list.into_iter().partition(|a| {
             a.bot
                 .as_deref()
                 .is_some_and(|b| b.eq_ignore_ascii_case(bot_id))
         });
+        // An account other bots were given a share of is only unlinked from the deleted bot: it
+        // passes to the first of them and keeps the same bots as before (minus the deleted one),
+        // so nobody gains access. An account only this bot used goes away.
+        let mut gone = Vec::new();
+        let mut handed_over = false;
+        for mut a in owned {
+            let heir = a
+                .identity
+                .shared_with
+                .iter()
+                .find(|b| !b.eq_ignore_ascii_case(bot_id))
+                .cloned();
+            match heir {
+                Some(heir) => {
+                    a.identity.shared_with.retain(|b| *b != heir);
+                    a.bot = Some(heir);
+                    handed_over = true;
+                    rest.push(a);
+                }
+                None => gone.push(a),
+            }
+        }
         // A deleted bot also leaves the sharing and default lists of the
         // accounts that stay (this only ever narrows who may use them).
         let mut trimmed = false;
@@ -1246,7 +1268,7 @@ impl EmailControl for EmailHost {
                 .retain(|b| !b.eq_ignore_ascii_case(bot_id));
             trimmed |= (s0, d0) != (a.identity.shared_with.len(), a.identity.default_for.len());
         }
-        if gone.is_empty() && !trimmed {
+        if gone.is_empty() && !trimmed && !handed_over {
             return Ok(0);
         }
         if gone.is_empty() {

@@ -333,7 +333,7 @@ async fn forgotten_items_erase_and_chat_and_bot_deletes_clean_memory() {
     .await;
     let shared_id: Uuid = shared.json()["id"].as_str().unwrap().parse().unwrap();
     let r = call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
-    assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", r.json());
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
     assert!(store.get(own_id).unwrap().is_none());
     assert!(store.get(shared_id).unwrap().is_some());
     assert!(

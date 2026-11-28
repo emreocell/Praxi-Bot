@@ -259,6 +259,35 @@ impl DiscordState {
         })
     }
 
+    /// How many Discord channels chose `bot`.
+    #[must_use]
+    pub fn channels_using(&self, bot: BotId) -> usize {
+        self.inner
+            .lock()
+            .file
+            .bots
+            .values()
+            .filter(|b| **b == bot)
+            .count()
+    }
+
+    /// Forget what is mapped to a deleted bot: the channels that chose it and their daemon
+    /// threads. Returns how many mappings were removed. Allowed channels stay (the owner's).
+    ///
+    /// # Errors
+    /// The state file cannot be written (nothing changes then).
+    pub fn forget_bot(&self, bot: BotId) -> Result<usize> {
+        let suffix = format!(":{bot}");
+        let mut removed = 0;
+        self.update(|f| {
+            let before = f.bots.len() + f.threads.len();
+            f.bots.retain(|_, b| *b != bot);
+            f.threads.retain(|key, _| !key.ends_with(&suffix));
+            removed = before - f.bots.len() - f.threads.len();
+        })?;
+        Ok(removed)
+    }
+
     /// Daemon chat used for a channel and bot.
     #[must_use]
     pub fn thread_for(&self, channel_id: &str, bot: BotId) -> Option<ChatId> {
@@ -344,5 +373,29 @@ mod tests {
         let code = state.create_code();
         state.reject_public_code(&code);
         assert_eq!(state.redeem("42", &code).unwrap(), PairOutcome::Invalid);
+    }
+
+    #[test]
+    fn a_deleted_bot_is_forgotten_by_the_channels_that_chose_it_and_only_by_those() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = DiscordState::open(dir.path().join("state.json")).unwrap();
+        let (gone, kept) = (BotId::new(), BotId::new());
+        state.set_bot_for("1", gone).unwrap();
+        state.set_bot_for("2", gone).unwrap();
+        state.set_bot_for("3", kept).unwrap();
+        state.set_thread_for("1", gone, ChatId::new()).unwrap();
+        let thread_of_kept = ChatId::new();
+        state.set_thread_for("3", kept, thread_of_kept).unwrap();
+        state.set_channel_allowed("1", true).unwrap();
+        assert_eq!(state.channels_using(gone), 2);
+
+        assert_eq!(state.forget_bot(gone).unwrap(), 3);
+        assert_eq!(state.channels_using(gone), 0);
+        assert_eq!(state.bot_for("3"), Some(kept));
+        assert_eq!(state.thread_for("3", kept), Some(thread_of_kept));
+        assert_eq!(state.thread_for("1", gone), None);
+        // Which channels the owner allowed is the owner's, not the bot's.
+        assert!(state.is_allowed_channel("1"));
+        assert_eq!(state.forget_bot(gone).unwrap(), 0);
     }
 }

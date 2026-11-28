@@ -25,6 +25,7 @@ use crate::{AppState, DaemonConfig, router};
 mod assistant_import;
 mod attachments;
 mod audit;
+mod bot_delete;
 mod bot_patch;
 mod bot_tools;
 mod browser_profiles;
@@ -577,7 +578,7 @@ async fn bots_crud() {
 
     assert_eq!(
         call(&t, Method::DELETE, &path, None).await.status,
-        StatusCode::NO_CONTENT
+        StatusCode::OK
     );
     assert_eq!(
         call(&t, Method::GET, &path, None).await.status,
@@ -615,7 +616,7 @@ async fn deleting_a_bot_also_deletes_its_scheduled_jobs() {
         call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None)
             .await
             .status,
-        StatusCode::NO_CONTENT
+        StatusCode::OK
     );
     // The API hides the job of a missing bot either way, so look at the store:
     // an orphan there would still be due and could only fail on every run.
@@ -629,11 +630,14 @@ async fn deleting_a_bot_also_deletes_its_scheduled_jobs() {
 }
 
 #[tokio::test]
-async fn bot_with_chats_cannot_be_deleted() {
+async fn bot_with_chats_is_deleted_with_them() {
     let t = setup();
-    let (bot, _) = make_chat(&t).await;
+    let (bot, chat) = make_chat(&t).await;
     let r = call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
-    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["chats"], 1);
+    let r = call(&t, Method::GET, &format!("/v1/chats/{chat}/messages"), None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
 }
 
 // ---------------------------------------------------- messages / events

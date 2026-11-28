@@ -19,6 +19,7 @@ mod attachment_routes;
 mod audit_routes;
 pub mod auth;
 mod bot_cursor_routes;
+mod bot_delete_routes;
 mod bot_engine;
 mod bot_tools;
 pub mod changes;
@@ -283,6 +284,17 @@ pub trait ChannelControl: Send + Sync {
     /// Notify the paired owner that an MCP server's form waits in the local desktop chat.
     /// Same rule: a chat id is navigation only, and no form text is sent.
     async fn notify_elicitation(&self, _chat: protocol::ChatId) {}
+    /// How many chats of this channel chose the bot (what [`ChannelControl::forget_bot`] forgets
+    /// first), for the delete preview.
+    fn chats_using_bot(&self, _bot: protocol::BotId) -> usize {
+        0
+    }
+    /// A bot was deleted: drop what the channel remembers about it (which chats chose it, the
+    /// threads it had there). Pairing stays: it belongs to the owner. Returns how many entries
+    /// were removed.
+    async fn forget_bot(&self, _bot: protocol::BotId) -> usize {
+        0
+    }
     /// Current state of the channel.
     fn info(&self) -> dto::ChannelDto;
     /// A fresh one-time pairing code.
@@ -1841,7 +1853,11 @@ fn api_routes() -> Router<AppState> {
             get(r::get_bot)
                 .put(r::update_bot)
                 .patch(r::patch_bot)
-                .delete(r::delete_bot),
+                .delete(bot_delete_routes::delete_bot),
+        )
+        .route(
+            "/v1/bots/{id}/delete-preview",
+            get(bot_delete_routes::delete_preview),
         )
         .route("/v1/chats/search", get(chat_history::search))
         .route("/v1/chats/{id}/export", get(chat_history::export))

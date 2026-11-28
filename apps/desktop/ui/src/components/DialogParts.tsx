@@ -14,7 +14,8 @@ export function DialogHeader({
   leading,
   actions,
   onClose,
-  closeDisabled = false
+  closeDisabled = false,
+  landmark = true
 }: {
   title: string;
   subtitle?: string;
@@ -25,10 +26,13 @@ export function DialogHeader({
   actions?: ReactNode;
   onClose: () => void;
   closeDisabled?: boolean;
+  /** `false` for a dialog opened over another one: a page has one banner, not two. */
+  landmark?: boolean;
 }) {
   const { t } = useTranslation();
+  const Row = landmark ? "header" : "div";
   return (
-    <header className={styles.header}>
+    <Row className={styles.header}>
       {leading}
       <div className={styles.headerText}>
         <h2 className={styles.title}>{title}</h2>
@@ -45,7 +49,7 @@ export function DialogHeader({
       >
         <X aria-hidden="true" />
       </button>
-    </header>
+    </Row>
   );
 }
 
@@ -85,16 +89,20 @@ export function DialogFooter({
   note,
   noteTone = "info",
   noteId,
+  landmark = true,
   children
 }: {
   /** Status text on the left ("Unsaved changes"). */
   note?: ReactNode;
   noteTone?: "info" | "warning" | "danger";
   noteId?: string;
+  /** `false` for a dialog opened over another one: a page has one contentinfo, not two. */
+  landmark?: boolean;
   children: ReactNode;
 }) {
+  const Row = landmark ? "footer" : "div";
   return (
-    <footer className={styles.footer}>
+    <Row className={styles.footer}>
       {note ? (
         <p
           className={[
@@ -111,7 +119,7 @@ export function DialogFooter({
         </p>
       ) : null}
       {children}
-    </footer>
+    </Row>
   );
 }
 

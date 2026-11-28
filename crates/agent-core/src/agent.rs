@@ -854,6 +854,21 @@ impl AgentLoop {
         self.sh.profiles.write().remove(&bot_id);
     }
 
+    /// A bot was deleted: drop what the loop holds in memory for it, its registered profile, its
+    /// "always allow" rules and its per-site rules (their audit entries stay: the audit log is
+    /// append-only).
+    pub fn forget_bot(&self, bot_id: BotId) {
+        self.forget_profile(bot_id);
+        self.sh.profile_rules.lock().retain(|(b, _)| *b != bot_id);
+        self.sh.grants.lock().always.retain(|g| g.bot_id != bot_id);
+    }
+
+    /// How many "always allow" and per-site rules a bot has (what deleting it would drop).
+    #[must_use]
+    pub fn count_standing_rules(&self, bot_id: BotId) -> usize {
+        self.list_grants(bot_id).len() + self.list_profile_rules(bot_id).len()
+    }
+
     /// Register the profile used by `bot_id` (otherwise the bot row's JSON
     /// `config` is parsed as a profile).
     pub fn add_profile(&self, bot_id: BotId, profile: BotProfile) {

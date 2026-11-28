@@ -268,6 +268,15 @@ fn event(
     Ok(())
 }
 
+/// How many missions a bot leads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BotMissionCounts {
+    /// All of them, whatever their state.
+    pub total: u64,
+    /// Those in the `running` state.
+    pub running: u64,
+}
+
 impl MissionStore {
     /// Open (creating and migrating) the database at `path`.
     ///
@@ -556,6 +565,51 @@ impl MissionStore {
             [bot_id],
             |r| r.get(0),
         )?)
+    }
+
+    /// How many missions `bot_id` leads, and how many of them are running.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn bot_mission_counts(&self, bot_id: &str) -> Result<BotMissionCounts> {
+        let conn = self.conn();
+        let (total, running): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(state = 'running'), 0) FROM missions WHERE bot_id = ?1",
+            [bot_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok(BotMissionCounts {
+            total: u64::try_from(total).unwrap_or(0),
+            running: u64::try_from(running).unwrap_or(0),
+        })
+    }
+
+    /// Delete every mission `bot_id` leads, with its items, notes, sessions, events, waits and
+    /// wakes, in one transaction. Returns the number of missions removed.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn delete_for_bot(&self, bot_id: &str) -> Result<u64> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for table in [
+            "mission_items",
+            "mission_notes",
+            "mission_sessions",
+            "mission_events",
+            "mission_waits",
+            "mission_wakes",
+        ] {
+            tx.execute(
+                &format!(
+                    "DELETE FROM {table} WHERE mission_id IN (SELECT id FROM missions WHERE bot_id = ?1)"
+                ),
+                [bot_id],
+            )?;
+        }
+        let n = tx.execute("DELETE FROM missions WHERE bot_id = ?1", [bot_id])?;
+        tx.commit()?;
+        Ok(n as u64)
     }
 
     // ---- items ----
@@ -2202,5 +2256,33 @@ mod tests {
         };
         let s = MissionStore::open(&path).unwrap();
         assert_eq!(s.progress(&id).unwrap().total, 1);
+    }
+
+    #[test]
+    fn deleting_a_bots_missions_takes_the_whole_ledger_and_only_that_bot() {
+        let s = store();
+        let mine = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        s.add_note(&mine.id, "learned", "a note", false, 2).unwrap();
+        let mut other = new_mission(&[("b.com", "y")]);
+        other.bot_id = "other".into();
+        let theirs = s.create(&other, 1).unwrap();
+        assert_eq!(
+            s.bot_mission_counts("b").unwrap(),
+            BotMissionCounts {
+                total: 1,
+                running: 1
+            }
+        );
+        assert_eq!(s.delete_for_bot("b").unwrap(), 1);
+        assert!(s.get(&mine.id).unwrap().is_none());
+        assert_eq!(s.items(&mine.id, None).unwrap().len(), 0);
+        assert_eq!(s.notes(&mine.id, false).unwrap().len(), 0);
+        assert_eq!(
+            s.bot_mission_counts("b").unwrap(),
+            BotMissionCounts::default()
+        );
+        assert!(s.get(&theirs.id).unwrap().is_some());
+        assert_eq!(s.items(&theirs.id, None).unwrap().len(), 1);
+        assert_eq!(s.delete_for_bot("b").unwrap(), 0);
     }
 }

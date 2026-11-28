@@ -1731,6 +1731,28 @@ fn refusals_are_globally_rate_limited_and_per_user_once() {
     );
 }
 
+#[test]
+fn a_deleted_bot_is_forgotten_by_the_chats_that_chose_it_and_only_by_those() {
+    use crate::pairing::PairingStore;
+    let store = PairingStore::in_memory();
+    let (gone, kept) = (BotId::new(), BotId::new());
+    store.set_bot_for_chat(1, gone).unwrap();
+    store.set_bot_for_chat(2, gone).unwrap();
+    store.set_bot_for_chat(3, kept).unwrap();
+    store.set_thread_for(1, gone, ChatId::new()).unwrap();
+    let thread_of_kept = ChatId::new();
+    store.set_thread_for(3, kept, thread_of_kept).unwrap();
+    assert_eq!(store.chats_using(gone), 2);
+
+    // Two choices and one thread go; the other bot's choice and thread stay.
+    assert_eq!(store.forget_bot(gone).unwrap(), 3);
+    assert_eq!(store.chats_using(gone), 0);
+    assert_eq!(store.chats_using(kept), 1);
+    assert_eq!(store.thread_for(3, kept), Some(thread_of_kept));
+    assert_eq!(store.thread_for(1, gone), None);
+    assert_eq!(store.forget_bot(gone).unwrap(), 0);
+}
+
 #[tokio::test]
 async fn transport_errors_never_contain_the_bot_token() {
     // Nothing listens on port 1: reqwest's error text would normally embed the URL.

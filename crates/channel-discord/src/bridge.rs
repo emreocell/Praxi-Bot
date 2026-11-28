@@ -236,6 +236,22 @@ pub struct DiscordChannel {
     main: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
+impl DiscordChannel {
+    /// How many Discord channels chose `bot`.
+    #[must_use]
+    pub fn channels_using(&self, bot: BotId) -> usize {
+        self.inner.state.channels_using(bot)
+    }
+
+    /// Forget the channel and thread mappings of a deleted bot (see [`DiscordState::forget_bot`]).
+    ///
+    /// # Errors
+    /// The state file cannot be written.
+    pub fn forget_bot(&self, bot: BotId) -> Result<usize> {
+        self.inner.state.forget_bot(bot)
+    }
+}
+
 impl std::fmt::Debug for DiscordChannel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiscordChannel").finish_non_exhaustive()

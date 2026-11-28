@@ -50,6 +50,8 @@ const screens = [
   { name: 'apps-custom-mcp', expect: '[data-testid=mcp-custom-form]', query: 'screen=apps', act: [{ click: '[data-testid=apps-advanced]' }] },
   { name: 'new-bot-dialog', query: 'screen=newbot' },
   { name: 'bot-edit-dialog', query: 'screen=botform' },
+  { name: 'bot-delete-review', expect: '[data-testid=delete-bot-counts]', scope: '[data-testid=delete-bot-dialog]', query: 'screen=botform', act: [{ click: '[data-testid=bot-edit-delete]' }] },
+  { name: 'bot-delete-confirm', expect: '[data-testid=delete-bot-name]', scope: '[data-testid=delete-bot-dialog]', query: 'screen=botform', act: [{ click: '[data-testid=bot-edit-delete]' }, { click: '[data-testid=delete-bot-continue]' }] },
   { name: 'bot-profile-dialog', query: 'screen=botprofile' },
   { name: 'skills-dialog', query: 'screen=skills' },
   { name: 'first-run-wizard', query: 'screen=onboarding' },

@@ -1,0 +1,617 @@
+//! Deleting a bot for good: the preview, the refusals, what goes and what stays.
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use axum::http::{Method, StatusCode};
+use memory_store::{Kind, NewMemory};
+use parking_lot::Mutex;
+use protocol::{BotId, ChatId, RunId};
+use serde_json::{Value, json};
+
+use super::{PROFILE, T, call, call_token_only, make_chat, setup};
+use crate::email::{
+    EmailAccountDto, EmailAccountInput, EmailControl, EmailControlError, EmailImapServer,
+    EmailProbeStatus, EmailProviderKind, EmailSendMode, EmailSmtpServer, EmailTestReport,
+};
+
+fn bot_id(s: &str) -> BotId {
+    BotId(s.parse().unwrap())
+}
+
+/// A finished run of `bot` in `chat`, with two messages the search can find by `word`.
+fn history(t: &T, bot: &str, chat: &str, word: &str) -> RunId {
+    let st = t.state.storage();
+    let run = RunId::new();
+    let chat_id = ChatId(chat.parse().unwrap());
+    st.insert_run(&storage::Run {
+        id: run,
+        user_id: t.state.user_id(),
+        bot_id: bot_id(bot),
+        chat_id: Some(chat_id),
+        kind: "turn".into(),
+        state: "succeeded".into(),
+        error: None,
+        created_at_ms: 10,
+        updated_at_ms: 10,
+        parent_run_id: None,
+        spec: None,
+        computer_target: None,
+        computer_node: None,
+        computer_node_name: None,
+        paused_at_ms: None,
+        pause_reason: None,
+    })
+    .unwrap();
+    for role in ["user", "assistant"] {
+        let m = storage::Message {
+            id: uuid::Uuid::now_v7(),
+            user_id: t.state.user_id(),
+            chat_id,
+            run_id: Some(run),
+            role: role.into(),
+            content: format!("{word} from the {role}"),
+            created_at_ms: 11,
+            exposure_untrusted: false,
+            exposure_private: false,
+            exposure_sources: Vec::new(),
+        };
+        st.insert_message(&m).unwrap();
+        t.state.memory_store().unwrap().index_message(&m).unwrap();
+    }
+    // The run's event log and the chat's attachments are files.
+    let log = storage::event_log_path(&t.state.data_dir(), run);
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(&log, "{}\n").unwrap();
+    run
+}
+
+async fn schedule(t: &T, bot: &str, name: &str) {
+    let body = json!({"bot_id": bot, "name": name, "spec": {"every": {"seconds": 3600}},
+        "payload": {"kind": "agent_prompt", "text": "hi"}});
+    let r = call(t, Method::POST, "/v1/schedules", Some(body)).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+}
+
+fn delete_path(bot: &str) -> String {
+    format!("/v1/bots/{bot}")
+}
+
+fn preview_path(bot: &str) -> String {
+    format!("/v1/bots/{bot}/delete-preview")
+}
+
+#[tokio::test]
+async fn the_preview_counts_what_would_go_and_changes_nothing() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    history(&t, &bot, &chat, "quokka");
+    schedule(&t, &bot, "daily").await;
+    let memory = t.state.memory_store().unwrap();
+    memory
+        .add(
+            &NewMemory::new(
+                t.state.user_id(),
+                Some(bot_id(&bot)),
+                Kind::Bot,
+                "Likes tea",
+            ),
+            "t",
+        )
+        .unwrap();
+
+    let r = call(&t, Method::GET, &preview_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let p = r.json();
+    assert_eq!(p["bot_id"], bot);
+    assert_eq!(p["name"], "Tester");
+    assert_eq!(
+        (&p["chats"], &p["messages"], &p["runs"]),
+        (&json!(1), &json!(2), &json!(1))
+    );
+    assert_eq!(
+        (&p["schedules"], &p["memories"], &p["missions"]),
+        (&json!(1), &json!(1), &json!(0))
+    );
+    assert_eq!(
+        (&p["active_runs"], &p["running_missions"]),
+        (&json!(0), &json!(0))
+    );
+    assert_eq!(p["grants"], 0);
+    assert_eq!(p["channels"], json!([]));
+    assert_eq!(p["mailboxes"], json!([]));
+
+    // Nothing was deleted by looking.
+    assert_eq!(
+        call(&t, Method::GET, &format!("/v1/bots/{bot}"), None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(&t, Method::GET, &preview_path(&bot), None)
+            .await
+            .json(),
+        p
+    );
+}
+
+#[tokio::test]
+async fn the_preview_and_the_delete_need_the_owner_key_and_an_existing_bot() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    history(&t, &bot, &chat, "quokka");
+    for (m, path) in [
+        (Method::GET, preview_path(&bot)),
+        (Method::DELETE, delete_path(&bot)),
+    ] {
+        let r = call_token_only(&t, m.clone(), &path, None).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{m} {path}");
+        assert_eq!(r.json()["error"]["code"], "owner_key_required");
+    }
+    // A refused delete changed nothing.
+    assert_eq!(
+        call(&t, Method::GET, &preview_path(&bot), None)
+            .await
+            .json()["chats"],
+        1
+    );
+    let unknown = uuid::Uuid::now_v7();
+    for (m, path) in [
+        (Method::GET, preview_path(&unknown.to_string())),
+        (Method::DELETE, delete_path(&unknown.to_string())),
+    ] {
+        assert_eq!(call(&t, m, &path, None).await.status, StatusCode::NOT_FOUND);
+    }
+    assert_eq!(
+        call(&t, Method::GET, &preview_path("not-a-uuid"), None)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn a_bot_with_chats_and_runs_is_deleted_with_all_of_it_and_another_bot_is_untouched() {
+    let t = setup();
+    let (gone, gone_chat) = make_chat(&t).await;
+    let (kept, kept_chat) = make_chat(&t).await;
+    let gone_run = history(&t, &gone, &gone_chat, "quokka");
+    let kept_run = history(&t, &kept, &kept_chat, "quokka");
+    schedule(&t, &gone, "gone-daily").await;
+    schedule(&t, &kept, "kept-daily").await;
+    let memory = t.state.memory_store().unwrap();
+    let user = t.state.user_id();
+    let kept_memory = memory
+        .add(
+            &NewMemory::new(user, Some(bot_id(&kept)), Kind::Bot, "Kept likes tea"),
+            "t",
+        )
+        .unwrap();
+    let shared = memory
+        .add(
+            &NewMemory::new(user, None, Kind::Profile, "Owner likes tea"),
+            "t",
+        )
+        .unwrap();
+    memory
+        .add(
+            &NewMemory::new(user, Some(bot_id(&gone)), Kind::Bot, "Gone likes coffee"),
+            "t",
+        )
+        .unwrap();
+    let attachments = t.state.data_dir().join("attachments").join(&gone_chat);
+    std::fs::create_dir_all(&attachments).unwrap();
+    std::fs::write(attachments.join("a.txt"), "x").unwrap();
+
+    let r = call(&t, Method::DELETE, &delete_path(&gone), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let report = r.json();
+    assert_eq!(report["name"], "Tester");
+    assert_eq!(
+        (&report["chats"], &report["messages"], &report["runs"]),
+        (&json!(1), &json!(2), &json!(1))
+    );
+    assert_eq!(
+        (&report["schedules"], &report["memories"]),
+        (&json!(1), &json!(1))
+    );
+    assert_eq!(report["inboxes_deleted"], json!([]));
+
+    // The bot, its chat and its history are gone.
+    for path in [
+        format!("/v1/bots/{gone}"),
+        format!("/v1/chats/{gone_chat}/messages"),
+        format!("/v1/runs/{gone_run}"),
+    ] {
+        assert_eq!(
+            call(&t, Method::GET, &path, None).await.status,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+    assert_eq!(
+        call(&t, Method::DELETE, &delete_path(&gone), None)
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    // What lived outside the main database went too: schedule, memory, search text, files.
+    let id = bot_id(&gone);
+    assert_eq!(
+        t.state
+            .schedule_store()
+            .unwrap()
+            .list_by_bot(id)
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(memory.count_bot(user, id).unwrap(), 0);
+    let found = memory.search_sessions(user, "quokka", 10).unwrap();
+    assert_eq!(
+        found.len(),
+        2,
+        "only the kept bot's two messages are searchable"
+    );
+    assert!(found.iter().all(|h| h.chat_id.to_string() == kept_chat));
+    assert!(!storage::event_log_path(&t.state.data_dir(), gone_run).exists());
+    assert!(!attachments.exists());
+    // The audit log says it happened; its older rows stay.
+    let audit = t.state.storage().list_audit(user).unwrap();
+    let entry = audit.iter().find(|a| a.action == "bot.deleted").unwrap();
+    assert_eq!(entry.detail["name"], "Tester");
+    assert_eq!(entry.detail["chats"], 1);
+
+    assert_kept_bot_untouched(
+        &t,
+        &kept,
+        &kept_chat,
+        kept_run,
+        &[kept_memory.id, shared.id],
+    )
+    .await;
+}
+
+/// The bot that was not deleted has everything it had.
+async fn assert_kept_bot_untouched(
+    t: &T,
+    kept: &str,
+    kept_chat: &str,
+    kept_run: RunId,
+    memories: &[uuid::Uuid],
+) {
+    let memory = t.state.memory_store().unwrap();
+    let r = call(t, Method::GET, &preview_path(kept), None).await;
+    let p = r.json();
+    assert_eq!(
+        (
+            &p["chats"],
+            &p["messages"],
+            &p["runs"],
+            &p["schedules"],
+            &p["memories"]
+        ),
+        (&json!(1), &json!(2), &json!(1), &json!(1), &json!(1))
+    );
+    assert!(memory.get(memories[0]).unwrap().is_some());
+    assert!(memory.get(memories[1]).unwrap().is_some());
+    assert!(storage::event_log_path(&t.state.data_dir(), kept_run).exists());
+    assert_eq!(
+        call(
+            t,
+            Method::GET,
+            &format!("/v1/chats/{kept_chat}/messages"),
+            None
+        )
+        .await
+        .json()
+        .as_array()
+        .unwrap()
+        .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn a_run_in_progress_refuses_the_delete_until_it_has_stopped() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    let run = history(&t, &bot, &chat, "quokka");
+    t.state
+        .storage()
+        .update_run_state(run, "running", None)
+        .unwrap();
+
+    let p = call(&t, Method::GET, &preview_path(&bot), None)
+        .await
+        .json();
+    assert_eq!(p["active_runs"], 1);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("run in progress")
+    );
+    // Nothing was removed.
+    let p = call(&t, Method::GET, &preview_path(&bot), None)
+        .await
+        .json();
+    assert_eq!(
+        (&p["chats"], &p["messages"], &p["runs"]),
+        (&json!(1), &json!(2), &json!(1))
+    );
+
+    t.state
+        .storage()
+        .update_run_state(run, "cancelled", None)
+        .unwrap();
+    assert_eq!(
+        call(&t, Method::DELETE, &delete_path(&bot), None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn a_running_mission_refuses_the_delete_and_a_stopped_one_goes_with_the_bot() {
+    let t = setup();
+    t.state.enable_missions().unwrap();
+    let (bot, chat) = make_chat(&t).await;
+    let store = t.state.mission_store().unwrap();
+    let mission = store
+        .create(
+            &missions::NewMission {
+                user_id: t.state.user_id().to_string(),
+                bot_id: bot.clone(),
+                chat_id: chat.clone(),
+                title: "Backlinks".into(),
+                goal_text: "register me".into(),
+                target_done: None,
+                budgets: missions::Budgets::default(),
+                items: vec![missions::NewItem {
+                    key: "a.example".into(),
+                    kind: "site".into(),
+                    title: "a.example".into(),
+                    payload: None,
+                }],
+            },
+            storage::now_ms(),
+        )
+        .unwrap();
+
+    let p = call(&t, Method::GET, &preview_path(&bot), None)
+        .await
+        .json();
+    assert_eq!(
+        (&p["missions"], &p["running_missions"]),
+        (&json!(1), &json!(1))
+    );
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("mission")
+    );
+    assert!(store.get(&mission.id).unwrap().is_some());
+
+    store
+        .set_state(&mission.id, missions::MissionState::Paused, Some("test"), 2)
+        .unwrap();
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["missions"], 1);
+    assert!(store.get(&mission.id).unwrap().is_none());
+}
+
+// ---- mailboxes ---------------------------------------------------------------
+
+/// A mail control with a list of accounts that records what is removed at the provider and what
+/// `forget_bot` is asked.
+struct Mail {
+    accounts: Mutex<Vec<EmailAccountDto>>,
+    removed: Mutex<Vec<(String, bool)>>,
+    forgotten: Mutex<Vec<String>>,
+    provider_error: Mutex<Option<EmailControlError>>,
+}
+
+fn account(
+    name: &str,
+    provider: EmailProviderKind,
+    owner: Option<&str>,
+    shared_with: &[&str],
+) -> EmailAccountDto {
+    EmailAccountDto {
+        name: name.into(),
+        provider,
+        address: format!("{name}@agentmail.to"),
+        inbox_id: None,
+        username: String::new(),
+        imap: EmailImapServer::default(),
+        smtp: EmailSmtpServer::default(),
+        drafts_folder: "Drafts".into(),
+        bot: owner.map(str::to_owned),
+        allowed_senders: Vec::new(),
+        shared_with: shared_with.iter().map(|s| (*s).to_owned()).collect(),
+        default_for: Vec::new(),
+        send_mode: EmailSendMode::default(),
+        password_set: true,
+        custom_ca: false,
+    }
+}
+
+#[async_trait]
+impl EmailControl for Mail {
+    fn list(&self) -> Vec<EmailAccountDto> {
+        self.accounts.lock().clone()
+    }
+    async fn add(&self, _: EmailAccountInput) -> Result<EmailAccountDto, EmailControlError> {
+        Err(EmailControlError::Invalid("not in this test".into()))
+    }
+    async fn update(&self, _: &str, _: Value) -> Result<EmailAccountDto, EmailControlError> {
+        Err(EmailControlError::NotFound("x".into()))
+    }
+    async fn remove(&self, name: &str) -> Result<(), EmailControlError> {
+        self.remove_account(name, false).await
+    }
+    async fn remove_account(&self, name: &str, remote: bool) -> Result<(), EmailControlError> {
+        if remote && let Some(e) = self.provider_error.lock().clone() {
+            return Err(e);
+        }
+        self.removed.lock().push((name.to_owned(), remote));
+        self.accounts.lock().retain(|a| a.name != name);
+        Ok(())
+    }
+    async fn test_saved(&self, _: &str) -> Result<EmailTestReport, EmailControlError> {
+        Ok(EmailTestReport {
+            imap: EmailProbeStatus::Ok,
+            smtp: EmailProbeStatus::Ok,
+            api: None,
+            ok: true,
+        })
+    }
+    async fn test_draft(&self, _: EmailAccountInput) -> Result<EmailTestReport, EmailControlError> {
+        self.test_saved("").await
+    }
+    async fn forget_bot(&self, bot: &str) -> Result<usize, EmailControlError> {
+        self.forgotten.lock().push(bot.to_owned());
+        Ok(0)
+    }
+}
+
+/// A bot with one chat, and a mail control with: its own `AgentMail` inbox, an IMAP account it
+/// shares with `other`, an account of `other` it was given a share of, and an account of
+/// nobody's it has nothing to do with.
+async fn with_mail() -> (T, String, String, Arc<Mail>) {
+    let t = setup();
+    let other = uuid::Uuid::now_v7().to_string();
+    let mail = Arc::new(Mail {
+        accounts: Mutex::new(Vec::new()),
+        removed: Mutex::new(Vec::new()),
+        forgotten: Mutex::new(Vec::new()),
+        provider_error: Mutex::new(None),
+    });
+    t.state.set_email(mail.clone());
+    let (bot, _chat) = make_chat(&t).await;
+    *mail.accounts.lock() = vec![
+        account("praxi", EmailProviderKind::Agentmail, Some(&bot), &[]),
+        account("team", EmailProviderKind::ImapSmtp, Some(&bot), &[&other]),
+        account("theirs", EmailProviderKind::ImapSmtp, Some(&other), &[&bot]),
+        account("unrelated", EmailProviderKind::ImapSmtp, Some(&other), &[]),
+    ];
+    (t, bot, other, mail)
+}
+
+#[tokio::test]
+async fn the_preview_lists_the_mailboxes_and_what_becomes_of_each() {
+    let (t, bot, _other, _mail) = with_mail().await;
+    let p = call(&t, Method::GET, &preview_path(&bot), None)
+        .await
+        .json();
+    let boxes = p["mailboxes"].as_array().unwrap();
+    let find = |n: &str| boxes.iter().find(|m| m["name"] == n).cloned();
+    let own = find("praxi").unwrap();
+    assert_eq!(own["fate"], "removed");
+    assert_eq!(own["provider"], "agentmail");
+    assert_eq!(own["address"], "praxi@agentmail.to");
+    assert_eq!(own["inbox_deletable"], true);
+    let shared = find("team").unwrap();
+    assert_eq!(
+        (&shared["fate"], &shared["inbox_deletable"]),
+        (&json!("handed_over"), &json!(false))
+    );
+    assert_eq!(find("theirs").unwrap()["fate"], "unlinked");
+    assert!(
+        find("unrelated").is_none(),
+        "an account of another bot is not this bot's"
+    );
+}
+
+#[tokio::test]
+async fn the_agentmail_inbox_is_deleted_at_the_provider_only_when_asked() {
+    let (t, bot, _other, mail) = with_mail().await;
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["inboxes_deleted"], json!([]));
+    assert_eq!(r.json()["mailboxes_removed"], 1);
+    assert_eq!(r.json()["mailboxes_kept"], 2);
+    assert!(
+        mail.removed.lock().is_empty(),
+        "the default never deletes an inbox"
+    );
+    assert_eq!(
+        *mail.forgotten.lock(),
+        vec![bot.clone()],
+        "the links are cleaned"
+    );
+
+    let (t, bot, _other, mail) = with_mail().await;
+    let r = call(
+        &t,
+        Method::DELETE,
+        &format!("{}?delete_inbox=true", delete_path(&bot)),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["inboxes_deleted"], json!(["praxi@agentmail.to"]));
+    // Only the inbox only this bot used; the shared IMAP account is never touched remotely.
+    assert_eq!(*mail.removed.lock(), vec![("praxi".to_owned(), true)]);
+}
+
+#[tokio::test]
+async fn a_provider_failure_deletes_nothing_so_the_owner_can_retry() {
+    let (t, bot, _other, mail) = with_mail().await;
+    *mail.provider_error.lock() = Some(EmailControlError::Upstream("provider down".into()));
+    let r = call(
+        &t,
+        Method::DELETE,
+        &format!("{}?delete_inbox=true", delete_path(&bot)),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY, "{:?}", r.json());
+    // The bot, its chat and its account are all still there.
+    let p = call(&t, Method::GET, &preview_path(&bot), None).await;
+    assert_eq!(p.status, StatusCode::OK);
+    assert_eq!(p.json()["chats"], 1);
+    assert_eq!(mail.accounts.lock().len(), 4);
+    // Once the provider answers, the same request goes through.
+    *mail.provider_error.lock() = None;
+    let r = call(
+        &t,
+        Method::DELETE,
+        &format!("{}?delete_inbox=true", delete_path(&bot)),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+}
+
+#[tokio::test]
+async fn the_last_bot_can_be_deleted_too() {
+    let t = setup();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({"profile_toml": PROFILE})),
+    )
+    .await;
+    let bot = r.json()["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        call(&t, Method::DELETE, &delete_path(&bot), None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(&t, Method::GET, "/v1/bots", None).await.json(),
+        json!([])
+    );
+}

@@ -13,7 +13,6 @@ import {
   type CustomRole,
   type CustomText,
   customRefIssue,
-  type DeleteBlock,
   fallbackList,
   parseFallbackInput,
   removeFallback
@@ -537,19 +536,12 @@ export function AdvancedFields({
   draft,
   customText,
   onCustomText,
-  deleteBlocked,
-  chatCount,
-  runCount,
   onDelete
 }: {
   draft: BotDraft;
   customText: CustomText;
   onCustomText: (role: CustomRole, text: string) => void;
-  /** Why the daemon would refuse to delete the bot (it needs no chats and no runs), or `null`. */
-  deleteBlocked: DeleteBlock;
-  chatCount: number;
-  runCount: number;
-  /** Absent for a bot that does not exist yet. */
+  /** Opens the two-step delete dialog. Absent for a bot that does not exist yet. */
   onDelete?: () => void;
 }) {
   const { t } = useTranslation();
@@ -593,17 +585,10 @@ export function AdvancedFields({
           <div className={styles.danger}>
             <div className={styles.dangerText}>
               <p className={styles.dangerTitle}>{t("botEdit.deleteTitle")}</p>
-              <p className={dialogStyles.hint}>
-                {deleteBlocked === "chats"
-                  ? t("botEdit.deleteBlocked", { count: chatCount })
-                  : deleteBlocked === "runs"
-                    ? t("botEdit.deleteBlockedRuns", { count: runCount })
-                    : t("botEdit.deleteHint")}
-              </p>
+              <p className={dialogStyles.hint}>{t("botDelete.hint")}</p>
             </div>
             <Button
               variant="secondary"
-              disabled={deleteBlocked !== null}
               data-testid="bot-edit-delete"
               onClick={onDelete}
             >

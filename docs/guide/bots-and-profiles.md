@@ -224,11 +224,35 @@ interface (`find_tool`, `get_tool_details`, `use_tool`) instead of the whole lis
 | Inspect one, including its effective policy | `GET /v1/bots/{id}` (API; desktop app) |
 | Replace a profile | `PUT /v1/bots/{id}` with the `expected_version` from the profile being replaced; missing precondition is `428 precondition_required`, stale is `409 version_conflict` with the current bot. Legacy callers must reload and explicitly retry; the server never upgrades a stale full document automatically |
 | Change single fields safely | `PATCH /v1/bots/{id}` with `expected_version` and `ops` (`set` / `unset` on JSON Pointer paths such as `/models/planner` or `/permissions/categories/fs/level`); a stale version is a `409` that returns the current bot. `GET` and list return profile + `version` in one storage snapshot. Successful profile writes and skill assignment changes advance the same bot revision in their write transaction. The edit modal saves with this. At most 128 operations, 32 path segments / resulting JSON levels, 4096 path bytes and a conservative 1 MiB escaped JSON budget; excessive input is refused before applying it |
-| Delete a bot | `DELETE /v1/bots/{id}`; only possible while it has no chats or runs |
+| Delete a bot, with its chats and runs | Desktop app: the bot's edit page, Advanced, "Delete this bot": a list of what goes and what stays, then you type the bot's name. API: `GET /v1/bots/{id}/delete-preview` (counts, mailboxes, channels), then `DELETE /v1/bots/{id}` (owner key; `?delete_inbox=true` also deletes an AgentMail inbox only this bot used). See [Deleting a bot](#deleting-a-bot) |
 | See or revoke its "always allow" grants | `bot grants list <bot-id>`, `bot grants revoke ...` |
 
 The CLI has no command for editing or deleting bots yet; use the desktop app or
 the HTTP API (see `docs/api/openapi.json`).
+
+### Deleting a bot
+
+The owner can delete any bot, also one with chats and runs. It cannot be undone, so the app
+shows what goes first, then asks for the bot's name. Make an
+[encrypted backup](backup.md) first if you may want the chats or memory later.
+
+- **Deleted with the bot:** its chats and messages (and their search entries), runs, steps and
+  approvals, schedules and triggers, missions, incoming webhooks, memories only this bot knew,
+  skill assignment, spend limits, workspace size limits, knowledge index and grants, the
+  Telegram and Discord chats set to it, and its browser slot. Everything is removed in one
+  transaction in the main database; the stores outside it are cleaned in the same step.
+- **Stays:** files the bot wrote into your folders (and its workspace folder), memories shared
+  with your other bots, and the activity log, which only grows: it gets a `bot.deleted` entry.
+- **Mailboxes:** an account only this bot used is removed from the app with its stored
+  password or key. An account other bots share is not removed: it passes to the first of
+  them and keeps the same sharing, minus the deleted bot. The AgentMail inbox itself is kept
+  unless you tick "Also delete the inbox": mail in it is lost for good. If the provider
+  refuses, nothing is deleted and you can retry.
+- **Refused while the bot is working:** a run in progress or a running mission answers `409`;
+  stop it first (the dialog offers a button). The last bot can be deleted too: the app then
+  shows its "create a bot" start screen.
+- A bot cannot do this to another bot: the bot-management tool a bot may call still refuses a
+  bot that has chats or runs, and a delete needs the owner key.
 
 ### Main bot and bot order (desktop app)
 
