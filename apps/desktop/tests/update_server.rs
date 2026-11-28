@@ -331,10 +331,13 @@ async fn download_from_feed(
         .map_err(|e| format!("check: {e}"))?
         .ok_or("no update announced")?;
     assert_eq!(update.version, announced);
-    update
-        .download(|_, _| {}, || {})
-        .await
-        .map_err(|e| e.to_string())
+    let result = update.download(|_, _| {}, || {}).await;
+    if result.is_err() {
+        let rt = UpdateRuntime::detached(Some(s), "0.1.0");
+        assert!(install(&rt, &update).await.is_err());
+        assert_eq!(rt.pending(), None);
+    }
+    result.map_err(|e| e.to_string())
 }
 
 #[tokio::test]
@@ -370,4 +373,55 @@ async fn a_signature_from_another_key_or_for_another_version_is_refused() {
         .await
         .unwrap_err();
     assert!(err.contains("requireSignedVersion"), "{err}");
+}
+
+// A throwaway key signs both real minisign algorithms. The secret was discarded.
+#[tokio::test]
+async fn minisign_download_boundaries_and_install_refusal() {
+    let f: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/minisign_regression.json")).unwrap();
+    let key = f["public_key"].as_str().unwrap();
+    for (signature, tampered_file, accepted) in [
+        ("prehashed", false, true),
+        // The Tauri updater intentionally passes allow_legacy=true.
+        ("legacy", false, true),
+        ("changed_untrusted", false, true),
+        ("prehashed", true, false),
+        ("tampered_signature", false, false),
+        ("tampered_trusted", false, false),
+    ] {
+        let bytes = if tampered_file {
+            b"installer!\n".to_vec()
+        } else {
+            b"installer\n".to_vec()
+        };
+        let endpoint = signed_server(
+            "0.2.0",
+            f[signature].as_str().unwrap().to_owned(),
+            bytes.clone(),
+        );
+        let s = UpdateSettings {
+            pubkey: key.to_owned(),
+            endpoint: endpoint.clone(),
+            rollback_endpoint: None,
+            preview_endpoint: None,
+        };
+        let app = mock_app_with("0.1.0", true);
+        let update = check(app.handle(), &s, &endpoint, false)
+            .await
+            .unwrap()
+            .unwrap();
+        let result = update.download(|_, _| {}, || {}).await;
+        if accepted {
+            assert_eq!(result.expect(signature), bytes, "{signature}");
+        } else {
+            assert!(
+                result.is_err(),
+                "{signature}, tampered file: {tampered_file}"
+            );
+            let rt = UpdateRuntime::detached(Some(s), "0.1.0");
+            assert!(install(&rt, &update).await.is_err(), "{signature}");
+            assert_eq!(rt.pending(), None, "{signature}");
+        }
+    }
 }

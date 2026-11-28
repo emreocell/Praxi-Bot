@@ -59,6 +59,40 @@ fn tampered_file_and_wrong_key_are_refused() {
     ));
 }
 
+// These fixtures use a throwaway key; the secret key was discarded after signing.
+#[test]
+fn minisign_algorithm_and_comment_boundaries() {
+    let (data, _) = fixture("valid");
+    let key = include_str!("../../tests/fixtures/catalog_update/regression.pub").trim();
+    let prehashed =
+        include_str!("../../tests/fixtures/catalog_update/regression-prehashed.minisig");
+    let legacy = include_str!("../../tests/fixtures/catalog_update/regression-legacy.minisig");
+    assert!(verify_and_parse(&data, prehashed, key).is_ok());
+    assert!(matches!(
+        verify_and_parse(&data, legacy, key),
+        Err(CatalogUpdateError::BadSignature(_))
+    ));
+
+    let mut lines: Vec<_> = prehashed.lines().map(str::to_owned).collect();
+    let replacement = if &lines[1][20..21] == "A" { "B" } else { "A" };
+    lines[1].replace_range(20..21, replacement);
+    let tampered = lines.join("\n");
+    assert!(matches!(
+        verify_and_parse(&data, &tampered, key),
+        Err(CatalogUpdateError::BadSignature(_))
+    ));
+    let trusted = prehashed.replace("fixture catalog", "fixture altered");
+    assert!(matches!(
+        verify_and_parse(&data, &trusted, key),
+        Err(CatalogUpdateError::BadSignature(_))
+    ));
+    let untrusted = prehashed.replace(
+        "untrusted comment: test fixture",
+        "untrusted comment: changed",
+    );
+    assert!(verify_and_parse(&data, &untrusted, key).is_ok());
+}
+
 #[test]
 fn oversized_input_is_refused_before_anything_else() {
     let (_, sig) = fixture("valid");
