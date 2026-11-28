@@ -75,6 +75,7 @@ impl FakePages {
                 url: url.to_owned(),
                 title: Some(title.to_owned()),
                 text: text.to_owned(),
+                bytes: text.len(),
             },
         );
         self
@@ -251,6 +252,84 @@ async fn the_number_of_sources_is_capped_and_failures_do_not_use_up_the_cap() {
         reads.load(Ordering::SeqCst) <= 2 + 3 + FETCH_WAVE,
         "no more reads than one wave beyond what was needed"
     );
+}
+
+#[tokio::test]
+async fn failing_pages_cannot_make_the_pass_fetch_without_end() {
+    let hits: Vec<(String, String)> = (0..60)
+        .map(|i| (format!("P{i}"), format!("https://site{i}.example/p")))
+        .collect();
+    let refs: Vec<(&str, &str)> = hits.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let (s, _) = search(&[("q", &refs)]);
+    // Nothing loads: every address is a 404.
+    let pages = FakePages::default();
+    let reads = Arc::clone(&pages.reads);
+    let g = gather(&s, &pages, &request(&["q"], 4)).await.unwrap();
+    assert!(g.sources.is_empty());
+    assert_eq!(reads.load(Ordering::SeqCst), 4 * ATTEMPTS_PER_SOURCE);
+    // The absolute limit holds whatever is asked for.
+    let pages = FakePages::default();
+    let reads = Arc::clone(&pages.reads);
+    gather(&s, &pages, &request(&["q"], MAX_SOURCES))
+        .await
+        .unwrap();
+    assert_eq!(reads.load(Ordering::SeqCst), MAX_FETCH_ATTEMPTS);
+}
+
+#[tokio::test]
+async fn the_bytes_read_are_bounded_over_the_whole_pass() {
+    let hits: Vec<(String, String)> = (0..12)
+        .map(|i| (format!("P{i}"), format!("https://site{i}.example/p")))
+        .collect();
+    let refs: Vec<(&str, &str)> = hits.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let (s, _) = search(&[("q", &refs)]);
+    let mut pages = FakePages::default();
+    for (i, (t, u)) in hits.iter().enumerate() {
+        pages = pages.page(u, t, &long("topic", &format!("site{i}")));
+        // Each page claims to have cost 6 MiB to read.
+        pages.pages.get_mut(u).unwrap().bytes = 6 * 1024 * 1024;
+    }
+    let reads = Arc::clone(&pages.reads);
+    let g = gather(&s, &pages, &request(&["q"], 12)).await.unwrap();
+    // 16 MiB / 6 MiB: the pass stops after the wave that crossed the limit.
+    assert!(
+        reads.load(Ordering::SeqCst) <= FETCH_WAVE * 2,
+        "{}",
+        reads.load(Ordering::SeqCst)
+    );
+    assert!(g.sources.len() < 12);
+    assert!(!g.sources.is_empty());
+}
+
+#[tokio::test]
+async fn the_excerpts_never_add_up_to_more_than_max_chars() {
+    let hits: Vec<(String, String)> = (0..15)
+        .map(|i| (format!("P{i}"), format!("https://site{i}.example/p")))
+        .collect();
+    let refs: Vec<(&str, &str)> = hits.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let (s, _) = search(&[("q", &refs)]);
+    let mut pages = FakePages::default();
+    for (i, (t, u)) in hits.iter().enumerate() {
+        pages = pages.page(u, t, &long("topic", &format!("site{i}")));
+    }
+    // MIN_CHARS with the most sources: each excerpt would get MIN_EXCERPT (1 000), 15 000 in all.
+    let mut req = request(&["q"], MAX_SOURCES);
+    req.max_chars = MIN_CHARS;
+    let g = gather(&s, &pages, &req).await.unwrap();
+    let total: usize = g.sources.iter().map(|x| x.excerpt.chars().count()).sum();
+    assert!(total <= MIN_CHARS, "{total}");
+    assert!(!g.sources.is_empty() && g.sources.len() < MAX_SOURCES);
+}
+
+#[tokio::test]
+async fn a_long_address_in_a_note_is_cut() {
+    let long_url = format!("https://a.example/{}", "x".repeat(5_000));
+    let (s, _) = search(&[("q", &[("A", long_url.as_str())])]);
+    let g = gather(&s, &FakePages::default(), &request(&["q"], 2))
+        .await
+        .unwrap();
+    assert_eq!(g.skipped.len(), 1);
+    assert!(g.skipped[0].url.chars().count() <= MAX_NOTE_URL_CHARS);
 }
 
 #[tokio::test]
@@ -443,6 +522,7 @@ async fn nothing_read_says_so_instead_of_inviting_an_unsourced_answer() {
 fn pack(id: &str) -> Pack {
     Pack {
         id: id.into(),
+        bot_id: Some("bot-a".into()),
         question: "How do heat pumps compare with gas boilers?".into(),
         sources: vec![
             PackSource {
@@ -471,9 +551,17 @@ fn a_pack_survives_in_memory_and_on_disk_and_ids_cannot_name_other_files() {
     assert!(valid_id(&id), "{id}");
     let p = pack(&id);
     put_pack(Some(dir.path()), &p);
-    assert_eq!(get_pack(None, &id), Some(p.clone()), "memory");
+    assert_eq!(
+        get_pack(None, &id, Some("bot-a")),
+        Some(p.clone()),
+        "memory"
+    );
     memory().lock().retain(|x| x.id != id);
-    assert_eq!(get_pack(Some(dir.path()), &id), Some(p), "disk");
+    assert_eq!(
+        get_pack(Some(dir.path()), &id, Some("bot-a")),
+        Some(p),
+        "disk"
+    );
 
     for bad in [
         "../../etc/passwd",
@@ -485,7 +573,11 @@ fn a_pack_survives_in_memory_and_on_disk_and_ids_cannot_name_other_files() {
         "x-0123456789",
     ] {
         assert!(!valid_id(bad), "{bad}");
-        assert_eq!(get_pack(Some(dir.path()), bad), None, "{bad}");
+        assert_eq!(
+            get_pack(Some(dir.path()), bad, Some("bot-a")),
+            None,
+            "{bad}"
+        );
     }
     // A file whose content names another id is not trusted for this one.
     let other = new_id();
@@ -494,7 +586,33 @@ fn a_pack_survives_in_memory_and_on_disk_and_ids_cannot_name_other_files() {
         serde_json::to_vec(&pack(&id)).unwrap(),
     )
     .unwrap();
-    assert_eq!(get_pack(Some(dir.path()), &other), None);
+    assert_eq!(get_pack(Some(dir.path()), &other, Some("bot-a")), None);
+}
+
+#[test]
+fn a_pack_is_only_given_to_the_bot_that_made_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = new_id();
+    put_pack(Some(dir.path()), &pack(&id));
+    for from in ["memory", "disk"] {
+        if from == "disk" {
+            memory().lock().retain(|x| x.id != id);
+        }
+        let d = Some(dir.path());
+        assert!(get_pack(d, &id, Some("bot-a")).is_some(), "{from}: owner");
+        assert_eq!(get_pack(d, &id, Some("bot-b")), None, "{from}: other bot");
+        assert_eq!(get_pack(d, &id, None), None, "{from}: no bot");
+    }
+    // A pack that records no bot (or an old file) is nobody's but a caller that names none.
+    let anon = new_id();
+    put_pack(
+        None,
+        &Pack {
+            bot_id: None,
+            ..pack(&anon)
+        },
+    );
+    assert_eq!(get_pack(None, &anon, Some("bot-a")), None);
 }
 
 #[test]
@@ -611,4 +729,87 @@ fn names_dates_and_paths_are_plain() {
         p.starts_with("research/") && !p[9..].contains('/') && !p.contains(".."),
         "{p}"
     );
+}
+
+#[test]
+fn a_link_definition_cannot_turn_a_citation_into_a_link() {
+    let p = pack("r-0123456789abcdef");
+    let base = "Heat pumps usually cost less to run than gas boilers because they move heat \
+        instead of making it, which gives them a high efficiency in mild weather.[1]";
+    for def in [
+        "[1]: https://evil.example",
+        "   [1]: <https://evil.example> \"Source\"",
+        "> [1]: https://evil.example",
+        "- [ 1 ]: https://evil.example",
+        "1. [2]:\nhttps://evil.example",
+        "[x]: https://evil.example",
+    ] {
+        let body = format!("{base}\n\n{def}");
+        assert_eq!(
+            assemble_report(&p, "T", &body, "2026-11-27").unwrap_err(),
+            ReportError::LinkDefinition,
+            "{def}"
+        );
+    }
+    for link in [
+        "See [1](https://evil.example) now.",
+        "See [12](https://e.example).",
+    ] {
+        let body = format!("{base}\n\n{link}");
+        assert_eq!(
+            assemble_report(&p, "T", &body, "2026-11-27").unwrap_err(),
+            ReportError::NumberedLink,
+            "{link}"
+        );
+    }
+    // What is fine: a definition-looking line in code, a footnote, a citation followed by a
+    // colon inside a sentence, a link with words as its label.
+    let ok = format!(
+        "{base}\n\n```\n[1]: https://code.example\n```\n\nAs shown in [1]: the gap is wide. \
+         See [the guide](https://g.example) and a note.[^a]\n\n[^a]: A footnote."
+    );
+    let r = assemble_report(&p, "T", &ok, "2026-11-27").unwrap();
+    assert!(r.markdown.contains("[1]: https://code.example"));
+}
+
+#[test]
+fn a_page_title_cannot_forge_a_link_in_the_source_list() {
+    let mut p = pack("r-0123456789abcdef");
+    p.sources[0].title = "Good](https://evil.example) <https://evil.example> \\ [x".into();
+    let body = "Heat pumps usually cost less to run than gas boilers because they move heat \
+        instead of making it, which gives them a high efficiency in mild weather.[1]";
+    let r = assemble_report(&p, "T", body, "2026-11-27").unwrap();
+    let line = r.markdown.lines().last().unwrap();
+    assert_eq!(
+        line,
+        "- [1] Good\\](https://evil.example) &lt;https://evil.example&gt; \\\\ \\[x — https://a.example/x"
+    );
+}
+
+/// An owner "ask" rule: a plain request to the address is let through (the owner was asked in
+/// the card), a redirect hop is not.
+struct AskRule;
+impl tool_registry::UrlGuard for AskRule {
+    fn blocked(&self, _url: &str, redirect_hop: bool) -> bool {
+        redirect_hop
+    }
+}
+
+#[tokio::test]
+async fn a_site_the_owner_wants_to_approve_first_is_never_fetched_unasked() {
+    let fetcher = HttpFetcher::new(
+        std::sync::Arc::new(crate::DefaultUrlPolicy::default()),
+        crate::http::HttpConfig::default(),
+    )
+    .unwrap();
+    // This tool has no address input, so the owner was never asked about any page it reads:
+    // an "ask" rule refuses here (before any connection) the way it refuses a redirect.
+    let err = tool_registry::with_url_guard(
+        std::sync::Arc::new(AskRule),
+        HttpPages(&fetcher).read("https://ask.example/page"),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("owner"), "{err}");
+    assert!(matches!(err, WebError::Policy(_)), "{err:?}");
 }

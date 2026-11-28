@@ -468,6 +468,10 @@ impl BotProfile {
     pub fn spec_visible(&self, name: &str, category: PermissionCategory) -> bool {
         self.tool_visible(name)
             && (name.starts_with(builtin_tools::pc::PC_PREFIX) || self.category_visible(category))
+            // The report tool saves its file through `fs_write`: a bot whose tool lists or
+            // file access hide `fs_write` (for example `allow = ["web_*"]`) must not get a
+            // file written for it by way of a web tool.
+            && (name != builtin_tools::WEB_RESEARCH_REPORT || self.tool_visible("fs_write"))
     }
 
     /// Copy of this profile that knows whether an UNSET file mode is denied

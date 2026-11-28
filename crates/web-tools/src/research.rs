@@ -81,6 +81,18 @@ const FINGERPRINT_WORDS: usize = 400;
 const NEAR_COPY: f64 = 0.8;
 /// Longest title kept, in characters.
 const MAX_TITLE_CHARS: usize = 160;
+/// Most bytes read of one page (a page of text is far smaller; the rest is cut off).
+const MAX_PAGE_BYTES: usize = 2 * 1024 * 1024;
+/// Most bytes read over the whole pass, whatever the number of pages.
+const MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+/// Page fetches tried per source asked for (pages that fail or are unusable use some up).
+const ATTEMPTS_PER_SOURCE: usize = 3;
+/// Most page fetches of one pass, whatever is asked.
+pub const MAX_FETCH_ATTEMPTS: usize = 30;
+/// Longest address kept in a "not used" note, in characters.
+const MAX_NOTE_URL_CHARS: usize = 300;
+/// Most "not used" notes returned.
+pub const MAX_NOT_USED: usize = 12;
 
 /// What to research and within which limits. Every limit is already clamped.
 #[derive(Debug, Clone)]
@@ -154,6 +166,8 @@ pub(crate) struct Page {
     pub url: String,
     pub title: Option<String>,
     pub text: String,
+    /// Bytes received for the page (what counts against [`MAX_TOTAL_BYTES`]).
+    pub bytes: usize,
 }
 
 /// Where pages come from. The HTTP reader in production, a table in tests.
@@ -168,7 +182,21 @@ pub(crate) struct HttpPages<'a>(pub &'a HttpFetcher);
 #[async_trait]
 impl PageSource for HttpPages<'_> {
     async fn read(&self, url: &str) -> Result<Page, WebError> {
-        let page = self.0.get(url, &GetOptions::accepting(HTML_TYPES)).await?;
+        // The tool has no address input, so every fetch is one nobody asked the owner about.
+        // An owner "ask" rule is therefore refused here, like a redirect target (the fetcher
+        // itself refuses only a "block" for the first address).
+        if tool_registry::url_blocked(url, true) {
+            return Err(crate::policy::PolicyViolation::new(
+                "this site is blocked by an owner rule, or the owner wants to approve it first",
+            )
+            .into());
+        }
+        let opts = GetOptions {
+            max_bytes: Some(self.0.config().max_bytes.min(MAX_PAGE_BYTES)),
+            ..GetOptions::accepting(HTML_TYPES)
+        };
+        let page = self.0.get(url, &opts).await?;
+        let bytes = page.body.len();
         let raw = page.text();
         let (title, text) = if page.media_type.as_deref() == Some("text/plain") {
             (None, raw)
@@ -184,6 +212,7 @@ impl PageSource for HttpPages<'_> {
             url: page.url.to_string(),
             title,
             text,
+            bytes,
         })
     }
 }
@@ -455,14 +484,28 @@ pub(crate) async fn gather(
     let mut queue: VecDeque<Candidate> = reading_order(found).into();
     let mut read_keys: HashSet<String> = HashSet::new();
     let mut prints: Vec<HashSet<u64>> = Vec::new();
+    // Hard limits besides the number of sources: how many fetches are tried, how many bytes
+    // come in, and how much page text the pack holds in all.
+    let max_attempts = (req.max_sources * ATTEMPTS_PER_SOURCE).min(MAX_FETCH_ATTEMPTS);
+    let mut attempts = 0usize;
+    let mut total_bytes = 0usize;
+    let mut used_chars = 0usize;
     while out.sources.len() < req.max_sources && !queue.is_empty() {
         if Instant::now() >= deadline {
             out.timed_out = true;
             break;
         }
-        let wave: Vec<Candidate> = (0..(req.max_sources - out.sources.len()).min(FETCH_WAVE))
-            .filter_map(|_| queue.pop_front())
-            .collect();
+        if attempts >= max_attempts
+            || total_bytes >= MAX_TOTAL_BYTES
+            || req.max_chars.saturating_sub(used_chars) < MIN_PAGE_CHARS
+        {
+            break;
+        }
+        let room = (req.max_sources - out.sources.len())
+            .min(FETCH_WAVE)
+            .min(max_attempts - attempts);
+        let wave: Vec<Candidate> = (0..room).filter_map(|_| queue.pop_front()).collect();
+        attempts += wave.len();
         // `join_all` keeps the order of the wave, so numbering never depends on which page
         // answered first. It runs on this task: the owner's site rules (a task-local guard)
         // apply to every request.
@@ -473,7 +516,7 @@ pub(crate) async fn gather(
         let results = futures_util::future::join_all(reads).await;
         for (cand, result) in wave.into_iter().zip(results) {
             let skip = |reason: String| Skipped {
-                url: cand.url.clone(),
+                url: cut_chars(&cand.url, MAX_NOTE_URL_CHARS).to_owned(),
                 reason,
             };
             let page = match result {
@@ -488,6 +531,7 @@ pub(crate) async fn gather(
                     continue;
                 }
             };
+            total_bytes = total_bytes.saturating_add(page.bytes);
             if out.sources.len() >= req.max_sources {
                 break;
             }
@@ -504,6 +548,12 @@ pub(crate) async fn gather(
                 ));
                 continue;
             }
+            let left = req.max_chars.saturating_sub(used_chars);
+            if left < MIN_PAGE_CHARS {
+                out.skipped
+                    .push(skip("the character budget is used up".into()));
+                continue;
+            }
             let print = shingles(&page.text);
             if prints.iter().any(|p| is_near_copy(p, &print)) {
                 out.near_copies += 1;
@@ -512,7 +562,8 @@ pub(crate) async fn gather(
             read_keys.insert(final_key);
             read_keys.insert(cand.key.clone());
             prints.push(print);
-            let (text, cut) = excerpt(&page.text, &terms, per_source);
+            let (text, cut) = excerpt(&page.text, &terms, per_source.min(left));
+            used_chars += text.chars().count();
             let title = page
                 .title
                 .as_deref()
@@ -607,7 +658,7 @@ pub(crate) fn render(id: &str, req: &Request, g: &Gathered) -> String {
     }
     if !g.skipped.is_empty() {
         s.push_str("\nNot used:\n");
-        for k in g.skipped.iter().take(12) {
+        for k in g.skipped.iter().take(MAX_NOT_USED) {
             let _ = writeln!(s, "- {} ({})", k.url, k.reason);
         }
     }
@@ -638,6 +689,9 @@ pub struct PackSource {
 pub struct Pack {
     /// Handle the model passes to the report tool.
     pub id: String,
+    /// The bot whose run read the pages. Only that bot may cite the pack.
+    #[serde(default)]
+    pub bot_id: Option<String>,
     /// The question that was researched.
     pub question: String,
     /// Sources by number.
@@ -655,10 +709,13 @@ fn memory() -> &'static Mutex<VecDeque<Pack>> {
     MEM.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
-/// Where packs are kept under a spill directory. Both tools derive it the same way.
+/// Where packs are kept under the daemon's data directory. Both tools derive it the same way.
+/// It is deliberately not under `spill/`: the file tools may read the spill folder, but every
+/// other folder of the data directory is protected from them, so one bot cannot list or read
+/// the packs (the questions and sources) of another.
 #[must_use]
-pub fn pack_dir(spill_dir: &Path) -> PathBuf {
-    spill_dir.join(PACK_DIR_NAME)
+pub fn pack_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(PACK_DIR_NAME)
 }
 
 /// An id is `r-` and lowercase hex: nothing that could name another file.
@@ -711,27 +768,32 @@ pub fn put_pack(dir: Option<&Path>, pack: &Pack) {
     }
 }
 
-/// The pack with this id, from memory or from `dir`. An id that is not in the exact shape
-/// [`new_id`] makes is never looked up.
+/// The pack with this id, from memory or from `dir`, when it belongs to `bot_id` (a bot gets
+/// no other bot's pack, and a call that names no bot gets only packs made without one). An id
+/// that is not in the exact shape [`new_id`] makes is never looked up.
 #[must_use]
-pub fn get_pack(dir: Option<&Path>, id: &str) -> Option<Pack> {
+pub fn get_pack(dir: Option<&Path>, id: &str, bot_id: Option<&str>) -> Option<Pack> {
     if !valid_id(id) {
         return None;
     }
-    if let Some(p) = memory().lock().iter().find(|p| p.id == id) {
-        return Some(p.clone());
-    }
-    let bytes = std::fs::read(dir?.join(format!("{id}.json"))).ok()?;
-    let pack: Pack = serde_json::from_slice(&bytes).ok()?;
-    (pack.id == id).then_some(pack)
+    let remembered = memory().lock().iter().find(|p| p.id == id).cloned();
+    let pack = match remembered {
+        Some(p) => p,
+        None => {
+            let bytes = std::fs::read(dir?.join(format!("{id}.json"))).ok()?;
+            serde_json::from_slice::<Pack>(&bytes).ok()?
+        }
+    };
+    (pack.id == id && pack.bot_id.as_deref() == bot_id).then_some(pack)
 }
 
 impl Gathered {
     /// The numbered sources, to remember under `id`.
     #[must_use]
-    pub(crate) fn pack(&self, id: &str, question: &str) -> Pack {
+    pub(crate) fn pack(&self, id: &str, question: &str, bot_id: Option<&str>) -> Pack {
         Pack {
             id: id.to_owned(),
+            bot_id: bot_id.map(str::to_owned),
             question: question.to_owned(),
             sources: self
                 .sources
@@ -766,6 +828,16 @@ pub enum ReportError {
         "these citation numbers are not sources of this research: {0:?}. The sources are [1] to [{1}]"
     )]
     UnknownCitations(Vec<usize>, usize),
+    /// A link reference definition (`[1]: https://...`).
+    #[error(
+        "the text has a link definition like \"[1]: https://...\": remove it. A definition turns every [n] with that label into a link to another address; the source list is written from what was read"
+    )]
+    LinkDefinition,
+    /// A link whose label is a citation number (`[1](https://...)`).
+    #[error(
+        "the text has a link whose label is a number, like [1](https://...): cite with a plain [n] and write other links with words as their label"
+    )]
+    NumberedLink,
 }
 
 /// A finished report.
@@ -823,6 +895,76 @@ fn marks(line: &str) -> Vec<(usize, usize, usize)> {
     out
 }
 
+/// The line without the Markdown container marks that may stand before a block: indentation,
+/// block quotes, bullets and numbers of a list.
+fn block_start(line: &str) -> &str {
+    let mut rest = line.trim_start();
+    loop {
+        let next = if let Some(r) = rest.strip_prefix('>') {
+            r
+        } else if let Some(r) = rest
+            .strip_prefix("- ")
+            .or_else(|| rest.strip_prefix("* "))
+            .or_else(|| rest.strip_prefix("+ "))
+        {
+            r
+        } else {
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            match rest.get(digits..) {
+                Some(r) if digits > 0 && (r.starts_with(". ") || r.starts_with(") ")) => &r[2..],
+                _ => return rest,
+            }
+        };
+        rest = next.trim_start();
+    }
+}
+
+/// `[label]: destination` at the start of a block: a link reference definition (a footnote,
+/// `[^1]:`, is not one).
+fn is_link_definition(line: &str) -> bool {
+    let Some(rest) = block_start(line).strip_prefix('[') else {
+        return false;
+    };
+    let Some(end) = rest.find(']') else {
+        return false;
+    };
+    let label = &rest[..end];
+    !label.is_empty()
+        && !label.starts_with('^')
+        && !label.contains('[')
+        && rest[end + 1..].starts_with(':')
+}
+
+/// Whether `line` has a `[123](` link: a citation number used as a link label.
+fn has_numbered_link(line: &str) -> bool {
+    let b = line.as_bytes();
+    (0..b.len()).any(|i| {
+        if b[i] != b'[' {
+            return false;
+        }
+        let digits = b[i + 1..].iter().take_while(|c| c.is_ascii_digit()).count();
+        digits > 0 && b.get(i + 1 + digits) == Some(&b']') && b.get(i + 2 + digits) == Some(&b'(')
+    })
+}
+
+/// A page title as plain text inside a Markdown list item: no brackets, angle brackets or
+/// backslashes that could open a link, an address or an escape of the text after it.
+fn md_plain(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' | '[' | ']' | '`' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Check the model's text against the pack and build the file: a title, the question, the text
 /// with its citations renumbered in order of first use, and a source list written from the
 /// pack, never from the text. A `Sources` section the model wrote itself is replaced.
@@ -863,6 +1005,12 @@ pub fn assemble_report(
         }
         if in_code {
             continue;
+        }
+        if is_link_definition(line) {
+            return Err(ReportError::LinkDefinition);
+        }
+        if has_numbered_link(line) {
+            return Err(ReportError::NumberedLink);
         }
         for (_, _, n) in marks(line) {
             if pack.sources.iter().any(|s| s.n == n) {
@@ -925,7 +1073,7 @@ pub fn assemble_report(
                 md,
                 "- [{}] {} — {}",
                 new + 1,
-                one_line(&s.title, MAX_TITLE_CHARS),
+                md_plain(&one_line(&s.title, MAX_TITLE_CHARS)),
                 s.url
             );
         }

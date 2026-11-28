@@ -382,16 +382,18 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         }
     }
     all.extend(fs_tools);
+    // Where `web_research` keeps its source lists: a protected folder of the data directory
+    // (the file tools may not read it), never under `spill/`, which they may.
+    let research_dir = cfg
+        .web
+        .as_ref()
+        .and_then(|w| w.research_dir.clone())
+        .unwrap_or_else(|| web_tools::research::pack_dir(&cfg.data_dir));
     if let Some(gate) = report_gate {
-        let spill = cfg
-            .web
-            .as_ref()
-            .and_then(|w| w.spill_dir.clone())
-            .unwrap_or_else(|| cfg.data_dir.join("spill"));
         all.push(research_report::tool(
             registry.clone(),
             gate,
-            web_tools::research::pack_dir(&spill),
+            research_dir.clone(),
         ));
     }
     if cfg.optional_tools != OptionalTools::default() {
@@ -465,7 +467,8 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.web.as_ref().map(|w| Arc::clone(&w.policy)),
         Some(&cfg.data_dir),
     ));
-    if let Some(web) = cfg.web.clone() {
+    if let Some(mut web) = cfg.web.clone() {
+        web.research_dir = Some(research_dir);
         match web_tools::tools(web) {
             Ok(tools) => all.extend(tools),
             Err(e) => tracing::warn!("web tools not available: {e}"),

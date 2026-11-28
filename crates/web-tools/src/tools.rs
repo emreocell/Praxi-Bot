@@ -72,6 +72,10 @@ pub struct WebToolsConfig {
     pub secrets: Option<Arc<dyn SecretStore>>,
     /// Directory for spilled large outputs. `None`: oversized output is truncated only.
     pub spill_dir: Option<PathBuf>,
+    /// Directory for the source lists `web_research` remembers (see
+    /// [`crate::research::pack_dir`]). It must be a protected folder the file tools cannot read,
+    /// not the spill directory. `None`: they are kept in memory only.
+    pub research_dir: Option<PathBuf>,
     /// The optional web scraping add-on. `Some` registers `web_scrape`; the embedder sets it only
     /// when the add-on is installed on this computer.
     pub scrape: Option<crate::scrape::ScrapeConfig>,
@@ -85,6 +89,7 @@ impl Default for WebToolsConfig {
             search: SearchConfig::default(),
             secrets: None,
             spill_dir: None,
+            research_dir: None,
             scrape: None,
         }
     }
@@ -104,6 +109,7 @@ struct Shared {
     fetcher: HttpFetcher,
     search: MultiSearch,
     spill_dir: Option<PathBuf>,
+    research_dir: Option<PathBuf>,
 }
 
 struct WebTool {
@@ -133,6 +139,7 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
         fetcher,
         search,
         spill_dir: cfg.spill_dir,
+        research_dir: cfg.research_dir,
     });
     let make = |name: &str, desc: &str, schema: Value, kind: Kind| -> Arc<dyn Tool> {
         Arc::new(WebTool {
@@ -627,21 +634,35 @@ impl WebTool {
         .await
         .map_err(tool_err)?;
         let id = r::new_id();
-        let dir = self.shared.spill_dir.as_deref().map(r::pack_dir);
-        r::put_pack(dir.as_deref(), &gathered.pack(&id, &req.question));
+        r::put_pack(
+            self.shared.research_dir.as_deref(),
+            &gathered.pack(&id, &req.question, ctx.bot_id.as_deref()),
+        );
         let text = r::render(&id, &req, &gathered);
         let mut out = finish_text(ctx, self.shared.spill_dir.as_deref(), text);
-        out.content.push(ContentPart::Json {
-            data: json!({
-                "untrusted_external_content": true,
-                "research_id": id,
-                "sources": gathered.sources.iter().map(|s| json!({
-                    "n": s.n, "url": s.url, "title": s.title, "found_for": s.found_for,
-                })).collect::<Vec<_>>(),
-                "not_used": gathered.skipped,
-                "timed_out": gathered.timed_out,
-            }),
+        // The machine-readable copy is small by construction (at most MAX_SOURCES sources and
+        // MAX_NOT_USED notes of capped length), and it is added only when it fits what is left
+        // of the inline budget, so it can never push the result past `max_inline_bytes`.
+        let data = json!({
+            "untrusted_external_content": true,
+            "research_id": id,
+            "sources": gathered.sources.iter().map(|s| json!({
+                "n": s.n, "url": s.url, "title": s.title, "found_for": s.found_for,
+            })).collect::<Vec<_>>(),
+            "not_used": gathered.skipped.iter().take(r::MAX_NOT_USED).collect::<Vec<_>>(),
+            "timed_out": gathered.timed_out,
         });
+        let inline: usize = out
+            .content
+            .iter()
+            .map(|p| match p {
+                ContentPart::Text { text } => text.len(),
+                _ => 0,
+            })
+            .sum();
+        if inline.saturating_add(json_len(&data)) <= ctx.max_inline_bytes {
+            out.content.push(ContentPart::Json { data });
+        }
         Ok(out)
     }
 

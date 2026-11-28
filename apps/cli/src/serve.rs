@@ -815,6 +815,7 @@ pub fn web_tools_config(
         }),
         secrets: store.cloned(),
         spill_dir: Some(data_dir.join("spill")),
+        research_dir: Some(web_tools::research::pack_dir(data_dir)),
         ..web_tools::WebToolsConfig::default()
     };
     // The optional web scraping add-on: `web_scrape` exists only on a computer where the owner

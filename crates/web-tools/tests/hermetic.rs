@@ -1859,6 +1859,8 @@ async fn web_research_searches_reads_numbers_and_remembers_the_sources() {
     let mut c = cfg(loopback_ok());
     c.search.searxng_url = Some(base.clone());
     c.spill_dir = Some(spill.path().to_path_buf());
+    let packs = tempfile::tempdir().unwrap();
+    c.research_dir = Some(web_tools::research::pack_dir(packs.path()));
     let reg = ToolRegistry::new();
     web_tools::register(&reg, c).unwrap();
     let spec = reg.get("web_research").unwrap().spec().clone();
@@ -1924,13 +1926,75 @@ async fn web_research_searches_reads_numbers_and_remembers_the_sources() {
         "found by both searches"
     );
 
-    // The source list is remembered for the report tool, in memory and in the spill folder.
-    let pack =
-        web_tools::research::get_pack(Some(&web_tools::research::pack_dir(spill.path())), &id)
-            .unwrap();
+    // The source list is remembered for the report tool, in memory and in its own folder (never
+    // in the spill folder, which the file tools may read).
+    let dir = web_tools::research::pack_dir(packs.path());
+    assert!(dir.join(format!("{id}.json")).exists());
+    assert!(!web_tools::research::pack_dir(spill.path()).exists());
+    let pack = web_tools::research::get_pack(Some(&dir), &id, None).unwrap();
+    assert_eq!(
+        web_tools::research::get_pack(Some(&dir), &id, Some("bot-b")),
+        None
+    );
     assert_eq!(pack.sources.len(), 2);
     assert_eq!(pack.sources[0].n, 1);
     assert!(pack.sources[0].url.ends_with("/costs"));
+}
+
+/// An owner "ask" rule as the loop's guard answers it: the address a call named was put to the
+/// owner (so it passes), a redirect target was not (so it is refused).
+struct AskPath(&'static str);
+impl tool_registry::UrlGuard for AskPath {
+    fn blocked(&self, url: &str, redirect_hop: bool) -> bool {
+        redirect_hop && url.contains(self.0)
+    }
+}
+
+#[tokio::test]
+async fn web_research_never_reads_a_site_the_owner_wants_to_approve_first() {
+    let server = MockServer::start().await;
+    let base = server.uri();
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "results": [
+                {"title": "Ask", "url": format!("{base}/ask/page"), "content": "a"},
+                {"title": "Fine", "url": format!("{base}/fine"), "content": "f"},
+            ]})),
+        )
+        .mount(&server)
+        .await;
+    let ask = Mock::given(method("GET"))
+        .and(path("/ask/page"))
+        .respond_with(html(&article("heat pumps", "ask-site")))
+        .expect(0)
+        .mount_as_scoped(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/fine"))
+        .respond_with(html(&article("heat pumps", "fine-site")))
+        .mount(&server)
+        .await;
+    let mut c = cfg(loopback_ok());
+    c.search.searxng_url = Some(base.clone());
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let guard: Arc<dyn tool_registry::UrlGuard> = Arc::new(AskPath("/ask/"));
+    let out = tool_registry::with_url_guard(
+        guard,
+        call(
+            &reg,
+            "web_research",
+            json!({"question": "Are heat pumps cheaper to run?"}),
+        ),
+    )
+    .await
+    .unwrap();
+    let t = text(&out);
+    assert!(t.contains("fine-site"), "{t}");
+    assert!(!t.contains("ask-site"), "{t}");
+    assert!(t.contains("/ask/page") && t.contains("owner"), "{t}");
+    drop(ask); // verifies that the page was never requested
 }
 
 #[tokio::test]
