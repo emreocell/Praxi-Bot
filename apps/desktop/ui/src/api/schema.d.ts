@@ -13712,6 +13712,14 @@ export interface components {
             duckduckgo: boolean;
             /** @description Whether the `DuckDuckGo` Lite fallback is enabled. */
             duckduckgo_lite: boolean;
+            /** @description Whether self-hosted extraction has been explicitly enabled. */
+            firecrawl_allow_self_hosted_scrape: boolean;
+            /** @description Whether a Firecrawl key is stored. */
+            firecrawl_key_set: boolean;
+            /** @description Whether Firecrawl is selected for extraction. */
+            firecrawl_scrape: boolean;
+            /** @description Firecrawl self-hosted server URL, if configured. */
+            firecrawl_url?: string | null;
             /**
              * @description `true` on a computer with no screen (a server or host) that has no search provider
              *     (Brave, Tavily or `SearXNG`): the free engines usually refuse such machines as robots, so
@@ -13720,7 +13728,7 @@ export interface components {
             needs_provider?: boolean;
             /**
              * @description Priority order of backend ids (`searxng`, `brave`, `tavily`,
-             *     `duckduckgo`, `duckduckgo_lite`, `bing`).
+             *     `firecrawl`, `duckduckgo`, `duckduckgo_lite`, `bing`).
              */
             order: string[];
             /** @description Configured `SearXNG` base URL; `null` if unset. */
@@ -13742,12 +13750,22 @@ export interface components {
             brave_key?: string | null;
             /** @description Remove the stored Brave Search API key. */
             clear_brave_key?: boolean | null;
+            /** @description Remove the stored Firecrawl key. */
+            clear_firecrawl_key?: boolean | null;
             /** @description Remove the stored Tavily Search API key. */
             clear_tavily_key?: boolean | null;
             /** @description Enable or disable the `DuckDuckGo` HTML fallback. */
             duckduckgo?: boolean | null;
             /** @description Enable or disable the `DuckDuckGo` Lite fallback. */
             duckduckgo_lite?: boolean | null;
+            /** @description Allow extraction through the self-hosted server. */
+            firecrawl_allow_self_hosted_scrape?: boolean | null;
+            /** @description Firecrawl API key, write-only. */
+            firecrawl_key?: string | null;
+            /** @description Select Firecrawl for extraction. */
+            firecrawl_scrape?: boolean | null;
+            /** @description Self-hosted Firecrawl URL; empty clears it. */
+            firecrawl_url?: string | null;
             /** @description Desired priority order of backend ids. */
             order?: string[] | null;
             /** @description `SearXNG` base URL; empty string clears it. */

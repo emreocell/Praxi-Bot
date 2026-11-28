@@ -3,7 +3,7 @@
 //!
 //! API keys are **write-only**: they enter through [`WebSearchConfigInput`], go
 //! straight into the secret store, and no response or log line ever carries one
-//! (responses only report `brave_key_set` / `tavily_key_set`).
+//! (responses report only whether each key is set).
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 #[allow(clippy::struct_excessive_bools)]
 pub struct WebSearchConfigDto {
     /// Priority order of backend ids (`searxng`, `brave`, `tavily`,
-    /// `duckduckgo`, `duckduckgo_lite`, `bing`).
+    /// `firecrawl`, `duckduckgo`, `duckduckgo_lite`, `bing`).
     pub order: Vec<String>,
     /// Effective ordered list of enabled and usable backends that `web_search`
     /// will try.
@@ -26,6 +26,14 @@ pub struct WebSearchConfigDto {
     pub brave_key_set: bool,
     /// Whether a Tavily Search API key is stored (never returned).
     pub tavily_key_set: bool,
+    /// Firecrawl self-hosted server URL, if configured.
+    pub firecrawl_url: Option<String>,
+    /// Whether a Firecrawl key is stored.
+    pub firecrawl_key_set: bool,
+    /// Whether Firecrawl is selected for extraction.
+    pub firecrawl_scrape: bool,
+    /// Whether self-hosted extraction has been explicitly enabled.
+    pub firecrawl_allow_self_hosted_scrape: bool,
     /// Whether the `DuckDuckGo` HTML fallback is enabled.
     pub duckduckgo: bool,
     /// Whether the `DuckDuckGo` Lite fallback is enabled.
@@ -67,6 +75,21 @@ pub struct WebSearchConfigInput {
     /// Remove the stored Tavily Search API key.
     #[serde(default)]
     pub clear_tavily_key: Option<bool>,
+    /// Self-hosted Firecrawl URL; empty clears it.
+    #[serde(default)]
+    pub firecrawl_url: Option<String>,
+    /// Firecrawl API key, write-only.
+    #[serde(default)]
+    pub firecrawl_key: Option<String>,
+    /// Remove the stored Firecrawl key.
+    #[serde(default)]
+    pub clear_firecrawl_key: Option<bool>,
+    /// Select Firecrawl for extraction.
+    #[serde(default)]
+    pub firecrawl_scrape: Option<bool>,
+    /// Allow extraction through the self-hosted server.
+    #[serde(default)]
+    pub firecrawl_allow_self_hosted_scrape: Option<bool>,
     /// Enable or disable the `DuckDuckGo` HTML fallback.
     #[serde(default)]
     pub duckduckgo: Option<bool>,
@@ -90,6 +113,17 @@ impl std::fmt::Debug for WebSearchConfigInput {
                 &self.tavily_key.as_ref().map(|_| "<redacted>"),
             )
             .field("clear_tavily_key", &self.clear_tavily_key)
+            .field("firecrawl_url", &self.firecrawl_url)
+            .field(
+                "firecrawl_key",
+                &self.firecrawl_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("clear_firecrawl_key", &self.clear_firecrawl_key)
+            .field("firecrawl_scrape", &self.firecrawl_scrape)
+            .field(
+                "firecrawl_allow_self_hosted_scrape",
+                &self.firecrawl_allow_self_hosted_scrape,
+            )
             .field("duckduckgo", &self.duckduckgo)
             .field("duckduckgo_lite", &self.duckduckgo_lite)
             .field("bing", &self.bing)

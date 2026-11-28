@@ -1184,11 +1184,15 @@ export class MockApiClient extends ApiClient {
   private readonly hostSetup = new MockHostSetup();
   private lastPlan: import("./types.ts").PackPlan | null = null;
   private webSearchConfig: WebSearchConfig = {
-    order: ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"],
+    order: ["searxng", "brave", "tavily", "firecrawl", "duckduckgo", "duckduckgo_lite", "bing"],
     active_backends: ["duckduckgo", "duckduckgo_lite", "bing"],
     searxng_url: null,
     brave_key_set: false,
     tavily_key_set: false,
+    firecrawl_url: null,
+    firecrawl_key_set: false,
+    firecrawl_scrape: false,
+    firecrawl_allow_self_hosted_scrape: false,
     duckduckgo: true,
     duckduckgo_lite: true,
     bing: true,
@@ -3734,6 +3738,10 @@ export class MockApiClient extends ApiClient {
       const tavily_key_set = input.clear_tavily_key
         ? false
         : cur.tavily_key_set || Boolean(input.tavily_key);
+      const firecrawl_url = input.firecrawl_url !== undefined ? (input.firecrawl_url ?? "").trim() || null : cur.firecrawl_url;
+      const firecrawl_key_set = input.clear_firecrawl_key ? false : cur.firecrawl_key_set || Boolean(input.firecrawl_key);
+      const firecrawl_scrape = input.firecrawl_scrape ?? cur.firecrawl_scrape;
+      const firecrawl_allow_self_hosted_scrape = input.firecrawl_allow_self_hosted_scrape ?? (firecrawl_url === cur.firecrawl_url && cur.firecrawl_allow_self_hosted_scrape);
       const duckduckgo = input.duckduckgo ?? cur.duckduckgo;
       const duckduckgo_lite = input.duckduckgo_lite ?? cur.duckduckgo_lite;
       const bing = input.bing ?? cur.bing;
@@ -3741,6 +3749,7 @@ export class MockApiClient extends ApiClient {
         if (name === "searxng") return searxng_url !== null;
         if (name === "brave") return brave_key_set;
         if (name === "tavily") return tavily_key_set;
+        if (name === "firecrawl") return Boolean(firecrawl_url || firecrawl_key_set);
         if (name === "duckduckgo") return duckduckgo;
         if (name === "duckduckgo_lite") return duckduckgo_lite;
         if (name === "bing") return bing;
@@ -3752,6 +3761,10 @@ export class MockApiClient extends ApiClient {
         searxng_url,
         brave_key_set,
         tavily_key_set,
+        firecrawl_url,
+        firecrawl_key_set,
+        firecrawl_scrape,
+        firecrawl_allow_self_hosted_scrape,
         duckduckgo,
         duckduckgo_lite,
         bing,

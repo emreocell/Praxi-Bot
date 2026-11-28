@@ -17,7 +17,7 @@ import type {
 } from "../../api/types";
 import { MoreInfo } from "../../components/ChoiceList";
 import { FormField, formStyles } from "../../components/SettingsForm";
-import { SettingGroup, Switch } from "../../components/SettingsUi";
+import { SettingGroup, Switch, SwitchField } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { applyWebSearchUpdate } from "../../lib/webSearchDraft";
 import {
@@ -51,6 +51,8 @@ function backendLabelKey(id: string): string {
       return "settingsModal.webSearch.backends.brave";
     case "tavily":
       return "settingsModal.webSearch.backends.tavily";
+    case "firecrawl":
+      return "settingsModal.webSearch.backends.firecrawl";
     case "duckduckgo":
       return "settingsModal.webSearch.backends.duckduckgo";
     case "duckduckgo_lite":
@@ -76,6 +78,11 @@ export function WebSearchCard() {
   const [searxngUrl, setSearxngUrl] = useState("");
   const [braveKey, setBraveKey] = useState("");
   const [tavilyKey, setTavilyKey] = useState("");
+  const [firecrawlKey, setFirecrawlKey] = useState("");
+  const [firecrawlUrl, setFirecrawlUrl] = useState("");
+  const [firecrawlSelfHosted, setFirecrawlSelfHosted] = useState(false);
+  const [firecrawlScrape, setFirecrawlScrape] = useState(false);
+  const [firecrawlAllow, setFirecrawlAllow] = useState(false);
 
   const [testQuery, setTestQuery] = useState("");
   const [testing, setTesting] = useState(false);
@@ -86,6 +93,10 @@ export function WebSearchCard() {
   const applyConfig = useCallback((next: WebSearchConfig) => {
     setConfig(next);
     setSearxngUrl(next.searxng_url ?? "");
+    setFirecrawlUrl(next.firecrawl_url ?? "");
+    setFirecrawlSelfHosted(Boolean(next.firecrawl_url));
+    setFirecrawlScrape(next.firecrawl_scrape);
+    setFirecrawlAllow(next.firecrawl_allow_self_hosted_scrape);
   }, []);
 
   const applyDraft = useCallback(
@@ -99,6 +110,13 @@ export function WebSearchCard() {
       setSearxngUrl(next.searxngUrl);
       setBraveKey(next.braveKey);
       setTavilyKey(next.tavilyKey);
+      if (sent.firecrawl_key !== undefined) setFirecrawlKey("");
+      if (sent.firecrawl_url !== undefined) {
+        setFirecrawlUrl(updated.firecrawl_url ?? "");
+        setFirecrawlSelfHosted(Boolean(updated.firecrawl_url));
+      }
+      if (sent.firecrawl_scrape !== undefined) setFirecrawlScrape(updated.firecrawl_scrape);
+      if (sent.firecrawl_allow_self_hosted_scrape !== undefined || sent.firecrawl_url !== undefined) setFirecrawlAllow(updated.firecrawl_allow_self_hosted_scrape);
     },
     [braveKey, searxngUrl, tavilyKey]
   );
@@ -199,8 +217,13 @@ export function WebSearchCard() {
     if (!client || !config) {
       return;
     }
-    if (draftChanged(provider, draftValue(provider), config)) {
-      const input = saveInput(provider, draftValue(provider));
+    if (selectedHasDraft) {
+      const input: WebSearchConfigInput = provider === "firecrawl" ? {
+        firecrawl_url: firecrawlSelfHosted ? firecrawlUrl.trim() : "",
+        ...(firecrawlKey.trim() ? { firecrawl_key: firecrawlKey.trim() } : {}),
+        firecrawl_scrape: firecrawlScrape,
+        firecrawl_allow_self_hosted_scrape: firecrawlSelfHosted && firecrawlAllow
+      } : saveInput(provider, draftValue(provider));
       setSaving(true);
       try {
         const updated = await client.updateWebSearch(input);
@@ -246,8 +269,9 @@ export function WebSearchCard() {
   };
 
   const selectedConfigured = config !== null && providerConfigured(provider, config);
-  const selectedHasDraft =
-    config !== null && draftChanged(provider, draftValue(provider), config);
+  const selectedHasDraft = config !== null && (provider === "firecrawl"
+    ? Boolean(firecrawlKey.trim()) || (firecrawlSelfHosted ? firecrawlUrl.trim() : "") !== (config.firecrawl_url ?? "") || firecrawlScrape !== config.firecrawl_scrape || (firecrawlSelfHosted && firecrawlAllow) !== config.firecrawl_allow_self_hosted_scrape
+    : draftChanged(provider, draftValue(provider), config));
   const busy = saving || testing;
 
   const keyField = (
@@ -362,12 +386,24 @@ export function WebSearchCard() {
                 </FormField>
               ) : null}
 
+              {provider === "firecrawl" ? <>
+                <FormField id="firecrawl-mode" label={t("settingsModal.webSearch.firecrawl.mode")} width="md">
+                  <select id="firecrawl-mode" className={formStyles.input} value={firecrawlSelfHosted ? "self" : "cloud"} onChange={(e) => { setFirecrawlSelfHosted(e.target.value === "self"); setFirecrawlAllow(false); }}>
+                    <option value="cloud">{t("settingsModal.webSearch.firecrawl.cloud")}</option>
+                    <option value="self">{t("settingsModal.webSearch.firecrawl.selfHosted")}</option>
+                  </select>
+                </FormField>
+                {firecrawlSelfHosted ? <FormField id="firecrawl-url" label={t("settingsModal.webSearch.firecrawl.url")} width="md"><input id="firecrawl-url" type="url" className={formStyles.input} value={firecrawlUrl} onChange={(e) => { setFirecrawlUrl(e.target.value); setFirecrawlAllow(false); }} /></FormField> : null}
+                <FormField id="firecrawl-key" label={t("settingsModal.webSearch.firecrawl.key")} helpTitle={t("settingsModal.webSearch.firecrawl.key")} helpBody={t("settingsModal.webSearch.keyWriteOnlyHint")} width="md"><input id="firecrawl-key" type="password" autoComplete="off" className={formStyles.input} value={firecrawlKey} onChange={(e) => setFirecrawlKey(e.target.value)} placeholder={t(config.firecrawl_key_set ? "settingsModal.webSearch.keyStoredPlaceholder" : "settingsModal.webSearch.keyEmptyPlaceholder")} /></FormField>
+                <SwitchField checked={firecrawlScrape} onChange={setFirecrawlScrape} label={t("settingsModal.webSearch.firecrawl.useScrape")} />
+                {firecrawlSelfHosted ? <SwitchField checked={firecrawlAllow} onChange={setFirecrawlAllow} label={t("settingsModal.webSearch.firecrawl.allow")} hint={t("settingsModal.webSearch.firecrawl.risk")} /> : null}
+              </> : null}
               <div className={styles.actions}>
                 <Button
                   type="submit"
                   size="sm"
                   variant="primary"
-                  disabled={busy || !(selectedHasDraft || selectedConfigured)}
+                  disabled={busy || !(selectedHasDraft || selectedConfigured) || (provider === "firecrawl" && firecrawlSelfHosted && !firecrawlUrl.trim())}
                   data-testid="web-provider-save-test"
                 >
                   <PlugZap />
@@ -385,7 +421,9 @@ export function WebSearchCard() {
                     onClick={() => clearProvider(provider)}
                   >
                     <Trash2 />
-                    {provider === "searxng"
+                    {provider === "firecrawl"
+                      ? t("settingsModal.webSearch.firecrawl.remove")
+                      : provider === "searxng"
                       ? t("settingsModal.webSearch.clearUrl")
                       : t("settingsModal.webSearch.clearKey")}
                   </Button>

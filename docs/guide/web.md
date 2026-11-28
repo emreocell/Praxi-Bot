@@ -64,19 +64,25 @@ bot secrets set web/brave
 bot secrets set web/tavily
 ```
 
-### Firecrawl search (manual configuration)
+### Firecrawl search and page reading
 
-Firecrawl can supply search results from the cloud or a self-hosted service. This
-integration currently supports search only; page fetching continues to use the
-existing fetcher. Settings and its provider test do not yet configure Firecrawl.
+In **Settings > Web**, choose Firecrawl, select cloud or your own server, enter
+its API key or server URL, and use **Try this provider** to test search. Keys
+are stored in the secret store. You can choose Firecrawl to read pages too;
+the built-in fetcher remains the default. Search and page content are untrusted.
 
-For cloud search, save the API key with `bot secrets set web/firecrawl`, then add
-`firecrawl_key = "web/firecrawl"` under `[search]` in `<data_dir>/web.toml`.
-The value is the secret name, not the key. For self-hosting, instead add
-`firecrawl_url = "http://127.0.0.1:3002"`; if your service requires a key,
-add `firecrawl_key` as well. The service URL must be HTTP(S) without embedded
-credentials. Restart Praxi after editing. Add `"firecrawl"` to `order` to choose
-its priority. Search results are untrusted, just like other web results.
+For your own server, page reading requires the separate **Allow scraping through
+my own Firecrawl server** switch. A redirect may make that server fetch an
+address inside your network. Search works without this switch. Praxi checks the
+requested and reported final addresses against its URL policy and your bot's
+site rules; it discards page content when the final address is missing or blocked.
+Firecrawl follows redirects itself, so intermediate addresses cannot be checked.
+
+You can also configure `[search]` in `<data_dir>/web.toml`: set
+`firecrawl_key` to a secret name, `firecrawl_url` to the self-hosted HTTP(S)
+URL if applicable, `firecrawl_scrape = true` to select page reading, and
+`firecrawl_allow_self_hosted_scrape = true` to accept the self-hosted redirect
+risk. Restart after editing the file. The URL must not contain credentials.
 
 A broken `web.toml` (a typo, a bad value) never stops the daemon: it logs a
 warning and uses the defaults. Unknown keys count as a typo, so mistakes are

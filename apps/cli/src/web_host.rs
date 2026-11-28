@@ -1,6 +1,6 @@
 //! Embedder backing `/v1/web/search*` (`daemon_api::WebControl`):
 //! reads and atomically writes `<data_dir>/web.toml`, stores write-only API
-//! keys (`web/brave`, `web/tavily`) in `SecretStore`, hot-reloads `web_*`
+//! keys (`web/brave`, `web/tavily`, `web/firecrawl`) in `SecretStore`, hot-reloads `web_*`
 //! tools into `ToolRegistry`, and runs live search probes.
 
 use std::collections::HashSet;
@@ -22,6 +22,7 @@ use crate::serve::{
 };
 
 const DEFAULT_BRAVE_KEY_NAME: &str = "web/brave";
+const DEFAULT_FIRECRAWL_KEY_NAME: &str = "web/firecrawl";
 const DEFAULT_TAVILY_KEY_NAME: &str = "web/tavily";
 const DEFAULT_TEST_QUERY: &str = "rust programming";
 /// What the Test button reports when every engine refused this computer as a robot (the full
@@ -148,6 +149,10 @@ impl WebHost {
             searxng_url,
             brave_key_set,
             tavily_key_set,
+            firecrawl_url: cfg.search.firecrawl_url.clone(),
+            firecrawl_key_set: self.secret_present(file.search.firecrawl_key.as_deref()),
+            firecrawl_scrape: cfg.search.firecrawl_scrape.enabled,
+            firecrawl_allow_self_hosted_scrape: cfg.search.firecrawl_scrape.allow_self_hosted,
             duckduckgo,
             duckduckgo_lite,
             bing,
@@ -249,27 +254,27 @@ fn plan_secret_change(
     SecretChange::Set { name, value }
 }
 
-fn validate_searxng_url(raw: &str) -> Result<Option<String>, WebControlError> {
+fn validate_provider_url(raw: &str, field: &str) -> Result<Option<String>, WebControlError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
     let u = url::Url::parse(trimmed)
-        .map_err(|e| WebControlError::Invalid(format!("invalid searxng_url: {e}")))?;
+        .map_err(|e| WebControlError::Invalid(format!("invalid {field}: {e}")))?;
     if !matches!(u.scheme(), "http" | "https") {
-        return Err(WebControlError::Invalid(
-            "searxng_url must use http:// or https://".into(),
-        ));
+        return Err(WebControlError::Invalid(format!(
+            "{field} must use http:// or https://"
+        )));
     }
     if u.host_str().is_none() {
-        return Err(WebControlError::Invalid(
-            "searxng_url must include a host".into(),
-        ));
+        return Err(WebControlError::Invalid(format!(
+            "{field} must include a host"
+        )));
     }
     if !u.username().is_empty() || u.password().is_some() {
-        return Err(WebControlError::Invalid(
-            "searxng_url must not contain credentials".into(),
-        ));
+        return Err(WebControlError::Invalid(format!(
+            "{field} must not contain credentials"
+        )));
     }
     Ok(Some(trimmed.to_owned()))
 }
@@ -296,6 +301,11 @@ impl WebControl for WebHost {
             ));
         }
 
+        if input.clear_firecrawl_key == Some(true) && input.firecrawl_key.is_some() {
+            return Err(WebControlError::Invalid(
+                "cannot both set and clear firecrawl_key in the same request".into(),
+            ));
+        }
         let _guard = self.update_lock.lock().await;
         // Start from defaults when web.toml is missing, unreadable, or malformed so
         // a valid settings save can repair/replace the broken file on disk.
@@ -305,7 +315,20 @@ impl WebControl for WebHost {
             file.search.order = Some(validate_order(order)?);
         }
         if let Some(url) = &input.searxng_url {
-            file.search.searxng_url = validate_searxng_url(url)?;
+            file.search.searxng_url = validate_provider_url(url, "searxng_url")?;
+        }
+        if let Some(url) = &input.firecrawl_url {
+            let next = validate_provider_url(url, "firecrawl_url")?;
+            if next != file.search.firecrawl_url {
+                file.search.firecrawl_allow_self_hosted_scrape = Some(false);
+            }
+            file.search.firecrawl_url = next;
+        }
+        if let Some(v) = input.firecrawl_scrape {
+            file.search.firecrawl_scrape = Some(v);
+        }
+        if let Some(v) = input.firecrawl_allow_self_hosted_scrape {
+            file.search.firecrawl_allow_self_hosted_scrape = Some(v);
         }
         if let Some(v) = input.duckduckgo {
             file.search.duckduckgo = Some(v);
@@ -330,7 +353,14 @@ impl WebControl for WebHost {
             input.clear_tavily_key,
         );
 
-        if (matches!(brave_change, SecretChange::Set { .. })
+        let firecrawl_change = plan_secret_change(
+            &mut file.search.firecrawl_key,
+            DEFAULT_FIRECRAWL_KEY_NAME,
+            input.firecrawl_key,
+            input.clear_firecrawl_key,
+        );
+        if (matches!(firecrawl_change, SecretChange::Set { .. })
+            || matches!(brave_change, SecretChange::Set { .. })
             || matches!(tavily_change, SecretChange::Set { .. }))
             && self.secrets.is_none()
         {
@@ -351,7 +381,7 @@ impl WebControl for WebHost {
         web_tools::tools(candidate_cfg.clone())
             .map_err(|e| WebControlError::Invalid(e.to_string()))?;
 
-        for change in [brave_change, tavily_change] {
+        for change in [brave_change, tavily_change, firecrawl_change] {
             match change {
                 SecretChange::Keep => {}
                 SecretChange::Set { name, value } => self.store_secret(name, value).await?,
@@ -621,6 +651,45 @@ mod tests {
             .unwrap();
         assert!(!cleared.brave_key_set);
         assert!(store.get("web/brave").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn firecrawl_settings_keep_key_secret_and_reset_server_consent_when_address_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (host, store, _) = host_with_store(dir.path());
+        let server = MockServer::start().await;
+        let updated = host
+            .update(WebSearchConfigInput {
+                firecrawl_url: Some(server.uri()),
+                firecrawl_key: Some("fake-test-key".into()),
+                firecrawl_scrape: Some(true),
+                firecrawl_allow_self_hosted_scrape: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(
+            updated.firecrawl_key_set
+                && updated.firecrawl_scrape
+                && updated.firecrawl_allow_self_hosted_scrape
+        );
+        assert_eq!(
+            store.get("web/firecrawl").unwrap().unwrap().expose(),
+            "fake-test-key"
+        );
+        assert!(
+            !std::fs::read_to_string(dir.path().join(WEB_FILE))
+                .unwrap()
+                .contains("fake-test-key")
+        );
+        let changed = host
+            .update(WebSearchConfigInput {
+                firecrawl_url: Some("http://localhost:3002".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(!changed.firecrawl_allow_self_hosted_scrape);
     }
 
     #[tokio::test]

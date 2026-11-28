@@ -1,9 +1,9 @@
 import type { WebSearchConfig, WebSearchConfigInput } from "../api/types";
 
 /** The search providers the owner sets up in Settings: a key or an address, never scraping. */
-export type ProviderId = "brave" | "tavily" | "searxng";
+export type ProviderId = "brave" | "tavily" | "searxng" | "firecrawl";
 
-export const PROVIDERS: readonly ProviderId[] = ["brave", "tavily", "searxng"];
+export const PROVIDERS: readonly ProviderId[] = ["brave", "tavily", "searxng", "firecrawl"];
 
 /** Whether a provider is already set up (a key is stored, or an address is saved). */
 export function providerConfigured(id: ProviderId, cfg: WebSearchConfig): boolean {
@@ -13,6 +13,7 @@ export function providerConfigured(id: ProviderId, cfg: WebSearchConfig): boolea
   if (id === "tavily") {
     return cfg.tavily_key_set;
   }
+  if (id === "firecrawl") return Boolean(cfg.firecrawl_url || cfg.firecrawl_key_set);
   return Boolean(cfg.searxng_url);
 }
 
@@ -42,6 +43,7 @@ export function saveInput(id: ProviderId, typed: string): WebSearchConfigInput {
   if (id === "tavily") {
     return { tavily_key: value };
   }
+  if (id === "firecrawl") return { firecrawl_key: value };
   return { searxng_url: value };
 }
 
@@ -53,5 +55,6 @@ export function clearInput(id: ProviderId): WebSearchConfigInput {
   if (id === "tavily") {
     return { clear_tavily_key: true };
   }
+  if (id === "firecrawl") return { firecrawl_url: "", clear_firecrawl_key: true, firecrawl_scrape: false };
   return { searxng_url: "" };
 }

@@ -77,21 +77,27 @@ bot secrets set web/brave
 bot secrets set web/tavily
 ```
 
-### Firecrawl araması (elle yapılandırma)
+### Firecrawl ile arama ve sayfa okuma
 
-Firecrawl ile buluttan veya kendi sunucundan arama yapabilirsin. Bu entegrasyon
-şimdilik yalnızca aramayı destekler; sayfalar mevcut getiriciyle alınır. Ayarlar
-ve sağlayıcı denemesi henüz Firecrawl yapılandırmasını desteklemez.
+**Ayarlar > Web** bölümünde Firecrawl'ı seç, bulutu veya kendi sunucunu seçip
+API anahtarını ya da sunucu adresini gir. **Bu sağlayıcıyı dene** ile aramayı
+sınayabilirsin. Anahtarlar gizli bilgi deposunda saklanır. Sayfaları okumak için
+de Firecrawl'ı seçebilirsin; varsayılan olarak yerleşik getirici kullanılır.
+Arama ve sayfa içerikleri güvenilmeyen içerik olarak değerlendirilir.
 
-Bulut araması için API anahtarını `bot secrets set web/firecrawl` ile kaydet.
-Ardından `<data_dir>/web.toml` dosyasında `[search]` altına
-`firecrawl_key = "web/firecrawl"` ekle. Bu değer anahtar değil, gizli bilginin
-adıdır. Kendi sunucun için bunun yerine `firecrawl_url = "http://127.0.0.1:3002"`
-ekle; sunucu anahtar istiyorsa `firecrawl_key` alanını da ekle. Sunucu adresi,
-içinde kullanıcı adı veya parola bulunmayan bir HTTP(S) adresi olmalıdır.
-Dosyayı düzenledikten sonra Praxi'yi yeniden başlat. Önceliğini seçmek için
-`order` listesine `"firecrawl"` ekle. Arama sonuçları diğer web sonuçları gibi
-güvenilmeyen içerik olarak değerlendirilir.
+Kendi sunucunda sayfa okumak için **Kendi Firecrawl sunucum üzerinden sayfa
+okumaya izin ver** anahtarını ayrıca açman gerekir. Yönlendirmeler sunucunun
+kendi ağındaki adreslere erişmesine neden olabilir. Arama için bu izin gerekmez.
+Praxi, istenen ve son adresi URL politikası ve botun site kurallarıyla kontrol
+eder; son adres yoksa veya engelliyse içeriği atar. Yönlendirmeleri Firecrawl
+izlediği için ara adresler kontrol edilemez.
+
+`<data_dir>/web.toml` içindeki `[search]` bölümünde de `firecrawl_key` ile
+gizli bilgi adını, gerekiyorsa `firecrawl_url` ile kendi HTTP(S) sunucunun
+adresini belirtebilirsin. Sayfa okumak için `firecrawl_scrape = true`, kendi
+sunucundaki yönlendirme riskini kabul etmek için ayrıca
+`firecrawl_allow_self_hosted_scrape = true` yaz. Dosyayı değiştirdikten sonra
+Praxi'yi yeniden başlat. Adreste kullanıcı adı veya parola bulunmamalıdır.
 
 Bozuk bir `web.toml` (bir yazım hatası, geçersiz bir değer) daemonu asla durdurmaz. Bir uyarı
 günlüğe yazılır ve varsayılanlar kullanılır. Bilinmeyen anahtarlar yazım hatası sayılır, böylece

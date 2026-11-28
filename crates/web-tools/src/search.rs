@@ -1300,6 +1300,15 @@ impl MultiSearch {
 
 // ------------------------------------------------------------------ config
 
+/// Explicit Firecrawl extraction choices.
+#[derive(Debug, Clone, Default)]
+pub struct FirecrawlScrapeConfig {
+    /// Use Firecrawl instead of the built-in page fetcher.
+    pub enabled: bool,
+    /// Permit scraping through a self-hosted server despite redirect risks.
+    pub allow_self_hosted: bool,
+}
+
 /// Which backends to enable and their priority order.
 #[derive(Debug, Clone)]
 pub struct SearchConfig {
@@ -1318,6 +1327,8 @@ pub struct SearchConfig {
     pub firecrawl_url: Option<String>,
     /// Secret holding the Firecrawl API key.
     pub firecrawl_key: Option<SecretRef>,
+    /// Firecrawl extraction settings.
+    pub firecrawl_scrape: FirecrawlScrapeConfig,
     /// Enable the `DuckDuckGo` HTML fallback (default `true`).
     pub duckduckgo: bool,
     /// Override of the `DuckDuckGo` endpoint (tests).
@@ -1349,6 +1360,7 @@ impl Default for SearchConfig {
             tavily_endpoint: None,
             firecrawl_url: None,
             firecrawl_key: None,
+            firecrawl_scrape: FirecrawlScrapeConfig::default(),
             duckduckgo: true,
             duckduckgo_endpoint: None,
             duckduckgo_lite: true,
