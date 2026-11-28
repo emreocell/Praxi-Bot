@@ -65,7 +65,8 @@ pub(crate) fn tool(
              its path. Call it after web_research with its research_id, a title and the text, citing \
              sources as [n] after each claim (only numbers web_research gave). Do not write a Sources \
              section: it is added from what was really read, and citations are renumbered. An unknown \
-             number is refused with the valid ones; fix the text and call again.",
+             number is refused with the valid ones; fix the text and call again. \
+             Example: {\"research_id\":\"r-abc123\",\"title\":\"EU battery rules\",\"text\":\"## Summary\\nRecycling targets rise in 2027 [1].\"}",
             json!({"type":"object","required":["research_id","title","text"],"properties":{
                 "research_id":{"type":"string","description":"The research_id web_research returned"},
                 "title":{"type":"string","description":"Report title (max 200 characters)"},
@@ -300,7 +301,10 @@ mod tests {
         assert_eq!(files.len(), 1, "{files:?}");
         let name = files[0].file_name().unwrap().to_string_lossy().into_owned();
         assert!(
-            name.ends_with(".md") && name.contains("heat-pumps-vs-boilers"),
+            std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                && name.contains("heat-pumps-vs-boilers"),
             "{name}"
         );
         assert!(said.contains(&files[0].display().to_string()), "{said}");
@@ -383,7 +387,7 @@ mod tests {
                 .unwrap_err();
             assert!(e.to_string().contains("unknown research_id"), "{bad}: {e}");
         }
-        assert!(files_in(&r.ws.join("research")).is_empty());
+        assert_eq!(files_in(&r.ws.join("research")), Vec::<PathBuf>::new());
     }
 
     #[tokio::test]
@@ -401,7 +405,7 @@ mod tests {
             "{said}"
         );
         assert!(said.contains("## Sources"), "{said}");
-        assert!(files_in(&r.ws.join("research")).is_empty());
+        assert_eq!(files_in(&r.ws.join("research")), Vec::<PathBuf>::new());
         assert!(!r.ws.parent().unwrap().join("nobody").exists());
 
         // Nor is there a second way to write when the file tool is missing.

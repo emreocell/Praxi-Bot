@@ -1799,17 +1799,21 @@ async fn a_rejected_key_and_a_spent_quota_are_not_reported_as_robot_checks() {
 }
 
 fn article(topic: &str, seed: &str) -> String {
-    let body = (0..30)
-        .map(|i| {
-            format!("<p>{seed} explains that {topic} matters in way number {i} for readers.</p>")
-        })
-        .collect::<String>();
+    let mut body = String::new();
+    for i in 0..30 {
+        use std::fmt::Write as _;
+        let _ = write!(
+            body,
+            "<p>{seed} explains that {topic} matters in way number {i} for readers.</p>"
+        );
+    }
     format!(
         "<html><head><title>{seed} on {topic}</title></head><body><article><h1>{seed}</h1>{body}</article></body></html>"
     )
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn web_research_searches_reads_numbers_and_remembers_the_sources() {
     let server = MockServer::start().await;
     let base = server.uri();
