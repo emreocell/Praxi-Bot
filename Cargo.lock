@@ -7,7 +7,6 @@ name = "account-health"
 version = "0.1.0"
 dependencies = [
  "browser-cdp",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",
@@ -15,6 +14,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "web-tools",
  "wiremock",
 ]
 
@@ -7448,7 +7448,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
- "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

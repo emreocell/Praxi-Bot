@@ -114,6 +114,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             std::time::SystemTime::now(),
             core::newest_mtime(env.data_dir),
         ),
+        core::check_account_sessions(env.data_dir),
     ];
     if let Some(url) = env.time_url {
         checks.push(core::check_clock_skew(

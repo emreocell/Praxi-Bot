@@ -344,6 +344,18 @@ pub trait ComposioControl: Send + Sync {
     /// # Errors
     /// [`ComposioControlError`].
     async fn app(&self, slug: &str) -> Result<ComposioAppDto, ComposioControlError>;
+    /// The authorization state of one app, read from Composio without changing anything here
+    /// (no cached status, audit row or tool list is touched). The default is the cached state.
+    ///
+    /// # Errors
+    /// [`ComposioControlError`].
+    async fn peek_app_state(&self, slug: &str) -> Result<ComposioConnState, ComposioControlError> {
+        self.apps()
+            .into_iter()
+            .find(|a| a.slug == slug)
+            .map(|a| a.state)
+            .ok_or_else(|| ComposioControlError::NotFound(format!("app {slug}")))
+    }
     /// Start connecting an app.
     ///
     /// # Errors

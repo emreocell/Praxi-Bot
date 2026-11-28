@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::report::{ItemStatus, load_report};
+use crate::report::{ItemStatus, clip_text, load_report};
 
 /// Plain check result for the embedder's doctor UI (id `account_health`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +55,7 @@ pub fn check_account_health(data_dir: &Path) -> DoctorRow {
         .iter()
         .filter(|i| i.status == ItemStatus::Expired)
         .take(3)
-        .map(|i| i.key.clone())
+        .map(|i| clip_text(&i.key, 80))
         .collect();
     let more = bad.saturating_sub(sample.len());
     let tail = if more == 0 {
@@ -96,6 +96,8 @@ mod tests {
                     detail: String::new(),
                     bot_id: None,
                     site: None,
+                    checked_at_ms: 0,
+                    fingerprint: None,
                 }],
                 reconnect: vec!["x".into()],
             },

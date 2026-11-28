@@ -1257,10 +1257,6 @@ impl AppState {
     /// The control hub (pause / human-driving latch), for embedders that guard
     /// actions of their own with it.
     #[must_use]
-    pub(crate) fn owner_notify_hub(&self) -> &owner_notify::Hub {
-        &self.0.owner_notify
-    }
-
     pub fn control_hub(&self) -> Arc<ControlHub> {
         Arc::clone(&self.0.hub)
     }

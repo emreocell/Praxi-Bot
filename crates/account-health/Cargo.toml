@@ -12,13 +12,13 @@ workspace = true
 
 [dependencies]
 browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
-reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time", "rt", "macros"] }
 tracing = "0.1"
 url.workspace = true
+web-tools = { path = "../web-tools", version = "0.1.0" }
 
 [dev-dependencies]
 tempfile.workspace = true
