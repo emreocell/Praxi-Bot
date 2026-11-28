@@ -166,7 +166,7 @@ fn deps(state: &AppState) -> Deps {
 ///
 /// The loop remembers when it last ran, so a report that cannot be written does not turn the
 /// daily pass into an hourly one.
-pub fn spawn_daily(state: Arc<AppState>) {
+pub fn spawn_daily(state: AppState) {
     if state.safe_mode() {
         return;
     }
