@@ -104,9 +104,21 @@ jobs:
           python3 -B -m unittest discover -s scripts/tests -p test_check_github_actions_pins.py -v
 
       - name: actionlint
+        env:
+          # A fixed release, not the moving `main` download script. The sha256 below is the one in the
+          # release's own actionlint_1.7.12_checksums.txt (checked again against that file at run time).
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
         run: |
           set -euo pipefail
-          bash <(curl --fail --silent --show-error https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --output "$tarball" "$base/$tarball"
+          curl --fail --silent --show-error --location --output checksums.txt "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum --check --strict -
+          grep -F "${ACTIONLINT_SHA256}  ${tarball}" checksums.txt
+          tar -xzf "$tarball" actionlint
+          rm -f "$tarball" checksums.txt
           ./actionlint -color
 
   build-and-test:

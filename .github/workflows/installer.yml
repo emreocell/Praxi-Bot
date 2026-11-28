@@ -171,7 +171,8 @@ jobs:
       # secrets below, set `if: true`, and make sure the thumbprint is applied
       # (e.g. via bundle.windows.certificateThumbprint or a signCommand).
       - name: Import signing certificate (disabled, no certificate yet)
-        if: ${{ false }}
+        # Turns on when the owner sets the repo variable WINDOWS_CODE_SIGNING to 'true'.
+        if: ${{ vars.WINDOWS_CODE_SIGNING == 'true' }}
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
