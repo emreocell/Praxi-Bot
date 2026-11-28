@@ -8000,7 +8000,7 @@
     "mailGuard": {
       "budget": "Most e-mails per day, per mailbox (0 = no limit)",
       "budgetHelp": "A send over this limit is refused until the count falls again. Default 20.",
-      "budgetHint": "Unlike the warnings above, this limit blocks. It applies to e-mail your bots send without you watching and to missions, and it is counted over a rolling 24 hours.",
+      "budgetHint": "Unlike the warnings above, this limit blocks. It applies to e-mail your bots send in the background, without you watching, and to missions. A mail you ask for yourself in a chat with your bot is never held back by it. It is counted over a rolling 24 hours.",
       "budgetTitle": "Outreach budget",
       "colBot": "Bot",
       "colNote": "Note",

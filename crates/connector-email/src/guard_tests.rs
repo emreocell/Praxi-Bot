@@ -479,6 +479,33 @@ async fn an_unattended_bot_is_refused_past_the_daily_outreach_budget() {
 }
 
 #[tokio::test]
+async fn a_mail_the_owner_asked_for_in_chat_is_never_held_to_the_outreach_budget() {
+    let (server, conn) = setup().await;
+    tight_budget(&conn, 1);
+    let t = send_tool(&conn);
+    // The owner's own chat turn on a Full bot: every call carries `unattended_mail`, but the
+    // mail is the owner's request, so the budget does not count it out.
+    let owner_chat = ToolContext {
+        owner_chat_turn: true,
+        ..full_ctx()
+    };
+    for to in ["a@example.com", "b@example.com", "c@example.com"] {
+        t.call(&owner_chat, mail(to)).await.unwrap();
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+    // The same Full bot running in the background is still held: its one slot is used up.
+    let e = t
+        .call(&full_ctx(), mail("d@example.com"))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, ToolError::Execution(m) if m.contains("Not sent")));
+    // A mission session counts against the budget even if a context said "owner chat".
+    conn.set_mission_resolver(Arc::new(|_| Some("m".to_owned())));
+    assert!(t.call(&owner_chat, mail("e@example.com")).await.is_err());
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn parallel_unattended_sends_cannot_share_the_last_slot_of_the_budget() {
     let (server, conn) = setup().await;
     tight_budget(&conn, 3);

@@ -44,15 +44,19 @@ impl MailProbe for FakeInbox {
             .mails
             .lock()
             .iter()
-            .find(|(at, from, _)| {
-                *at <= req.now_ms
-                    && *at >= req.registered_at_ms - 2 * MIN
-                    && *at >= req.not_before_ms
+            .find(|(at, from, summary)| {
+                // `"skewed"`: its (untrusted) Date header reads far in the future, so every
+                // date test passes however often it is looked at.
+                (summary["skewed"] == true
+                    || (*at <= req.now_ms
+                        && *at >= req.registered_at_ms - 2 * MIN
+                        && *at >= req.not_before_ms))
                     && *from == wanted
             })
             .map(|(_, _, summary)| MailHit {
                 summary: summary.clone(),
                 follow_up_at_ms: summary["follow_up_at_ms"].as_i64(),
+                message_id: summary["message_id"].as_str().map(str::to_owned),
             }))
     }
 }
@@ -1028,6 +1032,36 @@ async fn an_out_of_office_notice_puts_the_wait_off_instead_of_waking_the_mission
     let pass = w.sup.wake_pass().await.unwrap();
     assert_eq!((pass.fired, pass.released), (1, 1), "{pass:?}");
     assert_eq!(w.item("site-0.example").status, ItemStatus::Todo);
+}
+
+/// A notice whose `Date` header is ahead of the clock matches every look. It counts once: it
+/// neither burns the deferrals nor wakes the mission, and a real answer still gets through.
+#[tokio::test]
+async fn an_out_of_office_notice_dated_in_the_future_is_deferred_for_once_only() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    w.sup.step(&w.mission).await.unwrap();
+    let wait = || w.store.active_waits(&w.mission).unwrap().remove(0);
+    let start = w.clock.now_ms();
+    w.inbox.deliver(
+        start + 5 * MIN,
+        "site-0.example",
+        json!({
+            "message": {"subject": "Out of office"},
+            "follow_up_at_ms": start + 3 * 24 * 60 * MIN,
+            "message_id": "ooo-1@example",
+            "skewed": true,
+        }),
+    );
+    let mut fired = 0;
+    for _ in 0..(MAX_MAIL_DEFERS + 3) {
+        w.advance(10 * MIN);
+        fired += w.sup.wake_pass().await.unwrap().fired;
+    }
+    assert_eq!(fired, 0, "the same notice never wakes the mission");
+    assert_eq!(w.state(), MissionState::Waiting);
+    let d = wait();
+    assert_eq!(w.store.wait_deferral(d.id).unwrap().1, 1, "counted once");
+    assert_eq!(w.store.deferred_mail_ids(d.id).unwrap(), ["ooo-1@example"]);
 }
 
 #[tokio::test]

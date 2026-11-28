@@ -131,6 +131,39 @@ async fn an_out_of_office_reply_in_the_sent_thread_asks_for_a_follow_up_in_three
 }
 
 #[tokio::test]
+async fn an_out_of_office_reply_to_a_mail_of_no_mission_never_puts_a_wait_off() {
+    let msg = reply(
+        "in-ooo-2",
+        "Ann <ann@example.org>",
+        "th-1",
+        "Automatic reply: Hello",
+        "I am out of the office.",
+    );
+    let (_server, conn, probe) = rig(msg).await;
+    // The newest mail in that thread was sent outside any mission (a chat, a schedule).
+    conn.guard().record(SendLogEntry {
+        at: builtin_tools::connector_email::guard::now_secs(),
+        at_utc: String::new(),
+        bot: Some(BOT.into()),
+        run: "run-chat".into(),
+        account: "bot-mail".into(),
+        from: INBOX.into(),
+        recipients: vec!["ann@example.org".into()],
+        subject: "Hello again".into(),
+        message_id: "api-sent-2".into(),
+        thread_id: Some("th-1".into()),
+        mission_id: None,
+        opt_out_line: true,
+        overridden: Vec::new(),
+    });
+    let hit = look(&probe, "m-1").await.expect("a hit");
+    assert_eq!(hit.summary["inbound"]["mission_id"], Value::Null);
+    assert_eq!(hit.follow_up_at_ms, None);
+    // The id of the mail itself travels with the hit, so the same notice counts once.
+    assert_eq!(hit.message_id.as_deref(), Some("in-ooo-2"));
+}
+
+#[tokio::test]
 async fn a_stop_reply_in_the_sent_thread_suppresses_the_sender_and_still_wakes_the_mission() {
     let msg = reply(
         "in-2",

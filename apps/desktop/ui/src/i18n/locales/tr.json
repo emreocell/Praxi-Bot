@@ -8000,7 +8000,7 @@
     "mailGuard": {
       "budget": "Posta kutusu başına günde en fazla e-posta (0 = sınır yok)",
       "budgetHelp": "Bu sınırı aşan gönderim, sayı düşene kadar reddedilir. Varsayılan 20.",
-      "budgetHint": "Yukarıdaki uyarıların aksine bu sınır engeller. Siz başında değilken botlarınızın gönderdiği e-postalar ile görevler için geçerlidir; son 24 saat üzerinden sayılır.",
+      "budgetHint": "Yukarıdaki uyarıların aksine bu sınır engeller. Botlarınızın siz başında değilken arka planda gönderdiği e-postalar ile görevler için geçerlidir. Sohbette sizin istediğiniz bir e-posta bu sınıra takılmaz. Son 24 saat üzerinden sayılır.",
       "budgetTitle": "Toplu gönderim bütçesi",
       "colBot": "Bot",
       "colNote": "Not",

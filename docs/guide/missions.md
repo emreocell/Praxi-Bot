@@ -223,8 +223,8 @@ the people the mail went to):
   reply states (only a future date within 60 days is believed), otherwise for three more days,
   and that notice is not found again. The pause is saved with the wait, so it survives a
   restart; after three such notices the next one wakes the item anyway.
-- **A budget** limits outreach per mailbox: mail an unattended bot or a mission session sends
-  is refused once the mailbox has sent its daily budget in the last 24 hours (default 20).
+- **A budget** limits outreach per mailbox: mail a bot sends in the background or a mission session sends
+  is refused once the mailbox has sent its daily budget in the last 24 hours (default 20). A mail you ask for yourself in a chat is never counted against it.
   A mailbox with no sending history ramps up from 5 a day over 14 days. Both numbers are in
   Settings > Mail > Safe sending; the count comes from the send log, so a restart does not
   reset it. Mail you approve yourself in a chat is not held to it.

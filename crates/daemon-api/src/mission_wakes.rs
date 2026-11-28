@@ -182,16 +182,11 @@ impl MailProbe for OwnInboxProbe {
                 // sender who said STOP, count a temporary failure, note a follow-up date). What
                 // the mail says is data: it only picks one of these fixed actions.
                 let outcome = apply_to_message(&guard, &acct.name, &detail);
-                // An out-of-office notice for a mail of ANOTHER mission does not put this
-                // mission's wait off.
+                // Only a notice about a mail THIS mission sent puts its wait off: not one for a
+                // mail of another mission, and not one for a mail that belongs to no mission.
                 let follow_up_at_ms = outcome
                     .follow_up_secs()
-                    .filter(|_| {
-                        outcome
-                            .mission_id
-                            .as_deref()
-                            .is_none_or(|m| m == req.mission_id)
-                    })
+                    .filter(|_| outcome.mission_id.as_deref() == Some(req.mission_id))
                     .and_then(|secs| i64::try_from(secs).ok())
                     .and_then(|secs| secs.checked_mul(1000));
                 if let Some(object) = summary.as_object_mut() {
@@ -201,6 +196,10 @@ impl MailProbe for OwnInboxProbe {
                 Ok(Some(MailHit {
                     summary,
                     follow_up_at_ms,
+                    message_id: detail
+                        .message_id
+                        .clone()
+                        .or_else(|| detail.summary.id.clone()),
                 }))
             }
             Ok(WaitEnd::TimedOut { .. } | WaitEnd::Cancelled) => Ok(None),

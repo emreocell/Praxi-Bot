@@ -182,6 +182,10 @@ pub struct ToolContext {
     /// applies: the bot tools freeze it themselves. Set only there, never from `unattended_mail`
     /// (which every Full-level call carries) and never by a tool.
     pub full_waived_preview: bool,
+    /// The owner typed this chat turn themselves (an owner-started run: not a schedule, a
+    /// mission or a helper). Set only by the agent loop, never by a tool. A mail sent on such
+    /// a turn is the owner's own request, not outreach, so the daily outreach budget skips it.
+    pub owner_chat_turn: bool,
     /// Payment authorization supplied by the daemon, never tool arguments.
     pub payment: PaymentApproval,
     /// Set by the loop only when a run-scoped control grant covers this call:
@@ -207,6 +211,7 @@ impl Default for ToolContext {
             expected_origin: None,
             unattended_mail: false,
             full_waived_preview: false,
+            owner_chat_turn: false,
             payment: PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,

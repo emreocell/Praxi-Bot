@@ -17,11 +17,17 @@ pub enum ReplyClass {
     Other,
 }
 
+/// Most lines of a reply read.
+const MAX_LINES: usize = 500;
+/// Most characters of one line kept.
+const MAX_LINE_CHARS: usize = 300;
+
 /// The lower-cased lines of the new part of a reply: everything before the first quote marker,
 /// signature separator or "-----Original Message-----" line.
 fn unquoted_lines(body: &str) -> Vec<String> {
     let mut lines = Vec::new();
-    for line in body.lines() {
+    // A reply is read for its first lines only: a body of millions of lines costs no more.
+    for line in body.lines().take(MAX_LINES) {
         let line = line.trim();
         if line.starts_with('>')
             || line == "--"
@@ -30,7 +36,13 @@ fn unquoted_lines(body: &str) -> Vec<String> {
         {
             break;
         }
-        lines.push(line.to_lowercase());
+        // Every signal is a short line; a longer one is cut (never copied whole).
+        lines.push(
+            line.chars()
+                .take(MAX_LINE_CHARS)
+                .collect::<String>()
+                .to_lowercase(),
+        );
     }
     lines
 }
@@ -380,5 +392,18 @@ mod tests {
         assert_eq!(at("back on 2026-02-30"), None);
         assert_eq!(at("The meeting is on 2026-12-05"), None);
         assert_eq!(at("Thanks\n> I will be back on 2026-12-05"), None);
+    }
+
+    #[test]
+    fn only_the_first_lines_and_the_start_of_each_line_are_read() {
+        let late = format!("{}stop\n", "hello\n".repeat(MAX_LINES));
+        assert_eq!(classify_reply("Re: x", &late, None), ReplyClass::Other);
+        let long = format!("{} stop", "x".repeat(10_000));
+        assert_eq!(classify_reply("Re: x", &long, None), ReplyClass::Other);
+        assert_eq!(
+            classify_reply("Re: x", "hello\nstop\n", None),
+            ReplyClass::Stop
+        );
+        assert!(unquoted_lines(&"y".repeat(100_000))[0].len() <= MAX_LINE_CHARS);
     }
 }

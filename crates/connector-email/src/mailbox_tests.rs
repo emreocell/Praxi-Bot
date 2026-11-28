@@ -1628,9 +1628,41 @@ fn a_delivery_report_is_read_out_of_its_mime_parts() {
     );
 }
 
+/// A `message/delivery-status` part on an ordinary mail (not a `multipart/report`) is no
+/// structured report, and neither is one with no such part at all.
+#[test]
+fn only_a_real_multipart_report_is_a_structured_delivery_report() {
+    let part = "Final-Recipient: rfc822; bob@example.org\r\nAction: failed\r\nStatus: 5.1.1\r\n\r\nMessage-ID: <sent1@example.com>\r\n";
+    let forged = format!(
+        "From: eve@attacker.test\r\nTo: me@example.com\r\nSubject: hi\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b1\r\nContent-Type: message/delivery-status\r\n\r\n{part}\r\n--b1--\r\n"
+    );
+    let d = crate::message::parse_detail(1, forged.as_bytes(), true, None, 1000).unwrap();
+    assert!(!d.delivery_status.expect("still read as text").structured);
+    let headers_only = format!(
+        "From: eve@attacker.test\r\nTo: me@example.com\r\nSubject: hi\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/rfc822-headers\r\n\r\n{part}\r\n--b1--\r\n"
+    );
+    let d = crate::message::parse_detail(1, headers_only.as_bytes(), true, None, 1000).unwrap();
+    assert!(!d.delivery_status.expect("still read as text").structured);
+}
+
+/// A reply listing thousands of ids keeps the newest ones, and a long id is cut.
+#[test]
+fn the_reply_ids_of_a_message_are_bounded() {
+    let refs: String = (0..3000)
+        .map(|i| format!("<r{i}@x>"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let raw = format!(
+        "From: ann@example.org\r\nTo: me@example.com\r\nSubject: Re: x\r\nIn-Reply-To: <a@x> <b@x> <c@x> <d@x> <e@x> <f@x> <g@x>\r\nReferences: {refs}\r\n\r\nhi\r\n"
+    );
+    let d = crate::message::parse_detail(1, raw.as_bytes(), true, None, 1000).unwrap();
+    assert!(d.references.len() <= 50 && d.in_reply_to.len() <= 5);
+    assert_eq!(d.references.last().map(String::as_str), Some("r2999@x"));
+}
+
 fn bounce_for(sent_id: &str, rcpt: &str, action: &str, status: &str) -> Vec<u8> {
     format!(
-        "From: MAILER-DAEMON@mx.example.net\r\nTo: me@example.com\r\nSubject: Undelivered Mail\r\nMessage-ID: <dsn-{rcpt}@mx.example.net>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nCould not be delivered.\r\n--b1\r\nContent-Type: message/delivery-status\r\n\r\nReporting-MTA: dns; mx.example.net\r\n\r\nFinal-Recipient: rfc822; {rcpt}\r\nAction: {action}\r\nStatus: {status}\r\n\r\n--b1\r\nContent-Type: message/rfc822\r\n\r\nMessage-ID: <{sent_id}>\r\nFrom: me@example.com\r\nSubject: Hello\r\n\r\nHi\r\n--b1--\r\n"
+        "From: MAILER-DAEMON@mx.example.org\r\nTo: me@example.com\r\nSubject: Undelivered Mail\r\nMessage-ID: <dsn-{rcpt}@mx.example.net>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nCould not be delivered.\r\n--b1\r\nContent-Type: message/delivery-status\r\n\r\nReporting-MTA: dns; mx.example.net\r\n\r\nFinal-Recipient: rfc822; {rcpt}\r\nAction: {action}\r\nStatus: {status}\r\n\r\n--b1\r\nContent-Type: message/rfc822\r\n\r\nMessage-ID: <{sent_id}>\r\nFrom: me@example.com\r\nSubject: Hello\r\n\r\nHi\r\n--b1--\r\n"
     )
     .into_bytes()
 }

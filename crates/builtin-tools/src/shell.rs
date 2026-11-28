@@ -672,6 +672,7 @@ mod tests {
             expected_origin: None,
             unattended_mail: false,
             full_waived_preview: false,
+            owner_chat_turn: false,
             payment: tool_registry::PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,

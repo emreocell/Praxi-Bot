@@ -365,6 +365,9 @@ pub struct MailHit {
     /// of waking the item: set only for a mail matched to a mail we sent. The wait gives up no
     /// earlier than this; a hit after [`MAX_MAIL_DEFERS`] earlier ones wakes the item anyway.
     pub follow_up_at_ms: Option<i64>,
+    /// The mail's own id (`Message-ID` or the provider's). A notice the wait was already put off
+    /// for is recognised by it, whatever its (untrusted) `Date` says. `None`: no id to go by.
+    pub message_id: Option<String>,
 }
 
 /// How often one mail wait is put off for an out-of-office reply before the mail wakes the item.

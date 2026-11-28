@@ -1753,6 +1753,7 @@ impl builtin_tools::ToolGate for PaymentGate {
             expected_origin: None,
             unattended_mail: false,
             full_waived_preview: false,
+            owner_chat_turn: false,
             payment: self.mode.lock().clone(),
         })
     }

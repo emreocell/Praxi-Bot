@@ -61,6 +61,9 @@ pub struct GateAuthorization {
     /// [`tool_registry::ToolContext::full_waived_preview`]). Only the agent loop's own tool
     /// call sets it; a script's call never does.
     pub full_waived_preview: bool,
+    /// The owner typed this chat turn (see [`tool_registry::ToolContext::owner_chat_turn`]).
+    /// Only the agent loop's own tool call sets it; a script's call never does.
+    pub owner_chat_turn: bool,
     /// Approval for a managed browser payment document, if required.
     pub payment: tool_registry::PaymentApproval,
 }
@@ -352,6 +355,7 @@ impl ScriptHost for GateHost {
             expected_origin: authorization.expected_origin,
             unattended_mail: authorization.unattended_mail,
             full_waived_preview: false,
+            owner_chat_turn: false,
             payment: authorization.payment,
             // The gate does not say which kind it was: any taint counts as private here.
             exposure_private: self.gate.content_tainted(&self.run_id),

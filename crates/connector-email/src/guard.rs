@@ -30,6 +30,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 mod outreach;
+pub(crate) use outreach::MAX_REFS;
 pub use outreach::{
     BudgetBlock, InboundAction, InboundMail, InboundOutcome, OutreachState, SoftBounce,
 };

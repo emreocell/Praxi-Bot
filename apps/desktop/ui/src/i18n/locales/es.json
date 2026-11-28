@@ -7237,7 +7237,7 @@
     "mailGuard": {
       "budget": "Máximo de correos por día y buzón (0 = sin límite)",
       "budgetHelp": "Un envío por encima del límite se rechaza hasta que el recuento baje. Por defecto: 20.",
-      "budgetHint": "A diferencia de los avisos de arriba, este límite bloquea. Se aplica a los correos que tus bots envían sin que los veas y a las misiones, y se cuenta sobre 24 horas.",
+      "budgetHint": "A diferencia de los avisos de arriba, este límite bloquea. Se aplica a los correos que tus bots envían en segundo plano sin que los veas y a las misiones. Un correo que pides tú mismo en un chat con tu bot nunca queda frenado por él. Se cuenta sobre 24 horas.",
       "budgetTitle": "Presupuesto de envíos",
       "colBot": "Bot",
       "colNote": "Nota",

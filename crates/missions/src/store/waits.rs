@@ -150,6 +150,25 @@ fn wait_in(tx: &Transaction<'_>, wait_id: i64) -> Result<Wait> {
     .ok_or_else(|| MissionError::NotFound(format!("wait {wait_id}")))
 }
 
+/// Most out-of-office notice ids remembered per wait (a wait is put off only a few times).
+const MAX_DEFERRED_IDS: usize = 16;
+/// Longest id remembered.
+const MAX_DEFERRED_ID_CHARS: usize = 300;
+
+/// The remembered ids of a wait's out-of-office notices; empty when none (or unreadable).
+fn deferred_ids_in(conn: &rusqlite::Connection, wait_id: i64) -> Result<Vec<String>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT deferred_ids FROM mission_waits WHERE id = ?1",
+            [wait_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(raw
+        .and_then(|r| serde_json::from_str(&r).ok())
+        .unwrap_or_default())
+}
+
 /// The state of a mission, read inside a transaction.
 fn state_in(tx: &Transaction<'_>, id: &str) -> Result<MissionState> {
     let state: String = tx
@@ -348,9 +367,11 @@ impl MissionStore {
 
     /// A mail wait whose awaited person is away: the wait goes on, but gives up no earlier than
     /// `follow_up_ms` (a later give-up time stays as it is), and mail from before `now_ms` is no
-    /// longer the awaited reply. The item stays parked and no wake is recorded; the pause is
-    /// durable (it is the wait's own row). Returns `false` when nothing was changed: the wait
-    /// already ended, or it was put off `max_defers` times before (then the mail wakes the item).
+    /// longer the awaited reply. `message_id` (the notice's own id) is remembered, so the same
+    /// notice is never counted again even when its `Date` header reads later than `now_ms`. The
+    /// item stays parked and no wake is recorded; the pause is durable (it is the wait's own
+    /// row). Returns `false` when nothing was changed: the wait already ended, or it was put off
+    /// `max_defers` times before (then the mail wakes the item).
     ///
     /// # Errors
     /// SQLite failure.
@@ -360,6 +381,7 @@ impl MissionStore {
         follow_up_ms: i64,
         now_ms: i64,
         max_defers: u32,
+        message_id: Option<&str>,
     ) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -367,10 +389,28 @@ impl MissionStore {
         if w.state != WaitState::Waiting || !matches!(w.spec, WaitSpec::Mail { .. }) {
             return Ok(false);
         }
+        let mut ids = deferred_ids_in(&tx, wait_id)?;
+        if let Some(id) = message_id.filter(|id| !id.is_empty()) {
+            if ids.iter().any(|d| d == id) {
+                // Already counted: neither a second defer nor a wake.
+                return Ok(true);
+            }
+            ids.push(id.chars().take(MAX_DEFERRED_ID_CHARS).collect());
+            // A wait is put off a handful of times at most; keep the newest ids regardless.
+            let skip = ids.len().saturating_sub(MAX_DEFERRED_IDS);
+            ids.drain(..skip);
+        }
         let changed = tx.execute(
             "UPDATE mission_waits SET due_at_ms = MAX(due_at_ms, ?2), not_before_ms = ?3, \
-             defers = defers + 1 WHERE id = ?1 AND state = 'waiting' AND defers < ?4",
-            params![wait_id, follow_up_ms, now_ms, i64::from(max_defers)],
+             defers = defers + 1, deferred_ids = ?5 \
+             WHERE id = ?1 AND state = 'waiting' AND defers < ?4",
+            params![
+                wait_id,
+                follow_up_ms,
+                now_ms,
+                i64::from(max_defers),
+                serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_owned())
+            ],
         )?;
         if changed == 0 {
             return Ok(false);
@@ -385,6 +425,14 @@ impl MissionStore {
         )?;
         tx.commit()?;
         Ok(true)
+    }
+
+    /// The ids of the notices a wait was already put off for: see [`Self::defer_mail_wait`].
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn deferred_mail_ids(&self, wait_id: i64) -> Result<Vec<String>> {
+        deferred_ids_in(&self.conn(), wait_id)
     }
 
     /// `(not_before_ms, defers)` of a wait: see [`Self::defer_mail_wait`].

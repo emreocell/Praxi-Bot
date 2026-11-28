@@ -306,19 +306,21 @@ pub fn parse_detail(
             .reply_to()
             .map(|a| sole_address(Some(a)))
             .filter(|a| !a.is_empty()),
-        references: msg
-            .references()
-            .as_text_list()
-            .unwrap_or_default()
-            .iter()
-            .map(|r| r.trim_matches(['<', '>']).to_owned())
-            .collect(),
+        references: {
+            // A stranger's header can list thousands of ids: keep the newest (the last).
+            let ids = msg.references().as_text_list().unwrap_or_default();
+            ids.iter()
+                .skip(ids.len().saturating_sub(MAX_REFERENCE_IDS))
+                .map(|r| cap_untrusted(r.trim_matches(['<', '>'])))
+                .collect()
+        },
         in_reply_to: msg
             .in_reply_to()
             .as_text_list()
             .unwrap_or_default()
             .iter()
-            .map(|r| r.trim_matches(['<', '>']).to_owned())
+            .take(MAX_IN_REPLY_TO_IDS)
+            .map(|r| cap_untrusted(r.trim_matches(['<', '>'])))
             .collect(),
         thread_id: None,
         delivery_status: delivery_status_of(&msg),
@@ -342,15 +344,34 @@ pub fn parse_detail(
     })
 }
 
+/// Most ids kept of one message's `References` header (the newest).
+const MAX_REFERENCE_IDS: usize = 50;
+/// Most ids kept of one message's `In-Reply-To` header (a reply has one).
+const MAX_IN_REPLY_TO_IDS: usize = 5;
 /// Most bytes of delivery-status text read from one message.
 const MAX_DSN_BYTES: usize = 64 * 1024;
 
-/// The delivery report inside `msg` (a `multipart/report` with a `message/delivery-status`
-/// part), joined with the original message's headers that the report returns. `None` when the
-/// message has no such part.
+/// The delivery report inside `msg`, joined with the original message's headers that the
+/// report returns. `None` when the message has no recipient block to read.
+///
+/// The result is `structured` only for a real report: an outer `multipart/report` that carries
+/// a `message/delivery-status` part. Any sender can attach such a part to an ordinary mail, so
+/// even then the caller still decides on who sent it; a part alone, or a lone
+/// `text/rfc822-headers`, is read like body text.
 fn delivery_status_of(msg: &mail_parser::Message<'_>) -> Option<DeliveryStatus> {
     let mut text = String::new();
     let mut original_id = None;
+    let mut has_status_part = false;
+    let is_report = msg
+        .parts
+        .first()
+        .and_then(|root| root.content_type())
+        .is_some_and(|ct| {
+            ct.ctype().eq_ignore_ascii_case("multipart")
+                && ct
+                    .subtype()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("report"))
+        });
     for part in &msg.parts {
         let Some(ct) = part.content_type() else {
             continue;
@@ -359,6 +380,7 @@ fn delivery_status_of(msg: &mail_parser::Message<'_>) -> Option<DeliveryStatus> 
         let sub = ct.subtype().unwrap_or_default().to_ascii_lowercase();
         match (kind.as_str(), sub.as_str()) {
             ("message", "delivery-status") | ("text", "rfc822-headers") => {
+                has_status_part |= sub == "delivery-status";
                 let bytes = part.contents();
                 let bytes = &bytes[..bytes.len().min(MAX_DSN_BYTES.saturating_sub(text.len()))];
                 text.push_str(&String::from_utf8_lossy(bytes));
@@ -368,13 +390,13 @@ fn delivery_status_of(msg: &mail_parser::Message<'_>) -> Option<DeliveryStatus> 
                 if let mail_parser::PartType::Message(inner) = &part.body {
                     original_id = inner
                         .message_id()
-                        .map(|id| id.trim_matches(['<', '>']).to_owned());
+                        .map(|id| cap_untrusted(id.trim_matches(['<', '>'])));
                 }
             }
             _ => {}
         }
     }
-    let mut dsn = DeliveryStatus::parse(&text, true)?;
+    let mut dsn = DeliveryStatus::parse(&text, is_report && has_status_part)?;
     if dsn.original_message_id.is_none() {
         dsn.original_message_id = original_id.filter(|id| !id.is_empty());
     }

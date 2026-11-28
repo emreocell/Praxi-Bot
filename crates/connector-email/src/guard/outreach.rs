@@ -19,8 +19,8 @@ use crate::reply_classification::{ReplyClass, classify_reply, stated_return_date
 
 /// When an out-of-office reply states no (believable) return date: follow up this much later.
 pub const DEFAULT_FOLLOW_UP_SECS: u64 = 3 * 86_400;
-/// Most message ids read from one reply's `References`.
-const MAX_REFS: usize = 50;
+/// Most message ids read from one reply's `In-Reply-To` and `References`.
+pub(crate) const MAX_REFS: usize = 50;
 /// Most recipient blocks of one delivery report acted on.
 const MAX_DSN_RECIPIENTS: usize = 20;
 /// Inbound message ids remembered per address, so one report is never counted twice.
@@ -73,6 +73,11 @@ pub struct InboundMail<'a> {
     pub thread_id: Option<&'a str>,
     /// The delivery report, when the mail is one.
     pub dsn: Option<&'a DeliveryStatus>,
+    /// Whether the receiving server vouched for the sender (`Some(false)`: SPF, DKIM and DMARC
+    /// all failed or none passed). `None` when the provider reports nothing.
+    pub sender_authenticated: Option<bool>,
+    /// Whether the mail sat in the junk folder or carries the provider's spam label.
+    pub from_junk: Option<bool>,
 }
 
 /// What was done about one inbound mail.
@@ -220,6 +225,28 @@ fn local_part(address: &str) -> &str {
     address.rsplit_once('@').map_or(address, |(l, _)| l)
 }
 
+/// The lower-case domain of a bare or `Name <addr>` address; empty when there is none.
+fn domain_of(address: &str) -> String {
+    address
+        .rsplit_once('@')
+        .map_or("", |(_, d)| d)
+        .trim_matches(|c: char| c == '>' || c == '.' || c.is_whitespace())
+        .to_lowercase()
+}
+
+/// The two domains are the same or one is under the other. A bare top-level name never counts.
+fn domains_aligned(a: &str, b: &str) -> bool {
+    a.contains('.')
+        && b.contains('.')
+        && (a == b || a.ends_with(&format!(".{b}")) || b.ends_with(&format!(".{a}")))
+}
+
+/// An explicit failure to vouch for the sender, or a spam placement, makes a mail unfit to
+/// change anyone's state: anybody can forge a sender or drop mail in the junk folder.
+fn sender_untrusted(m: &InboundMail<'_>) -> bool {
+    m.from_junk == Some(true) || m.sender_authenticated == Some(false)
+}
+
 impl MailGuard {
     /// Match a reply or a delivery report to what we sent and act on a confident match:
     ///
@@ -234,11 +261,18 @@ impl MailGuard {
     pub fn apply_inbound(&self, m: &InboundMail<'_>) -> InboundOutcome {
         let sender = m.from_addr.trim().to_lowercase();
         if let Some(dsn) = m.dsn {
+            if sender_untrusted(m) {
+                return InboundOutcome::none(ReplyClass::Other, "sender_not_trusted");
+            }
             return self.apply_dsn(m, dsn, &sender);
         }
         let class = classify_reply(m.subject, m.body, m.auto_submitted);
         if !matches!(class, ReplyClass::Stop | ReplyClass::OutOfOffice) {
             return InboundOutcome::none(class, "not_a_signal");
+        }
+        // A forged or spam-folder "STOP" or "out of office" changes nothing.
+        if sender_untrusted(m) {
+            return InboundOutcome::none(class, "sender_not_trusted");
         }
         if sender.is_empty() {
             return InboundOutcome::none(class, "no_sender");
@@ -283,8 +317,10 @@ impl MailGuard {
     }
 
     fn apply_dsn(&self, m: &InboundMail<'_>, dsn: &DeliveryStatus, sender: &str) -> InboundOutcome {
-        let mut refs: Vec<String> = m.references.to_vec();
-        refs.extend(dsn.original_message_id.clone());
+        // The id the report itself quotes comes first: a long `References` chain must never
+        // push it out of the bounded list the matcher reads.
+        let mut refs: Vec<String> = dsn.original_message_id.iter().cloned().collect();
+        refs.extend(m.references.iter().take(MAX_REFS - 1).cloned());
         let from_mta = matches!(local_part(sender), "mailer-daemon" | "postmaster");
         let mut out = InboundOutcome {
             class: ReplyClass::Other,
@@ -302,9 +338,9 @@ impl MailGuard {
             } else if out.class != ReplyClass::HardBounce {
                 out.class = ReplyClass::SoftBounce;
             }
-            // Fields read out of ordinary body text prove nothing: only a mail that looks like
-            // it came from a mail system counts.
-            if !dsn.structured && !from_mta {
+            // Only a mail that looks like it came from a mail system counts, structured or
+            // not: any sender can attach a `message/delivery-status` part.
+            if !from_mta {
                 out.actions.push(InboundAction::None {
                     why: "report_not_from_a_mail_system",
                 });
@@ -328,6 +364,25 @@ impl MailGuard {
                 });
                 continue;
             };
+            // The mail system must belong to the mail it reports on: our own sending domain
+            // or the domain of the failed address. `mailer-daemon@anywhere` is not enough.
+            let sender_domain = domain_of(sender);
+            if !domains_aligned(&sender_domain, &domain_of(&entry.from))
+                && !domains_aligned(&sender_domain, &domain_of(address))
+            {
+                out.actions.push(InboundAction::None {
+                    why: "report_sender_not_aligned",
+                });
+                continue;
+            }
+            // A report about one of several recipients speaks for somebody else's address, so
+            // the receiving server must also have vouched for the mail system.
+            if entry.recipients.len() > 1 && m.sender_authenticated != Some(true) {
+                out.actions.push(InboundAction::None {
+                    why: "report_not_authenticated",
+                });
+                continue;
+            }
             out.sent_message_id = Some(entry.message_id.clone());
             out.mission_id.clone_from(&entry.mission_id);
             let action = if hard {
@@ -535,6 +590,8 @@ mod tests {
             references: refs,
             thread_id: None,
             dsn: None,
+            sender_authenticated: None,
+            from_junk: None,
         }
     }
 
@@ -672,13 +729,15 @@ mod tests {
     #[test]
     fn a_recipient_cannot_report_a_bounce_for_a_co_recipient() {
         let g = MailGuard::in_memory();
+        // A co-recipient whose own address looks like a mail system's.
         g.record(SendLogEntry {
-            recipients: vec!["bob@example.org".into(), "carol@example.org".into()],
+            recipients: vec!["postmaster@example.org".into(), "carol@example.org".into()],
             ..entry_for("id3@example.com")
         });
         let dsn = report("carol@example.org", "failed", "5.1.1", "id3@example.com");
-        let mut m = mail("bob@example.org", "", &[]);
+        let mut m = mail("postmaster@example.org", "", &[]);
         m.dsn = Some(&dsn);
+        m.sender_authenticated = Some(true);
         assert!(matches!(
             &g.apply_inbound(&m).actions[..],
             [InboundAction::None {
@@ -686,7 +745,112 @@ mod tests {
             }]
         ));
         // About their own address it can speak.
-        let dsn = report("bob@example.org", "failed", "5.1.1", "id3@example.com");
+        let dsn = report(
+            "postmaster@example.org",
+            "failed",
+            "5.1.1",
+            "id3@example.com",
+        );
+        m.dsn = Some(&dsn);
+        assert!(matches!(
+            &g.apply_inbound(&m).actions[..],
+            [InboundAction::Suppressed { .. }]
+        ));
+    }
+
+    #[test]
+    fn a_forged_report_never_suppresses_anyone() {
+        let g = MailGuard::in_memory();
+        g.record(SendLogEntry {
+            recipients: vec!["bob@example.org".into(), "carol@example.net".into()],
+            ..entry_for("id7@example.com")
+        });
+        let dsn = report("carol@example.net", "failed", "5.1.1", "id7@example.com");
+        let why = |g: &MailGuard, m: &InboundMail<'_>| match &g.apply_inbound(m).actions[..] {
+            [InboundAction::None { why }] => *why,
+            other => panic!("{other:?}"),
+        };
+        // A co-recipient writes a structured report from its own, non-mail-system address.
+        let mut m = mail("bob@example.org", "", &[]);
+        m.dsn = Some(&dsn);
+        m.sender_authenticated = Some(true);
+        assert_eq!(why(&g, &m), "report_not_from_a_mail_system");
+        // A mail-system look-alike on an unrelated domain.
+        m.from_addr = "mailer-daemon@attacker.test";
+        assert_eq!(why(&g, &m), "report_sender_not_aligned");
+        // The real mail system of the failed address, but nobody vouched for it and the mail
+        // went to several people.
+        m.from_addr = "mailer-daemon@mx.example.net";
+        m.sender_authenticated = None;
+        assert_eq!(why(&g, &m), "report_not_authenticated");
+        // Failed authentication or the junk folder: nothing is read at all.
+        m.sender_authenticated = Some(false);
+        assert_eq!(why(&g, &m), "sender_not_trusted");
+        m.sender_authenticated = Some(true);
+        m.from_junk = Some(true);
+        assert_eq!(why(&g, &m), "sender_not_trusted");
+        assert_eq!(g.opt_outs(), Vec::new());
+        // The genuine, authenticated one goes through.
+        m.from_junk = Some(false);
+        assert!(matches!(
+            &g.apply_inbound(&m).actions[..],
+            [InboundAction::Suppressed { .. }]
+        ));
+    }
+
+    #[test]
+    fn a_single_recipient_report_from_an_unreporting_provider_still_counts() {
+        let g = MailGuard::in_memory();
+        sent(&g, "id8@example.com", "bob@example.org", None);
+        let dsn = report("bob@example.org", "failed", "5.1.1", "id8@example.com");
+        // Aligned with our own sending domain too (the mail system of our provider).
+        let mut m = mail("mailer-daemon@mail.example.com", "", &[]);
+        m.dsn = Some(&dsn);
+        assert!(matches!(
+            &g.apply_inbound(&m).actions[..],
+            [InboundAction::Suppressed { .. }]
+        ));
+    }
+
+    #[test]
+    fn a_stop_or_an_out_of_office_from_a_failed_or_junk_sender_changes_nothing() {
+        let g = MailGuard::in_memory();
+        sent(&g, "id9@example.com", "ann@example.org", Some("m1"));
+        let refs = vec!["id9@example.com".to_owned()];
+        for (auth, junk) in [(Some(false), None), (None, Some(true))] {
+            let mut m = mail("ann@example.org", "STOP", &refs);
+            m.sender_authenticated = auth;
+            m.from_junk = junk;
+            assert_eq!(
+                g.apply_inbound(&m).actions,
+                vec![InboundAction::None {
+                    why: "sender_not_trusted"
+                }]
+            );
+            let mut m = mail("ann@example.org", "I am away.", &refs);
+            m.subject = "Automatic reply: Hello";
+            m.auto_submitted = Some("auto-replied");
+            m.sender_authenticated = auth;
+            m.from_junk = junk;
+            assert_eq!(g.apply_inbound(&m).follow_up_secs(), None);
+        }
+        assert_eq!(g.opt_outs(), Vec::new());
+        // Vouched for, or nothing known: it counts.
+        let mut m = mail("ann@example.org", "STOP", &refs);
+        m.sender_authenticated = Some(true);
+        assert!(matches!(
+            &g.apply_inbound(&m).actions[..],
+            [InboundAction::Suppressed { .. }]
+        ));
+    }
+
+    #[test]
+    fn the_id_a_report_quotes_is_found_behind_a_long_references_chain() {
+        let g = MailGuard::in_memory();
+        sent(&g, "id10@example.com", "bob@example.org", None);
+        let refs: Vec<String> = (0..200).map(|i| format!("noise{i}@x")).collect();
+        let dsn = report("bob@example.org", "failed", "5.1.1", "id10@example.com");
+        let mut m = mail("mailer-daemon@mx.example.org", "", &refs);
         m.dsn = Some(&dsn);
         assert!(matches!(
             &g.apply_inbound(&m).actions[..],

@@ -7237,7 +7237,7 @@
     "mailGuard": {
       "budget": "Höchstens so viele E-Mails pro Tag und Postfach (0 = kein Limit)",
       "budgetHelp": "Ein Versand über diesem Limit wird abgelehnt, bis die Zahl wieder sinkt. Standard: 20.",
-      "budgetHint": "Anders als die Warnungen oben blockiert dieses Limit. Es gilt für E-Mails, die Ihre Bots ohne Ihre Aufsicht senden, und für Missionen, und wird über 24 Stunden gezählt.",
+      "budgetHint": "Anders als die Warnungen oben blockiert dieses Limit. Es gilt für E-Mails, die Ihre Bots im Hintergrund ohne Ihre Aufsicht senden, und für Missionen. Eine E-Mail, um die Sie im Chat selbst bitten, wird davon nie gebremst. Gezählt wird über 24 Stunden.",
       "budgetTitle": "Versandbudget",
       "colBot": "Bot",
       "colNote": "Hinweis",

@@ -9,6 +9,12 @@
 const MAX_BLOCKS: usize = 50;
 /// Longest line read.
 const MAX_LINE: usize = 1000;
+/// Most lines read from one report, blank or not.
+const MAX_LINES: usize = 2000;
+/// Most bytes of text read from one report.
+const MAX_BYTES: usize = 64 * 1024;
+/// Most `Name: value` fields kept in one block (a real one has a handful).
+const MAX_FIELDS: usize = 40;
 
 /// One recipient block of a delivery report.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,8 +58,9 @@ pub struct DeliveryStatus {
     pub recipients: Vec<DsnRecipient>,
     /// `Message-ID` of the mail the report is about, from the returned headers.
     pub original_message_id: Option<String>,
-    /// The message really had the `delivery-status` MIME part (`false`: the fields were read
-    /// from ordinary body text, which anyone can write).
+    /// The message was a `multipart/report` with a `message/delivery-status` part (`false`: the
+    /// fields were read from ordinary body text, which anyone can write). Even a structured
+    /// report proves nothing about who sent it.
     pub structured: bool,
 }
 
@@ -105,7 +112,12 @@ impl DeliveryStatus {
             block.clear();
         };
         let mut blocks = 0;
-        for line in text.lines() {
+        let mut bytes = 0;
+        for line in text.lines().take(MAX_LINES) {
+            bytes += line.len() + 1;
+            if bytes > MAX_BYTES {
+                break;
+            }
             let line = line.trim_end();
             if line.is_empty() {
                 flush(&mut block);
@@ -118,7 +130,10 @@ impl DeliveryStatus {
             if line.starts_with('>') || line.starts_with([' ', '\t']) || line.len() > MAX_LINE {
                 continue;
             }
-            if let Some((name, value)) = line.split_once(':') {
+            // One block never grows without bound: later fields of it are dropped.
+            if block.len() < MAX_FIELDS
+                && let Some((name, value)) = line.split_once(':')
+            {
                 block.push((name.trim().to_lowercase(), value.trim().to_owned()));
             }
         }
@@ -159,6 +174,25 @@ mod tests {
         assert!(!d.recipients[0].is_temporary());
         assert!(!d.recipients[1].is_permanent_failure());
         assert!(!d.recipients[1].is_temporary());
+    }
+
+    #[test]
+    fn one_block_and_the_whole_text_are_bounded() {
+        // A single block of a million header lines is cut short, the recipient before it kept.
+        let mut text =
+            String::from("Final-Recipient: rfc822; a@x.com\nAction: failed\nStatus: 5.1.1\n");
+        text.push_str(&"X-Filler: y\n".repeat(100_000));
+        let d = DeliveryStatus::parse(&text, true).unwrap();
+        assert_eq!(d.recipients.len(), 1);
+        assert!(d.recipients[0].is_permanent_failure());
+        // The block never holds more than the field cap, so a field past it is not seen.
+        let mut late = "X-Filler: y\n".repeat(MAX_FIELDS);
+        late.push_str("Final-Recipient: rfc822; late@x.com\nAction: failed\nStatus: 5.1.1\n");
+        assert!(DeliveryStatus::parse(&late, true).is_none());
+        // Past the line cap nothing is read, however many recipients follow.
+        let mut many = "> quoted\n".repeat(MAX_LINES);
+        many.push_str("Final-Recipient: rfc822; z@x.com\nAction: failed\nStatus: 5.1.1\n");
+        assert!(DeliveryStatus::parse(&many, true).is_none());
     }
 
     #[test]

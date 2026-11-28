@@ -5057,6 +5057,7 @@ impl LoopGate {
                 // A script's call never has the owner's-chat waiver of the bot tools: the loop's
                 // own tool call is the only place that sets it, so nothing here freezes a preview.
                 full_waived_preview: false,
+                owner_chat_turn: false,
                 payment: payment_page.map_or_else(
                     || {
                         if page_guard && sh.full_access(&ctx) {

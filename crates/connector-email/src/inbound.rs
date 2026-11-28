@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::connector::Scoped;
 use crate::dsn::DeliveryStatus;
-use crate::guard::{InboundMail, InboundOutcome, MailGuard};
+use crate::guard::{InboundMail, InboundOutcome, MAX_REFS, MailGuard};
 use crate::imap::SearchQuery;
 use crate::message::MessageDetail;
 
@@ -29,8 +29,12 @@ pub fn apply_to_message(
     account: &str,
     detail: &MessageDetail,
 ) -> InboundOutcome {
+    // `In-Reply-To` first, then the newest ids of `References` (the one we answered is last):
+    // the matcher reads a bounded number of them.
     let mut references = detail.in_reply_to.clone();
-    references.extend(detail.references.iter().cloned());
+    let room = MAX_REFS.saturating_sub(references.len());
+    let skip = detail.references.len().saturating_sub(room);
+    references.extend(detail.references.iter().skip(skip).cloned());
     // The API mailboxes give no delivery-status part: the fields are read from the text,
     // which counts only when it comes from a mail system (see `DeliveryStatus::structured`).
     let dsn: Option<DeliveryStatus> = detail
@@ -56,6 +60,8 @@ pub fn apply_to_message(
         references: &references,
         thread_id: detail.thread_id.as_deref(),
         dsn: dsn.as_ref(),
+        sender_authenticated: detail.sender_authenticated,
+        from_junk: detail.from_junk.or(detail.summary.from_junk),
     })
 }
 

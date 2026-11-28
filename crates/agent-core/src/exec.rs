@@ -2248,6 +2248,7 @@ impl TurnExecutor {
                                 full_waived_preview: auto_reason
                                     .is_some_and(|r| r.starts_with("mode.full."))
                                     && self.sh.bot_preview_waived(ctx_ref, &tool.spec().name),
+                                owner_chat_turn: self.sh.full_owner_started(ctx_ref),
                                 payment,
                             },
                         )
@@ -2602,6 +2603,7 @@ impl TurnExecutor {
                     expected_origin: authorization.expected_origin,
                     unattended_mail: authorization.unattended_mail,
                     full_waived_preview: authorization.full_waived_preview,
+                    owner_chat_turn: authorization.owner_chat_turn,
                     payment: authorization.payment,
                     exposure_private: exposure.private,
                     control_guard,

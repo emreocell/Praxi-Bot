@@ -1194,10 +1194,15 @@ impl EmailTool {
         // line) kept the reply from being an owner-thread reply at all.
         let unattended_logged =
             resolve_pre_send_warnings(ctx, &plan.report, overridden, owner_thread)?;
-        // Outreach is held to a hard daily budget however it was approved: a bot nobody
-        // watches, and a mission session (whose owner approved a plan, not every mail).
+        // Background outreach is held to a hard daily budget however it was approved: a bot
+        // nobody watches, and a mission session (whose owner approved a plan, not every mail).
+        // A mail the owner asked for in their own chat turn, and a reply in the owner's own
+        // thread, is not outreach, even on a Full bot (which carries `unattended_mail` on every
+        // call).
         let mission_id = self.conn.mission_of_run(&ctx.run_id);
-        if ctx.unattended_mail || mission_id.is_some() {
+        let background = !owner_thread
+            && (mission_id.is_some() || (ctx.unattended_mail && !ctx.owner_chat_turn));
+        if background {
             guard
                 .check_outreach_budget(&plan.account, plan.recipients.len())
                 .map_err(|b| {

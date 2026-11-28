@@ -41,7 +41,7 @@ pub struct WakePass {
 enum Looked {
     /// The mail is there: the wait fires with this summary, or (an out-of-office notice) goes
     /// on until the given time.
-    Hit(Value, Option<i64>),
+    Hit(Value, Option<i64>, Option<String>),
     /// Not yet.
     Nothing,
     /// The look failed (reason): the wait goes on, slower.
@@ -109,8 +109,8 @@ impl Supervisor {
                 pass.probes += 1;
                 match self.look(probe.as_ref(), &w, &bot, now).await {
                     Looked::Stop => return Ok(pass),
-                    Looked::Hit(summary, follow_up) => {
-                        if self.put_off(&w, follow_up, now)? {
+                    Looked::Hit(summary, follow_up, id) => {
+                        if self.put_off(&w, follow_up, id.as_deref(), now)? {
                             touched.insert(w.mission_id.clone());
                         } else if self.fire_mail(&w, &summary, now)? {
                             pass.fired += 1;
@@ -138,10 +138,10 @@ impl Supervisor {
         for w in self.store.expired_waits(now)? {
             if let (WaitSpec::Mail { .. }, Some(probe)) = (&w.spec, &probe)
                 && let Some(bot) = self.store.get(&w.mission_id)?.map(|m| m.bot_id)
-                && let Looked::Hit(summary, follow_up) =
+                && let Looked::Hit(summary, follow_up, id) =
                     self.look(probe.as_ref(), &w, &bot, now).await
             {
-                if self.put_off(&w, follow_up, now)? {
+                if self.put_off(&w, follow_up, id.as_deref(), now)? {
                     touched.insert(w.mission_id.clone());
                 } else if self.fire_mail(&w, &summary, now)? {
                     pass.fired += 1;
@@ -274,7 +274,7 @@ impl Supervisor {
         tokio::select! {
             () = self.shutdown.cancelled() => Looked::Stop,
             r = tokio::time::timeout(PROBE_TIMEOUT, probe.check(&check)) => match r {
-                Ok(Ok(Some(hit))) => Looked::Hit(hit.summary, hit.follow_up_at_ms),
+                Ok(Ok(Some(hit))) => Looked::Hit(hit.summary, hit.follow_up_at_ms, hit.message_id),
                 Ok(Ok(None)) => Looked::Nothing,
                 Ok(Err(why)) => Looked::Failed(clean_external(&why, 200)),
                 Err(_) => Looked::Failed("the mailbox did not answer in time".to_owned()),
@@ -284,11 +284,19 @@ impl Supervisor {
 
     /// The mail was an out-of-office notice: the wait goes on until the follow-up time instead of
     /// waking the item. `true` when it was put off (nothing else is done for this mail).
-    fn put_off(&self, w: &Wait, follow_up_ms: Option<i64>, now: i64) -> Result<bool> {
+    fn put_off(
+        &self,
+        w: &Wait,
+        follow_up_ms: Option<i64>,
+        message_id: Option<&str>,
+        now: i64,
+    ) -> Result<bool> {
         let Some(at) = follow_up_ms else {
             return Ok(false);
         };
-        let done = self.store.defer_mail_wait(w.id, at, now, MAX_MAIL_DEFERS)?;
+        let done = self
+            .store
+            .defer_mail_wait(w.id, at, now, MAX_MAIL_DEFERS, message_id)?;
         if done {
             self.store
                 .note_poll(w.id, now + MAIL_POLL_SECS * 1000, None)?;
