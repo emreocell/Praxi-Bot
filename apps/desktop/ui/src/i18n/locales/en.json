@@ -715,8 +715,8 @@
       "signIn": "Sign in",
       "signOut": "Sign out",
       "signedInToast": "{{name}}: signed in",
-      "signedOutToast": "{{name}}: signed out",
       "signedOutRemoteRevokeFailed": "{{name}}: signed out here, but the provider could not be told to revoke it — revoke access at the provider if needed",
+      "signedOutToast": "{{name}}: signed out",
       "waiting": "Waiting for the browser sign-in…"
     },
     "botsAll": "All bots",

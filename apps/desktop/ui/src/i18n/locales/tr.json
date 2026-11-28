@@ -715,8 +715,8 @@
       "signIn": "Oturum aç",
       "signOut": "Oturumu kapat",
       "signedInToast": "{{name}}: oturum açıldı",
-      "signedOutToast": "{{name}}: oturum kapatıldı",
       "signedOutRemoteRevokeFailed": "{{name}}: burada oturum kapandı, ancak sağlayıcıya iptal bildirilemedi — gerekirse erişimi sağlayıcıdan kaldır",
+      "signedOutToast": "{{name}}: oturum kapatıldı",
       "waiting": "Tarayıcıda oturum açılması bekleniyor…"
     },
     "botsAll": "Tüm botlar",
