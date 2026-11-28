@@ -192,7 +192,7 @@ async fn agy_receives_http_bridge_even_without_capability_advertisement() {
         assert_eq!(new["mcpServers"][0]["type"], "http");
         assert_eq!(new["mcpServers"][0]["name"], "praxi");
         if mode == "acp-no-capabilities" {
-            assert_eq!(log(&dir, "bridge_tool_count"), "2");
+            assert_eq!(log(&dir, "bridge_tool_count"), "1");
         }
     }
 }

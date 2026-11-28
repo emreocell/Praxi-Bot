@@ -41,15 +41,27 @@ impl TurnHost for Host {
         false
     }
     async fn permission(&self, request: NativePermission) -> bool {
-        request.tool.contains(&tool_name("praxi_echo"))
-            || request.summary.contains(&tool_name("praxi_echo"))
+        is_echo_tool(&request.tool)
     }
+}
+
+fn is_echo_tool(tool: &str) -> bool {
+    tool.strip_prefix("mcp__praxi__").unwrap_or(tool) == tool_name("praxi_echo")
+}
+
+#[test]
+fn only_exact_echo_identity_is_auto_approved() {
+    let echo = tool_name("praxi_echo");
+    assert!(is_echo_tool(&echo));
+    assert!(is_echo_tool(&format!("mcp__praxi__{echo}")));
+    assert!(!is_echo_tool(&format!("other_{echo}")));
+    assert!(!is_echo_tool(&format!("{echo}_other")));
 }
 
 #[tokio::test]
 #[ignore = "manual, uses the signed-in agy account and incurs model usage"]
 async fn real_agy_http_bridge() {
-    let workspace = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let workspace = tempfile::tempdir().unwrap();
     let host = Arc::new(Host::default());
     let turn = NativeTurn {
         driver: Driver::Agy,

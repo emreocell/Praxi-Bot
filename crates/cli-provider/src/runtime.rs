@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, OnceLock},
     time::Duration,
 };
+use subtle::ConstantTimeEq as _;
 
 use async_trait::async_trait;
 use axum::{
@@ -237,8 +238,8 @@ struct Bridge {
     tools: Arc<Vec<ToolSpec>>,
     host: Arc<dyn TurnHost>,
     stop: CancellationToken,
-    /// Native-tools mode: the bridge also serves the `approve` permission-prompt tool.
-    native: bool,
+    /// Only Claude sessions requiring a permission prompt expose `approve`.
+    expose_approve: bool,
     /// `0` until the turn's CLI process exists. Connections are refused until then.
     #[cfg(not(windows))]
     child_pid: Arc<AtomicU32>,
@@ -305,12 +306,14 @@ impl Bridge {
                     .store(true, std::sync::atomic::Ordering::Release);
                 self.host.tools_listed();
                 let mut tools = self.tools.iter().map(|s| json!({"name":tool_name(&s.name),"description":s.description,"inputSchema":s.input_schema})).collect::<Vec<_>>();
-                if self.native {
+                if self.expose_approve {
                     tools.push(json!({"name":"approve","description":"Permission prompt handler used by the host.","inputSchema":{"type":"object","properties":{"tool_name":{"type":"string"},"input":{"type":"object"},"tool_use_id":{"type":"string"}},"required":["tool_name"]}}));
                 }
                 json!({"tools":tools})
             }
-            "tools/call" if self.native && req["params"]["name"].as_str() == Some("approve") => {
+            "tools/call"
+                if self.expose_approve && req["params"]["name"].as_str() == Some("approve") =>
+            {
                 let _active = self.active_tool();
                 let args = &req["params"]["arguments"];
                 let tool = args["tool_name"].as_str().unwrap_or("tool").to_owned();
@@ -363,6 +366,9 @@ async fn mcp(
     headers: HeaderMap,
     Json(req): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
+    if b.stop.is_cancelled() {
+        return Err(StatusCode::GONE);
+    }
     // The bearer is not enough: any same-user process can read the sidecar.
     // Windows accepts the socket only when its owner is inside this turn's job.
     // Unix still requires the child or a real forking descendant.
@@ -390,10 +396,16 @@ async fn mcp(
         return Err(StatusCode::FORBIDDEN);
     }
     // A per-turn unguessable capability lives only in the private config, never argv/env.
-    if headers.get("authorization").and_then(|v| v.to_str().ok()) != Some(b.capability.as_str()) {
+    let supplied = headers
+        .get("authorization")
+        .map_or(&[][..], |v| v.as_bytes());
+    if !bool::from(supplied.ct_eq(b.capability.as_bytes())) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
+    if b.stop.is_cancelled() {
+        return Err(StatusCode::GONE);
+    }
     if req.get("id").is_none() {
         return Ok((StatusCode::ACCEPTED, Json(Value::Null)));
     }
@@ -401,7 +413,7 @@ async fn mcp(
 }
 
 struct BridgeServer {
-    file: tempfile::NamedTempFile,
+    file: Option<tempfile::NamedTempFile>,
     task: tokio::task::JoinHandle<()>,
     stop: CancellationToken,
     url: String,
@@ -416,7 +428,7 @@ impl Drop for BridgeServer {
     }
 }
 impl BridgeServer {
-    async fn open(bridge: Bridge) -> Result<Self, CliError> {
+    async fn open(bridge: Bridge, sidecar: bool) -> Result<Self, CliError> {
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let listen = listener.local_addr()?;
         bridge.listen.set(listen).map_err(|_| CliError::Io)?;
@@ -424,14 +436,19 @@ impl BridgeServer {
         let authorization = bridge.capability.clone();
         #[cfg(not(windows))]
         let child_pid = Arc::clone(&bridge.child_pid);
-        let config = json!({"mcpServers":{"praxi":{"type":"http","url":url,"headers":{"Authorization":authorization}}}});
-        let mut file = tempfile::Builder::new()
-            .prefix("praxi-mcp-")
-            .suffix(".json")
-            .tempfile()?;
-        restrict_sidecar(file.path()).await?;
-        // NamedTempFile is created mode 0600 on Unix. Do not chmod after writing.
-        file.write_all(config.to_string().as_bytes())?;
+        let file = if sidecar {
+            let config = json!({"mcpServers":{"praxi":{"type":"http","url":url,"headers":{"Authorization":authorization}}}});
+            let mut file = tempfile::Builder::new()
+                .prefix("praxi-mcp-")
+                .suffix(".json")
+                .tempfile()?;
+            restrict_sidecar(file.path()).await?;
+            // NamedTempFile is created mode 0600 on Unix. Do not chmod after writing.
+            file.write_all(config.to_string().as_bytes())?;
+            Some(file)
+        } else {
+            None
+        };
         let stop = bridge.stop.clone();
         let shutdown = stop.clone();
         let app = Router::new().route("/mcp", post(mcp)).with_state(bridge);
@@ -839,11 +856,11 @@ async fn session(
     #[cfg(windows)]
     let job = crate::detect::SharedJob::new();
     let bridge = Bridge {
-        capability: format!("Bearer {}{}", uuid::Uuid::now_v7(), uuid::Uuid::now_v7()),
+        capability: format!("Bearer {}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()),
         tools: Arc::new(turn.tools.clone()),
         host: host.clone(),
         stop: stop.clone(),
-        native: false,
+        expose_approve: false,
         #[cfg(not(windows))]
         child_pid: Arc::new(AtomicU32::new(0)),
         #[cfg(windows)]
@@ -852,7 +869,7 @@ async fn session(
         active_tools: tokio::sync::watch::Sender::new(0),
         tools_delivered: Arc::new(AtomicBool::new(false)),
     };
-    let server = BridgeServer::open(bridge.clone()).await?;
+    let server = BridgeServer::open(bridge.clone(), true).await?;
     if stop.is_cancelled() {
         return Err(CliError::Cancelled);
     }
@@ -895,7 +912,13 @@ async fn session(
     }
     let mcp_servers = Vec::new();
 
-    let argv = args(engine, &turn, server.file.path(), version, &mcp_servers);
+    let argv = args(
+        engine,
+        &turn,
+        server.file.as_ref().expect("sidecar required").path(),
+        version,
+        &mcp_servers,
+    );
     if resolved.program.to_string_lossy().encode_utf16().count()
         + resolved
             .args
@@ -1645,7 +1668,7 @@ mod tests {
             tools: Arc::new(vec![]),
             host: Arc::new(NoCalls),
             stop: CancellationToken::new(),
-            native: false,
+            expose_approve: false,
             #[cfg(not(windows))]
             child_pid: Arc::new(AtomicU32::new(std::process::id())),
             #[cfg(windows)]
@@ -1695,8 +1718,13 @@ mod tests {
             let bridge = bridge();
             #[cfg(windows)]
             let job = bridge.job.clone();
-            let server = BridgeServer::open(bridge).await.unwrap();
-            let path = server.file.path().to_owned();
+            let server = BridgeServer::open(bridge, true).await.unwrap();
+            let path = server
+                .file
+                .as_ref()
+                .expect("sidecar required")
+                .path()
+                .to_owned();
             let response = post_allowed(
                 &server.url,
                 auth,
@@ -1715,13 +1743,46 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn cancelled_bridge_refuses_requests_and_stdin_transport_has_no_file() {
+        let bridge = bridge();
+        let stop = bridge.stop.clone();
+        let server = BridgeServer::open(bridge.clone(), false).await.unwrap();
+        assert!(server.file.is_none());
+        stop.cancel();
+        let result = mcp(
+            State(bridge),
+            ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+            HeaderMap::new(),
+            Json(json!({"id":1,"method":"ping"})),
+        )
+        .await;
+        assert_eq!(result.unwrap_err(), StatusCode::GONE);
+    }
+    #[tokio::test]
+    async fn approve_is_neither_listed_nor_callable_when_disabled() {
+        let b = bridge();
+        let list = b.rpc(&json!({"id":1,"method":"tools/list"})).await;
+        assert_eq!(list["result"]["tools"], json!([]));
+        let call = b
+            .rpc(&json!({"id":2,"method":"tools/call","params":{"name":"approve","arguments":{}}}))
+            .await;
+        assert_eq!(call["result"]["isError"], true);
+        let mut b = b;
+        b.expose_approve = true;
+        let list = b.rpc(&json!({"id":3,"method":"tools/list"})).await;
+        assert_eq!(list["result"]["tools"][0]["name"], "approve");
+    }
+    #[tokio::test]
     async fn non_child_connection_rejected() {
         let bridge = bridge();
         #[cfg(not(windows))]
         bridge.child_pid.store(u32::MAX, Ordering::SeqCst);
-        let server = BridgeServer::open(bridge).await.unwrap();
-        let config: Value =
-            serde_json::from_str(&std::fs::read_to_string(server.file.path()).unwrap()).unwrap();
+        let server = BridgeServer::open(bridge, true).await.unwrap();
+        let config: Value = serde_json::from_str(
+            &std::fs::read_to_string(server.file.as_ref().expect("sidecar required").path())
+                .unwrap(),
+        )
+        .unwrap();
         let url = config["mcpServers"]["praxi"]["url"]
             .as_str()
             .unwrap()

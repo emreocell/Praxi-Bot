@@ -151,6 +151,10 @@ fn codex_native_args(turn: &Turn) -> Vec<String> {
     args
 }
 
+fn exposes_approve(driver: Driver, plan: &LevelPlan) -> bool {
+    driver == Driver::Claude && plan.applied != ApprovalLevel::Full
+}
+
 #[allow(clippy::too_many_lines)] // Mirrors `session`: one linear, security-critical launch.
 async fn session(
     command: &str,
@@ -190,12 +194,13 @@ async fn session(
     let (resolved, executable_lock) = crate::detect::lock_executable(resolved)?;
     #[cfg(windows)]
     let job = crate::detect::SharedJob::new();
+    let plan = level_plan(driver, nt.level);
     let bridge = Bridge {
-        capability: format!("Bearer {}{}", uuid::Uuid::now_v7(), uuid::Uuid::now_v7()),
+        capability: format!("Bearer {}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()),
         tools: Arc::new(nt.turn.tools.clone()),
         host: host.clone(),
         stop: stop.clone(),
-        native: true,
+        expose_approve: exposes_approve(driver, &plan),
         #[cfg(not(windows))]
         child_pid: Arc::new(AtomicU32::new(0)),
         #[cfg(windows)]
@@ -204,13 +209,13 @@ async fn session(
         active_tools: tokio::sync::watch::Sender::new(0),
         tools_delivered: Arc::new(AtomicBool::new(false)),
     };
-    let server = BridgeServer::open(bridge.clone()).await?;
+    let server =
+        BridgeServer::open(bridge.clone(), driver.transport() == Transport::StreamJson).await?;
     if stop.is_cancelled() {
         return Err(CliError::Cancelled);
     }
     let pin = binary_pin(&resolved.program).ok_or(CliError::NotInstalled)?;
     let version = native_version(driver, &resolved, env).await?;
-    let plan = level_plan(driver, nt.level);
     if !plan.enforced {
         // Never start a CLI below a level Praxi cannot make it keep.
         return Err(CliError::NativeToolsOpen);
@@ -231,9 +236,12 @@ async fn session(
         return Err(CliError::BinaryChanged);
     }
     let argv = match driver.transport() {
-        Transport::StreamJson => {
-            claude_native_args(&nt.turn, &plan, &claude_mode_arg, server.file.path())
-        }
+        Transport::StreamJson => claude_native_args(
+            &nt.turn,
+            &plan,
+            &claude_mode_arg,
+            server.file.as_ref().expect("stream JSON sidecar").path(),
+        ),
         Transport::CodexAppServer => codex_native_args(&nt.turn),
         Transport::Acp => {
             // Vibe saves a model chosen over ACP as the user's default model, so Praxi never
@@ -1071,6 +1079,24 @@ mod tests {
     fn kimi_ask(options: &Value, title: &str) -> Value {
         json!({"sessionId":"s","options":options,"toolCall":{"toolCallId":"t:ask","title":title,
             "content":[{"type":"content","content":{"type":"text","text":"Which one?"}}]}})
+    }
+
+    #[test]
+    fn approve_is_only_exposed_for_claude_permission_prompts() {
+        for (driver, level, expected) in [
+            (Driver::Claude, ApprovalLevel::Ask, true),
+            (Driver::Claude, ApprovalLevel::AcceptEdits, true),
+            (Driver::Claude, ApprovalLevel::Full, false),
+            (Driver::Agy, ApprovalLevel::Ask, false),
+            (Driver::Agy, ApprovalLevel::Full, false),
+            (Driver::Cursor, ApprovalLevel::Ask, false),
+            (Driver::Codex, ApprovalLevel::Ask, false),
+        ] {
+            assert_eq!(
+                exposes_approve(driver, &level_plan(driver, level)),
+                expected
+            );
+        }
     }
 
     #[test]
