@@ -348,7 +348,10 @@ mod tests {
                 && name.contains("heat-pumps-vs-boilers"),
             "{name}"
         );
-        assert!(said.contains(&files[0].display().to_string()), "{said}");
+        // The tool names the plain path; on Windows the workspace root may carry the verbatim prefix.
+        let shown = files[0].display().to_string();
+        let shown = shown.strip_prefix(r"\\?\").unwrap_or(&shown);
+        assert!(said.contains(shown), "{said}");
         assert!(said.contains("2 of 2 sources read are cited"), "{said}");
         assert!(
             said.contains("Summary: Heat pumps usually cost less"),

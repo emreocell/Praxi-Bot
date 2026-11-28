@@ -801,6 +801,7 @@ pub fn load_web_file(data_dir: &Path) -> (WebConfigFile, Vec<String>) {
 /// Build the [`web_tools::WebToolsConfig`] for `file`. Invalid single values are
 /// dropped with a warning in `warnings`; the SSRF policy is always the default.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn web_tools_config(
     data_dir: &Path,
     file: &WebConfigFile,
