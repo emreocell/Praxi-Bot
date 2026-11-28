@@ -243,6 +243,22 @@ async fn update_and_test_validate_keys_query_length_and_invalid_config() {
     )
     .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    for key in [
+        String::new(),
+        "a".repeat(1025),
+        "a\rb".into(),
+        "a\nb".into(),
+        "a\0b".into(),
+    ] {
+        let r = call(
+            &t,
+            Method::PUT,
+            "/v1/web/search",
+            Some(json!({"firecrawl_key": key})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    }
 
     let r = call(
         &t,

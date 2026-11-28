@@ -137,7 +137,9 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
         )?),
         None => None,
     };
-    let firecrawl = if cfg.search.firecrawl_scrape.enabled {
+    let firecrawl = if cfg.search.firecrawl_scrape.enabled
+        && (cfg.search.firecrawl_url.is_some() || cfg.search.firecrawl_key.is_some())
+    {
         let raw = cfg
             .search
             .firecrawl_url
@@ -519,10 +521,18 @@ impl FirecrawlScrape {
         if !self.allowed {
             return Err(ToolError::Execution("Scraping through a self-hosted Firecrawl server is disabled; the owner must enable it in Settings > Web.".into()));
         }
+        if self.endpoint.host_str().is_some_and(|host| {
+            host.trim_end_matches('.')
+                .eq_ignore_ascii_case("api.firecrawl.dev")
+        }) {
+            return Err(ToolError::Execution(
+                "Firecrawl Cloud is unavailable until usage accounting is enabled".into(),
+            ));
+        }
         let wanted = url::Url::parse(input.url.trim())
             .map_err(|_| ToolError::InvalidInput("invalid URL".into()))?;
-        self.public
-            .check_url(&wanted)
+        crate::policy::check_resolved_url(self.public.as_ref(), &wanted)
+            .await
             .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
         if tool_registry::url_blocked(wanted.as_str(), false) {
             return Err(ToolError::Execution(
@@ -531,6 +541,11 @@ impl FirecrawlScrape {
         }
         let mut options = GetOptions::accepting(JSON_TYPES);
         if let Some(key) = &self.key {
+            if !crate::policy::credential_transport_safe(&self.endpoint) {
+                return Err(ToolError::Execution(
+                    "Firecrawl credentials require HTTPS or loopback HTTP".into(),
+                ));
+            }
             let store = self.secrets.as_ref().ok_or_else(|| {
                 ToolError::Execution("Firecrawl secret store is unavailable".into())
             })?;
@@ -579,7 +594,15 @@ impl FirecrawlScrape {
                     .into(),
             )
         };
-        let mut final_url = None;
+        let final_value = [data.pointer("/metadata/url"), data.get("url")]
+            .into_iter()
+            .flatten()
+            .find(|v| !v.is_null())
+            .ok_or_else(bad_url)?;
+        let final_url = final_value
+            .as_str()
+            .and_then(|v| url::Url::parse(v).ok())
+            .ok_or_else(bad_url)?;
         for value in [
             data.pointer("/metadata/url"),
             data.get("url"),
@@ -593,14 +616,14 @@ impl FirecrawlScrape {
                 .as_str()
                 .and_then(|v| url::Url::parse(v).ok())
                 .ok_or_else(bad_url)?;
-            if self.public.check_url(&url).is_err()
+            if crate::policy::check_resolved_url(self.public.as_ref(), &url)
+                .await
+                .is_err()
                 || tool_registry::url_blocked(url.as_str(), true)
             {
                 return Err(bad_url());
             }
-            final_url.get_or_insert(url);
         }
-        let final_url = final_url.ok_or_else(bad_url)?;
         let content = data
             .get(format)
             .and_then(Value::as_str)

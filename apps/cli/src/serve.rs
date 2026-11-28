@@ -840,13 +840,36 @@ fn configure_web_credentials(
 ) {
     cfg.brave_key = resolve_web_key("brave_key", s.brave_key.as_deref(), has_store, warnings);
     cfg.tavily_key = resolve_web_key("tavily_key", s.tavily_key.as_deref(), has_store, warnings);
-    cfg.firecrawl_url = s.firecrawl_url.clone().filter(|u| !u.trim().is_empty());
-    cfg.firecrawl_key = resolve_web_key(
-        "firecrawl_key",
-        s.firecrawl_key.as_deref(),
-        has_store,
-        warnings,
-    );
+    cfg.firecrawl_url = s
+        .firecrawl_url
+        .as_deref()
+        .filter(|u| !u.trim().is_empty())
+        .and_then(|raw| {
+            let valid = url::Url::parse(raw.trim()).ok().filter(|u| {
+                matches!(u.scheme(), "http" | "https")
+                    && u.host_str().is_some()
+                    && u.username().is_empty()
+                    && u.password().is_none()
+                    && u.query().is_none()
+                    && u.fragment().is_none()
+            });
+            if valid.is_none() {
+                warnings.push("web.toml: invalid firecrawl_url ignored".into());
+            }
+            valid.map(|_| raw.trim().to_owned())
+        });
+    if s.firecrawl_url
+        .as_deref()
+        .is_none_or(|u| u.trim().is_empty())
+        || cfg.firecrawl_url.is_some()
+    {
+        cfg.firecrawl_key = resolve_web_key(
+            "firecrawl_key",
+            s.firecrawl_key.as_deref(),
+            has_store,
+            warnings,
+        );
+    }
     cfg.firecrawl_scrape.enabled = s.firecrawl_scrape.unwrap_or(false);
     cfg.firecrawl_scrape.allow_self_hosted = s.firecrawl_allow_self_hosted_scrape.unwrap_or(false);
 }
@@ -1769,6 +1792,28 @@ mod tests {
     use crate::email_host::register_email;
     use provider_catalog::ProviderConfig;
     use secret_store::MemoryStore;
+
+    #[test]
+    fn invalid_firecrawl_file_url_is_not_exposed_or_used() {
+        for raw in [
+            "https://user:password@example.com/",
+            "https://example.com/?token=secret",
+            "https://example.com/#secret",
+            "ftp://example.com/",
+        ] {
+            let mut cfg = web_tools::SearchConfig::default();
+            let section = WebSearchSection {
+                firecrawl_url: Some(raw.into()),
+                firecrawl_key: Some("web/firecrawl".into()),
+                ..Default::default()
+            };
+            let mut warnings = Vec::new();
+            configure_web_credentials(&mut cfg, &section, true, &mut warnings);
+            assert!(cfg.firecrawl_url.is_none());
+            assert!(cfg.firecrawl_key.is_none());
+            assert_eq!(warnings, vec!["web.toml: invalid firecrawl_url ignored"]);
+        }
+    }
 
     /// A SIGHUP to the daemon must not kill it. Runs in a child process: without the handler the
     /// signal terminates the process, which a test cannot survive in-process.

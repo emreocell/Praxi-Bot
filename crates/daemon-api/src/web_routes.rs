@@ -76,6 +76,9 @@ pub(crate) async fn update_web_search(
     if let Some(k) = &input.tavily_key {
         check_api_key("tavily_key", k)?;
     }
+    if let Some(k) = &input.firecrawl_key {
+        check_api_key("firecrawl_key", k)?;
+    }
     Ok(Json(control.update(input).await?))
 }
 

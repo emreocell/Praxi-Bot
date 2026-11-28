@@ -276,6 +276,11 @@ fn validate_provider_url(raw: &str, field: &str) -> Result<Option<String>, WebCo
             "{field} must not contain credentials"
         )));
     }
+    if field == "firecrawl_url" && (u.query().is_some() || u.fragment().is_some()) {
+        return Err(WebControlError::Invalid(
+            "firecrawl_url must not contain a query or fragment".into(),
+        ));
+    }
     Ok(Some(trimmed.to_owned()))
 }
 
@@ -317,9 +322,11 @@ impl WebControl for WebHost {
         if let Some(url) = &input.searxng_url {
             file.search.searxng_url = validate_provider_url(url, "searxng_url")?;
         }
+        let mut firecrawl_url_changed = false;
         if let Some(url) = &input.firecrawl_url {
             let next = validate_provider_url(url, "firecrawl_url")?;
             if next != file.search.firecrawl_url {
+                firecrawl_url_changed = true;
                 file.search.firecrawl_allow_self_hosted_scrape = Some(false);
             }
             file.search.firecrawl_url = next;
@@ -353,11 +360,16 @@ impl WebControl for WebHost {
             input.clear_tavily_key,
         );
 
+        let clear_firecrawl = input.clear_firecrawl_key == Some(true)
+            || (firecrawl_url_changed && input.firecrawl_key.is_none());
+        if clear_firecrawl {
+            file.search.firecrawl_scrape = Some(false);
+        }
         let firecrawl_change = plan_secret_change(
             &mut file.search.firecrawl_key,
             DEFAULT_FIRECRAWL_KEY_NAME,
             input.firecrawl_key,
-            input.clear_firecrawl_key,
+            Some(clear_firecrawl),
         );
         if (matches!(firecrawl_change, SecretChange::Set { .. })
             || matches!(brave_change, SecretChange::Set { .. })
@@ -690,6 +702,8 @@ mod tests {
             .await
             .unwrap();
         assert!(!changed.firecrawl_allow_self_hosted_scrape);
+        assert!(!changed.firecrawl_key_set);
+        assert!(!changed.firecrawl_scrape);
     }
 
     #[tokio::test]

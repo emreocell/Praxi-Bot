@@ -1875,7 +1875,7 @@ async fn firecrawl_scrape_checks_input_and_final_url_before_returning_content() 
     c.search.firecrawl_scrape.allow_self_hosted = true;
     let reg = ToolRegistry::new();
     web_tools::register(&reg, c).unwrap();
-    for target in ["http://127.0.0.1/", "https://user@example.com/"] {
+    for target in ["http://127.0.0.1/", "https://user@203.0.113.1/"] {
         assert!(
             call(&reg, "web_extract", json!({"url": target}))
                 .await
@@ -1887,7 +1887,7 @@ async fn firecrawl_scrape_checks_input_and_final_url_before_returning_content() 
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "success": true, "data": {"markdown": "secret page content", "metadata": {"sourceURL": "http://10.0.0.1/"}}
         }))).mount(&server).await;
-    let err = call(&reg, "web_extract", json!({"url": "https://example.com/"}))
+    let err = call(&reg, "web_extract", json!({"url": "https://203.0.113.1/"}))
         .await
         .unwrap_err();
     assert!(err.contains("disallowed final URL"));
@@ -1908,25 +1908,25 @@ async fn firecrawl_scrape_honours_include_links_and_list_links_independently() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "success": true,
             "data": {
-                "markdown": "Read [example](https://example.com/link).",
-                "html": "<p>Read <a href=\"https://example.com/link\">example</a>.</p>",
-                "links": ["https://example.com/link"],
-                "metadata": {"url": "https://example.com/"}
+                "markdown": "Read [example](https://203.0.113.1/link).",
+                "html": "<p>Read <a href=\"https://203.0.113.1/link\">example</a>.</p>",
+                "links": ["https://203.0.113.1/link"],
+                "metadata": {"url": "https://203.0.113.1/"}
             }
         })))
         .mount(&server)
         .await;
     for (include_links, list_links) in [(true, false), (false, false), (false, true)] {
         let out = call(&reg, "web_extract", json!({
-            "url": "https://example.com/", "include_links": include_links, "list_links": list_links
+            "url": "https://203.0.113.1/", "include_links": include_links, "list_links": list_links
         })).await.unwrap();
         let result = text(&out);
         assert_eq!(
-            result.contains("[example](https://example.com/link)"),
+            result.contains("[example](https://203.0.113.1/link)"),
             include_links
         );
         assert_eq!(
-            result.contains("## Links\n- https://example.com/link"),
+            result.contains("## Links\n- https://203.0.113.1/link"),
             list_links
         );
         assert!(result.contains("example"));
@@ -1950,7 +1950,7 @@ async fn firecrawl_self_hosted_scrape_requires_explicit_opt_in() {
     c.search.firecrawl_scrape.enabled = true;
     let reg = ToolRegistry::new();
     web_tools::register(&reg, c).unwrap();
-    let err = call(&reg, "web_extract", json!({"url": "https://example.com/"}))
+    let err = call(&reg, "web_extract", json!({"url": "https://203.0.113.1/"}))
         .await
         .unwrap_err();
     assert!(err.contains("disabled"));
@@ -1961,8 +1961,8 @@ async fn firecrawl_self_hosted_scrape_requires_explicit_opt_in() {
 async fn firecrawl_scrape_rejects_missing_or_owner_blocked_final_urls_and_wraps_safe_content() {
     for (final_url, allowed) in [
         (None, false),
-        (Some("https://example.com/secret"), false),
-        (Some("https://example.com/safe"), true),
+        (Some("https://203.0.113.1/secret"), false),
+        (Some("https://203.0.113.1/safe"), true),
     ] {
         let server = MockServer::start().await;
         let mut c = cfg(DefaultUrlPolicy::default());
@@ -1973,7 +1973,7 @@ async fn firecrawl_scrape_rejects_missing_or_owner_blocked_final_urls_and_wraps_
         web_tools::register(&reg, c).unwrap();
         Mock::given(method("POST")).and(path("/v2/scrape"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "success": true, "data": {"markdown": "untrusted page", "metadata": {"sourceURL": final_url}}
+                "success": true, "data": {"markdown": "untrusted page", "metadata": {"url": final_url, "sourceURL": "https://203.0.113.1/safe"}}
             }))).mount(&server).await;
         let guard: Arc<dyn tool_registry::UrlGuard> = Arc::new(DenyPath("/secret"));
         let result = tool_registry::with_url_guard(
@@ -1981,7 +1981,7 @@ async fn firecrawl_scrape_rejects_missing_or_owner_blocked_final_urls_and_wraps_
             call_ctx(
                 &reg,
                 "web_extract",
-                json!({"url": "https://example.com/safe"}),
+                json!({"url": "https://203.0.113.1/safe"}),
                 &ToolContext::default(),
             ),
         )
@@ -2011,7 +2011,7 @@ async fn firecrawl_scrape_checks_owner_block_before_calling_service() {
         call_ctx(
             &reg,
             "web_extract",
-            json!({"url": "https://example.com/secret"}),
+            json!({"url": "https://203.0.113.1/secret"}),
             &ToolContext::default(),
         ),
     )
@@ -2032,11 +2032,98 @@ async fn firecrawl_scrape_refuses_an_unsafe_url_even_if_source_url_is_safe() {
     Mock::given(method("POST")).and(path("/v2/scrape"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "success": true,
-            "data": {"markdown": "private data", "metadata": {"sourceURL": "https://example.com/", "url": "http://10.0.0.1/"}}
+            "data": {"markdown": "private data", "metadata": {"sourceURL": "https://203.0.113.1/", "url": "http://10.0.0.1/"}}
         }))).mount(&server).await;
-    let err = call(&reg, "web_extract", json!({"url": "https://example.com/"}))
+    let err = call(&reg, "web_extract", json!({"url": "https://203.0.113.1/"}))
         .await
         .unwrap_err();
     assert!(err.contains("disallowed final URL"));
     assert!(!err.contains("private data"));
+}
+
+#[tokio::test]
+async fn firecrawl_rejects_echoed_source_as_final_url_and_resolved_loopback() {
+    let server = MockServer::start().await;
+    let mut c = cfg(DefaultUrlPolicy::default());
+    c.search.firecrawl_url = Some(server.uri());
+    c.search.firecrawl_scrape.enabled = true;
+    c.search.firecrawl_scrape.allow_self_hosted = true;
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    Mock::given(method("POST")).and(path("/v2/scrape"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true, "data": {"markdown": "private content", "metadata": {"url": null, "sourceURL": "https://203.0.113.1/"}}
+        }))).mount(&server).await;
+    let err = call(&reg, "web_extract", json!({"url": "https://203.0.113.1/"}))
+        .await
+        .unwrap_err();
+    assert!(err.contains("disallowed final URL"));
+    assert!(!err.contains("private content"));
+    let before = server.received_requests().await.unwrap().len();
+    assert!(
+        call(&reg, "web_extract", json!({"url": "http://localhost/"}))
+            .await
+            .is_err()
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+}
+
+#[tokio::test]
+async fn firecrawl_cloud_is_blocked_until_its_usage_is_accounted() {
+    let store = Arc::new(MemoryStore::default());
+    store.set("firecrawl", "test-key").unwrap();
+    let mut c = cfg(DefaultUrlPolicy::default());
+    c.secrets = Some(store);
+    c.search.firecrawl_key = Some(SecretRef::new("firecrawl").unwrap());
+    c.search.firecrawl_scrape.enabled = true;
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    for (name, input) in [
+        (
+            "web_search",
+            json!({"query": "hello", "backend": "firecrawl"}),
+        ),
+        ("web_extract", json!({"url": "https://203.0.113.1/"})),
+    ] {
+        let err = call(&reg, name, input).await.unwrap_err();
+        assert!(err.contains("usage accounting"), "{err}");
+    }
+}
+
+#[tokio::test]
+async fn unconfigured_firecrawl_scrape_uses_builtin_fetcher() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(html("<html><body>built in content</body></html>"))
+        .mount(&server)
+        .await;
+    let mut c = cfg(loopback_ok());
+    c.search.firecrawl_scrape.enabled = true;
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let result = call(&reg, "web_extract", json!({"url": server.uri()}))
+        .await
+        .unwrap();
+    assert!(text(&result).contains("built in content"));
+}
+
+#[tokio::test]
+async fn firecrawl_key_is_not_sent_over_non_literal_loopback_http() {
+    let server = MockServer::start().await;
+    let store = Arc::new(MemoryStore::new());
+    store.set("firecrawl", "test-key").unwrap();
+    let mut c = cfg(DefaultUrlPolicy::default());
+    c.search.firecrawl_url = Some(server.uri().replace("127.0.0.1", "localhost"));
+    c.search.firecrawl_key = Some(SecretRef::new("firecrawl").unwrap());
+    c.secrets = Some(store);
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let result = call(
+        &reg,
+        "web_search",
+        json!({"query": "hello", "backend": "firecrawl"}),
+    )
+    .await;
+    assert!(result.unwrap_err().contains("require HTTPS"));
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

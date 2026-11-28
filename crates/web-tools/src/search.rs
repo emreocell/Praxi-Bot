@@ -626,11 +626,24 @@ impl SearchBackend for FirecrawlBackend {
     }
 
     async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, WebError> {
+        if self.endpoint.host_str().is_some_and(|host| {
+            host.trim_end_matches('.')
+                .eq_ignore_ascii_case("api.firecrawl.dev")
+        }) {
+            return Err(WebError::Search(
+                "Firecrawl Cloud is unavailable until usage accounting is enabled".into(),
+            ));
+        }
         let (q, limit) = query.validated()?;
         let payload = serde_json::to_vec(&serde_json::json!({"query": q, "limit": limit}))
             .map_err(|_| WebError::Search("firecrawl: invalid request".into()))?;
         let mut opts = json_search_options(&self.fetcher);
         if let Some(key) = &self.key {
+            if !crate::policy::credential_transport_safe(&self.endpoint) {
+                return Err(WebError::Config(
+                    "Firecrawl credentials require HTTPS or loopback HTTP".into(),
+                ));
+            }
             let store = self
                 .secrets
                 .as_ref()

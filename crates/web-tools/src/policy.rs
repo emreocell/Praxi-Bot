@@ -82,6 +82,41 @@ pub trait UrlPolicy: Send + Sync {
     }
 }
 
+/// Whether a bearer credential may be sent to this endpoint.
+pub(crate) fn credential_transport_safe(url: &Url) -> bool {
+    url.scheme() == "https"
+        || (url.scheme() == "http"
+            && match url.host() {
+                Some(Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(Host::Ipv6(ip)) => ip.is_loopback(),
+                _ => false,
+            })
+}
+
+/// Apply the public policy to the URL and every resolved socket.
+pub(crate) async fn check_resolved_url(
+    policy: &dyn UrlPolicy,
+    url: &Url,
+) -> Result<(), PolicyViolation> {
+    policy.check_url(url)?;
+    if let Some(Host::Domain(host)) = url.host() {
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| PolicyViolation::new("URL has no port"))?;
+        let addresses: Vec<_> = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|_| PolicyViolation::new("host could not be resolved"))?
+            .collect();
+        if addresses.is_empty() {
+            return Err(PolicyViolation::new("host did not resolve"));
+        }
+        for address in addresses {
+            policy.check_socket(host, address)?;
+        }
+    }
+    Ok(())
+}
+
 /// Wraps an injected policy and additionally trusts exactly one `host:port`
 /// (the configured `SearXNG` instance). Every other URL goes through the
 /// inner policy unchanged; the trusted host on any other port is refused.
@@ -632,5 +667,40 @@ mod tests {
         for (host, want) in cases {
             assert_eq!(is_loopback_name(host), want, "host={host:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod firecrawl_security_tests {
+    use super::*;
+
+    #[test]
+    fn credentials_require_https_or_literal_loopback() {
+        for raw in ["https://example.com", "http://127.0.0.1", "http://[::1]"] {
+            assert!(credential_transport_safe(&Url::parse(raw).unwrap()));
+        }
+        for raw in [
+            "http://example.com",
+            "http://192.168.1.1",
+            "http://localhost",
+        ] {
+            assert!(!credential_transport_safe(&Url::parse(raw).unwrap()));
+        }
+    }
+
+    #[tokio::test]
+    async fn resolved_loopback_is_rejected() {
+        struct DenyResolved;
+        impl UrlPolicy for DenyResolved {
+            fn check_url(&self, _: &Url) -> Result<(), PolicyViolation> {
+                Ok(())
+            }
+            fn check_ip(&self, _: &str, _: IpAddr) -> Result<(), PolicyViolation> {
+                Err(PolicyViolation::new("resolved address denied"))
+            }
+        }
+        let url = Url::parse("http://localhost:80/").unwrap();
+        let error = check_resolved_url(&DenyResolved, &url).await.unwrap_err();
+        assert_eq!(error.0, "resolved address denied");
     }
 }

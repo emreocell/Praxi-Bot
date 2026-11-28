@@ -220,7 +220,7 @@ export function WebSearchCard() {
     if (selectedHasDraft) {
       const input: WebSearchConfigInput = provider === "firecrawl" ? {
         firecrawl_url: firecrawlSelfHosted ? firecrawlUrl.trim() : "",
-        ...(firecrawlKey.trim() ? { firecrawl_key: firecrawlKey.trim() } : {}),
+        ...(firecrawlKey.trim() ? { firecrawl_key: firecrawlKey.trim() } : ((firecrawlSelfHosted ? firecrawlUrl.trim() : "") !== (config?.firecrawl_url ?? "") ? { clear_firecrawl_key: true } : {})),
         firecrawl_scrape: firecrawlScrape,
         firecrawl_allow_self_hosted_scrape: firecrawlSelfHosted && firecrawlAllow
       } : saveInput(provider, draftValue(provider));
