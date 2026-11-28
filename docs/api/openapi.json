@@ -16905,6 +16905,166 @@
         ]
       }
     },
+    "/v1/phone-approval": {
+      "get": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Phone approval settings.",
+        "operationId": "get_phone_approval",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneApprovalStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Turn phone approval on, or change the address or the PIN. Any change drops every open link.",
+        "operationId": "put_phone_approval",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneApprovalSetup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneApprovalStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Turn phone approval off: the PIN is deleted and every open link stops working.",
+        "operationId": "delete_phone_approval",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneApprovalStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/phone-approval/links": {
+      "post": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Mint a one-time phone approval link for a pending money ask (owner key only). A new link\nfor the same ask replaces the old one.",
+        "operationId": "create_phone_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLink"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/policy": {
       "get": {
         "tags": [
@@ -37456,6 +37616,87 @@
             "type": "number",
             "format": "double",
             "description": "Money counted in the period (USD). Models without a known price add nothing here."
+          }
+        }
+      },
+      "PhoneApprovalSetup": {
+        "type": "object",
+        "description": "Turn phone approval on or change it.",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Public https address of the owner's tunnel to this daemon (origin only, no path)."
+          },
+          "pin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "6 to 12 digits. Required the first time; omitted keeps the current PIN."
+          }
+        }
+      },
+      "PhoneApprovalStatus": {
+        "type": "object",
+        "description": "Whether phone approval is on.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The public address links point to (`https://host[:port]`)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A PIN and an address are set."
+          },
+          "locked_until_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Too many wrong PINs: no link works until then (Unix ms)."
+          }
+        }
+      },
+      "PhoneLink": {
+        "type": "object",
+        "description": "A one-time phone link.",
+        "required": [
+          "url",
+          "expires_at_ms"
+        ],
+        "properties": {
+          "expires_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the link stops working (Unix ms)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Open on the phone; it works once, until `expires_at_ms`, and needs the PIN."
+          }
+        }
+      },
+      "PhoneLinkRequest": {
+        "type": "object",
+        "description": "Which ask a phone link is for.",
+        "required": [
+          "call_id"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The pending money ask (`call_id` of its `approval_needed` event)."
           }
         }
       },

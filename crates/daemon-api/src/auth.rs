@@ -195,7 +195,7 @@ fn read_verified(_data_dir: &Path, path: &Path) -> std::io::Result<(String, bool
 }
 
 #[cfg(unix)]
-fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
+pub(crate) fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let _ = std::fs::remove_file(path);
@@ -212,7 +212,7 @@ fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
 /// sits in a file with inherited (wider) permissions.  If the restriction
 /// fails the file is removed and the error returned (startup fails visibly).
 #[cfg(not(unix))]
-fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
+pub(crate) fn write_private(path: &Path, content: &str) -> std::io::Result<bool> {
     use std::io::Write;
     let _ = std::fs::remove_file(path);
     let mut f = std::fs::OpenOptions::new()
@@ -335,6 +335,13 @@ pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next:
         None => None,
         Some(o) => match o.to_str() {
             Ok(s) if state.origin_allowed(s) => Some(o.clone()),
+            // The phone approval page posts its own forms from the owner's tunnel address.
+            Ok(s)
+                if crate::phone_approval::is_page_route(req.method(), req.uri().path())
+                    && crate::phone_approval::origin_is_address(&state, s) =>
+            {
+                None
+            }
             _ => return ApiError::forbidden("origin not allowed").into_response(),
         },
     };
@@ -345,7 +352,8 @@ pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next:
     // instead of the bearer token (the route verifies it).
     let public = (req.method() == Method::GET && req.uri().path() == "/v1/health")
         || is_webhook_route(&req)
-        || is_incoming_webhook(&req);
+        || is_incoming_webhook(&req)
+        || crate::phone_approval::is_page_route(req.method(), req.uri().path());
     if !public {
         let presented = match bearer(req.headers()) {
             Some(t) => Some(t),

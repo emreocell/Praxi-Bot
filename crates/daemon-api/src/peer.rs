@@ -182,7 +182,10 @@ pub(crate) fn protect_execution_config(
 /// 8. reveal the plaintext of a stored fill secret (`POST /v1/fill-secrets/reveal`):
 ///    a login, password or card is typed by the bot on the host and never needs
 ///    to be read over the link, so a stolen administrator desktop cannot drain
-///    the vault (the handler also insists on the person at the host's own app).
+///    the vault (the handler also insists on the person at the host's own app);
+/// 9. mint or open a phone approval link (`/v1/phone-approval/links`,
+///    `/v1/phone-approval/p/…`): its credential is the nonce plus the PIN on the
+///    owner's tunnel, never a paired device (setting the PIN up is allowed).
 ///
 /// No other route returns secret material: the API token and the owner key are
 /// never an output, provider/mail/search/voice keys and secrets are write-only,
@@ -221,6 +224,11 @@ pub(crate) fn admin_desktop_never(method: &Method, check_path: &str) -> Option<&
     }
     if *method == Method::POST && check_path == "/v1/fill-secrets/reveal" {
         return Some("revealing a stored secret is done at the host's own app");
+    }
+    if under(check_path, "/v1/phone-approval/links") || under(check_path, "/v1/phone-approval/p") {
+        return Some(
+            "phone approval links are minted by the host's chat channel and opened through the owner's tunnel",
+        );
     }
     None
 }
@@ -460,6 +468,9 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     }
     if is_incoming_webhook_path(check_path) {
         return Some("incoming webhooks are managed on this computer by the owner");
+    }
+    if under(check_path, "/v1/phone-approval") {
+        return Some("phone approval is set up by the owner on this computer");
     }
     if under(check_path, "/v1/logs") {
         return Some("recent logs are available only to the local owner");
@@ -1007,6 +1018,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ordinary_peers_never_touch_phone_approval() {
+        for (method, path) in [
+            (Method::GET, "/v1/phone-approval"),
+            (Method::PUT, "/v1/phone-approval"),
+            (Method::DELETE, "/v1/phone-approval"),
+            (Method::POST, "/v1/phone-approval/links"),
+            (Method::GET, "/v1/phone-approval/p/abc"),
+            (Method::POST, "/v1/phone-approval/p/abc/decide"),
+        ] {
+            assert!(
+                host_local_denial(&method, path).is_some(),
+                "{method} {path}"
+            );
+        }
+    }
+
+    #[test]
     fn peers_never_touch_the_mail_guard_routes() {
         for path in [
             "/v1/email/guard/settings",
@@ -1064,6 +1092,11 @@ mod tests {
             (Method::PUT, "/v1/view/privileges/abc"),
             // 8. plaintext of a stored secret
             (Method::POST, "/v1/fill-secrets/reveal"),
+            // 9. phone approval links and the page behind them
+            (Method::POST, "/v1/phone-approval/links"),
+            (Method::GET, "/v1/phone-approval/p/abc"),
+            (Method::POST, "/v1/phone-approval/p/abc/unlock"),
+            (Method::POST, "/v1/phone-approval/p/abc/decide"),
         ] {
             assert!(
                 admin_desktop_never(&method, path).is_some(),
@@ -1100,6 +1133,7 @@ mod tests {
                 "/v1/bots/abc/incoming-webhooks/x/rotate-secret",
             ),
             (Method::GET, "/v1/channels/telegram"),
+            (Method::PUT, "/v1/phone-approval"),
             // a path that only starts like a listed one
             (Method::POST, "/v1/hostage"),
             (Method::GET, "/v1/mcp-servers"),

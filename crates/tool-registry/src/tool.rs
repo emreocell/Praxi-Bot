@@ -219,6 +219,21 @@ impl Default for ToolContext {
     }
 }
 
+/// What a checkout page shows right before a payment is asked about, read by the tool from the
+/// live page ([`Tool::checkout_facts`]). The domain comes from the browser; the merchant, the
+/// amount and the screenshot are the page's own claims and can lie.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CheckoutFacts {
+    /// Host name of the page, from the browser's own URL.
+    pub domain: Option<String>,
+    /// The site's name as the page states it (`og:site_name`, else the title).
+    pub merchant: Option<String>,
+    /// The first total-like amount the page shows (text, as shown).
+    pub amount: Option<String>,
+    /// A screenshot of the visible part of the page: bytes and MIME type.
+    pub screenshot: Option<(Vec<u8>, &'static str)>,
+}
+
 /// A narrow, owner-created standing authorisation that stands in for the
 /// approval card of one specific call (for example "this secret on this exact
 /// origin"). Returned by [`Tool::standing_grant`]; the loop records it in the
@@ -335,6 +350,12 @@ pub trait Tool: Send + Sync {
         None
     }
 
+    /// What the checkout page this call acts on shows, for the owner's money card (the phone
+    /// approval page shows it). Display only, never a permission input. Default: nothing.
+    async fn checkout_facts(&self, _ctx: &ToolContext, _input: &Value) -> Option<CheckoutFacts> {
+        None
+    }
+
     /// Host the call actually contacts when the input does not name one.
     ///
     /// `OpenAPI` tools use this so the card footer shows the API host, not the
@@ -417,6 +438,10 @@ pub trait ToolWrapper: Send + Sync {
     /// wrapped browser tool look like it never reaches a checkout.
     async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64>;
 
+    /// Forward [`Tool::checkout_facts`] to the wrapped tool: a wrapper that drops it leaves the
+    /// owner's money card without the checkout's domain, amount and screenshot.
+    async fn checkout_facts(&self, ctx: &ToolContext, input: &Value) -> Option<CheckoutFacts>;
+
     /// Forward [`Tool::approval_details`] to the wrapped tool.
     ///
     /// # Errors
@@ -479,6 +504,10 @@ impl<W: ToolWrapper> Tool for W {
 
     async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
         ToolWrapper::payment_page(self, ctx, input).await
+    }
+
+    async fn checkout_facts(&self, ctx: &ToolContext, input: &Value) -> Option<CheckoutFacts> {
+        ToolWrapper::checkout_facts(self, ctx, input).await
     }
 }
 
@@ -1074,6 +1103,13 @@ impl Tool for W {
                 input: &serde_json::Value,
             ) -> Option<u64> {
                 self.0.payment_page(ctx, input).await
+            }
+            async fn checkout_facts(
+                &self,
+                ctx: &crate::ToolContext,
+                input: &serde_json::Value,
+            ) -> Option<crate::CheckoutFacts> {
+                self.0.checkout_facts(ctx, input).await
             }
             async fn approval_details(
                 &self,

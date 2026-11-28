@@ -752,6 +752,10 @@ pub(crate) struct Pending {
     /// A tool-wide standing grant ("always for this bot") is refused for this card: an MCP
     /// tool in a run that has read something private.
     pub always_refused: bool,
+    /// The card asks to move money: a chat channel must never approve it
+    /// (`POST /v1/approvals` refuses one that says it comes from a channel), and only such a
+    /// card gets a phone approval link.
+    pub money: bool,
     /// The run that parked this card, so Stop can close every card of a run.
     pub run_id: RunId,
     /// The persisted approval row of this park.
@@ -1209,6 +1213,9 @@ pub(crate) struct Shared {
     pub events: broadcast::Sender<StreamItem>,
     pub runs: Mutex<HashMap<RunId, Arc<RunCtx>>>,
     pub pending: Mutex<HashMap<ToolCallId, Pending>>,
+    /// Checkout screenshots of parked money asks, for the phone approval page (bytes, MIME
+    /// type). Dropped when the ask closes.
+    pub checkout_shots: Mutex<HashMap<ToolCallId, (Vec<u8>, &'static str)>>,
     /// `secret_request` calls waiting for the owner's form (see `approval.rs`).
     pub secret_requests: Mutex<HashMap<ToolCallId, SecretRequestInfo>>,
     /// `browser_handover` calls waiting for the owner (see `approval.rs`).

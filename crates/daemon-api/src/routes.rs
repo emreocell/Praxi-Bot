@@ -199,7 +199,10 @@ fn run_dto_with(r: storage::Run, can_remember: bool) -> RunDto {
 /// not the tool call id, which only the `approval_needed` event carries).
 /// An approval with no decision event in a run that is no longer waiting was
 /// lost to a restart and reads `expired`.
-fn run_approvals(s: &AppState, run: &storage::Run) -> Result<Vec<ApprovalDto>, ApiError> {
+pub(crate) fn run_approvals(
+    s: &AppState,
+    run: &storage::Run,
+) -> Result<Vec<ApprovalDto>, ApiError> {
     let log =
         storage::read_event_log(s.storage().data_dir(), run.id).map_err(ApiError::internal)?;
     let waiting = run.state == RunState::WaitingApproval.as_str();
@@ -1416,6 +1419,18 @@ pub(crate) async fn decide_approval(
         && s.agent().approval_is_gate_grant(call_id)
     {
         s.require_owner(&headers)?;
+    }
+    // A chat channel (Telegram, Discord) never approves money: that takes the phone approval
+    // page and its PIN, or the desktop app (docs/design/phone-money-approval-adr.md).
+    if matches!(input.decision, Decision::Approve)
+        && headers.contains_key(crate::phone_approval::CHANNEL_HEADER)
+        && s.agent().approval_is_money(call_id)
+    {
+        return Err(ApiError::new(
+            axum::http::StatusCode::FORBIDDEN,
+            crate::phone_approval::PHONE_APPROVAL_REQUIRED,
+            "a payment cannot be approved from a chat: use the phone approval link or the app",
+        ));
     }
     match input.decision {
         Decision::Approve => {

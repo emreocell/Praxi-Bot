@@ -4,7 +4,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use serde_json::Value;
-use tool_registry::{PaymentApproval, ToolError};
+use tool_registry::{CheckoutFacts, PaymentApproval, ToolError};
 
 use super::{BrowserDriver, BrowserTool, Op, PAYMENT_APPROVAL, act};
 
@@ -196,6 +196,91 @@ impl BrowserTool {
     }
 }
 
+/// Page script that reads the merchant and the first total-like amount. It only reads; what it
+/// returns is the page's claim (a page can rewrite the DOM functions it calls).
+const CHECKOUT_FACTS_JS: &str = r#"(() => {
+  const og = document.querySelector('meta[property="og:site_name"]');
+  const site = ((og && og.getAttribute('content')) || document.title || '').slice(0, 200);
+  const cur = '(?:[$€£¥₺]|\\b(?:USD|EUR|GBP|TRY|JPY|CHF|CAD|AUD|TL)\\b)';
+  const num = '\\d[\\d.,  ]*\\d';
+  const money = new RegExp(cur + '\\s?' + num + '|' + num + '\\s?' + cur);
+  const label = /total|amount due|to pay|toplam|tutar|ödenecek/i;
+  let amount = '';
+  const nodes = document.body ? document.body.querySelectorAll('*') : [];
+  for (let i = 0; i < nodes.length && i < 3000; i++) {
+    const el = nodes[i];
+    if (el.children.length > 0) continue;
+    const own = (el.textContent || '').trim();
+    if (!own || own.length > 60 || !label.test(own)) continue;
+    const box = (el.parentElement && el.parentElement.innerText) || own;
+    const m = box.slice(0, 300).match(money);
+    if (m) { amount = m[0]; break; }
+  }
+  if (!amount && document.body) {
+    const m = (document.body.innerText || '').slice(0, 20000).match(money);
+    if (m) amount = m[0];
+  }
+  return { site, amount };
+})()"#;
+
+/// Longest merchant or amount text kept.
+const MAX_FACT_CHARS: usize = 80;
+/// Largest screenshot kept for the phone page.
+const MAX_SHOT_BYTES: usize = 4 * 1024 * 1024;
+/// How long reading the checkout may delay the card.
+const FACTS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// One line of page text: whitespace collapsed, control characters removed, at most
+/// [`MAX_FACT_CHARS`] characters.
+fn clean_fact(raw: &str) -> Option<String> {
+    let line: String = raw
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_FACT_CHARS)
+        .collect();
+    (!line.is_empty()).then_some(line)
+}
+
+fn image_mime(ext: &str) -> Option<&'static str> {
+    match ext {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+/// What the current page shows for the owner's money card: the browser's own host name, the
+/// page's merchant and amount, and a viewport screenshot. Every part is best effort.
+pub(super) async fn read_checkout(driver: &dyn BrowserDriver) -> CheckoutFacts {
+    let read = async {
+        let domain = driver
+            .current_url()
+            .await
+            .and_then(|u| url::Url::parse(&u).ok())
+            .and_then(|u| u.host_str().map(str::to_owned));
+        let page = driver.eval(CHECKOUT_FACTS_JS).await.unwrap_or_default();
+        let screenshot = driver
+            .screenshot(false, None)
+            .await
+            .ok()
+            .filter(|(bytes, _)| !bytes.is_empty() && bytes.len() <= MAX_SHOT_BYTES)
+            .and_then(|(bytes, ext)| image_mime(ext).map(|mime| (bytes, mime)));
+        CheckoutFacts {
+            domain,
+            merchant: page["site"].as_str().and_then(clean_fact),
+            amount: page["amount"].as_str().and_then(clean_fact),
+            screenshot,
+        }
+    };
+    tokio::time::timeout(FACTS_TIMEOUT, read)
+        .await
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +295,20 @@ mod tests {
         assert!(payment_label("Ödemeyi onayla"));
         assert!(!payment_label("Pay history"));
         assert!(!payment_label("Buy newsletter subscription tips"));
+    }
+
+    #[test]
+    fn checkout_facts_are_one_short_line() {
+        assert_eq!(
+            clean_fact("  Shop\n\t Name\u{7}  ").as_deref(),
+            Some("Shop Name")
+        );
+        assert_eq!(clean_fact(" \n "), None);
+        assert_eq!(
+            clean_fact(&"x".repeat(500)).map(|s| s.len()),
+            Some(MAX_FACT_CHARS)
+        );
+        assert_eq!(image_mime("png"), Some("image/png"));
+        assert_eq!(image_mime("svg"), None);
     }
 }

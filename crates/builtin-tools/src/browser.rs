@@ -4429,6 +4429,19 @@ impl Tool for BrowserTool {
             .await
     }
 
+    async fn checkout_facts(
+        &self,
+        ctx: &ToolContext,
+        _input: &Value,
+    ) -> Option<tool_registry::CheckoutFacts> {
+        BROWSER_LANE
+            .scope(ctx.lane.clone(), async {
+                let shared = self.select_shared(ctx).ok()?;
+                Some(payment::read_checkout(&*shared.driver).await)
+            })
+            .await
+    }
+
     async fn landed_origin(&self, ctx: &ToolContext) -> Option<String> {
         BROWSER_LANE
             .scope(ctx.lane.clone(), async {
