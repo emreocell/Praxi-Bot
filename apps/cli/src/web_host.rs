@@ -284,6 +284,22 @@ fn validate_provider_url(raw: &str, field: &str) -> Result<Option<String>, WebCo
     Ok(Some(trimmed.to_owned()))
 }
 
+fn update_firecrawl_url(
+    file: &mut WebConfigFile,
+    raw: Option<&str>,
+) -> Result<bool, WebControlError> {
+    let Some(raw) = raw else {
+        return Ok(false);
+    };
+    let next = validate_provider_url(raw, "firecrawl_url")?;
+    let changed = next != file.search.firecrawl_url;
+    if changed {
+        file.search.firecrawl_allow_self_hosted_scrape = Some(false);
+    }
+    file.search.firecrawl_url = next;
+    Ok(changed)
+}
+
 #[async_trait]
 impl WebControl for WebHost {
     fn get(&self) -> WebSearchConfigDto {
@@ -322,15 +338,8 @@ impl WebControl for WebHost {
         if let Some(url) = &input.searxng_url {
             file.search.searxng_url = validate_provider_url(url, "searxng_url")?;
         }
-        let mut firecrawl_url_changed = false;
-        if let Some(url) = &input.firecrawl_url {
-            let next = validate_provider_url(url, "firecrawl_url")?;
-            if next != file.search.firecrawl_url {
-                firecrawl_url_changed = true;
-                file.search.firecrawl_allow_self_hosted_scrape = Some(false);
-            }
-            file.search.firecrawl_url = next;
-        }
+        let firecrawl_url_changed =
+            update_firecrawl_url(&mut file, input.firecrawl_url.as_deref())?;
         if let Some(v) = input.firecrawl_scrape {
             file.search.firecrawl_scrape = Some(v);
         }
