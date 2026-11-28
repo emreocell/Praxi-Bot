@@ -315,6 +315,7 @@
       "Bağlayın (yaklaşık 5 dakika)",
       "Bota kimler yazabilir",
       "Sohbette",
+      "Görevleri telefondan yönetin",
       "Onaylar",
       "Mesajlar ve ekler",
       "Bilmekte fayda var"
@@ -767,6 +768,7 @@
       "Bir tane oluştur",
       "Ne zaman ifadeleri",
       "Bir zamanlama ne çalıştırabilir",
+      "Kalıcı talimatlar: yalnızca sana bir şey gerektiğinde konuşan kontrol",
       "Webhooklar",
       "Kaçırılan çalışmalar",
       "Kısa seri işler için zamanlama değil, tek bir çalışma kullan",
@@ -867,6 +869,7 @@
     "title": "Telegram",
     "headings": [
       "Sohbette",
+      "Görevleri telefondan yönet",
       "Dil",
       "Bilmen gerekenler"
     ],

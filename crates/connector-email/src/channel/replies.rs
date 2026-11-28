@@ -126,11 +126,11 @@ impl ReplyGate {
         }
         let mut to = Vec::new();
         for r in recipients {
-            if r.chars().any(char::is_control) || r.contains(['<', '>', ',', ';', ' ']) {
+            if crate::address::has_hidden_char(r) || r.contains(['<', '>', ',', ';', ' ']) {
                 return Err(input("recipients must be plain e-mail addresses"));
             }
             let addr = r.trim().to_lowercase();
-            if addr.parse::<email_address::EmailAddress>().is_err() {
+            if !crate::address::is_valid_address(&addr) {
                 return Err(input("recipients must be plain e-mail addresses"));
             }
             if !known(&addr) {

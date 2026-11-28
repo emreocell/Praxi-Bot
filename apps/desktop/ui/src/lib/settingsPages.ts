@@ -27,6 +27,13 @@ export const SETTINGS_PAGES = [
 ] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
+/** Pages whose cards save through the daemon (Save on the card), not the app settings store. */
+export const MANUAL_SAVE_PAGES: ReadonlySet<SettingsPageId> = new Set(["connections"]);
+
+export function pageUsesManualCardSave(page: SettingsPageId): boolean {
+  return MANUAL_SAVE_PAGES.has(page);
+}
+
 /**
  * The titled groups of each page, in order.  Rarely used cards of a group sit under the page's one
  * collapsed "Advanced settings" disclosure, under the same group title.

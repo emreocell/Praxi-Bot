@@ -312,6 +312,7 @@ fn prompt_of(p: &Payload) -> String {
         Payload::AgentPrompt { text } => text.clone(),
         Payload::Workflow { name, .. } => format!("(runs workflow {name})"),
         Payload::Tool { name, .. } => format!("(calls tool {name})"),
+        Payload::StandingOrder { checklist, .. } => checklist.clone(),
     }
 }
 

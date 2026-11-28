@@ -319,6 +319,7 @@
       "Connect it (about 5 minutes)",
       "Who can talk to the bot",
       "In the chat",
+      "Manage missions from your phone",
       "When a bot reports back on its own",
       "Approvals",
       "Messages and attachments",
@@ -684,6 +685,7 @@
       "What you see",
       "Waiting for a mail, a timer or a webhook",
       "When a mission stops",
+      "From your phone",
       "Limits of this first version"
     ],
     "summary": "A secretary who asks \"shall I open the file? shall I pick up the pen? this page"
@@ -792,6 +794,7 @@
       "Create one",
       "When phrases",
       "What a schedule can run",
+      "Standing orders: a check that speaks only when something needs you",
       "Webhooks",
       "Missed runs",
       "Short bursts: use one run, not a schedule",
@@ -893,6 +896,7 @@
     "title": "Telegram",
     "headings": [
       "In the chat",
+      "Manage missions from your phone",
       "When a bot reports back on its own",
       "Language",
       "Good to know"

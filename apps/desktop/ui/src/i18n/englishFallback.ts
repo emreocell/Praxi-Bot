@@ -12,6 +12,9 @@ export function usesEnglishFallback(locale: string, key: string): boolean {
     key === "pastedSecret.kind.payment_card" ||
     // The model picker's short "set up" row for a coding CLI that is not ready on the server.
     key === "modelPicker.missingCliShort" ||
-    key === "modelPicker.setUpCli"
+    key === "modelPicker.setUpCli" ||
+    // Standing orders (quiet checks), English and Turkish first.
+    key === "schedules.form.payloadKeptStanding" ||
+    key === "schedules.payload.standingOrder"
   );
 }

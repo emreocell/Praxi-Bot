@@ -5953,7 +5953,6 @@
       "ignored": "E-mails d'expéditeurs non autorisés ignorés : {{n}}",
       "needsSenders": "Ce canal fonctionnait sans liste d'expéditeurs autorisés : il ne transmet donc plus AUCUN e-mail au bot. Ajoutez, sous « Expéditeurs autorisés » dans les réglages de la boîte aux lettres ci-dessus, les adresses autorisées à écrire au bot (par exemple la vôtre). D'ici là, chaque e-mail reçu reste non lu dans la boîte.",
       "noAccount": "Ajoutez d'abord une boîte aux lettres ci-dessus.",
-      "noSenders": "La boîte aux lettres sélectionnée n'a aucun expéditeur autorisé : aucun e-mail n'atteindra donc le bot. Ajoutez votre propre adresse sous « Expéditeurs autorisés » dans les réglages de la boîte aux lettres ci-dessus.",
       "note": "Le courrier est écrit par d'autres personnes : le bot le traite donc comme une information, jamais comme des ordres. Par défaut, il ne voit que l'expéditeur, l'objet et les premières lignes. Les pièces jointes ne sont jamais ouvertes. Rien n'est envoyé, sauf si vous autorisez les réponses puis approuvez chacune d'elles ici.",
       "replies": "Laisser le bot suggérer des réponses (vous approuvez chacune avant son envoi)",
       "running": "En cours d'exécution",

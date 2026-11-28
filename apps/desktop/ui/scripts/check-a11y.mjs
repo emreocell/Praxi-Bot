@@ -1,5 +1,5 @@
 // Automated accessibility check (axe-core) over the mock-mode screens, in a headless Chrome.
-//   node scripts/check-a11y.mjs [--only=<substring>] [--budget=<seconds>]
+//   node scripts/check-a11y.mjs [--only=<substring>] [--budget=<seconds>] [--shard=i/n]
 // Builds the mock bundle (VITE_MOCK=1), serves it with `vite preview`, opens every case in one
 // Chrome through playwright-core, runs axe-core and compares the result with `a11y-allowlist.mjs`.
 // New violations fail; allow-list entries that no longer match anything fail too (ratchet).
@@ -14,11 +14,12 @@ import { fileURLToPath, URL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { allowlist } from './a11y-allowlist.mjs';
+import { isTimeoutError, parseShardArg, pickShard, resolveBudgetSeconds } from './a11y-check-lib.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 const only = flag('only');
-const budgetMs = Number(flag('budget') ?? 120) * 1000;
+const shard = parseShardArg(flag('shard'));
 const root = fileURLToPath(new URL('../', import.meta.url));
 const CHROMES = [process.env.CHROME_BIN, 'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean);
@@ -94,7 +95,14 @@ const themes = ['clay', 'obsidian'];
 const cases = [];
 for (const s of screens) for (const theme of themes) cases.push({ name: `${s.name}/${theme}/en`, query: `${s.query}&theme=${theme}&lang=en`, act: s.act, expect: s.expect, scope: s.scope });
 cases.push({ name: 'home/clay/tr', query: 'screen=home&theme=clay&lang=tr' }, { name: 'settings-general/clay/de', query: 'screen=settings&section=general&theme=clay&lang=de' });
-const selected = only ? cases.filter((c) => c.name.includes(only)) : cases;
+const filtered = only ? cases.filter((c) => c.name.includes(only)) : cases;
+const selected = pickShard(filtered, shard);
+const housekeeping = !shard || shard.total === 1;
+const budgetSec = resolveBudgetSeconds(selected.length, { explicit: flag('budget'), ci: process.env.CI === 'true' });
+const budgetMs = budgetSec * 1000;
+if (shard) {
+  process.stdout.write(`a11y shard ${shard.index}/${shard.total}: ${selected.length} of ${filtered.length} cases, budget ${budgetSec}s\n`);
+}
 
 const killTree = (pid) => {
   if (!pid) return;
@@ -109,6 +117,7 @@ const freePort = () => new Promise((ok, fail) => {
 const axeSource = readFileSync(resolve(root, 'node_modules/axe-core/axe.min.js'), 'utf8');
 const tmp = mkdtempSync(join(tmpdir(), 'praxi-a11y-'));
 const started = Date.now();
+let workStarted = started;
 let preview; let browser;
 const found = new Map(); // key -> { rule, impact, help, selector, html, screens:Set }
 let failed = false;
@@ -125,52 +134,68 @@ try {
     try { if ((await globalThis.fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch { /* not up yet */ }
     await delay(200);
   }
+  workStarted = Date.now();
   browser = await chromium.launch({ executablePath: chromePath, headless: true, args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
   let next = 0;
   let budgetHit = false;
+  const runCaseOnce = async (page, c) => {
+    await page.goto(`http://127.0.0.1:${port}/?mock=1&rt=ignore&${c.query}`, { waitUntil: 'load' });
+    await page.waitForSelector('#root > *', { timeout: 15000 });
+    await page.waitForTimeout(500); // mock data and entry transitions settle
+    for (const a of c.act ?? []) {
+      try {
+        if (a.press) await page.keyboard.press(a.press);
+        else if (a.type) await page.locator(a.type[0]).first().fill(a.type[1], { timeout: 5000 });
+        else if (a.clickText) await page.getByRole('button', { name: a.clickText }).first().click({ timeout: 5000 });
+        else if (a.rightClick) await page.locator(a.rightClick).first().click({ button: 'right', timeout: 5000 });
+        else await page.locator(a.click).first().click({ timeout: 5000 });
+      } catch (err) { if (!a.optional) throw err; }
+      await page.waitForTimeout(400);
+    }
+    if (c.expect) await page.waitForSelector(c.expect, { timeout: 5000 }); // the view under test really opened
+    await page.evaluate(axeSource);
+    const result = await page.evaluate((scope) => globalThis.axe.run(scope ? globalThis.document.querySelector(scope) : globalThis.document, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] },
+      resultTypes: ['violations']
+    }), c.scope);
+    for (const v of result.violations) {
+      for (const node of v.nodes) {
+        const selector = node.target.join(' >> ');
+        const key = `${v.id} ${selector}`;
+        const e = found.get(key) ?? { rule: v.id, impact: v.impact, help: v.help, selector, screens: new Set(), html: node.html.slice(0, 160) };
+        e.screens.add(c.name); found.set(key, e);
+      }
+    }
+  };
   const runCase = async (c) => {
-    const page = await context.newPage();
-    try {
-      await page.goto(`http://127.0.0.1:${port}/?mock=1&rt=ignore&${c.query}`, { waitUntil: 'load' });
-      await page.waitForSelector('#root > *', { timeout: 15000 });
-      await page.waitForTimeout(500); // mock data and entry transitions settle
-      for (const a of c.act ?? []) {
-        try {
-          if (a.press) await page.keyboard.press(a.press);
-          else if (a.type) await page.locator(a.type[0]).first().fill(a.type[1], { timeout: 5000 });
-          else if (a.clickText) await page.getByRole('button', { name: a.clickText }).first().click({ timeout: 5000 });
-          else if (a.rightClick) await page.locator(a.rightClick).first().click({ button: 'right', timeout: 5000 });
-          else await page.locator(a.click).first().click({ timeout: 5000 });
-        } catch (err) { if (!a.optional) throw err; }
-        await page.waitForTimeout(400);
-      }
-      if (c.expect) await page.waitForSelector(c.expect, { timeout: 5000 }); // the view under test really opened
-      await page.evaluate(axeSource);
-      const result = await page.evaluate((scope) => globalThis.axe.run(scope ? globalThis.document.querySelector(scope) : globalThis.document, {
-        runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] },
-        resultTypes: ['violations']
-      }), c.scope);
-      for (const v of result.violations) {
-        for (const node of v.nodes) {
-          const selector = node.target.join(' >> ');
-          const key = `${v.id} ${selector}`;
-          const e = found.get(key) ?? { rule: v.id, impact: v.impact, help: v.help, selector, screens: new Set(), html: node.html.slice(0, 160) };
-          e.screens.add(c.name); found.set(key, e);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const page = await context.newPage();
+      try {
+        await runCaseOnce(page, c);
+        return;
+      } catch (err) {
+        if (attempt === 0 && isTimeoutError(err)) {
+          process.stdout.write(`RETRY ${c.name}: ${err.message.split('\n')[0]}\n`);
+          continue;
         }
-      }
-    } catch (err) {
-      process.stdout.write(`FAIL ${c.name}: ${err.message.split('\n')[0]}\n`); failed = true;
-    } finally { await page.close(); }
+        process.stdout.write(`FAIL ${c.name}: ${err.message.split('\n')[0]}\n`); failed = true;
+        return;
+      } finally { await page.close(); }
+    }
   };
   // A few pages at a time keeps the whole run well under a minute; results are merged per violation.
   await Promise.all(Array.from({ length: 4 }, async () => {
     while (next < selected.length) {
-      if (Date.now() - started > budgetMs) { budgetHit = true; return; }
+      if (Date.now() - workStarted > budgetMs) { budgetHit = true; return; }
       await runCase(selected[next++]);
     }
   }));
   if (budgetHit) { process.stdout.write(`BUDGET exhausted after ${next} cases\n`); failed = true; }
+
+  if (!housekeeping) {
+    process.stdout.write('a11y shard: skipping keyboard ring and focus-return (run without --shard for full pass)\n');
+  }
 
   // Keyboard pass: Tab through the new views in four themes; every stop must show a focus indicator.
   const ringThemes = ['clay', 'obsidian', 'contrast-dark', 'contrast-light'];
@@ -178,7 +203,8 @@ try {
   const ringProblems = new Map();
   const combos = ringScreens.flatMap((sc) => ringThemes.map((theme) => ({ sc, theme })));
   let nextCombo = 0;
-  const ringWorker = async () => { while (nextCombo < combos.length) {
+  const ringWorker = async () => { if (!housekeeping) return; while (nextCombo < combos.length) {
+    if (Date.now() - workStarted > budgetMs) { process.stdout.write(`BUDGET exhausted during keyboard ring\n`); failed = true; return; }
     const { sc, theme } = combos[nextCombo++];
     const page = await context.newPage();
     try {
@@ -230,6 +256,8 @@ try {
     { name: 'add server wizard', query: 'screen=home&menu=1', open: async (pg) => { await pg.locator('[data-testid=computer-add]').first().click(); }, within: '[data-testid=add-server]', back: '[data-testid=computer-picker]' }
   ];
   for (const rc of returnChecks) {
+    if (!housekeeping) break;
+    if (Date.now() - workStarted > budgetMs) { process.stdout.write(`BUDGET exhausted during focus-return checks\n`); failed = true; break; }
     if (only && !rc.name.includes(only)) continue;
     const page = await context.newPage();
     try {
@@ -259,7 +287,7 @@ try {
     const hit = allowlist.filter((a) => matches(a, v));
     if (hit.length) hit.forEach((a) => used.add(a)); else fresh.push(v);
   }
-  const stale = only ? [] : allowlist.filter((a) => !used.has(a));
+  const stale = only || !housekeeping ? [] : allowlist.filter((a) => !used.has(a));
   for (const a of allowlist) if (!a.reason) { process.stdout.write(`allow-list entry ${a.rule} / ${a.selector} has no reason\n`); failed = true; }
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   process.stdout.write(`a11y: ${selected.length} cases, ${found.size} violating nodes (${found.size - fresh.length} allow-listed), ${secs}s\n`);

@@ -20,7 +20,10 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
-import { SettingsCard } from "../../components/SettingsUi";
+import { MoreInfo } from "../../components/ChoiceList";
+import { FieldHelp, FormField, formStyles } from "../../components/SettingsForm";
+import barStyles from "../../components/SettingsForm.module.css";
+import { SettingsCard, SwitchField, SwitchGrid } from "../../components/SettingsUi";
 import { BrandIcon } from "../../components/BrandIcon";
 import { botView } from "../../lib/botProfile";
 import { MAIL_CHANGED_EVENT, mailToolsOn, mailToolsPatch, nextStep } from "../../lib/botMail";
@@ -30,7 +33,6 @@ import { HintBadge } from "../../components/HintBadge";
 import type { Bot, EmailAccount, EmailTestReport } from "../../api/types";
 import { openExternal } from "../../lib/externalLink";
 import { BotAccessPicker } from "../../components/BotAccessPicker";
-import formStyles from "../../components/Form.module.css";
 import { Segmented } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import {
@@ -106,27 +108,33 @@ export function TestResult({ report }: { report: EmailTestReport }) {
   );
 }
 
-function Field({
+function AccountField({
   id,
   label,
   hint,
+  helpBody,
+  width,
   error,
   children
 }: {
   id: string;
   label: string;
   hint?: string;
+  helpBody?: string;
+  width?: "full" | "md" | "sm";
   error?: string | null;
   children: React.ReactNode;
 }) {
   return (
-    <div className={formStyles.field}>
-      <label className={formStyles.label} htmlFor={id}>
-        {label}
-      </label>
-      {children}
-      {error ? <p className={formStyles.error} role="alert">{error}</p> : null}
-      {hint && !error ? <p className={formStyles.hint}>{hint}</p> : null}
+    <div>
+      <FormField id={id} label={label} hint={hint} helpTitle={label} helpBody={helpBody} width={width}>
+        {children}
+      </FormField>
+      {error ? (
+        <p className={formStyles.error} role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -230,10 +238,11 @@ function AccountForm({
       </div>
 
       <div className={styles.grid}>
-        <Field
+        <AccountField
           id="email-name"
           label={t("settingsModal.email.form.name")}
-          hint={t("settingsModal.email.form.nameHint")}
+          helpBody={t("settingsModal.email.form.nameHint")}
+          width="sm"
           error={err("name")}
         >
           <input
@@ -246,10 +255,11 @@ function AccountForm({
             placeholder="work"
             onChange={(e) => set({ name: e.target.value })}
           />
-        </Field>
-        <Field
+        </AccountField>
+        <AccountField
           id="email-address"
           label={t("settingsModal.email.form.address")}
+          width="md"
           error={err("address")}
         >
           <input
@@ -261,13 +271,14 @@ function AccountForm({
             placeholder="you@example.com"
             onChange={(e) => set({ address: e.target.value })}
           />
-        </Field>
+        </AccountField>
       </div>
 
       <div className={styles.grid}>
-        <Field
+        <AccountField
           id="email-imap-host"
           label={t("settingsModal.email.form.imapHost")}
+          width="md"
           error={err("imapHost")}
         >
           <input
@@ -278,26 +289,28 @@ function AccountForm({
             placeholder="imap.example.com"
             onChange={(e) => set({ imapHost: e.target.value, preset: "custom" })}
           />
-        </Field>
-        <Field
+        </AccountField>
+        <AccountField
           id="email-imap-port"
           label={t("settingsModal.email.form.port")}
+          width="sm"
           error={err("imapPort")}
         >
           <input
             id="email-imap-port"
-            className={`${formStyles.input} ${styles.port}`}
+            className={formStyles.input}
             inputMode="numeric"
             value={form.imapPort}
             onChange={(e) => set({ imapPort: e.target.value, preset: "custom" })}
           />
-        </Field>
+        </AccountField>
       </div>
 
       <div className={styles.grid}>
-        <Field
+        <AccountField
           id="email-smtp-host"
           label={t("settingsModal.email.form.smtpHost")}
+          width="md"
           error={err("smtpHost")}
         >
           <input
@@ -308,20 +321,21 @@ function AccountForm({
             placeholder="smtp.example.com"
             onChange={(e) => set({ smtpHost: e.target.value, preset: "custom" })}
           />
-        </Field>
-        <Field
+        </AccountField>
+        <AccountField
           id="email-smtp-port"
           label={t("settingsModal.email.form.port")}
+          width="sm"
           error={err("smtpPort")}
         >
           <input
             id="email-smtp-port"
-            className={`${formStyles.input} ${styles.port}`}
+            className={formStyles.input}
             inputMode="numeric"
             value={form.smtpPort}
             onChange={(e) => set({ smtpPort: e.target.value, preset: "custom" })}
           />
-        </Field>
+        </AccountField>
       </div>
       <div className={formStyles.field}>
         <span className={formStyles.label}>{t("settingsModal.email.form.security")}</span>
@@ -337,10 +351,11 @@ function AccountForm({
       </div>
 
       <div className={styles.grid}>
-        <Field
+        <AccountField
           id="email-username"
           label={t("settingsModal.email.form.username")}
-          hint={t("settingsModal.email.form.usernameHint")}
+          helpBody={t("settingsModal.email.form.usernameHint")}
+          width="md"
         >
           <input
             id="email-username"
@@ -349,15 +364,16 @@ function AccountForm({
             autoComplete="off"
             onChange={(e) => set({ username: e.target.value })}
           />
-        </Field>
-        <Field
+        </AccountField>
+        <AccountField
           id="email-password"
           label={t("settingsModal.email.form.password")}
-          hint={
+          helpBody={
             editing
               ? `${t("settingsModal.email.form.passwordKeep")} ${t("settingsModal.email.form.passwordHint")}`
               : t("settingsModal.email.form.passwordHint")
           }
+          width="md"
           error={err("password")}
         >
           <input
@@ -368,7 +384,7 @@ function AccountForm({
             autoComplete="new-password"
             onChange={(e) => set({ password: e.target.value })}
           />
-        </Field>
+        </AccountField>
       </div>
 
       <div className={formStyles.field}>
@@ -388,32 +404,40 @@ function AccountForm({
       </div>
 
       {defaultCandidates.length > 0 ? (
-        <div className={formStyles.field} data-testid="email-default-for">
+        <div data-testid="email-default-for">
           <span className={formStyles.label}>{t("settingsModal.email.form.defaultFor")}</span>
-          <div className={styles.defaults}>
+          <SwitchGrid>
             {defaultCandidates.map((b) => (
-              <label key={b.id} className={styles.remote}>
-                <input
-                  type="checkbox"
-                  checked={form.defaultFor.includes(b.id)}
-                  onChange={(e) =>
-                    set({
-                      defaultFor: e.target.checked
-                        ? [...form.defaultFor, b.id]
-                        : form.defaultFor.filter((id) => id !== b.id)
-                    })
-                  }
-                />
-                <span>{b.name}</span>
-              </label>
+              <SwitchField
+                key={b.id}
+                checked={form.defaultFor.includes(b.id)}
+                onChange={(on) =>
+                  set({
+                    defaultFor: on ? [...form.defaultFor, b.id] : form.defaultFor.filter((id) => id !== b.id)
+                  })
+                }
+                label={b.name}
+                testId={`email-default-${b.id}`}
+              />
             ))}
-          </div>
+          </SwitchGrid>
           <p className={formStyles.hint}>{t("settingsModal.email.form.defaultForHint")}</p>
         </div>
       ) : null}
 
       <div className={formStyles.field}>
-        <span className={formStyles.label}>{t("settingsModal.email.form.sendMode.label")}</span>
+        <div className={barStyles.labelRow}>
+          <span className={formStyles.label}>{t("settingsModal.email.form.sendMode.label")}</span>
+          <FieldHelp
+            title={t("settingsModal.email.form.sendMode.label")}
+            body={
+              form.sendMode === "draft_only"
+                ? t("settingsModal.email.form.sendMode.draftOnlyHint")
+                : t("settingsModal.email.form.sendMode.askHint")
+            }
+            testId="email-send-mode-help"
+          />
+        </div>
         <Segmented
           label={t("settingsModal.email.form.sendMode.label")}
           value={form.sendMode}
@@ -423,15 +447,12 @@ function AccountForm({
             { value: "draft_only", label: t("settingsModal.email.form.sendMode.draftOnly"), testId: "email-send-draft" }
           ]}
         />
-        <p className={formStyles.hint}>
-          {t(form.sendMode === "ask" ? "settingsModal.email.form.sendMode.askHint" : "settingsModal.email.form.sendMode.draftOnlyHint")}
-        </p>
       </div>
 
-      <Field
+      <AccountField
         id="email-senders"
         label={t("settingsModal.email.form.senders")}
-        hint={t("settingsModal.email.form.sendersHint")}
+        helpBody={t("settingsModal.email.form.sendersHint")}
         error={err("senders")}
       >
         <textarea
@@ -441,27 +462,29 @@ function AccountForm({
           placeholder="you@example.com"
           onChange={(e) => set({ allowedSenders: e.target.value })}
         />
-      </Field>
+      </AccountField>
 
       {report ? <TestResult report={report} /> : null}
 
-      <div className={styles.actions}>
-        <Button type="submit" size="sm" variant="primary" disabled={busy || testing}>
-          {editing ? t("settingsModal.email.form.save") : t("settingsModal.email.form.create")}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={busy || testing}
-          data-testid="email-test-draft"
-          onClick={() => void test()}
-        >
-          <PlugZap />
-          {testing ? t("settingsModal.email.testing") : t("settingsModal.email.test")}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => void onDone()}>
-          {t("common.cancel")}
-        </Button>
+      <div className={barStyles.cardBar} data-testid="email-form-save-bar">
+        <div className={barStyles.cardBarActions}>
+          <Button type="submit" size="sm" variant="primary" disabled={busy || testing}>
+            {editing ? t("settingsModal.email.form.save") : t("settingsModal.email.form.create")}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy || testing}
+            data-testid="email-test-draft"
+            onClick={() => void test()}
+          >
+            <PlugZap />
+            {testing ? t("settingsModal.email.testing") : t("settingsModal.email.test")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => void onDone()}>
+            {t("common.cancel")}
+          </Button>
+        </div>
       </div>
     </form>
   );
@@ -639,10 +662,11 @@ function AgentmailFlow({
         ]}
         onChange={(mode) => set({ mode })}
       />
-      <Field
+      <AccountField
         id="agentmail-key"
         label={t("settingsModal.email.agentmail.apiKey")}
-        hint={t("settingsModal.email.agentmail.apiKeyHint")}
+        helpBody={t("settingsModal.email.agentmail.apiKeyHint")}
+        width="md"
         error={err("apiKey")}
       >
         <input
@@ -653,7 +677,7 @@ function AgentmailFlow({
           autoComplete="new-password"
           onChange={(e) => set({ apiKey: e.target.value })}
         />
-      </Field>
+      </AccountField>
       {scopedKey ? (
         <p className={formStyles.hint} role="status" data-testid="agentmail-scoped-hint">
           {t("settingsModal.email.agentmail.scopedKeyHint")}{" "}
@@ -668,10 +692,11 @@ function AgentmailFlow({
         </p>
       ) : null}
       {connect ? (
-        <Field
+        <AccountField
           id="agentmail-inbox"
           label={t("settingsModal.email.agentmail.inbox")}
-          hint={t("settingsModal.email.agentmail.inboxHint")}
+          helpBody={t("settingsModal.email.agentmail.inboxHint")}
+          width="md"
           error={err("inbox")}
         >
           <input
@@ -683,7 +708,7 @@ function AgentmailFlow({
             placeholder={t("settingsModal.email.agentmail.inboxPlaceholder")}
             onChange={(e) => set({ inbox: e.target.value })}
           />
-        </Field>
+        </AccountField>
       ) : null}
       <div className={formStyles.field}>
         <span className={formStyles.label}>{t("settingsModal.email.agentmail.bot")}</span>
@@ -703,10 +728,11 @@ function AgentmailFlow({
         {err("bot") ? <p className={formStyles.error} role="alert">{err("bot")}</p> : null}
       </div>
       {connect ? null : (
-        <Field
+        <AccountField
           id="agentmail-hint"
           label={t("settingsModal.email.agentmail.nameHint")}
-          hint={t("settingsModal.email.agentmail.nameHintHelp")}
+          helpBody={t("settingsModal.email.agentmail.nameHintHelp")}
+          width="sm"
           error={err("nameHint")}
         >
           <input
@@ -718,9 +744,10 @@ function AgentmailFlow({
             placeholder="atlas"
             onChange={(e) => set({ nameHint: e.target.value })}
           />
-        </Field>
+        </AccountField>
       )}
-      <div className={styles.actions}>
+      <div className={barStyles.cardBar}>
+        <div className={barStyles.cardBarActions}>
         <Button type="submit" size="sm" variant="primary" disabled={busy}>
           {connect
             ? busy
@@ -733,6 +760,7 @@ function AgentmailFlow({
         <Button size="sm" variant="ghost" onClick={() => void onDone()}>
           {t("common.cancel")}
         </Button>
+        </div>
       </div>
     </form>
   );
@@ -958,15 +986,12 @@ function AccountRow({
         {confirm ? (
           <>
             {isAgentmail ? (
-              <label className={styles.remote}>
-                <input
-                  type="checkbox"
-                  checked={alsoRemote}
-                  data-testid={`email-delete-remote-${account.name}`}
-                  onChange={(e) => setAlsoRemote(e.target.checked)}
-                />
-                <span>{t("settingsModal.email.agentmail.alsoDelete")}</span>
-              </label>
+              <SwitchField
+                checked={alsoRemote}
+                onChange={setAlsoRemote}
+                label={t("settingsModal.email.agentmail.alsoDelete")}
+                testId={`email-delete-remote-${account.name}`}
+              />
             ) : null}
             <Button
               size="sm"
@@ -1072,10 +1097,9 @@ export function EmailCard() {
       testId="email-card"
     >
       <div className={styles.root}>
-      <p className={styles.note}>
-        <Info aria-hidden="true" />
-        <span>{t("settingsModal.email.note")}</span>
-      </p>
+      <MoreInfo testId="email-card-more">
+        <p>{t("settingsModal.email.note")}</p>
+      </MoreInfo>
       {loadError ? (
         <p className={formStyles.error} role="alert">
           {t("settingsModal.email.loadError", { message: loadError })}

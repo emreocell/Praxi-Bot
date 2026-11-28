@@ -425,3 +425,25 @@ test("editing a zoned cron schedule keeps its zone instead of showing UTC", () =
   assert.equal(d.cron, "0 9 * * *");
   assert.deepEqual(buildInput(d, undefined, s).spec, { cron: "0 9 * * * Europe/Istanbul" });
 });
+
+test("parsePayload reads a standing order and keeps it on edit", () => {
+  assert.deepEqual(
+    parsePayload({
+      kind: "standing_order",
+      checklist: "Is the disk under 90%?",
+      max_runs_per_day: 12
+    }),
+    { kind: "standing_order", checklist: "Is the disk under 90%?" }
+  );
+  assert.deepEqual(parsePayload({ kind: "standing_order" }), { kind: "unknown" });
+  const payload = {
+    kind: "standing_order",
+    checklist: "Is the disk under 90%?",
+    active_hours: { start: "08:00", end: "22:00", timezone: "Europe/Istanbul" },
+    max_runs_per_day: 12
+  };
+  const editing = sched({ payload });
+  const draft = { ...draftFromSchedule(editing), prompt: "" };
+  assert.equal(validateDraft(draft, editing), null);
+  assert.deepEqual(buildInput(draft, null, editing).payload, payload);
+});

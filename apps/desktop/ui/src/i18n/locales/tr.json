@@ -6761,6 +6761,7 @@
         "problems": "Sadece bir sorun olursa"
       },
       "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
+      "payloadKeptStanding": "Bu zamanlama bir kalıcı talimat: sana bir şey gerekmedikçe sessiz kalır. Kontrol listesi, etkin saatler ve günlük sınır burada değişmez.",
       "preview": "Önizle",
       "prompt": "İstem",
       "promptHint": "Bottan her seferinde yapması istenen şey.",
@@ -6795,6 +6796,7 @@
     "originBot": "Bot oluşturdu",
     "originBotHint": "Onayınla bir bot oluşturdu. Botlar yalnızca kendi oluşturdukları zamanlamaları değiştirebilir.",
     "payload": {
+      "standingOrder": "Kalıcı talimat: {{text}}",
       "tool": "{{name}} aracını çağırır",
       "unknown": "Özel görev",
       "workflow": "{{name}} iş akışını çalıştırır"
@@ -7234,36 +7236,46 @@
     "calendar": {
       "add": "Takvimi ekle",
       "addTitle": "Takvim bağla",
+      "advanced": "Gelişmiş",
+      "advancedHint": "Takvim adresi, bot adı ve davet gönderen adresi.",
       "description": "Botların takvimini okuyup yönetebilsin.",
       "emailHint": "Davetler bu adresten gider. Kullanıcı adın zaten e-posta adresinse boş bırak.",
       "emailLabel": "E-posta adresin (isteğe bağlı)",
+      "emailShort": "Davet e-postaları için. Kullanıcı adın zaten bir adres ise boş bırak.",
       "empty": "Henüz bağlı bir takvim yok.",
       "loadError": "Takvimler yüklenemedi ({{message}}).",
       "nameHint": "Harf, rakam, - ve _ kullanabilirsin. Botlar takvimi bu adla seçer.",
       "nameLabel": "Botlar için ad",
+      "nameShort": "Harf, rakam, - ve _. Botlar bu adı kullanır.",
       "note": "Botların takvimine bakabilir, boş zaman bulabilir, etkinlik ekleyip taşıyabilir ve insanları davet edebilir. Parola güvenli depoda saklanır ve bir daha gösterilmez.",
       "passwordHint": "Normal parolanı değil, bir uygulama parolası kullan. Güvenli şekilde saklanır ve geri okunamaz.",
       "passwordLabel": "Uygulama parolası",
+      "passwordShort": "Normal parola değil, uygulama parolası kullan.",
       "pickHint": "Botların hangi takvimi kullansın, seç:",
       "presets": {
         "fastmail": {
           "hint": "Fastmail adresini ve takvim erişimi olan bir uygulama parolası kullan (Ayarlar, Gizlilik ve Güvenlik, Entegrasyonlar).",
+          "hintShort": "Fastmail adresi + takvim erişimli uygulama parolası.",
           "label": "Fastmail"
         },
         "google": {
           "hint": "Tam Gmail adresini ve bir uygulama parolası kullan (Google Hesabı, Güvenlik, Uygulama parolaları; 2 adımlı doğrulama gerekir). Google bazen takvimler için uygulama parolalarını reddeder. Deneme başarısız olursa muhtemel neden budur.",
+          "hintShort": "Tam Gmail + Google uygulama parolası (2 adımlı doğrulama gerekir).",
           "label": "Google Takvim"
         },
         "icloud": {
           "hint": "Apple Kimliğini ve uygulamaya özel bir parola kullan (account.apple.com, Oturum Açma ve Güvenlik).",
+          "hintShort": "Apple Kimliği + account.apple.com uygulama parolası.",
           "label": "iCloud (Apple)"
         },
         "nextcloud": {
           "hint": "Sunucunun adresini ve kullanıcı adını yaz. Uygulama parolasını Ayarlar, Güvenlik, Cihazlar ve oturumlar bölümünden oluştur.",
+          "hintShort": "Sunucu adı, kullanıcı adı ve Nextcloud uygulama parolası.",
           "label": "Nextcloud"
         },
         "other": {
           "hint": "Takvim hizmetinin verdiği CalDAV adresini yapıştır.",
+          "hintShort": "Sağlayıcının verdiği CalDAV adresini yapıştır.",
           "label": "Diğer (CalDAV)"
         }
       },
@@ -7273,6 +7285,7 @@
       "schedulingOff": "Bu hizmet davetleri kendisi göndermez; botun davetleri e-postayla gönderir (bunun için bir e-posta hesabı gerekir).",
       "schedulingOn": "Bu hizmet davetleri kendisi gönderir.",
       "serverLabel": "Nextcloud sunucun",
+      "serverShort": "Yalnızca sunucu adı, https:// olmadan.",
       "serviceLabel": "Takvim hizmeti",
       "test": "Bağlantıyı dene",
       "testFailed": "Deneme başarısız oldu: {{error}}",
@@ -7286,6 +7299,7 @@
       },
       "urlHint": "Senin için dolduruldu. Listeden doğru takvimi seçmek için bağlantıyı dene.",
       "urlLabel": "Takvim adresi",
+      "urlShort": "Senin için dolduruldu. Listeden seçmek için bağlantıyı dene.",
       "usernameLabel": "Kullanıcı adı"
     },
     "computer": {
@@ -7816,27 +7830,39 @@
     },
     "emailChannel": {
       "account": "İzlenecek posta kutusu",
+      "accountHint": "Yalnızca IMAP posta kutuları izlenebilir.",
       "approve": "Tam olarak bunu gönder",
       "bot": "Postaları alacak bot",
       "choose": "Seçin…",
       "deny": "Gönderme",
       "description": "Bir botun, posta kutunuzun tek bir klasöründeki yeni postaları görmesine izin verin.",
       "enable": "E-posta kanalını aç",
+      "enableHint": "Kapalıyken bota hiç posta iletilmez.",
       "folder": "İzlenecek klasör",
       "folderHint": "Genellikle INBOX. Yalnızca bunu açtıktan sonra gelen postalar iletilir.",
       "fromLine": "Gönderen: {{from}}. Gönderim modu: her gönderim onayınızı gerektirir.",
       "full": "Bota her postanın özetini değil tüm metnini göster",
+      "fullHint": "Açık değilse bot yalnızca kısa bir özet görür.",
       "ignored": "İzin verilmeyen göndericilerden gelen ve yok sayılan e-postalar: {{n}}",
       "needsSenders": "Bu kanal izinli gönderici listesi olmadan çalışıyordu, bu yüzden artık bota HİÇ e-posta iletmiyor. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne bota yazabilecek adresleri (örneğin kendi adresini) ekle. O zamana kadar gelen tüm e-postalar posta kutusunda okunmamış kalır.",
       "noAccount": "Önce yukarıdan bir posta kutusu ekleyin.",
-      "noSenders": "Seçilen posta kutusunda izinli gönderici yok, bu yüzden bota hiç e-posta ulaşmaz. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne kendi adresini ekle.",
       "note": "Postaları başkaları yazar; bu yüzden bot onları emir değil bilgi olarak ele alır. Varsayılan olarak yalnızca göndereni, konuyu ve ilk birkaç satırı görür. Ekler hiçbir zaman açılmaz. Yanıtlara izin verip her birini burada onaylamadıkça hiçbir şey gönderilmez.",
       "replies": "Botun yanıt önermesine izin ver (her yanıt gönderilmeden önce sizin onayınızı bekler)",
+      "repliesHint": "Önerilen her yanıt burada onayınızı bekler.",
       "running": "Çalışıyor",
       "save": "Kaydet",
       "saved": "Kaydedildi.",
       "sent": "E-posta gönderildi.",
       "skipped": "Art arda başarısız olduğu için bırakılan e-postalar (örneğin bot silinmiş): {{n}}",
+      "status": {
+        "needMailbox": "Önce bir posta kutusu seçin.",
+        "noSendersDetail": "Posta kutusu kartında izinli göndericileri ekleyin, sonra burada kaydedin.",
+        "noSendersTitle": "İzinli gönderici yok",
+        "off": "Kanal kapalı.",
+        "openMailbox": "Posta kutusu ayarlarını aç",
+        "stoppedHint": "Kanalı açın, posta kutusu ve bot seçin, sonra kaydedin.",
+        "unsaved": "Kaydedilmemiş değişiklikler — uygulamak için kaydedin."
+      },
       "stopped": "Çalışmıyor",
       "subject": "Konu: {{subject}}",
       "title": "Bota e-posta",
@@ -7925,15 +7951,19 @@
       "colTime": "Zaman",
       "colTo": "Kime",
       "daily": "Posta kutusu başına günde şu sayının üstünde uyar (0 = hiç uyarma)",
+      "dailyHelp": "0 bu uyarıyı kapatır. Gönderimi engellemez.",
       "days": "Birine bu kadar gün içinde zaten yazdıysam uyar (0 = hiç uyarma)",
+      "daysHelp": "0 bu uyarıyı kapatır. Gönderimi engellemez.",
       "description": "Sınırlar, bir çıkış listesi ve botlarınızın gönderdiği her e-postanın günlüğü.",
       "export": "CSV olarak dışa aktar",
       "footer": "Çıkış satırının metni",
       "footerHint": "{sender} gönderen adresle değiştirilir. Satırı bot değil uygulama ekler ve bot onu silemez. Bir e-postayı satırsız göndermek için kartta onaylayabilirsiniz; kartta bir uyarı görünür. Program yanıtları okumaz: biri “DURDUR” diye yanıtlarsa adresini bu listeye kendiniz ekleyin.",
       "footerPlaceholder": "Boş bırakırsanız yerleşik metin kullanılır (Türkçe ve İngilizce)",
+      "footerShort": "Boş bırakırsanız yerleşik Türkçe ve İngilizce metin kullanılır.",
       "intro": "Bir botun göndereceği her e-posta yine önce size sorulur. Bu ayarlar yalnızca sorunun ne zaman uyarıyla geldiğini belirler. Uyarı sizi hiçbir zaman engellemez: her zaman \"Yine de gönder\" diyebilirsiniz ve bu seçim günlüğe yazılır.",
       "kindAddress": "adres",
       "kindDomain": "tüm alan adı",
+      "limitsTitle": "Gönderim uyarıları",
       "loading": "Yükleniyor…",
       "logEmpty": "Henüz e-posta gönderilmedi.",
       "logHint": "Kime, ne zaman ve hangi bottan e-posta gitti. Yalnızca gerçekten gönderilenler listelenir.",
@@ -7942,6 +7972,7 @@
       "optOutEmpty": "Listede henüz kimse yok.",
       "optOutHint": "Bir adres (ayse@ornek.com) ya da tüm bir alan adı (ornek.com) ekleyin. Onlara yazmaya çalışan bot, onay kartınızda bir uyarı alır.",
       "optOutLine": "E-postalara varsayılan olarak çıkış satırı ekle",
+      "optOutLineHint": "Satırı uygulama ekler; bot kaldıramaz.",
       "optOutPlaceholder": "ayse@ornek.com ya da ornek.com",
       "optOutRemove": "{{value}} kaydını kaldır",
       "optOutTitle": "Yazmayacağım kişiler",
@@ -7950,10 +7981,15 @@
       "saved": "Kaydedildi",
       "sentAnyway": "Yine de gönderildi",
       "softHint": "Bu ikisi engel değil, uyarıdır.",
+      "status": {
+        "saved": "Tüm değişiklikler kaydedildi.",
+        "unsaved": "Kaydedilmemiş değişiklikler var."
+      },
       "title": "Güvenli gönderim",
       "verifyDomains": "Doğrulama e-postasının bağlantı verebileceği ek siteler",
       "verifyDomainsHint": "Bir sitede kayıt olan bot, doğrulama e-postasından yalnızca o sitenin bağlantılarını alır. Bir site e-postalarını başka bir hizmet üzerinden gönderiyorsa (örneğin bir izleme alan adı), o alan adını buraya satır başına bir tane ekleyin (example.com). Emin değilseniz boş bırakın: bot o zaman size sorar.",
-      "verifyDomainsPlaceholder": "posta.ornek.com"
+      "verifyDomainsPlaceholder": "posta.ornek.com",
+      "verifyDomainsShort": "Doğrulama bağlantıları başka bir sunucudaysa satır başına bir alan adı."
     },
     "mode": {
       "moreHint": "Nadiren gerekir. Ayarları bir dahaki açışında yine kapalı gelir.",
@@ -8156,7 +8192,6 @@
         "searxng": "Kendi SearXNG sunucunun adresi, örneğin http://127.0.0.1:8080. Web arama rehberinde sunucu için tek komutla kurulum var.",
         "tavily": "Tavily hesabında bir anahtar oluştur ve buraya yapıştır."
       },
-      "providerHint": "Botlar web'de bir arama sağlayıcısı üzerinden arar. Ücretsiz motorlar ev bilgisayarında çoğunlukla çalışır ama sunucuları genelde engeller; bu yüzden sunucuda bunlardan birini bağlaman gerekir.",
       "providerTitle": "Arama sağlayıcısı",
       "saveAndTest": "Kaydet ve dene",
       "searxngLabel": "SearXNG URL",

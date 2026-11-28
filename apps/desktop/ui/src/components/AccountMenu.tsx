@@ -17,8 +17,8 @@ export type AccountAction =
   | "apps"
   | "computer";
 
-/** The menu only needs a little more than the name: three tiles side by side and the longest row. */
-const MENU_WIDTH = 228;
+/** Width of the profile popover (matches the pre–#1007 menu). */
+const MENU_WIDTH = 272;
 
 const QUICK: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string }> = [
   { id: "appearance", icon: Palette, key: "account.appearance" },
@@ -35,7 +35,7 @@ const ROWS: ReadonlyArray<{ id: AccountAction; icon: LucideIcon; key: string; kb
 ];
 
 /**
- * Bottom-left profile button (avatar and name, only as wide as the name needs) with its menu:
+ * Bottom-left profile button (avatar and name across the rail's usable width) with its menu:
  * three quick tiles, then settings, scheduled tasks, updates and help.  The menu is a portal popover, so it may reach
  * outside a narrow rail.  `compact` = icon-only rail.
  */

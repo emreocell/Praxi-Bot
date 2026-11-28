@@ -5815,7 +5815,6 @@
       "ignored": "Mails from senders who are not allowed were ignored: {{n}}",
       "needsSenders": "This channel was running without a list of allowed senders, so it now passes NO mail to the bot. Add the addresses that may write to the bot (for example your own) under \"Allowed senders\" in the mailbox settings above. Until then every incoming mail stays unread in the mailbox.",
       "noAccount": "Add a mailbox above first.",
-      "noSenders": "The selected mailbox has no allowed senders, so no mail will reach the bot. Add your own address under \"Allowed senders\" in the mailbox settings above.",
       "note": "Mail is written by other people, so the bot treats it as information, never as orders. By default it only sees the sender, the subject and the first few lines. Attachments are never opened. Nothing is sent unless you allow replies and then approve each one here.",
       "replies": "Let the bot suggest replies (you approve every one before it is sent)",
       "running": "Running",
