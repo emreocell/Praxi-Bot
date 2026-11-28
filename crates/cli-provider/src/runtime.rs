@@ -1,5 +1,6 @@
 //! Per-turn CLI sessions. Wire dialects are locked by `tests/fixtures/runtime_cli.rs`.
 //! No credential files are opened here. Prompts and results only cross stdin/MCP.
+use std::sync::atomic::AtomicBool;
 #[cfg(not(windows))]
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
@@ -147,6 +148,8 @@ pub struct NativeQuestion {
 #[async_trait]
 pub trait TurnHost: Send + Sync + 'static {
     fn text(&self, text: &str);
+    /// Called when the CLI requests the bridge's tool catalogue.
+    fn tools_listed(&self) {}
     /// Most recent cumulative usage reported for this turn, including on failure.
     fn usage_snapshot(&self, _usage: &TurnUsage) {}
     async fn call(&self, name: &str, input: Value) -> ToolReply;
@@ -244,6 +247,7 @@ struct Bridge {
     job: crate::detect::SharedJob,
     listen: Arc<OnceLock<SocketAddr>>,
     active_tools: tokio::sync::watch::Sender<usize>,
+    tools_delivered: Arc<AtomicBool>,
 }
 
 struct ActiveTool<'a>(&'a tokio::sync::watch::Sender<usize>);
@@ -297,6 +301,9 @@ impl Bridge {
             }
             "ping" => json!({}),
             "tools/list" => {
+                self.tools_delivered
+                    .store(true, std::sync::atomic::Ordering::Release);
+                self.host.tools_listed();
                 let mut tools = self.tools.iter().map(|s| json!({"name":tool_name(&s.name),"description":s.description,"inputSchema":s.input_schema})).collect::<Vec<_>>();
                 if self.native {
                     tools.push(json!({"name":"approve","description":"Permission prompt handler used by the host.","inputSchema":{"type":"object","properties":{"tool_name":{"type":"string"},"input":{"type":"object"},"tool_use_id":{"type":"string"}},"required":["tool_name"]}}));
@@ -843,6 +850,7 @@ async fn session(
         job: job.clone(),
         listen: Arc::new(OnceLock::new()),
         active_tools: tokio::sync::watch::Sender::new(0),
+        tools_delivered: Arc::new(AtomicBool::new(false)),
     };
     let server = BridgeServer::open(bridge.clone()).await?;
     if stop.is_cancelled() {
@@ -1644,6 +1652,7 @@ mod tests {
             job: crate::detect::SharedJob::new(),
             listen: Arc::new(OnceLock::new()),
             active_tools: tokio::sync::watch::Sender::new(0),
+            tools_delivered: Arc::new(AtomicBool::new(false)),
         }
     }
     fn http_post(url: &str, auth: Option<&str>, body: &str) -> String {

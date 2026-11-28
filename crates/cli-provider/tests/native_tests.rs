@@ -165,7 +165,7 @@ async fn acp_agent_permissions_follow_the_level_and_fs_is_refused() {
 
 #[tokio::test]
 async fn agy_receives_http_bridge_even_without_capability_advertisement() {
-    for mode in ["", "acp-no-capabilities"] {
+    for mode in ["acp-list", "acp-no-capabilities"] {
         let (dir, workspace, env) = setup();
         let env = env.with_env_var("FAKE_MODE", mode);
         let host = Arc::new(Host {
@@ -195,6 +195,36 @@ async fn agy_receives_http_bridge_even_without_capability_advertisement() {
             assert_eq!(log(&dir, "bridge_tool_count"), "2");
         }
     }
+}
+
+#[tokio::test]
+async fn agy_silently_ignoring_bridge_stops_before_prompt() {
+    let (dir, workspace, env) = setup();
+    let host = Arc::new(Host {
+        allow: false,
+        choose: None,
+        questions: Mutex::new(Vec::new()),
+        permissions: Mutex::new(Vec::new()),
+        text: Mutex::new(String::new()),
+    });
+    let nt = NativeTurn {
+        turn: turn(),
+        driver: Driver::Agy,
+        level: ApprovalLevel::Full,
+        workspace: workspace.path().to_owned(),
+    };
+    let error = tokio::time::timeout(
+        Duration::from_secs(30),
+        run_native_turn("fixture", &env, nt, host, CancellationToken::new()),
+    )
+    .await
+    .expect("agent timed out")
+    .unwrap_err();
+    assert_eq!(
+        error,
+        cli_provider::runtime::CliError::PraxiBridgeUnavailable
+    );
+    assert!(!dir.path().join("prompt").exists());
 }
 
 #[tokio::test]

@@ -202,6 +202,7 @@ async fn session(
         job: job.clone(),
         listen: Arc::new(OnceLock::new()),
         active_tools: tokio::sync::watch::Sender::new(0),
+        tools_delivered: Arc::new(AtomicBool::new(false)),
     };
     let server = BridgeServer::open(bridge.clone()).await?;
     if stop.is_cancelled() {
@@ -759,6 +760,17 @@ impl Run<'_> {
                     send(stdin, json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":cwd,"mcpServers":servers}})).await?;
                 }
                 Some(2) => {
+                    // Session acceptance alone does not establish that agy loaded the tools.
+                    // Never send the system prompt claiming them until it requested the catalog.
+                    if self.nt.driver == Driver::Agy
+                        && !self.nt.turn.tools.is_empty()
+                        && !self
+                            .bridge
+                            .tools_delivered
+                            .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        return Err(CliError::PraxiBridgeUnavailable);
+                    }
                     let id = v["result"]["sessionId"]
                         .as_str()
                         .ok_or(CliError::Protocol)?;

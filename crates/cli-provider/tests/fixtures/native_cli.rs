@@ -135,10 +135,12 @@ fn acp(args: &[String]) {
         }
     }
     log("session_new", &logged_params.to_string());
-    if std::env::var("FAKE_MODE").as_deref() == Ok("acp-no-capabilities")
-        && let Some(server) = new["params"]["mcpServers"]
-            .as_array()
-            .and_then(|s| s.first())
+    if matches!(
+        std::env::var("FAKE_MODE").as_deref(),
+        Ok("acp-no-capabilities" | "acp-list")
+    ) && let Some(server) = new["params"]["mcpServers"]
+        .as_array()
+        .and_then(|s| s.first())
     {
         let response = http(
             server["url"].as_str().unwrap(),
