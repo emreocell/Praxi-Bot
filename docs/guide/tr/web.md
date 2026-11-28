@@ -46,9 +46,10 @@ döndüren ilki kazanır (varsayılan sıra):
 1. Kendi çalıştırdığın bir [SearXNG](https://docs.searxng.org/) örneği (`searxng_url`),
 2. Brave Search API (`brave_key`),
 3. Tavily Search API (`tavily_key`),
-4. DuckDuckGo HTML (`duckduckgo`, varsayılan `true`),
-5. DuckDuckGo Lite (`duckduckgo_lite`, varsayılan `true`),
-6. Bing HTML (`bing`, varsayılan `true`).
+4. Firecrawl (`firecrawl_url`, `firecrawl_key`),
+5. DuckDuckGo HTML (`duckduckgo`, varsayılan `true`),
+6. DuckDuckGo Lite (`duckduckgo_lite`, varsayılan `true`),
+7. Bing HTML (`bing`, varsayılan `true`).
 
 ```toml
 [search]
@@ -58,7 +59,7 @@ tavily_key = "web/tavily"               # NAME of a secret, never the key itself
 duckduckgo = true                       # keyless fallback (default true)
 duckduckgo_lite = true                  # keyless fallback (default true)
 bing = true                             # keyless fallback (default true)
-order = ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"]
+order = ["searxng", "brave", "tavily", "firecrawl", "duckduckgo", "duckduckgo_lite", "bing"]
 
 [http]
 timeout_secs = 20            # whole request (search backends are capped at 8s each)
@@ -75,6 +76,22 @@ Her anahtar isteğe bağlıdır. Brave ya da Tavily anahtarlarını gizli bilgi 
 bot secrets set web/brave
 bot secrets set web/tavily
 ```
+
+### Firecrawl araması (elle yapılandırma)
+
+Firecrawl ile buluttan veya kendi sunucundan arama yapabilirsin. Bu entegrasyon
+şimdilik yalnızca aramayı destekler; sayfalar mevcut getiriciyle alınır. Ayarlar
+ve sağlayıcı denemesi henüz Firecrawl yapılandırmasını desteklemez.
+
+Bulut araması için API anahtarını `bot secrets set web/firecrawl` ile kaydet.
+Ardından `<data_dir>/web.toml` dosyasında `[search]` altına
+`firecrawl_key = "web/firecrawl"` ekle. Bu değer anahtar değil, gizli bilginin
+adıdır. Kendi sunucun için bunun yerine `firecrawl_url = "http://127.0.0.1:3002"`
+ekle; sunucu anahtar istiyorsa `firecrawl_key` alanını da ekle. Sunucu adresi,
+içinde kullanıcı adı veya parola bulunmayan bir HTTP(S) adresi olmalıdır.
+Dosyayı düzenledikten sonra Praxi'yi yeniden başlat. Önceliğini seçmek için
+`order` listesine `"firecrawl"` ekle. Arama sonuçları diğer web sonuçları gibi
+güvenilmeyen içerik olarak değerlendirilir.
 
 Bozuk bir `web.toml` (bir yazım hatası, geçersiz bir değer) daemonu asla durdurmaz. Bir uyarı
 günlüğe yazılır ve varsayılanlar kullanılır. Bilinmeyen anahtarlar yazım hatası sayılır, böylece

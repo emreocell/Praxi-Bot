@@ -752,6 +752,12 @@ pub struct WebSearchSection {
     /// Name of the secret holding the Tavily Search API key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tavily_key: Option<String>,
+    /// Firecrawl service root for a self-hosted deployment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firecrawl_url: Option<String>,
+    /// Name of the secret holding the Firecrawl API key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firecrawl_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duckduckgo: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -868,6 +874,8 @@ pub fn web_tools_config(
     };
     cfg.search.brave_key = resolve_key("brave_key", s.brave_key.as_deref(), warnings);
     cfg.search.tavily_key = resolve_key("tavily_key", s.tavily_key.as_deref(), warnings);
+    cfg.search.firecrawl_url = s.firecrawl_url.clone().filter(|u| !u.trim().is_empty());
+    cfg.search.firecrawl_key = resolve_key("firecrawl_key", s.firecrawl_key.as_deref(), warnings);
     let h = &file.http;
     let positive = |what: &str, v: Option<u64>, warnings: &mut Vec<String>| {
         v.filter(|n| {

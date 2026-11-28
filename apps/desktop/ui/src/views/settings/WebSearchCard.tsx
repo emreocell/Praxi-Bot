@@ -237,7 +237,9 @@ export function WebSearchCard() {
         ? { text: t("settingsModal.webSearch.status.active"), active: true }
         : { text: t("settingsModal.webSearch.status.needsKey"), active: false };
     }
-    const enabled = isKeylessBackend(id) ? cfg[id] : false;
+    const enabled = id === "firecrawl"
+      ? cfg.active_backends.includes(id)
+      : isKeylessBackend(id) ? cfg[id] : false;
     return enabled
       ? { text: t("settingsModal.webSearch.status.active"), active: true }
       : { text: t("settingsModal.webSearch.status.disabled"), active: false };

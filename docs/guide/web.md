@@ -35,9 +35,10 @@ You can configure backends, priority order, API keys, and run a live probe eithe
 1. a [SearXNG](https://docs.searxng.org/) instance you run (`searxng_url`),
 2. Brave Search API (`brave_key`),
 3. Tavily Search API (`tavily_key`),
-4. DuckDuckGo HTML (`duckduckgo`, default `true`),
-5. DuckDuckGo Lite (`duckduckgo_lite`, default `true`),
-6. Bing HTML (`bing`, default `true`).
+4. Firecrawl (`firecrawl_url`, `firecrawl_key`),
+5. DuckDuckGo HTML (`duckduckgo`, default `true`),
+6. DuckDuckGo Lite (`duckduckgo_lite`, default `true`),
+7. Bing HTML (`bing`, default `true`).
 
 ```toml
 [search]
@@ -47,7 +48,7 @@ tavily_key = "web/tavily"               # NAME of a secret, never the key itself
 duckduckgo = true                       # keyless fallback (default true)
 duckduckgo_lite = true                  # keyless fallback (default true)
 bing = true                             # keyless fallback (default true)
-order = ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"]
+order = ["searxng", "brave", "tavily", "firecrawl", "duckduckgo", "duckduckgo_lite", "bing"]
 
 [http]
 timeout_secs = 20            # whole request (search backends are capped at 8s each)
@@ -62,6 +63,20 @@ Every key is optional. Store Brave or Tavily keys in the secret store (or enter 
 bot secrets set web/brave
 bot secrets set web/tavily
 ```
+
+### Firecrawl search (manual configuration)
+
+Firecrawl can supply search results from the cloud or a self-hosted service. This
+integration currently supports search only; page fetching continues to use the
+existing fetcher. Settings and its provider test do not yet configure Firecrawl.
+
+For cloud search, save the API key with `bot secrets set web/firecrawl`, then add
+`firecrawl_key = "web/firecrawl"` under `[search]` in `<data_dir>/web.toml`.
+The value is the secret name, not the key. For self-hosting, instead add
+`firecrawl_url = "http://127.0.0.1:3002"`; if your service requires a key,
+add `firecrawl_key` as well. The service URL must be HTTP(S) without embedded
+credentials. Restart Praxi after editing. Add `"firecrawl"` to `order` to choose
+its priority. Search results are untrusted, just like other web results.
 
 A broken `web.toml` (a typo, a bad value) never stops the daemon: it logs a
 warning and uses the defaults. Unknown keys count as a typo, so mistakes are

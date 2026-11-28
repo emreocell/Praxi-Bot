@@ -553,6 +553,74 @@ async fn searxng_backend_normalises_results() {
 }
 
 #[tokio::test]
+async fn firecrawl_search_supports_self_hosting_and_write_only_keys() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v2/search"))
+        .and(header("Authorization", "Bearer test-firecrawl-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"success": true, "data": {"web": [
+                {"title": "Example", "url": "https://example.com/", "description": "<b>Result</b>"},
+                {"title": "Invalid", "url": "javascript:bad"}
+            ]}}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let store = Arc::new(MemoryStore::new());
+    store.set("firecrawl", "test-firecrawl-key").unwrap();
+    let mut c = cfg(DefaultUrlPolicy::default());
+    c.secrets = Some(store);
+    c.search.firecrawl_url = Some(server.uri());
+    c.search.firecrawl_key = Some(SecretRef::new("firecrawl").unwrap());
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let out = call(
+        &reg,
+        "web_search",
+        json!({"query": "hello", "backend": "firecrawl"}),
+    )
+    .await
+    .unwrap();
+    let result = json_part(&out);
+    assert_eq!(result["backend"], "firecrawl");
+    assert_eq!(result["untrusted_external_content"], true);
+    assert_eq!(result["results"].as_array().unwrap().len(), 1);
+    assert!(!text(&out).contains("test-firecrawl-key"));
+}
+
+#[tokio::test]
+async fn firecrawl_search_works_without_a_key_on_self_hosted_service() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v2/search"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"success": true, "data": {"web": [{"title": "Example", "url": "https://example.com/"}]}})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut c = cfg(DefaultUrlPolicy::default());
+    c.search.firecrawl_url = Some(server.uri());
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    call(
+        &reg,
+        "web_search",
+        json!({"query": "hello", "backend": "firecrawl"}),
+    )
+    .await
+    .unwrap();
+}
+
+#[test]
+fn firecrawl_rejects_urls_with_credentials() {
+    let mut c = cfg(DefaultUrlPolicy::default());
+    c.search.firecrawl_url = Some("http://user:password@localhost:8080".into());
+    assert!(web_tools::tools(c).is_err());
+}
+
+#[tokio::test]
 async fn brave_backend_uses_secret_ref_and_header() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

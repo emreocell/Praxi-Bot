@@ -124,6 +124,11 @@ impl WebHost {
                 "searxng" => searxng_url.is_some(),
                 "brave" => brave_key_set && cfg.search.brave_key.is_some(),
                 "tavily" => tavily_key_set && cfg.search.tavily_key.is_some(),
+                "firecrawl" => {
+                    cfg.search.firecrawl_url.is_some()
+                        || (cfg.search.firecrawl_key.is_some()
+                            && self.secret_present(file.search.firecrawl_key.as_deref()))
+                }
                 "duckduckgo" => duckduckgo,
                 "duckduckgo_lite" => duckduckgo_lite,
                 "bing" => bing,
@@ -545,6 +550,7 @@ mod tests {
                 "searxng",
                 "brave",
                 "tavily",
+                "firecrawl",
                 "duckduckgo",
                 "duckduckgo_lite",
                 "bing"
