@@ -41,6 +41,12 @@ use crate::{ApiError, AppState, WeakAppState, error::ErrorBody, routes::ApiJson}
 
 /// File of the owner's settings, in the data directory.
 pub const SETTINGS_FILE: &str = "owner-notify.json";
+/// File of the notices (the panel log, the push log, the held ones), in the data directory, so a
+/// restart loses none of them.
+pub const NOTICES_FILE: &str = "owner-notices.json";
+/// A notice that no bridge was handed before a restart is replayed to the first bridge that
+/// connects, unless it is older than this (a day-old "finished" is not news).
+const UNSENT_MAX_AGE_MS: i64 = 12 * 60 * 60 * 1000;
 /// Notices the panel log keeps.
 const LOG_MAX: usize = 200;
 /// Notices the push log keeps for a bridge that reconnects.
@@ -199,6 +205,10 @@ fn load_settings(path: &Path) -> OwnerNotifySettings {
 /// Write the settings so that a crash leaves the old file or the new one, never half of one, and
 /// only the daemon's user can read it.
 fn save_settings(path: &Path, s: &OwnerNotifySettings) -> std::io::Result<()> {
+    save_json(path, s)
+}
+
+fn save_json<T: Serialize>(path: &Path, s: &T) -> std::io::Result<()> {
     use std::io::Write as _;
     let tmp = path.with_extension("json.tmp");
     let written = (|| {
@@ -253,6 +263,38 @@ struct HubState {
     milestones: HashMap<String, u32>,
     /// Notices whose questions were answered (only ids still in `log`).
     answered: HashSet<String>,
+    /// The newest notice a bridge was handed, so a restart knows what is still unsent.
+    delivered_seq: u64,
+}
+
+/// What survives a restart: the bounded logs (see [`LOG_MAX`], [`PUSH_MAX`], [`HELD_MAX`]).
+#[derive(Default, Serialize, Deserialize)]
+struct Persisted {
+    seq: u64,
+    #[serde(default)]
+    delivered_seq: u64,
+    log: Vec<OwnerNotice>,
+    pushed: Vec<OwnerNotice>,
+    held: Vec<OwnerNotice>,
+    #[serde(default)]
+    answered: Vec<String>,
+}
+
+fn load_notices(path: &Path) -> Option<Persisted> {
+    let bytes = std::fs::read(path).ok()?;
+    match serde_json::from_slice::<Persisted>(&bytes) {
+        Ok(p) => Some(p),
+        Err(error) => {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", %error, "owner notices could not be read; starting with none");
+            None
+        }
+    }
+}
+
+fn newest<T>(mut items: Vec<T>, max: usize) -> VecDeque<T> {
+    let skip = items.len().saturating_sub(max);
+    items.drain(..skip);
+    items.into()
 }
 
 /// The notice log and the push gate.
@@ -260,6 +302,14 @@ pub(crate) struct Hub {
     state: Mutex<HubState>,
     tx: broadcast::Sender<OwnerNotice>,
     path: Option<PathBuf>,
+    /// Where the notices are kept (none: in memory only).
+    notices_path: Option<PathBuf>,
+    /// One writer at a time, so the file ends with the newest state.
+    write_lock: Mutex<()>,
+    /// With a notices file from an earlier run: the `seq` up to which a bridge had been handed
+    /// notices when that run ended. The first bridge to connect without a cursor gets the newer
+    /// ones.
+    resume_after: Option<u64>,
 }
 
 /// A notice before it has an id and a place in the log.
@@ -309,15 +359,64 @@ impl Draft {
 impl Hub {
     pub(crate) fn load(data_dir: &Path) -> Self {
         let path = data_dir.join(SETTINGS_FILE);
-        let state = HubState {
+        let notices_path = data_dir.join(NOTICES_FILE);
+        let mut state = HubState {
             settings: load_settings(&path),
             ..HubState::default()
         };
+        let mut resume_after = None;
+        if let Some(p) = load_notices(&notices_path) {
+            state.seq = p.seq;
+            state.delivered_seq = p.delivered_seq;
+            state.log = newest(p.log, LOG_MAX);
+            state.pushed = newest(p.pushed, PUSH_MAX);
+            state.held = newest(p.held, HELD_MAX);
+            state.answered = p.answered.into_iter().collect();
+            resume_after = Some(p.delivered_seq);
+        }
         Self {
             state: Mutex::new(state),
             tx: broadcast::channel(64).0,
             path: Some(path),
+            notices_path: Some(notices_path),
+            write_lock: Mutex::new(()),
+            resume_after,
         }
+    }
+
+    /// Write the notices down. A failure is logged and does not stop the notice: it still goes
+    /// out, it only would not survive a restart.
+    fn persist(&self) {
+        let Some(path) = &self.notices_path else {
+            return;
+        };
+        let _one_writer = self.write_lock.lock();
+        let snapshot = {
+            let st = self.state.lock();
+            Persisted {
+                seq: st.seq,
+                delivered_seq: st.delivered_seq,
+                log: st.log.iter().cloned().collect(),
+                pushed: st.pushed.iter().cloned().collect(),
+                held: st.held.iter().cloned().collect(),
+                answered: st.answered.iter().cloned().collect(),
+            }
+        };
+        if let Err(error) = save_json(path, &snapshot) {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", %error, "owner notices could not be saved");
+        }
+    }
+
+    /// A bridge was handed the notice `seq`.
+    pub(crate) fn mark_delivered(&self, seq: u64) {
+        {
+            let mut st = self.state.lock();
+            if seq <= st.delivered_seq {
+                return;
+            }
+            st.delivered_seq = seq;
+        }
+        self.persist();
     }
 
     #[cfg(test)]
@@ -326,6 +425,9 @@ impl Hub {
             state: Mutex::new(HubState::default()),
             tx: broadcast::channel(64).0,
             path: None,
+            notices_path: None,
+            write_lock: Mutex::new(()),
+            resume_after: None,
         }
     }
 
@@ -345,6 +447,14 @@ impl Hub {
 
     /// Record a notice and push it when the settings allow. Returns it (`None`: coalesced).
     pub(crate) fn publish(&self, d: Draft, now_ms: i64) -> Option<OwnerNotice> {
+        let notice = self.publish_unsaved(d, now_ms);
+        if notice.is_some() {
+            self.persist();
+        }
+        notice
+    }
+
+    fn publish_unsaved(&self, d: Draft, now_ms: i64) -> Option<OwnerNotice> {
         let mut st = self.state.lock();
         Self::release_locked(&mut st, &self.tx, now_ms);
         if let Some((key, window)) = &d.coalesce {
@@ -428,8 +538,15 @@ impl Hub {
 
     /// Push what quiet hours held back, once the window is over.
     pub(crate) fn release_held(&self, now_ms: i64) {
-        let mut st = self.state.lock();
-        Self::release_locked(&mut st, &self.tx, now_ms);
+        let released = {
+            let mut st = self.state.lock();
+            let had = !st.held.is_empty();
+            Self::release_locked(&mut st, &self.tx, now_ms);
+            had && st.held.is_empty()
+        };
+        if released {
+            self.persist();
+        }
     }
 
     /// Every notice after `after` (the app's panel).
@@ -465,12 +582,15 @@ impl Hub {
             return Err("a newer notice replaced this one: answer that one");
         }
         st.answered.insert(notice.id.clone());
+        drop(st);
+        self.persist();
         Ok(())
     }
 
     /// The answer was not taken: the notice can be answered again.
     pub(crate) fn release_answers(&self, id: &str) {
         self.state.lock().answered.remove(id);
+        self.persist();
     }
 
     /// The pushed notices after `after`, and a receiver for the next ones, taken together so
@@ -481,14 +601,24 @@ impl Hub {
     ) -> (Vec<OwnerNotice>, broadcast::Receiver<OwnerNotice>) {
         let st = self.state.lock();
         let rx = self.tx.subscribe();
-        // No cursor: a bridge that has never connected starts with what is new from now on.
-        let replay = after.map_or_else(Vec::new, |after| {
-            st.pushed
+        // No cursor: a bridge that has never connected starts with what is new from now on, plus
+        // what an earlier run pushed and no bridge was handed before it ended.
+        let now_ms = storage::now_ms();
+        let replay = match (after, self.resume_after) {
+            (Some(after), _) => st
+                .pushed
                 .iter()
                 .filter(|n| n.seq > after)
                 .cloned()
-                .collect()
-        });
+                .collect(),
+            (None, Some(resume)) => st
+                .pushed
+                .iter()
+                .filter(|n| n.seq > resume && now_ms.saturating_sub(n.at_ms) < UNSENT_MAX_AGE_MS)
+                .cloned()
+                .collect(),
+            (None, None) => Vec::new(),
+        };
         (replay, rx)
     }
 
@@ -1056,28 +1186,36 @@ pub(crate) async fn stream_notices(
     let first: VecDeque<SseEvent> = std::iter::once(hello)
         .chain(replay.iter().filter_map(notice_event))
         .collect();
+    if let Some(last) = replay.last() {
+        hub.mark_delivered(last.seq);
+    }
+    let state = s.clone();
     let stream = futures::stream::unfold(
         (first, rx, shutdown),
-        |(mut first, mut rx, shutdown)| async move {
-            if let Some(ev) = first.pop_front() {
-                return Some((Ok(ev), (first, rx, shutdown)));
-            }
-            loop {
-                tokio::select! {
-                    () = shutdown.cancelled() => return None,
-                    got = rx.recv() => match got {
-                        Ok(n) => {
-                            if let Some(ev) = notice_event(&n) {
+        move |(mut first, mut rx, shutdown)| {
+            let state = state.clone();
+            async move {
+                if let Some(ev) = first.pop_front() {
+                    return Some((Ok(ev), (first, rx, shutdown)));
+                }
+                loop {
+                    tokio::select! {
+                        () = shutdown.cancelled() => return None,
+                        got = rx.recv() => match got {
+                            Ok(n) => {
+                                if let Some(ev) = notice_event(&n) {
+                                    state.owner_notify().mark_delivered(n.seq);
+                                    return Some((Ok(ev), (first, rx, shutdown)));
+                                }
+                            }
+                            // The bridge fell behind: say so and let it replay with `after`.
+                            Err(broadcast::error::RecvError::Lagged(_)) => {
+                                let ev = SseEvent::default().event("lagged").data("{}");
                                 return Some((Ok(ev), (first, rx, shutdown)));
                             }
-                        }
-                        // The bridge fell behind: say so and let it replay with `after`.
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            let ev = SseEvent::default().event("lagged").data("{}");
-                            return Some((Ok(ev), (first, rx, shutdown)));
-                        }
-                        Err(broadcast::error::RecvError::Closed) => return None,
-                    },
+                            Err(broadcast::error::RecvError::Closed) => return None,
+                        },
+                    }
                 }
             }
         },

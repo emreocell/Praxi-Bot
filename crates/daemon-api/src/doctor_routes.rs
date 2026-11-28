@@ -426,6 +426,12 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         "safe mode",
         Box::new(move || doctor::check_safe_mode(safe)),
     );
+    let guard = s.loop_guard().clone();
+    add(
+        "background_loops",
+        "background loops",
+        Box::new(move || doctor::check_background_loops(&guard.statuses())),
+    );
     let lane = s.full_access_lane().clone();
     add(
         "full_access_lane",

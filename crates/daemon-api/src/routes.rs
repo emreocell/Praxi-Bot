@@ -410,6 +410,7 @@ pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
             host
         },
         uptime_secs: s.uptime_secs(),
+        background: s.background_health(),
     })
 }
 

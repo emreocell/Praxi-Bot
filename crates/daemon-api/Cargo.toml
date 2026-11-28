@@ -52,6 +52,7 @@ protocol.workspace = true
 assistant-import = { path = "../assistant-import", version = "0.1.0" }
 provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
 secret-store.workspace = true
+liveness = { path = "../liveness", version = "0.1.0" }
 scheduler = { path = "../scheduler", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true

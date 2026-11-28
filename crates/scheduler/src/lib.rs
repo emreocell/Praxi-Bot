@@ -54,7 +54,9 @@ mod registry_tests;
 mod tests;
 
 pub use clock::{Clock, FakeClock, SystemClock};
-pub use engine::{CLOCK_JUMP_THRESHOLD_MS, MISFIRE_GRACE_MS, ScheduleExecutor, Scheduler};
+pub use engine::{
+    CLOCK_JUMP_THRESHOLD_MS, LOOP_NAME, MISFIRE_GRACE_MS, ScheduleExecutor, Scheduler,
+};
 pub use error::{Result, SchedulerError};
 pub use model::{
     AttemptRun, FileEvent, MisfirePolicy, Occurrence, OccurrenceState, ParsedCron, Payload,

@@ -16,6 +16,8 @@ use crate::{
 
 #[path = "consistency_tests.rs"]
 mod consistency;
+#[path = "supervise_tests.rs"]
+mod supervise;
 
 #[derive(Default)]
 struct RecordingExecutor {

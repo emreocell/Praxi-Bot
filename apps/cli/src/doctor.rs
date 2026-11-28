@@ -94,6 +94,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             core::safe_mode_from_env(std::env::var("BOT_SAFE_MODE").ok().as_deref())
                 || daemon_safe_mode(env.port),
         ),
+        check_background_loops(env.port),
         core::check_disk(env.data_dir),
         check_local_models(env.data_dir),
         crate::voice_host::check_offline_voice(env.data_dir),
@@ -777,29 +778,72 @@ fn check_daemon(dir: &Path, port: u16) -> Check {
 
 /// Whether the daemon answering on `port` runs in safe mode (`false` when none answers).
 fn daemon_safe_mode(port: u16) -> bool {
+    daemon_health(port).is_some_and(|v| v["safe_mode"] == true)
+}
+
+/// The daemon's `GET /v1/health` reply, or `None` when no daemon answers on `port`.
+fn daemon_health(port: u16) -> Option<Value> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
-        return false;
-    }
-    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+    TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
+    let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-    else {
-        return false;
-    };
+        .ok()?;
     rt.block_on(async {
-        let Ok(resp) = reqwest::Client::new()
+        let resp = reqwest::Client::new()
             .get(format!("http://127.0.0.1:{port}/v1/health"))
             .timeout(Duration::from_secs(3))
             .send()
             .await
-        else {
-            return false;
-        };
-        resp.json::<Value>()
-            .await
-            .is_ok_and(|v| v["safe_mode"] == true)
+            .ok()?;
+        resp.json::<Value>().await.ok()
     })
+}
+
+/// `background loops`, as the running daemon reports them in `GET /v1/health`.
+fn check_background_loops(port: u16) -> Check {
+    const ID: &str = "background_loops";
+    const N: &str = "background loops";
+    let Some(health) = daemon_health(port) else {
+        return Check::skipped(ID, N, "the daemon is not running");
+    };
+    let loops = health["background"]["loops"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let names = |keep: &dyn Fn(&Value) -> bool| -> Vec<String> {
+        loops
+            .iter()
+            .filter(|l| keep(l))
+            .filter_map(|l| l["name"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let degraded = names(&|l| l["degraded"] == true);
+    if !degraded.is_empty() {
+        return Check::fail(
+            ID,
+            N,
+            format!(
+                "degraded: {} crashed too often and stopped; schedules and missions that depend on it do not run",
+                degraded.join(", ")
+            ),
+            "restart the daemon (for a host: `systemctl restart praxi`); if it comes back, send the support log",
+        );
+    }
+    let restarted = names(&|l| l["restarts"].as_u64().unwrap_or(0) > 0);
+    if restarted.is_empty() {
+        Check::ok(ID, N, "running")
+    } else {
+        Check::warn(
+            ID,
+            N,
+            format!(
+                "restarted after a crash since the daemon started: {}",
+                restarted.join(", ")
+            ),
+            "the daemon recovered by itself; if this keeps happening, send the support log",
+        )
+    }
 }
 
 /// Version string from `GET /v1/health`, `None` if it is not our daemon.

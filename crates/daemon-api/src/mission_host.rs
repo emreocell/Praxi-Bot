@@ -283,7 +283,10 @@ impl AppState {
             },
             |t| (Arc::clone(&t.clock), t.pacing.clone()),
         );
-        let supervisor = Arc::new(Supervisor::new(store, runner, clock, pacing, token.clone()));
+        let supervisor = Arc::new(
+            Supervisor::new(store, runner, clock, pacing, token.clone())
+                .with_guard(self.0.loop_guard.clone()),
+        );
         supervisor.set_mail_probe(Arc::new(OwnInboxProbe {
             mail: self.0.agent.mail_handle(),
         }));

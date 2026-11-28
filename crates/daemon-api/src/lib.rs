@@ -61,6 +61,7 @@ pub mod live_view;
 mod local_install;
 mod local_models;
 mod logs;
+mod loops;
 pub mod mcp;
 pub mod mcp_import;
 mod mcp_routes;
@@ -84,6 +85,7 @@ mod provider_models;
 mod secret_request_routes;
 mod site_rule_routes;
 pub mod trusted_folders;
+mod watchdog;
 pub(crate) mod workspace_routes;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod bot_limits_routes;
@@ -390,6 +392,8 @@ struct Inner {
     cli_logins: cli_login::LoginBook,
     /// Live model lists of the coding CLIs (disk-cached, refreshed in the background).
     cli_models: Arc<cli_provider::models::ModelCache>,
+    /// Keeps the scheduler and mission loops alive and tells the owner when one crashes.
+    loop_guard: liveness::Guard,
     /// The running scheduler (see [`AppState::start_scheduler`]).
     scheduler: parking_lot::Mutex<Option<Scheduler>>,
     /// The mission ledger (see [`AppState::enable_missions`]).
@@ -532,6 +536,7 @@ impl AppState {
         let state = Self(Arc::new(Inner {
             schedule_events: tokio::sync::broadcast::channel(64).0,
             owner_notify: owner_notify::Hub::load(storage.data_dir()),
+            loop_guard: liveness::Guard::default(),
             notice_watcher: OnceLock::new(),
             channels: parking_lot::Mutex::new(Vec::new()),
             agent,
@@ -616,6 +621,7 @@ impl AppState {
         ));
         state.install_unset_file_access();
         state.install_external_source_check();
+        state.wire_loop_notices();
         knowledge_runtime::install(&state);
         Ok(state)
     }
@@ -1126,13 +1132,20 @@ impl AppState {
             leader: self.leader().clone(),
         });
         #[cfg(test)]
-        let clock = self.0.scheduler_clock.lock().clone();
+        let clock = self
+            .0
+            .scheduler_clock
+            .lock()
+            .clone()
+            .unwrap_or_else(|| Arc::new(scheduler::SystemClock::new()));
         #[cfg(not(test))]
-        let clock: Option<Arc<dyn scheduler::Clock>> = None;
-        *scheduler = Some(match clock {
-            Some(clock) => Scheduler::start_with_clock(store, exec, clock),
-            None => Scheduler::start(store, exec),
-        });
+        let clock = Arc::new(scheduler::SystemClock::new());
+        *scheduler = Some(Scheduler::start_guarded(
+            store,
+            exec,
+            clock,
+            &self.0.loop_guard,
+        ));
         Ok(())
     }
 
@@ -2362,9 +2375,13 @@ async fn serve_with_startup_timeout(
     knowledge_watch::spawn(&state);
     secret_request_routes::start_channel_notifications(&state);
     let stopping = state.clone();
+    if let Ok(addr) = listener.local_addr() {
+        watchdog::start(addr, state.shutdown_token());
+    }
     let served = axum::serve(listener, router(state.clone()))
         .with_graceful_shutdown(async move {
             shutdown.await;
+            let _ = liveness::notify::send("STOPPING=1");
             stopping.shutdown_token().cancel();
             if let Err(e) = startup.await {
                 support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: leader startup task failed: {e}");

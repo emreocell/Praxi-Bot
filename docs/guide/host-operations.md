@@ -54,7 +54,7 @@ Units:
 
 | Unit | Role | Enabled by the installer |
 | --- | --- | --- |
-| `praxi.service` | `bot serve` or `bot serve --host`, loopback only. `Restart=on-failure`, `RestartSec=5` | yes |
+| `praxi.service` | `bot serve` or `bot serve --host`, loopback only. `Restart=on-failure`, `RestartSec=5`, `WatchdogSec=120` | yes |
 | `praxi-xvfb.service` | virtual display | with desktop |
 | `praxi-desktop.service` | Xfce session on that display | with a desktop session |
 | `praxi-node.service` | `bot-node run`. `RestartSec=10` | installed, not enabled |
@@ -85,6 +85,31 @@ your own `apt upgrade`, set `NEEDRESTART_MODE=l` as well if those hooks should
 list units and leave them alone. On systemd older than 249 the installer omits
 `Upholds=` and uses a start-up helper; details are in the
 [remote-host troubleshooting](remote-host.md#troubleshooting-desktop-xauthority-d-bus-and-namespaces).
+
+## When something inside the daemon breaks
+
+Three things keep a host running without you:
+
+- **A crashed background loop is restarted.** The scheduler, the mission wake loop and the
+  mission drivers each run under a supervisor. A panic restarts the loop after a short, growing
+  wait (1 s, 2 s, 4 s, up to 30 s) and you get an owner notice ("Schedules stopped and were
+  restarted"). Five crashes in a row without a quiet five minutes between them stop the loop for
+  good: it is then *degraded*, you get a second notice ("Schedules are not running"),
+  `GET /v1/health` shows `background.status: "degraded"`, and `bot doctor` shows
+  `background loops` as failed. Restart the daemon (`sudo systemctl restart praxi.service`) to
+  bring it back.
+- **A hung daemon is restarted by systemd.** The unit has `WatchdogSec=120`. The daemon sends
+  a heartbeat every 40 seconds, but only after its own `GET /v1/health` answered over the
+  loopback within 10 seconds. A daemon that is stuck stops beating and systemd kills and
+  restarts it (`Restart=on-failure`).
+- **Notices survive a restart.** The notices behind the app's notification panel and the
+  Telegram / Discord pushes are kept in `owner-notices.json` in the data directory (the newest
+  200, readable by the daemon's user only). A notice held back by quiet hours is still pushed
+  when the window ends, and a notice that no bridge had been handed when the daemon went down
+  (and is less than 12 hours old) goes to the first bridge that connects.
+
+A degraded loop does not stop the heartbeat on purpose: restarting the daemon over and over
+would not fix a bug that comes back at every start, and chat keeps working meanwhile.
 
 ## Upgrade and repair
 

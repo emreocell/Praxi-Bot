@@ -15,6 +15,7 @@ use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use liveness::{Guard, Verdict};
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
@@ -31,6 +32,11 @@ use crate::wake::MailProbe;
 /// How long the loop waits for the drivers of running sessions after `shutdown` before it
 /// aborts them (their runs are cancelled the moment `shutdown` fires, so this is a backstop).
 const DRIVER_JOIN_GRACE: Duration = Duration::from_secs(15);
+
+/// Name of the wake loop for the [`Guard`] (timers, timeouts and mailboxes of waiting items).
+pub const WAKE_LOOP: &str = "mission_wakes";
+/// Name of the loop that starts the sessions of running missions for the [`Guard`].
+pub const DRIVER_LOOP: &str = "mission_drivers";
 
 /// Source of "now".
 pub trait Clock: Send + Sync {
@@ -200,6 +206,8 @@ pub struct Supervisor {
     mail: Mutex<Option<Arc<dyn MailProbe>>>,
     /// When the wake loop last pruned old waits and wakes (`i64::MIN`: never).
     last_prune_ms: AtomicI64,
+    /// Restarts a loop that panics and reports it.
+    guard: Guard,
 }
 
 impl std::fmt::Debug for Supervisor {
@@ -230,7 +238,22 @@ impl Supervisor {
             on_change: Mutex::new(None),
             mail: Mutex::new(None),
             last_prune_ms: AtomicI64::new(i64::MIN),
+            guard: Guard::default(),
         }
+    }
+
+    /// Keep the loops alive with `guard` (shared with the rest of the daemon, so health and the
+    /// owner notice see them). Without it the supervisor has a guard of its own that nobody reads.
+    #[must_use]
+    pub fn with_guard(mut self, guard: Guard) -> Self {
+        self.guard = guard;
+        self
+    }
+
+    /// The guard that keeps the loops alive.
+    #[must_use]
+    pub fn guard(&self) -> &Guard {
+        &self.guard
     }
 
     /// Let the wake loop look into mailboxes for `mail` waits.
@@ -349,32 +372,61 @@ impl Supervisor {
     /// mission is driven by its own task, one session at a time. The returned
     /// handle completes only after every driver is gone: the sessions in flight
     /// are cancelled the moment `shutdown` fires and joined here.
+    ///
+    /// Both loops are kept alive by the [`Guard`]: a panic restarts the loop (the drivers loop
+    /// recovers like after a restart of the daemon), and the owner is told.
     pub fn spawn(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
         let this = Arc::clone(self);
         tokio::spawn(async move {
-            match this.store.recover_interrupted(this.clock.now_ms()) {
-                Ok(runs) if runs.is_empty() => {}
-                Ok(runs) => {
-                    tracing::info!(
-                        "missions: {} interrupted session(s) abandoned; missions continue from their ledger",
-                        runs.len()
-                    );
-                    // The recovered runs sit paused: cancel them so nobody resumes one
-                    // next to the session that replaces it.
-                    for run in &runs {
-                        this.runner.cancel_run(run);
-                    }
-                }
-                Err(e) => tracing::warn!("missions: recovery failed: {e}"),
-            }
             // Timers, timeouts and mailboxes of waiting items, on their own task: a slow mailbox
             // never delays the start of a session.
             let wakes = {
-                let wake_loop = Arc::clone(&this);
-                tokio::spawn(async move { wake_loop.wake_loop().await })
+                let me = Arc::clone(&this);
+                this.guard
+                    .supervise(WAKE_LOOP, this.shutdown.clone(), move || {
+                        let me = Arc::clone(&me);
+                        async move { me.wake_loop().await }
+                    })
             };
-            let mut drivers: JoinSet<()> = JoinSet::new();
-            while !this.shutdown.is_cancelled() {
+            let drivers = {
+                let me = Arc::clone(&this);
+                this.guard
+                    .supervise(DRIVER_LOOP, this.shutdown.clone(), move || {
+                        let me = Arc::clone(&me);
+                        async move { me.driver_loop().await }
+                    })
+            };
+            let _ = drivers.await;
+            let _ = wakes.await;
+        })
+    }
+
+    /// Recover the sessions a restart interrupted, then start a driver for every running
+    /// mission until `shutdown`. Starting over after a crash of this loop is the same as after
+    /// a restart of the daemon: the drivers it owned are gone, so their marks are cleared and the
+    /// sessions they left behind are abandoned.
+    async fn driver_loop(self: Arc<Self>) {
+        let this = self;
+        this.driving.lock().clear();
+        this.active.lock().clear();
+        match this.store.recover_interrupted(this.clock.now_ms()) {
+            Ok(runs) if runs.is_empty() => {}
+            Ok(runs) => {
+                tracing::info!(
+                    "missions: {} interrupted session(s) abandoned; missions continue from their ledger",
+                    runs.len()
+                );
+                // The recovered runs sit paused: cancel them so nobody resumes one
+                // next to the session that replaces it.
+                for run in &runs {
+                    this.runner.cancel_run(run);
+                }
+            }
+            Err(e) => tracing::warn!("missions: recovery failed: {e}"),
+        }
+        let mut drivers: JoinSet<()> = JoinSet::new();
+        while !this.shutdown.is_cancelled() {
+            let pass = async {
                 match this.store.list_by_state(MissionState::Running) {
                     Ok(list) => {
                         for m in list {
@@ -395,25 +447,35 @@ impl Supervisor {
                 }
                 // Reap the drivers that ended (a panicked one is already logged by tokio).
                 while drivers.try_join_next().is_some() {}
-                tokio::select! {
-                    biased;
-                    () = this.shutdown.cancelled() => break,
-                    () = this.wake.notified() => {}
-                    () = tokio::time::sleep(this.cfg.poll) => {}
+            };
+            match this.guard.guarded(DRIVER_LOOP, pass).await {
+                Ok(()) => {}
+                Err(Verdict::GiveUp) => break,
+                Err(Verdict::Retry(wait)) => {
+                    tokio::select! {
+                        () = this.shutdown.cancelled() => break,
+                        () = tokio::time::sleep(wait) => {}
+                    }
+                    continue;
                 }
             }
-            let joined = async { while drivers.join_next().await.is_some() {} };
-            if tokio::time::timeout(DRIVER_JOIN_GRACE, joined)
-                .await
-                .is_err()
-            {
-                tracing::warn!("missions: a session did not stop in time; aborting it");
-                drivers.abort_all();
-                while drivers.join_next().await.is_some() {}
-                this.active.lock().clear();
+            tokio::select! {
+                biased;
+                () = this.shutdown.cancelled() => break,
+                () = this.wake.notified() => {}
+                () = tokio::time::sleep(this.cfg.poll) => {}
             }
-            let _ = wakes.await;
-        })
+        }
+        let joined = async { while drivers.join_next().await.is_some() {} };
+        if tokio::time::timeout(DRIVER_JOIN_GRACE, joined)
+            .await
+            .is_err()
+        {
+            tracing::warn!("missions: a session did not stop in time; aborting it");
+            drivers.abort_all();
+            while drivers.join_next().await.is_some() {}
+            this.active.lock().clear();
+        }
     }
 
     /// Run sessions of mission `id` until it is no longer `running`.

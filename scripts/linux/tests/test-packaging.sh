@@ -662,6 +662,8 @@ sed -i '/^BOT_MAX_COMPUTER_RUNS=/d;/^BOT_BROWSER_IDLE_SECONDS=/d' "${SANDBOX}/et
 # 5b-host. --host-mode writes 'bot serve --host' and a later plain re-install keeps it
 run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz"   --skip-packages --no-start --host-mode > "${TMP_ROOT}/host-mode.log" 2>&1
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "/bot serve --host"
+assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "WatchdogSec=120"
+assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "NotifyAccess=main"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "WorkingDirectory=${SANDBOX}/opt/praxi"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "/.local/bin:"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "Environment=NPM_CONFIG_PREFIX=${SANDBOX}/var/lib/praxi/.npm-global"

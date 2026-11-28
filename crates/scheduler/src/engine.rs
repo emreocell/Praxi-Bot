@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use liveness::{Guard, Verdict};
 use parking_lot::Mutex;
 use protocol::TaskId;
 use tokio::sync::{Notify, watch};
@@ -43,6 +44,9 @@ pub const MISFIRE_GRACE_MS: i64 = 5_000;
 /// Maximum sleep slice when no schedule has a nearer `next_run_at` so periodic
 /// wall-clock checks remain bounded.
 const MAX_IDLE_SLEEP_MS: u64 = 1_000;
+
+/// Name of the scheduler loop for the [`Guard`] (health, doctor and the owner notice).
+pub const LOOP_NAME: &str = "scheduler";
 
 /// Callback invoked by the [`Scheduler`] when a schedule or webhook fires.
 #[async_trait]
@@ -117,6 +121,7 @@ struct Inner {
     pass_tx: watch::Sender<u64>,
     replay_guard: ReplayGuard,
     watch_slots: Arc<tokio::sync::Semaphore>,
+    guard: Guard,
 }
 
 /// Handle to the running scheduler engine.
@@ -155,6 +160,19 @@ impl Scheduler {
         executor: Arc<dyn ScheduleExecutor>,
         clock: Arc<dyn Clock>,
     ) -> Self {
+        let guard = Guard::default();
+        Self::start_guarded(store, executor, clock, &guard)
+    }
+
+    /// As [`Self::start_with_clock`], with the loop kept alive by `guard`: a panic in a pass is
+    /// caught, one in the loop restarts it, and `guard` reports both.
+    #[must_use]
+    pub fn start_guarded(
+        store: Arc<ScheduleStore>,
+        executor: Arc<dyn ScheduleExecutor>,
+        clock: Arc<dyn Clock>,
+        guard: &Guard,
+    ) -> Self {
         let (pass_tx, _pass_rx) = watch::channel(0_u64);
         let inner = Arc::new(Inner {
             store,
@@ -170,10 +188,10 @@ impl Scheduler {
             pass_tx,
             replay_guard: ReplayGuard::default(),
             watch_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+            guard: guard.clone(),
         });
 
         let init_wall = inner.clock.wall_ms();
-        let init_mono = inner.clock.mono_ms();
 
         // Nothing is dispatching yet, so every unresolved row is a leftover of
         // an earlier process. Reclassify it as visible history; no replay.
@@ -208,9 +226,15 @@ impl Scheduler {
             tracing::error!(error = %e, "scheduler startup pass failed");
         }
 
+        // A restart of the loop starts it over from the clock as it is then.
         let loop_inner = Arc::clone(&inner);
-        let handle = tokio::spawn(async move {
-            run_loop(loop_inner, init_wall, init_mono).await;
+        let handle = guard.supervise(LOOP_NAME, inner.cancel.clone(), move || {
+            let inner = Arc::clone(&loop_inner);
+            async move {
+                let wall = inner.clock.wall_ms();
+                let mono = inner.clock.mono_ms();
+                run_loop(inner, wall, mono).await;
+            }
         });
 
         Self {
@@ -426,7 +450,7 @@ impl Scheduler {
     /// Wake the scheduler loop and wait until it completes a full scheduling
     /// pass (spawning any newly due executions and recording any skips).
     pub async fn tick(&self) {
-        if self.inner.cancel.is_cancelled() {
+        if self.inner.cancel.is_cancelled() || self.inner.guard.is_given_up(LOOP_NAME) {
             return;
         }
         let mut rx = self.inner.pass_tx.subscribe();
@@ -470,7 +494,8 @@ impl Scheduler {
 
 async fn run_loop(inner: Arc<Inner>, mut prev_wall_ms: i64, mut prev_mono_ms: i64) {
     loop {
-        if inner.cancel.is_cancelled() {
+        if inner.cancel.is_cancelled() || inner.guard.is_given_up(LOOP_NAME) {
+            let _ = inner.pass_tx.send(u64::MAX);
             break;
         }
 
@@ -493,22 +518,42 @@ async fn run_loop(inner: Arc<Inner>, mut prev_wall_ms: i64, mut prev_mono_ms: i6
             );
         }
 
-        if clock_jumped
-            && delta_wall < delta_mono
-            && let Err(e) = reanchor_after_backward_jump(&inner, now_wall_ms)
-        {
-            tracing::error!(error = %e, "failed to re-anchor schedules after clock moved backwards");
-        }
+        // A panic in one pass (a corrupt row, a bug in an executor callback) costs that pass,
+        // not the loop: it is counted, and the loop waits and goes on.
+        let pass = async {
+            if clock_jumped
+                && delta_wall < delta_mono
+                && let Err(e) = reanchor_after_backward_jump(&inner, now_wall_ms)
+            {
+                tracing::error!(error = %e, "failed to re-anchor schedules after clock moved backwards");
+            }
 
-        if let Err(e) = process_due(&inner, now_wall_ms, clock_jumped, false) {
-            tracing::error!(error = %e, "error processing due schedules");
-        }
+            if let Err(e) = process_due(&inner, now_wall_ms, clock_jumped, false) {
+                tracing::error!(error = %e, "error processing due schedules");
+            }
 
-        if let Err(error) = poll_triggers(&inner, now_wall_ms) {
-            let _ = error;
-            tracing::error!("schedule trigger pass failed");
-        }
+            if let Err(error) = poll_triggers(&inner, now_wall_ms) {
+                let _ = error;
+                tracing::error!("schedule trigger pass failed");
+            }
+        };
+        let outcome = inner.guard.guarded(LOOP_NAME, pass).await;
         let _ = inner.pass_tx.send(observed_req);
+        match outcome {
+            Ok(()) => {}
+            Err(Verdict::GiveUp) => {
+                // Nobody waits for a pass that will not come.
+                let _ = inner.pass_tx.send(u64::MAX);
+                break;
+            }
+            Err(Verdict::Retry(wait)) => {
+                tokio::select! {
+                    () = inner.cancel.cancelled() => break,
+                    () = tokio::time::sleep(wait) => {}
+                }
+                continue;
+            }
+        }
 
         // If another tick was requested while we were running, loop immediately.
         if inner.req_seq.load(Ordering::SeqCst) > observed_req {

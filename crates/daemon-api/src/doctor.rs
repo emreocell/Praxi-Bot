@@ -1272,6 +1272,54 @@ pub fn check_full_access_lane(switch: &agent_core::FullLaneSwitch) -> Check {
     }
 }
 
+/// `background loops`: whether the scheduler and the mission loops run. One that crashed is
+/// restarted by itself (a warning, so the owner looks at the logs); one that crashed too often was
+/// given up on and stays down until the daemon restarts (a failure: nothing fires on its own).
+#[must_use]
+pub fn check_background_loops(loops: &[liveness::LoopStatus]) -> Check {
+    const ID: &str = "background_loops";
+    const N: &str = "background loops";
+    let degraded: Vec<&str> = loops
+        .iter()
+        .filter(|l| l.state == liveness::LoopState::Degraded)
+        .map(|l| l.name)
+        .collect();
+    if !degraded.is_empty() {
+        return Check::fail(
+            ID,
+            N,
+            format!(
+                "degraded: {} crashed too often and stopped; schedules and missions that depend on it do not run",
+                degraded.join(", ")
+            ),
+            "restart the daemon (for a host: `systemctl restart praxi`); if it comes back, send the support log",
+        );
+    }
+    let restarted: Vec<String> = loops
+        .iter()
+        .filter(|l| l.restarts > 0)
+        .map(|l| format!("{} ({}x)", l.name, l.restarts))
+        .collect();
+    if restarted.is_empty() {
+        let names: Vec<&str> = loops.iter().map(|l| l.name).collect();
+        let detail = if names.is_empty() {
+            "none running here".to_owned()
+        } else {
+            format!("running: {}", names.join(", "))
+        };
+        return Check::ok(ID, N, detail);
+    }
+    Check::warn(
+        ID,
+        N,
+        format!(
+            "running, but restarted after a crash since the daemon started: {}",
+            restarted.join(", ")
+        ),
+        "the daemon recovered by itself; if this keeps happening, send the support log",
+    )
+}
+
 /// The environment switch for safe mode (`BOT_SAFE_MODE`): `1`, `true`, `on` or `yes`.
 #[must_use]
 pub fn safe_mode_from_env(value: Option<&str>) -> bool {

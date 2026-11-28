@@ -1564,6 +1564,9 @@ ExecStart=${PREFIX}/bin/bot ${SERVE_ARGS}
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
+# The daemon beats only while its own /v1/health answers; a hung daemon is killed and restarted.
+WatchdogSec=120
+NotifyAccess=main
 ${HARDENING}
 
 [Install]

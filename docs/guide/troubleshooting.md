@@ -67,6 +67,11 @@ error.
   run `sudo praxi doctor` so the check runs with the service's own user,
   environment (`/etc/praxi/praxi.env`), and mount namespace rather than your
   interactive shell.
+- **Background loops (`background_loops`)** shows whether the scheduler and the mission loops
+  run. A warning means one crashed and was restarted by itself; a failure means one crashed five
+  times in a row and stays stopped until the daemon restarts (schedules, mission wake-ups or
+  missions do not run meanwhile). The same state is in `background` of `GET /v1/health`. See
+  [host operations](host-operations.md#when-something-inside-the-daemon-breaks).
 - **Browser (`browser`)** reports which Chrome, Chromium or Edge the bot would start, or why none
   can be used (only the snap Chromium exists, `BOT_BROWSER_PATH` points to nothing). On Linux, when
   no browser works, the check offers **Install browser**: it downloads a pinned Google Chrome for
