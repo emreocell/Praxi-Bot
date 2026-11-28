@@ -87,6 +87,13 @@
   gap: var(--space-3);
 }
 
+.pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
 .found {
   display: flex;
   flex-direction: column;

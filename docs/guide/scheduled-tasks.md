@@ -52,7 +52,65 @@ The CLI creates schedules that send a **prompt** to the bot. Through the API
 - a **workflow** (replayed without a model, see [Workflows](workflows.md)), or
 - a direct **tool** call.
 
+- a **standing order** (see below).
+
 All of these go through the normal permission gate.
+
+## Standing orders: a check that speaks only when something needs you
+
+A **standing order** is a schedule whose payload is a checklist ("is the backup
+disk under 90% full? any unanswered mail from a client?"). Every run works through
+the checklist and ends with one last line, exactly:
+
+- `OK`: nothing needs you. **No notice is created**, in the app or on a chat
+  channel; the run itself stays in the run history.
+- `NEEDS_OWNER(<reason>)`: something needs you. A "Needs you" notice is created
+  and pushed (to Telegram, Discord and other channels, subject to your owner
+  notice settings and quiet hours) with the reason.
+
+Only the last line counts, so an "OK" in the middle of a report changes nothing, and
+the `OK` has to be that line exactly, with no formatting around it. Silence has to be
+earned: a run that ends without a clear `OK` or `NEEDS_OWNER(...)` line, that says
+`NEEDS_OWNER` anywhere before an `OK` (quoted or injected text, or a contradiction), or
+that a step or budget limit cut short is reported as well ("The check ended without a
+clear OK or NEEDS_OWNER answer", "The check was cut short by a limit"). The run is told
+that what it reads (pages, mail, files) is data and cannot dictate its answer. The reason
+is scrubbed of hidden and control characters and kept short. If it came from something
+the bot read privately (mail, files, accounts), the notice says to open it in the app
+instead of repeating it on a chat service. The same reason is not pushed again within an
+hour; when the bot had read private or untrusted content, its wording cannot tell
+problems apart, so the hour counts per standing order. A run that fails is reported as
+usual.
+
+```json
+{
+  "kind": "standing_order",
+  "checklist": "Is the backup disk under 90% full? Any unanswered mail from a client?",
+  "active_hours": { "start": "08:00", "end": "22:00", "timezone": "Europe/Istanbul" },
+  "max_runs_per_day": 12
+}
+```
+
+Send it as the `payload` of `POST /v1/schedules` with any `spec` (for example
+`{"every": {"seconds": 1800}}`).
+
+- `checklist` (required, up to 4,000 characters, no hidden characters).
+- `active_hours` (optional): firings outside this daily window (`HH:MM` to
+  `HH:MM`, exactly five characters each, may cross midnight, end exclusive, in the
+  given IANA timezone) are skipped without starting a run, and without touching
+  anything else: a change check does not advance, queued mail or file events stay
+  queued (a source is not polled while the window is closed), and no run is counted.
+  Without it the order may fire all day. Unknown fields in the payload are refused.
+- `max_runs_per_day` (default 24, 1 to 288): the **daily cost cap**. Once the
+  order has started this many runs in a day (in the active-hours timezone, else
+  UTC), later firings that day are skipped until the next day. Skipped firings
+  start no run and call no model, so they cost nothing. The bot's own spending
+  limits still apply on top. A run that could not start (for example the model
+  service was unreachable) gives its slot back.
+
+Each run gets its own chat (so a long history never makes the next check dearer),
+and a standing order is told not to ask questions: nobody is watching.
+Approvals work as for any unattended run.
 
 ## Webhooks
 

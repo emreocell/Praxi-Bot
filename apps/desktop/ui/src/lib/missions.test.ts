@@ -12,8 +12,10 @@ import {
   missionChip,
   missionCounts,
   missionHeadline,
+  missionsStartedIn,
   missionsToShow,
   progressPercent,
+  progressShort,
   shouldPoll,
   waitingItems,
   waitLine,
@@ -229,4 +231,23 @@ test("only waiting items are listed as waiting", () => {
     waitingItems([it("a", "todo"), it("b", "waiting"), it("c", "blocked")]).map((i) => i.key),
     ["b"]
   );
+});
+
+test("the cards of a chat: missions /mission started there, and missions the bot started from its messages", () => {
+  const linked = mission("linked", "running", { chat_id: "mission-chat-1", started_at_ms: 30 });
+  const asked = mission("asked", "done", { chat_id: "mission-chat-2", goal: "Sign up on 20 sites", started_at_ms: 20 });
+  const elsewhere = mission("elsewhere", "running", { chat_id: "mission-chat-3", goal: "Something else", started_at_ms: 10 });
+  const own = mission("own", "running", { chat_id: "here", goal: "Sign up on 20 sites", started_at_ms: 40 });
+  const before = mission("before", "running", { chat_id: "mission-chat-4", goal: "Sign up on 20 sites", started_at_ms: 1 });
+  const messages = [{ text: "  Sign up on 20 sites ", ts: 5 }];
+  const shown = missionsStartedIn([linked, asked, elsewhere, own, before], "here", messages, ["linked"]);
+  // Oldest first; the chat's own mission (it has the header) and one that started before the message are not cards.
+  assert.deepEqual(shown.map((m) => m.id), ["asked", "linked"]);
+  assert.deepEqual(missionsStartedIn([linked], undefined, messages, ["linked"]), []);
+  assert.deepEqual(missionsStartedIn([mission("empty", "running", { goal: " ", chat_id: "x" })], "here", [{ text: "", ts: 0 }], []), []);
+});
+
+test("progress in a few characters", () => {
+  assert.equal(progressShort(mission("a", "running")), "7/15");
+  assert.equal(progressShort(mission("b", "running", { progress: { total: 0, done: 0, blocked: 0, waiting: 0, todo: 0, doing: 0, failed: 0, skipped: 0, left: 0 } })), null);
 });

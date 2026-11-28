@@ -1191,6 +1191,8 @@ pub(crate) struct Shared {
     /// The mission ledger, set by the daemon. Mission sessions park a CAPTCHA / 2FA
     /// item in it instead of waiting for the owner, and ask the owner once.
     pub mission_store: RwLock<Option<Arc<missions::MissionStore>>>,
+    /// When a child run of a mission session finishes, wakes any matching wait.
+    pub mission_child_wake: RwLock<Option<Arc<dyn missions::ChildWakeSink>>>,
     /// Paired servers a bot may use as ITS computer while it runs here.
     pub server_links: RwLock<Option<Arc<dyn builtin_tools::pc::ServerLinks>>>,
     /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when
@@ -1224,6 +1226,8 @@ pub(crate) struct Shared {
     pub tasks: Mutex<HashMap<RunId, JoinHandle<()>>>,
     /// Background work (memory extraction).
     pub bg: Mutex<Vec<JoinHandle<()>>>,
+    /// Chats whose history is being summarised, or failed lately (and when they may retry).
+    pub summaries: Mutex<HashMap<ChatId, crate::summary::Attempt>>,
     pub surface: ToolSurface,
     /// Last `gseq` handed out (see [`StreamItem::gseq`]).
     pub gseq: AtomicU64,
@@ -2198,6 +2202,7 @@ impl Shared {
             let prior = crate::history::chat_provenance(
                 &self.storage,
                 chat_id,
+                run.bot_id,
                 Some(run.id),
                 schedule_id_of(&run.kind),
             );
@@ -2475,15 +2480,10 @@ impl Shared {
         let Ok(id) = run_id.parse::<Uuid>() else {
             return false;
         };
-        let Some((profile, bot)) = self
-            .runs
-            .lock()
-            .get(&RunId(id))
-            .map(|c| (Arc::clone(&c.profile), c.bot_id))
-        else {
+        let Some(ctx) = self.runs.lock().get(&RunId(id)).cloned() else {
             return false;
         };
-        self.spec_visible(&profile, bot, spec)
+        self.bot_tool_allowed(&ctx, &spec.name) && self.spec_visible(&ctx.profile, ctx.bot_id, spec)
     }
 
     /// Profile allow / exclude lists, platform and the tool's own per-bot
@@ -2687,6 +2687,16 @@ impl Shared {
         hints: &[String],
         offered: Option<&[String]>,
     ) -> Option<Resolved> {
+        // The bot management tools belong to the runs `bot_tool_allowed` names, also when the
+        // model reaches one through `use_tool`.
+        let target = if name == agent_router::USE_TOOL {
+            input.get("name").and_then(Value::as_str).unwrap_or(name)
+        } else {
+            name
+        };
+        if !self.bot_tool_allowed(ctx, target) {
+            return None;
+        }
         let Some(offered) = offered else {
             return self.resolve_call(&ctx.profile, ctx.bot_id, name, input, hints);
         };

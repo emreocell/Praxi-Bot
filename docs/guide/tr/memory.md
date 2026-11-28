@@ -19,6 +19,8 @@ Her not aynı şekilde ele alınmaz:
 
 Bot, sen istediğinde de bir notu kaydedebilir veya unutabilir ("doğum günümün 3 Mart olduğunu hatırla"). Bunun için kendi mesajından alıntı yapması gerekir.
 
+Bellek, sohbetler arasında *senin* hakkında olandır. Botun **tek bir uzun sohbetten** tuttuğu şey (eski mesajların bir nota özetlenmesi) ayrı bir konudur: bkz. [Uzun sohbetler](long-chats.md).
+
 ## Nerede durur
 
 Her şey, bilgisayarında Praxi veri klasöründe (`memory.db` dosyası), sohbetlerinden ayrı saklanır. Aynı dosya, botun "önceki sohbetlerde ara" aracı için geçmiş mesajlarının aranabilir bir kopyasını da tutar; belleği **Kapalı** olan bot buna yeni bir şey eklemez. Hatırlanması için hiçbir şey kimseye gönderilmez. Her bot ortak notlarını ve kendi notlarını görür; başkalarının notları asla görünmez.
@@ -27,7 +29,7 @@ Her şey, bilgisayarında Praxi veri klasöründe (`memory.db` dosyası), sohbet
 
 ## Görme, düzeltme ve unutturma
 
-**Ayarlar → Kişisel bellek**'i aç, bir bot seç; şunları yapabilirsin:
+**Ayarlar → Yapay zekâ ve hafıza**yı aç, bir bot seç; şunları yapabilirsin:
 
 ![Bir botun panelindeki Kitaplık sekmesi: beceriler, belgeler, notlar ve hafıza; her rafta tek bir eylem](../images/tr/bot-panel-library.webp)
 
@@ -51,7 +53,7 @@ Web sayfalarından, dosyalardan, araçlardan veya başka botlardan alınan notla
 
 ## Kapat ya da önce sor
 
-Her botun kendi ayarı **Botu düzenle → Gelişmiş → Bellek** altında (ve **Ayarlar → Kişisel bellek**'in en üstünde) bulunur:
+Her botun kendi ayarı **Botu düzenle → Gelişmiş → Bellek** altında (ve **Ayarlar → Yapay zekâ ve hafıza**nın en üstünde) bulunur:
 
 | Ayar | Ne olur |
 | --- | --- |
@@ -71,4 +73,4 @@ Bu ayarları yalnızca sen, botun çalıştığı bilgisayarda değiştirebilirs
 * **Temel (kelime eşleşmesi)** varsayılandır. Bir not, mesajınla aynı kelimeleri içeriyorsa bulunur ("çay", "yeşil çay seviyor"u bulur). Model gerektirmez ve hiçbir yere bir şey göndermez. "Araba" ile "otomobil"in aynı şey olduğunu anlamaz.
 * **Akıllı (anlam)**, bir botun bilgi kaynakları için zaten kurduğun bir gömme modelini kullanır ([Bilgi gömmeleri](knowledge-embeddings.md) sayfasına bak); böylece "araba", "otomobil kullanıyor"u bulabilir. Açmak, notlarını arka planda yeniden dizinler ve ilerlemeyi gösterir; bitene kadar Temel kullanılır. Model başarısız olursa Praxi Temel'e döner ve hiçbir şey kaybolmaz.
 
-Geçiş için **Ayarlar → Kişisel bellek → Anılar nasıl bulunur** bölümünü kullan.
+Geçiş için **Ayarlar → Yapay zekâ ve hafıza → Anılar nasıl bulunur** bölümünü kullan.

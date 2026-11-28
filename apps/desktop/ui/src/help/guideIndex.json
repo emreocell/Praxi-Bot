@@ -195,7 +195,7 @@
       "Running a CLI with its own tools (engine mode)",
       "Engines defined by a data file"
     ],
-    "summary": "Settings → Providers lists CLI engines on the daemon's computer. Refresh"
+    "summary": "re-runs bounded version and authentication probes. Detection also warms at"
   },
   {
     "doc": "cli-reference.md",
@@ -248,6 +248,12 @@
     "title": "Computer use on your own PC",
     "headings": [
       "What a bot can do",
+      "Window management",
+      "Accessibility actions",
+      "Keyboard",
+      "Clipboard",
+      "Waiting instead of sleeping",
+      "Results that need fewer screenshots",
       "Safety",
       "Not verified"
     ],
@@ -313,6 +319,7 @@
       "Connect it (about 5 minutes)",
       "Who can talk to the bot",
       "In the chat",
+      "Manage missions from your phone",
       "When a bot reports back on its own",
       "Approvals",
       "Messages and attachments",
@@ -489,6 +496,14 @@
     "summary": "Day-to-day operation of the always-on Linux host (systemd, unprivileged user"
   },
   {
+    "doc": "import-from-assistants.md",
+    "title": "Import from other assistants",
+    "headings": [
+      "Open the import screen"
+    ],
+    "summary": "Praxi can read setups you already have in Claude, Cursor, VS Code, Codex,"
+  },
+  {
     "doc": "incoming-webhooks.md",
     "title": "Incoming webhooks",
     "headings": [
@@ -613,6 +628,17 @@
     "summary": "Your bots run on the computer where you installed Praxi. They work while Praxi is open and your computer is awake."
   },
   {
+    "doc": "long-chats.md",
+    "title": "Long chats: how a bot keeps the thread",
+    "headings": [
+      "What happens",
+      "What the note is, and what it is not",
+      "Switch it off",
+      "Good to know"
+    ],
+    "summary": "In another language: Türkçe."
+  },
+  {
     "doc": "mcp-server.md",
     "title": "Use Praxi as an MCP server",
     "headings": [
@@ -665,10 +691,12 @@
     "headings": [
       "Two things that changed",
       "Starting a mission",
+      "Or start from a goal",
       "Or just ask in the chat",
       "What you see",
       "Waiting for a mail, a timer or a webhook",
       "When a mission stops",
+      "From your phone",
       "Limits of this first version"
     ],
     "summary": "A secretary who asks \"shall I open the file? shall I pick up the pen? this page"
@@ -777,6 +805,7 @@
       "Create one",
       "When phrases",
       "What a schedule can run",
+      "Standing orders: a check that speaks only when something needs you",
       "Webhooks",
       "Missed runs",
       "Short bursts: use one run, not a schedule",
@@ -791,7 +820,7 @@
     "headings": [
       "Make your first job",
       "Typing it in words",
-      "Advanced (collapsed)",
+      "More options (collapsed)",
       "If the computer was off",
       "Run now, pause, edit, delete",
       "History and problems",
@@ -843,12 +872,12 @@
     "headings": [
       "The pages",
       "Search",
-      "Simple and Advanced",
+      "More options",
       "Safety levels",
       "Reset to recommended",
       "Small screens"
     ],
-    "summary": "Open Settings from the account menu. Everything is on ten pages with plain names."
+    "summary": "Open Settings from the profile menu (your name at the bottom of the left"
   },
   {
     "doc": "skill-management-api.md",
@@ -878,6 +907,7 @@
     "title": "Telegram",
     "headings": [
       "In the chat",
+      "Manage missions from your phone",
       "When a bot reports back on its own",
       "Language",
       "Good to know"
@@ -887,7 +917,9 @@
   {
     "doc": "triggers.md",
     "title": "When something happens",
-    "headings": [],
+    "headings": [
+      "Feeds, web pages, calendar events and Home Assistant"
+    ],
     "summary": "Open a bot's panel, choose Automation, then When something happens."
   },
   {
@@ -895,7 +927,7 @@
     "title": "Troubleshooting",
     "headings": [
       "Recent logs and a support bundle",
-      "Diagnostics (Settings → Diagnostics, bot doctor)",
+      "Diagnostics (Settings → System, bot doctor)",
       "Start-up check (desktop app)",
       "The always-on host",
       "daemon not reachable at http://127.0.0.1:47821 (exit code 3)",
@@ -941,12 +973,27 @@
     "headings": [
       "Before you start",
       "Choosing the speech-to-text provider",
+      "Offline dictation and read-aloud",
       "Starting and using a call",
       "Interrupting (barge-in) and call controls",
       "What it can and cannot do",
       "Privacy and safety"
     ],
     "summary": "Voice call mode in the desktop app lets you talk to a bot without typing. You"
+  },
+  {
+    "doc": "voice-live.md",
+    "title": "Live voice conversation (Talk)",
+    "headings": [
+      "Before you start",
+      "Talking",
+      "Asking the bot to do things",
+      "What is stored",
+      "Cost",
+      "Settings",
+      "If it does not work"
+    ],
+    "summary": "once, and you can interrupt it just by speaking. When you finish, the conversation is added to the chat as"
   },
   {
     "doc": "web-scraping.md",

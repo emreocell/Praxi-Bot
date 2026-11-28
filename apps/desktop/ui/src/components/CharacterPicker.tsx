@@ -4,15 +4,20 @@ import { BOT_SHAPES, BotAvatar, type BotShapeId } from "ui";
 import { BOT_COLORS } from "../lib/botProfile";
 import styles from "./CharacterPicker.module.css";
 
-/** 8x2 grid picking one of the 16 3D clay silhouettes, previewed in the active tint. */
+/**
+ * Grid picking one of the 16 3D clay silhouettes, previewed in the active tint: 8x2 large tiles, or
+ * `compact` small ones that fill a row (one row of 16 in a wide dialog).
+ */
 export function CharacterShapeGrid({
   value,
   color,
-  onChange
+  onChange,
+  compact = false
 }: {
   value: BotShapeId;
   color: string;
   onChange: (shape: BotShapeId) => void;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const activeIdx = Math.max(
@@ -36,7 +41,7 @@ export function CharacterShapeGrid({
   };
   return (
     <div
-      className={styles.shapeGrid}
+      className={[styles.shapeGrid, compact ? styles.shapeGridCompact : ""].filter(Boolean).join(" ")}
       role="group"
       aria-label={t("newBot.shapeGroup")}
       onKeyDown={onKeyDown}
@@ -60,7 +65,7 @@ export function CharacterShapeGrid({
           >
             <BotAvatar
               bot={{ id: `pick-${s.id}`, name: label, shape: s.id, color }}
-              size="sm"
+              size={compact ? "xs" : "sm"}
               live={false}
               decorative
             />
@@ -71,15 +76,17 @@ export function CharacterShapeGrid({
   );
 }
 
-/** Palette swatches plus a rainbow custom `<input type="color">` picker. */
+/** Palette swatches plus a rainbow custom `<input type="color">` picker (`compact`: smaller dots). */
 export function CharacterColorRow({
   value,
   onChange,
-  centered = true
+  centered = true,
+  compact = false
 }: {
   value: string;
   onChange: (color: string) => void;
   centered?: boolean;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const normalized = value.trim().toLowerCase();
@@ -106,7 +113,7 @@ export function CharacterColorRow({
   };
   return (
     <div
-      className={styles.swatchRow}
+      className={[styles.swatchRow, compact ? styles.swatchRowCompact : ""].filter(Boolean).join(" ")}
       style={centered ? undefined : { justifyContent: "flex-start" }}
       role="group"
       aria-label={t("botForm.color")}

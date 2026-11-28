@@ -30,6 +30,10 @@ pub(crate) struct Families {
     /// Browser tools of a connected app (an MCP server such as Playwright).
     pub app_browser: bool,
     pub shell: bool,
+    /// `desktop_open` (an address or a file in the computer's own browser or application).
+    pub open: bool,
+    /// `bot_create` (a real Praxi bot made by the model).
+    pub bots: bool,
     /// `wait` is offered.
     pub wait: bool,
     /// Any tool at all.
@@ -53,6 +57,8 @@ impl Families {
                 "web_extract" => f.web_fetch = true,
                 "web_scrape" => f.web_scrape = true,
                 "shell_run" => f.shell = true,
+                "desktop_open" => f.open = true,
+                "bot_create" => f.bots = true,
                 "wait" => f.wait = true,
                 "browser_act" => {
                     f.browser = true;
@@ -135,6 +141,23 @@ say so.",
     if (f.web_fetch || f.browser) && f.shell {
         out.push_str(
             "\n- Do not read web pages with shell_run (curl, wget) or browser_eval when web_extract or browser_* can do it.",
+        );
+    }
+    if f.open {
+        out.push_str(
+            "\n- To show the user something you made (an HTML page, a PDF, a picture), call desktop_open with `path` (a file \
+in your workspace), and `with` to pick chrome, firefox or edge. Do not start a browser with shell_run or desktop_launch \
+for that. Look at web pages in your own browser (browser_open); give desktop_open a `url` only when the user asked for \
+an address in their own browser (it holds their sign-ins, so it asks unless they typed that address). Say it is open \
+only when the result says it opened.",
+        );
+    }
+    if f.bots {
+        out.push_str(
+            "\n- When the user asks you to create, make or add a BOT (\"create a bot named X\", \"a bot for chatting\"), \
+call bot_create: it makes a real Praxi bot in the app. Never write an HTML page or code instead. Give a name, a persona \
+(who it is and how it talks), a colour (#rrggbb) and a shape, and a model only if the user named one. Then tell the user the bot \
+is in their bot list. Change one you made with bot_update; bot_list shows them.",
         );
     }
     if f.wait {
@@ -269,6 +292,19 @@ mod tests {
         // Nothing browser-related when no browser tool exists.
         let none = block(Families::of(["fs_read"])).unwrap();
         assert!(!none.contains("cookie banner"), "{none}");
+    }
+
+    #[test]
+    fn opening_and_bot_creation_are_taught_only_when_the_tool_is_offered() {
+        let b = block(Families::of(["desktop_open", "bot_create"])).unwrap();
+        assert!(b.contains("call desktop_open with `path`"), "{b}");
+        assert!(b.contains("call bot_create"), "{b}");
+        assert!(b.contains("Never write an HTML page"), "{b}");
+        let none = block(Families::of(["fs_read"])).unwrap();
+        assert!(
+            !none.contains("desktop_open") && !none.contains("bot_create"),
+            "{none}"
+        );
     }
 
     #[test]

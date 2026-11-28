@@ -244,6 +244,12 @@
     "title": "Kendi bilgisayarında bilgisayar kullanımı",
     "headings": [
       "Bir bot neler yapabilir",
+      "Pencere yönetimi",
+      "Erişilebilirlik eylemleri",
+      "Klavye",
+      "Pano",
+      "Uyumak yerine beklemek",
+      "Daha az ekran görüntüsü gerektiren sonuçlar",
       "Güvenlik",
       "Doğrulanmayanlar"
     ],
@@ -309,6 +315,7 @@
       "Bağlayın (yaklaşık 5 dakika)",
       "Bota kimler yazabilir",
       "Sohbette",
+      "Görevleri telefondan yönetin",
       "Onaylar",
       "Mesajlar ve ekler",
       "Bilmekte fayda var"
@@ -484,6 +491,14 @@
     "summary": "Her an açık duran Linux sunucunun (systemd, yetkisiz praxi kullanıcısı) günlük işletimi."
   },
   {
+    "doc": "tr/import-from-assistants.md",
+    "title": "Diğer asistanlardan içe aktarma",
+    "headings": [
+      "İçe aktarma ekranını aç"
+    ],
+    "summary": "Praxi, Claude, Cursor, VS Code, Codex, OpenClaw, Hermes ya da seçtiğin bir"
+  },
+  {
     "doc": "tr/incoming-webhooks.md",
     "title": "Gelen webhook'lar",
     "headings": [
@@ -603,6 +618,17 @@
     "summary": "Botların, Praxi'yi kurduğun bilgisayarda çalışır. Praxi açıkken ve bilgisayarın uyanıkken çalışırlar."
   },
   {
+    "doc": "tr/long-chats.md",
+    "title": "Uzun sohbetler: bot konuyu nasıl kaybetmez",
+    "headings": [
+      "Ne olur",
+      "Not nedir, ne değildir",
+      "Kapat",
+      "Bilmekte fayda var"
+    ],
+    "summary": "Başka dilde: English."
+  },
+  {
     "doc": "tr/mcp-server.md",
     "title": "Praxi'yi MCP sunucusu olarak kullanma",
     "headings": [
@@ -648,6 +674,15 @@
       "Notlar nasıl bulunur: Temel veya Akıllı"
     ],
     "summary": "Başka dilde: English · Deutsch."
+  },
+  {
+    "doc": "tr/missions.md",
+    "title": "Görevler: tek büyük iş, ara onay olmadan",
+    "headings": [
+      "Bir postayı, zamanlayıcıyı veya webhook'u beklemek",
+      "Bu sürümün sınırları"
+    ],
+    "summary": "Uzun süren görevler oturumlar halinde ilerler; bekleme kayıtları yeniden başlatmadan sonra da durur."
   },
   {
     "doc": "tr/model-catalog.md",
@@ -753,6 +788,7 @@
       "Bir tane oluştur",
       "Ne zaman ifadeleri",
       "Bir zamanlama ne çalıştırabilir",
+      "Kalıcı talimatlar: yalnızca sana bir şey gerektiğinde konuşan kontrol",
       "Webhooklar",
       "Kaçırılan çalışmalar",
       "Kısa seri işler için zamanlama değil, tek bir çalışma kullan",
@@ -818,12 +854,12 @@
     "headings": [
       "Sayfalar",
       "Arama",
-      "Basit ve Gelişmiş",
+      "Daha fazla seçenek",
       "Güvenlik düzeyleri",
       "Önerilene sıfırla",
       "Küçük ekranlar"
     ],
-    "summary": "Değişiklikler kendiliğinden kaydedilir: her değişiklikten sonra sağ üstteki etikette Kaydedildi yazar."
+    "summary": "yazı alanında /settings yazarak aç. Değişiklikler kendiliğinden kaydedilir: her"
   },
   {
     "doc": "tr/skill-management-api.md",
@@ -853,6 +889,7 @@
     "title": "Telegram",
     "headings": [
       "Sohbette",
+      "Görevleri telefondan yönet",
       "Dil",
       "Bilmen gerekenler"
     ],
@@ -861,7 +898,9 @@
   {
     "doc": "tr/triggers.md",
     "title": "Bir şey olduğunda",
-    "headings": [],
+    "headings": [
+      "Akışlar, web sayfaları, takvim etkinlikleri ve Home Assistant"
+    ],
     "summary": "Bot panelinde Otomasyon → Bir şey olduğunda bölümünü açın. Yeni e-posta,"
   },
   {
@@ -869,7 +908,7 @@
     "title": "Sorun giderme (teknik)",
     "headings": [
       "Son günlükler ve destek paketi",
-      "Tanılama (Ayarlar → Tanılama, bot doctor)",
+      "Tanılama (Ayarlar → Sistem, bot doctor)",
       "7/24 çalışan sunucu",
       "daemon not reachable at http://127.0.0.1:47821 (çıkış kodu 3)",
       "Kimlik doğrulama reddedildi (çıkış kodu 4)",
@@ -914,6 +953,7 @@
     "headings": [
       "Başlamadan önce",
       "Konuşmayı yazıya çevirme sağlayıcısını seçmek",
+      "Çevrimdışı dikte ve sesli okuma",
       "Arama başlatmak ve kullanmak",
       "Sözünü kesmek ve arama denetimleri",
       "Neler yapabilir, neler yapamaz",

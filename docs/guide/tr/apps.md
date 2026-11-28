@@ -8,13 +8,17 @@ Ana görünümde Composio üzerinden uygulama bağlayabilirsin. Doğrudan, yerel
 
 ## Composio hesabını bağla
 
-**Composio hesabını bağla** ile tarayıcında oturum aç ya da **Proje API anahtarı
-kullan** seçeneğini seç. Daemon anahtarı doğrular ve gizli bilgi deposunda
-saklar. Composio kuruluş veya proje adını verdiğinde bu ad bağlantı kartında görünür.
+Composio, kendi logosuyla uygulama listesinde bir satırdır. Giriş yapmadan önce
+**Keşfet** altında ilk satırdır: tarayıcında oturum açmak için **Giriş yap**'ı, proje
+API anahtarı yapıştırmak için **Anahtar kullan**'ı seç. Daemon anahtarı doğrular ve
+gizli bilgi deposunda saklar. Giriş yaptıktan sonra Composio **Uygulamaların**
+bölümüne geçer; Composio kuruluş veya proje adını verdiğinde bu ad satırında görünür.
 
 ## Uygulamayı bağla ve yönet
 
-1. **Keşfet** bölümünden uygulamayı bul. Popüler uygulamalar başta görünür.
+1. **Keşfet** bölümünden uygulamayı bul. Önce **Popüler** gelir (Gmail, Google
+   Takvim, Google Drive, Outlook, Slack, WhatsApp, Telegram, Notion, GitHub ve
+   birkaç tane daha), ardından diğer uygulamalar kategoriye göre sıralanır.
    Arama, kategoriler ve **Daha fazla göster** ile kataloğu gezebilirsin.
 2. Uygulama sayfasını aç. Botların yapabileceği işlemleri incele ve **Bağlan**'ı seç.
 3. Tarayıcıda uygulamaya izin ver. Praxi, izin tamamlanana veya süresi dolana
@@ -62,7 +66,7 @@ kalır.
 `get and pay` gibi arama ile ödeme fiilini karıştıran adlar **Para hareketi
 yapar** sayılır.
 
-Composio kartından oturumu kapatırsan botların Composio uygulamalarına erişimi
+**Uygulamaların** altındaki Composio satırından **Çıkış yap** ile oturumu kapatırsan botların Composio uygulamalarına erişimi
 duraklar. Uygulama ayarları ve hangi botların erişebildiği saklanır.
 
 ## Home Assistant
@@ -87,10 +91,18 @@ Doğrudan ve kendin yönettiğin bağlantılar için üst çubukta **MCP sunucul
   kendi oluşturduğun bir istemciyle bağlayan yönlendirmeli bir kurulum. Bkz.
   [Google Workspace](google-workspace.md). Ana listedeki Gmail, Drive ve Takvim uygulamaları
   Composio kullanır ve kurulum gerektirmez.
-- **Özel MCP sunucusu:** Elle bir `Stdio` (yerel bir komut, istersen `KEY=value` biçiminde
-  ortam değişkeni satırları) ya da `HTTP` (sunucu URL'si) MCP sunucusu ekle ve hangi botların
-  kullanabileceğini seç. Altta yatan `mcp.toml` biçimi ve güvenlik ayarları için
-  [MCP sunucuları](mcp-servers.md) sayfasına bak.
+- **Kendi MCP sunucunu ekle:** **Sunucu URL'si (HTTP)** alanını doldur; ad bundan
+  önerilir. **Giriş** altında **Yok**, **Erişim anahtarı** (bir başlık, varsayılanı
+  `Authorization`; anahtar `mcp.toml`'a değil gizli kasaya gider) ya da **Tarayıcıyla
+  giriş yap** seç. **Bunun yerine yerel bir komut çalıştır (stdio)** komutu ve
+  `AD=değer` ayarlarını açar; adında KEY, SECRET, PASSWORD gibi sözcükler geçen
+  değerler de gizli kasaya gider. Hangi botların kullanabileceğini ve salt okunur
+  etiketlerine güvenip güvenmeyeceğini seç (**?** açıklar). **Sunucu ekle** onu kapalı
+  kaydeder; listede **Kapalı** durumu ve **Aç** düğmesiyle görünür. **Bağlantıyı test
+  et** onu kaydeder, açar, araçlarını hiçbirini çalıştırmadan listeler ve olmazsa
+  yeniden kapatır. Hatalar yazarken alanın altında söylenir (adreste parola, kullanılan
+  bir ad, `AD=değer` olmayan bir satır). Altta yatan `mcp.toml` biçimi ve güvenlik
+  ayarları için [MCP sunucuları](mcp-servers.md) sayfasına bak.
 - **Yerel geliştirici sunucuları:** Yerleşik katalogdaki, API anahtarı istemeyen yerel stdio
   sunucuları (**Filesystem**, **Playwright**, **Fetch**, **Context7**, **SQLite** ve
   **Google Drive** gibi) ile daha önce eklediğin yerel sunucular. Klasör isteyen sunucular

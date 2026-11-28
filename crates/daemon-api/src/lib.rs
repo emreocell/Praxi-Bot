@@ -14,6 +14,7 @@
 //! other exception is `GET /v1/events`, which also accepts `?token=<token>` for
 //! browser `EventSource` clients (Host / Origin still apply).
 
+pub mod account_health;
 mod assistant_import_routes;
 mod attachment_routes;
 mod audit_routes;
@@ -110,9 +111,11 @@ mod spend_routes;
 mod sse;
 mod stop;
 pub mod terminal;
+mod trigger_sources;
 mod triggers;
 pub mod usage;
 pub mod voice;
+pub mod voice_live;
 mod voice_routes;
 pub mod web;
 mod web_routes;
@@ -163,6 +166,7 @@ pub use policy::{PolicyLoadError, load_policy, validate_policy};
 pub use schedule_tools::{ScheduleLimits, load_schedule_limits};
 pub use skills::SkillAssignments;
 pub use voice::{VoiceControl, VoiceControlError};
+pub use voice_live::{LiveDown, LiveLink, LiveOpen, LiveUp};
 pub use web::{WebControl, WebControlError};
 
 /// Default TCP port of `bot serve`.
@@ -346,6 +350,8 @@ struct Inner {
     web: OnceLock<Arc<dyn WebControl>>,
     /// Dictation (speech-to-text) management (see [`AppState::set_voice`]).
     voice: OnceLock<Arc<dyn VoiceControl>>,
+    /// The one open live voice conversation (see [`voice_live`]).
+    live_voice: parking_lot::Mutex<Option<voice_live::LiveSlot>>,
     /// Skill catalog index (see [`AppState::set_skills`]).
     skills: OnceLock<::skills::SkillIndex>,
     /// Serialises owner catalog mutations with per-bot assignment writes.
@@ -396,6 +402,8 @@ struct Inner {
     mission_store: OnceLock<Arc<missions::MissionStore>>,
     /// The running mission supervisor (leader components only).
     missions: parking_lot::Mutex<Option<mission_host::MissionRuntime>>,
+    /// Clock and pacing of missions when the embedder replaced the real ones (the evals).
+    mission_timing: OnceLock<mission_host::MissionTiming>,
     leader: OnceLock<host::LeaderControl>,
     /// Embedder additions to `/v1/doctor` (see [`AppState::set_doctor_host`]).
     doctor_host: OnceLock<Arc<dyn DoctorHost>>,
@@ -561,6 +569,7 @@ impl AppState {
             homeassistant: OnceLock::new(),
             web: OnceLock::new(),
             voice: OnceLock::new(),
+            live_voice: parking_lot::Mutex::new(None),
             skills: OnceLock::new(),
             skill_mutations: parking_lot::Mutex::new(()),
             web_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
@@ -596,6 +605,7 @@ impl AppState {
             scheduler: parking_lot::Mutex::new(None),
             mission_store: OnceLock::new(),
             missions: parking_lot::Mutex::new(None),
+            mission_timing: OnceLock::new(),
             leader: OnceLock::new(),
             doctor_host: OnceLock::new(),
             doctor_runs: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2177,8 +2187,24 @@ fn api_routes() -> Router<AppState> {
             get(spend_routes::get_spend_limit).put(spend_routes::put_spend_limit),
         )
         .route("/v1/voice", get(vo::get_voice).put(vo::update_voice))
+        .route("/v1/voice/live", post(voice_live::open))
+        .route(
+            "/v1/voice/live/{id}",
+            axum::routing::delete(voice_live::close),
+        )
+        .route("/v1/voice/live/{id}/audio", post(voice_live::audio))
+        .route("/v1/voice/live/{id}/tool", post(voice_live::tool_result))
+        .route("/v1/voice/live/{id}/note", post(voice_live::note))
+        .route(
+            "/v1/chats/{id}/voice-transcript",
+            post(voice_live::save_transcript),
+        )
         .route("/v1/voice/local", get(vo::get_local_voice))
         .route("/v1/voice/local/install", post(vo::install_local_voice))
+        .route(
+            "/v1/voice/synthesize",
+            post(vo::synthesize).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
         .route(
             "/v1/voice/transcribe",
             post(vo::transcribe).layer(axum::extract::DefaultBodyLimit::max(vo::MAX_BODY_BYTES)),

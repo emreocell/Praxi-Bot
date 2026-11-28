@@ -86,11 +86,13 @@ export function IdentityFields({
       <section className={dialogStyles.block}>
         <h3 className={dialogStyles.blockTitle}>{t("botEdit.look")}</h3>
         <CharacterShapeGrid
+          compact
           value={draft.shape}
           color={draft.color}
           onChange={(shape) => patch({ shape })}
         />
         <CharacterColorRow
+          compact
           value={draft.color}
           centered={false}
           onChange={(color) => patch({ color })}
@@ -243,19 +245,24 @@ export function ModelFields({
   );
 }
 
-/** Access: the shared level list (with "Custom"), and the per-category matrix for "Custom". */
-export function PermissionFields({ draft, patch }: { draft: BotDraft; patch: Patch }) {
+/**
+ * Access: the shared level list (with "Custom"), and the per-category matrix for "Custom".
+ * `showLevel={false}`: the level is chosen elsewhere on the page (the New-bot dialog); only the details here.
+ */
+export function PermissionFields({ draft, patch, showLevel = true }: { draft: BotDraft; patch: Patch; showLevel?: boolean }) {
   const { t } = useTranslation();
   return (
     <>
-      <AccessLevelPicker
-        value={draft.preset}
-        label={t("accessLevel.title")}
-        allowCustom
-        recommended={RECOMMENDED_SAFETY_PRESET}
-        testIdPrefix="bot-edit-preset"
-        onChange={(preset) => patch({ preset })}
-      />
+      {showLevel ? (
+        <AccessLevelPicker
+          value={draft.preset}
+          label={t("accessLevel.title")}
+          allowCustom
+          recommended={RECOMMENDED_SAFETY_PRESET}
+          testIdPrefix="bot-edit-preset"
+          onChange={(preset) => patch({ preset })}
+        />
+      ) : null}
       {draft.preset === "custom" ? (
         <section className={dialogStyles.block}>
           <div className={dialogStyles.blockHead}>

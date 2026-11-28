@@ -140,6 +140,35 @@ pub fn installed_as_service() -> bool {
     cfg!(unix) && Path::new("/usr/local/bin/praxi").is_file()
 }
 
+/// Whether `data` is the installer's own server data folder, owned by the user this process
+/// runs as. Only there does the service `PATH` the installer wrote apply.
+#[cfg(unix)]
+#[must_use]
+pub fn is_service_data_dir(data: &Path) -> bool {
+    service_data_dir_as(
+        rustix::process::geteuid().as_raw(),
+        data,
+        Path::new(SERVICE_DATA_DIR),
+    )
+}
+
+/// Not applicable off Unix.
+#[cfg(not(unix))]
+#[must_use]
+pub fn is_service_data_dir(_data: &Path) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn service_data_dir_as(euid: u32, data: &Path, service: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Ok(data), Ok(service)) = (std::fs::canonicalize(data), std::fs::canonicalize(service))
+    else {
+        return false;
+    };
+    data == service && std::fs::metadata(&data).is_ok_and(|m| m.uid() == euid)
+}
+
 /// The start of a terminal command that runs `bot cli ...` as `who`, for a person logged in
 /// as somebody else (the SSH user). The installer's `praxi` command already does that; without
 /// it, `sudo -u <user>` does.
@@ -204,6 +233,26 @@ pub fn path_with_install_dirs(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn only_the_installers_data_folder_owned_by_this_user_is_the_service_data_dir() {
+        let euid = rustix::process::geteuid().as_raw();
+        let service = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        assert!(service_data_dir_as(euid, service.path(), service.path()));
+        assert!(!service_data_dir_as(euid, other.path(), service.path()));
+        assert!(!service_data_dir_as(
+            euid.wrapping_add(1),
+            service.path(),
+            service.path()
+        ));
+        assert!(!service_data_dir_as(
+            euid,
+            &service.path().join("missing"),
+            service.path()
+        ));
+    }
+
     use super::*;
 
     #[test]

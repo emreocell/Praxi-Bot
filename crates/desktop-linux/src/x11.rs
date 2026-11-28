@@ -6,18 +6,20 @@ use std::thread;
 use std::time::Duration;
 
 use desktop_api::{
-    DesktopError,
+    ActGuard, DesktopError, InputTarget, WindowOp,
     snapshot::{AppSpec, Image, Pid, Quality, Rect, Region, WindowInfo},
 };
 use x11rb::{
     CURRENT_TIME, NONE,
     connection::Connection as _,
     protocol::{
+        Event,
         xproto::{
             Atom, AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ClientMessageEvent,
-            ConfigureWindowAux, ConnectionExt as _, EventMask, GetKeyboardMappingReply,
-            ImageFormat, InputFocus, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT,
-            MapState, StackMode, Window,
+            ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, EventMask,
+            GetKeyboardMappingReply, ImageFormat, InputFocus, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
+            MOTION_NOTIFY_EVENT, MapState, PropMode, SELECTION_NOTIFY_EVENT, SelectionNotifyEvent,
+            StackMode, Window, WindowClass,
         },
         xtest::ConnectionExt as _,
     },
@@ -28,7 +30,8 @@ use x11rb::{
 use crate::helper::{LaunchFail, explain_launch};
 use crate::pure::{
     Key, KeyPlace, TypeAction, char_to_keysym, clamp_capture_rect, detect_display_session,
-    find_keysym, free_keycodes, parse_key, plan_text_actions, x_unreachable, zpixmap_to_bgra,
+    find_keysym, free_keycodes, parse_key, parse_wm_class, plan_text_actions, x_unreachable,
+    zpixmap_to_bgra,
 };
 
 fn display_name() -> String {
@@ -470,6 +473,321 @@ pub fn activate_window(window_id: u64) -> Result<(), DesktopError> {
     let _ = conn.set_input_focus(InputFocus::PARENT, win, CURRENT_TIME);
     conn.sync().map_err(x11_err("activate_window sync"))?;
     Ok(())
+}
+
+// ── Window management ─────────────────────────────────────────────────────────
+
+/// `_NET_WM_STATE` actions of the EWMH spec.
+const NET_WM_STATE_REMOVE: u32 = 0;
+const NET_WM_STATE_ADD: u32 = 1;
+/// ICCCM `IconicState`, the argument of a `WM_CHANGE_STATE` request.
+const ICONIC_STATE: u32 = 3;
+
+fn send_to_root(
+    conn: &RustConnection,
+    root: Window,
+    win: Window,
+    kind: Atom,
+    data: [u32; 5],
+) -> Result<(), DesktopError> {
+    let ev = ClientMessageEvent::new(32, win, kind, data);
+    conn.send_event(
+        false,
+        root,
+        EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+        ev,
+    )
+    .map_err(x11_err("send_event"))?;
+    Ok(())
+}
+
+/// The program and kind of a top-level window, read now: who owns it (image, pid
+/// and start time from `/proc`), whether that program runs outside the user's own
+/// account, the window class, and whether it is a dialog (transient for another
+/// window, or of the dialog window type). `None` when the window is gone or its
+/// program cannot be identified.
+pub fn top_level_facts(window_id: u64) -> Option<InputTarget> {
+    let win = u32::try_from(window_id).ok()?;
+    let info = window_info(window_id)?;
+    let identity = crate::identity::process_identity(info.pid)?;
+    let (conn, _) = connect().ok()?;
+    let class = conn
+        .get_property(false, win, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 256)
+        .ok()?
+        .reply()
+        .ok()
+        .map(|r| parse_wm_class(&r.value))
+        .unwrap_or_default();
+    let transient = read_u32_prop(&conn, win, AtomEnum::WM_TRANSIENT_FOR.into())
+        .is_some_and(|t| t != 0 && t != win);
+    let dialog = intern_atom(&conn, b"_NET_WM_WINDOW_TYPE")
+        .ok()
+        .zip(intern_atom(&conn, b"_NET_WM_WINDOW_TYPE_DIALOG").ok())
+        .and_then(|(kind, dialog)| {
+            read_u32_list_prop(&conn, win, kind).map(|types| types.contains(&dialog))
+        })
+        .unwrap_or(false);
+    Some(InputTarget {
+        window_id,
+        title: info.title,
+        class,
+        elevated: crate::identity::process_elevated(info.pid),
+        identity,
+        password_focus: false,
+        owned: transient || dialog,
+    })
+}
+
+/// Minimise, maximise, restore, move, resize or ask to close a window. The window
+/// manager is asked the standard (EWMH / ICCCM) way; a program that does not
+/// support a graceful close is never killed.
+///
+/// Right before the request the window is judged again: with a `guard` it must
+/// still belong to the program the approval was shown for, and in any case it
+/// must still pass [`desktop_api::guard::window_op_refusal`]. A mismatch is a
+/// refusal and nothing is sent.
+pub fn window_op(
+    window_id: u64,
+    op: WindowOp,
+    guard: Option<&ActGuard>,
+) -> Result<(), DesktopError> {
+    let win = u32::try_from(window_id)
+        .map_err(|_| DesktopError::Accessibility("invalid X11 window id".into()))?;
+    if window_info(window_id).is_none() {
+        return Err(DesktopError::Accessibility(
+            "window no longer exists".into(),
+        ));
+    }
+    desktop_api::guard::check_window_op(guard, top_level_facts(window_id).as_ref(), op)
+        .map_err(|r| DesktopError::GuardRefused(format!("not sent: {}", r.why())))?;
+    let (conn, screen_num) = connect()?;
+    let root = conn.setup().roots[screen_num].root;
+    let maximise = |add: bool| -> Result<(), DesktopError> {
+        let state = intern_atom(&conn, b"_NET_WM_STATE")?;
+        let vert = intern_atom(&conn, b"_NET_WM_STATE_MAXIMIZED_VERT")?;
+        let horz = intern_atom(&conn, b"_NET_WM_STATE_MAXIMIZED_HORZ")?;
+        let action = if add {
+            NET_WM_STATE_ADD
+        } else {
+            NET_WM_STATE_REMOVE
+        };
+        send_to_root(&conn, root, win, state, [action, vert, horz, 1, 0])
+    };
+    match op {
+        WindowOp::Minimize => {
+            let change = intern_atom(&conn, b"WM_CHANGE_STATE")?;
+            send_to_root(&conn, root, win, change, [ICONIC_STATE, 0, 0, 0, 0])?;
+        }
+        WindowOp::Maximize => maximise(true)?,
+        WindowOp::Restore => {
+            maximise(false)?;
+            // A minimised window is mapped again by an activation request.
+            let net_active = intern_atom(&conn, b"_NET_ACTIVE_WINDOW")?;
+            send_to_root(&conn, root, win, net_active, [1, CURRENT_TIME, 0, 0, 0])?;
+        }
+        WindowOp::Move { x, y } => {
+            maximise(false)?;
+            conn.configure_window(win, &ConfigureWindowAux::new().x(x).y(y))
+                .map_err(x11_err("configure_window"))?;
+        }
+        WindowOp::Resize { width, height } => {
+            maximise(false)?;
+            conn.configure_window(win, &ConfigureWindowAux::new().width(width).height(height))
+                .map_err(x11_err("configure_window"))?;
+        }
+        WindowOp::Close => {
+            let protocols = intern_atom(&conn, b"WM_PROTOCOLS")?;
+            let delete = intern_atom(&conn, b"WM_DELETE_WINDOW")?;
+            let supports_delete = read_u32_list_prop(&conn, win, protocols)
+                .is_some_and(|atoms| atoms.contains(&delete));
+            if supports_delete {
+                // The program's own close request, the one its close button sends.
+                let ev =
+                    ClientMessageEvent::new(32, win, protocols, [delete, CURRENT_TIME, 0, 0, 0]);
+                conn.send_event(false, win, EventMask::NO_EVENT, ev)
+                    .map_err(x11_err("send_event"))?;
+            } else {
+                let close = intern_atom(&conn, b"_NET_CLOSE_WINDOW")?;
+                send_to_root(&conn, root, win, close, [CURRENT_TIME, 1, 0, 0, 0])?;
+            }
+        }
+    }
+    conn.sync().map_err(x11_err("window_op sync"))?;
+    Ok(())
+}
+
+// ── Clipboard (the CLIPBOARD selection) ───────────────────────────────────────
+
+/// Longest clipboard text read, in bytes. Larger content (an INCR transfer) is refused.
+const MAX_CLIPBOARD_BYTES: u32 = 4 * 1024 * 1024;
+/// How long a clipboard owner may take to answer a request.
+const CLIPBOARD_TIMEOUT: Duration = Duration::from_millis(1500);
+const CLIPBOARD_POLL: Duration = Duration::from_millis(10);
+
+fn hidden_window(conn: &RustConnection, screen_num: usize) -> Result<Window, DesktopError> {
+    let screen = &conn.setup().roots[screen_num];
+    let win = conn.generate_id().map_err(x11_err("generate_id"))?;
+    conn.create_window(
+        0,
+        win,
+        screen.root,
+        -10,
+        -10,
+        1,
+        1,
+        0,
+        WindowClass::INPUT_ONLY,
+        0,
+        &CreateWindowAux::new().event_mask(EventMask::PROPERTY_CHANGE),
+    )
+    .map_err(x11_err("create_window"))?;
+    Ok(win)
+}
+
+/// The text of the CLIPBOARD selection; `None` when it holds no text.
+pub fn clipboard_text() -> Result<Option<String>, DesktopError> {
+    let (conn, screen_num) = connect()?;
+    let win = hidden_window(&conn, screen_num)?;
+    let clipboard = intern_atom(&conn, b"CLIPBOARD")?;
+    let utf8 = intern_atom(&conn, b"UTF8_STRING")?;
+    let prop = intern_atom(&conn, b"PRAXI_CLIPBOARD")?;
+    let incr = intern_atom(&conn, b"INCR")?;
+    conn.convert_selection(win, clipboard, utf8, prop, CURRENT_TIME)
+        .map_err(x11_err("convert_selection"))?;
+    conn.flush().map_err(x11_err("flush"))?;
+    let deadline = std::time::Instant::now() + CLIPBOARD_TIMEOUT;
+    let result = loop {
+        match conn.poll_for_event().map_err(x11_err("poll_for_event"))? {
+            Some(Event::SelectionNotify(ev)) => {
+                break if ev.property == NONE {
+                    Ok(None)
+                } else {
+                    read_clipboard_property(&conn, win, ev.property, incr)
+                };
+            }
+            Some(_) => {}
+            None if std::time::Instant::now() >= deadline => {
+                break Err(DesktopError::Accessibility(
+                    "the program that owns the clipboard did not answer".into(),
+                ));
+            }
+            None => thread::sleep(CLIPBOARD_POLL),
+        }
+    };
+    let _ = conn.destroy_window(win);
+    let _ = conn.flush();
+    result
+}
+
+fn read_clipboard_property(
+    conn: &RustConnection,
+    win: Window,
+    prop: Atom,
+    incr: Atom,
+) -> Result<Option<String>, DesktopError> {
+    let reply = conn
+        .get_property(true, win, prop, AtomEnum::ANY, 0, MAX_CLIPBOARD_BYTES / 4)
+        .map_err(x11_err("get_property"))?
+        .reply()
+        .map_err(x11_err("get_property reply"))?;
+    if reply.type_ == incr {
+        return Err(DesktopError::Accessibility(
+            "the clipboard text is too large to read".into(),
+        ));
+    }
+    if reply.value.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&reply.value).into_owned()))
+}
+
+/// Take the CLIPBOARD selection and serve `text` from a background thread until
+/// another program takes the selection over (the way every X11 program offers it).
+pub fn set_clipboard_text(text: &str) -> Result<(), DesktopError> {
+    let (conn, screen_num) = connect()?;
+    let win = hidden_window(&conn, screen_num)?;
+    let clipboard = intern_atom(&conn, b"CLIPBOARD")?;
+    let utf8 = intern_atom(&conn, b"UTF8_STRING")?;
+    let targets = intern_atom(&conn, b"TARGETS")?;
+    let text_atom = intern_atom(&conn, b"TEXT")?;
+    conn.set_selection_owner(win, clipboard, CURRENT_TIME)
+        .map_err(x11_err("set_selection_owner"))?;
+    let owner = conn
+        .get_selection_owner(clipboard)
+        .map_err(x11_err("get_selection_owner"))?
+        .reply()
+        .map_err(x11_err("get_selection_owner reply"))?
+        .owner;
+    if owner != win {
+        return Err(DesktopError::Accessibility(
+            "could not take the clipboard".into(),
+        ));
+    }
+    let text = text.to_owned();
+    thread::Builder::new()
+        .name("x11-clipboard".into())
+        .spawn(move || {
+            serve_clipboard(&conn, &text, clipboard, utf8, targets, text_atom);
+        })
+        .map_err(|e| DesktopError::Internal(format!("clipboard thread: {e}")))?;
+    Ok(())
+}
+
+fn serve_clipboard(
+    conn: &RustConnection,
+    text: &str,
+    clipboard: Atom,
+    utf8: Atom,
+    targets: Atom,
+    text_atom: Atom,
+) {
+    let string: Atom = AtomEnum::STRING.into();
+    loop {
+        let Ok(event) = conn.wait_for_event() else {
+            return;
+        };
+        match event {
+            // Someone else owns the selection now: this copy is no longer wanted.
+            Event::SelectionClear(_) => return,
+            Event::SelectionRequest(req) => {
+                let mut property = req.property;
+                if req.selection != clipboard {
+                    property = NONE;
+                } else if req.target == targets {
+                    let list = [targets, utf8, string, text_atom];
+                    let _ = conn.change_property32(
+                        PropMode::REPLACE,
+                        req.requestor,
+                        req.property,
+                        AtomEnum::ATOM,
+                        &list,
+                    );
+                } else if req.target == utf8 || req.target == string || req.target == text_atom {
+                    let _ = conn.change_property8(
+                        PropMode::REPLACE,
+                        req.requestor,
+                        req.property,
+                        req.target,
+                        text.as_bytes(),
+                    );
+                } else {
+                    property = NONE;
+                }
+                let notify = SelectionNotifyEvent {
+                    response_type: SELECTION_NOTIFY_EVENT,
+                    sequence: 0,
+                    time: req.time,
+                    requestor: req.requestor,
+                    selection: req.selection,
+                    target: req.target,
+                    property,
+                };
+                let _ = conn.send_event(false, req.requestor, EventMask::NO_EVENT, notify);
+                let _ = conn.flush();
+            }
+            _ => {}
+        }
+    }
 }
 
 /// How long `Command::spawn` may block. A stuck filesystem must not hang the tool.

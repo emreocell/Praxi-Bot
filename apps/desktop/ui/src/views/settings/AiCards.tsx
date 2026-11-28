@@ -19,6 +19,7 @@ import { EnginesCard } from "./HomeCards";
 import { HelpersCard } from "./HelpersCard";
 import { DocumentsCard } from "./DocumentsCard";
 import { KnowledgeCard } from "./KnowledgeCard";
+import { HistorySummaryCard } from "./HistorySummaryCard";
 import { MemoryCard } from "./MemoryCard";
 import type { CardDef } from "./types";
 import { humanLine } from "../../lib/humanError";
@@ -122,6 +123,15 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("memory.description"),
       keywords: "memory recall forget undo remember delete hafiza hatirla unut sil geri al gedächtnis merken vergessen löschen",
       node: <MemoryCard />
+    },
+    {
+      id: "historySummary",
+      section: "ai",
+      kind: "block",
+      title: t("historySummary.title"),
+      description: t("historySummary.description"),
+      keywords: "long chat summary summarise older history context uzun sohbet özet eski mesaj bağlam lange chats zusammenfassung verlauf resumen chat largo historial",
+      node: <HistorySummaryCard />
     },
     {
       id: "documents",

@@ -133,7 +133,7 @@
       "have": "Bir sunucum var",
       "haveHint": "Tek satırı kopyala, sunucuda yapıştır, verdiği kodu buraya yapıştır.",
       "local": "Bu bilgisayarda çalıştır (başlamak için önerilir)",
-      "localHint": "Kurulacak bir şey yok. Botların burada zaten çalışıyor. Sunucuyu sonra ekleyebilirsin.",
+      "localHint": "Kurulum yok. Botların burada çalışır. İstersen sonra sunucu eklersin.",
       "need": "Sunucuya ihtiyacım var (ücretsiz seçenekler, adım adım)",
       "needHint": "Sunucu edinmek için kısa rehber: ücretsiz bulut sunucusu, kiralık sunucu veya evdeki boş bir bilgisayar.",
       "title": "Hangisi sana uyuyor?"
@@ -354,16 +354,16 @@
     "hostKeyTitle": "Bu senin sunucun mu?",
     "hostKeyYes": "Evet, bu sunucuya güven",
     "intro": {
-      "optional": "Sunucuya ihtiyacın yok: isteğe bağlıdır ve her şey bu bilgisayarda zaten çalışıyor.",
+      "optional": "Gerekmez. Her şey zaten bu bilgisayarda çalışıyor.",
       "title": "Sunucuya ihtiyacın var mı?",
-      "what": "Sunucu, gece gündüz açık duran başka bir bilgisayardır; kendi bilgisayarın kapalıyken de botların çalışmaya devam eder."
+      "what": "Sunucu, sürekli açık kalan başka bir bilgisayardır; kendi bilgisayarın kapalıyken botların çalışmaya devam eder."
     },
     "keyFile": "Özel anahtar dosyası",
     "keyHint": "Yalnızca yol kullanılır. Praxi anahtarın kendisini kopyalamaz ve saklamaz.",
     "keysFound": "Bu bilgisayarda bulunan anahtarlar",
     "lead": "Kiraladığın bir sunucuya bağlan. Kurulumu Praxi senin yerine yapar.",
     "local": {
-      "body": "Botların bu bilgisayarda çalışır. Bilgisayar ve Praxi açıkken çalışırlar. Başlamak için gereken tek şey bu.",
+      "body": "Botların bu bilgisayar ve Praxi açıkken burada çalışır. Başlamak için bu yeter.",
       "done": "Anladım",
       "later": "İleride botların 7/24 çalışsın istersen bilgisayar menüsünü aç ve yeniden Sunucu ekle'yi seç.",
       "title": "İyi seçim: kurulacak bir şey yok"
@@ -688,11 +688,9 @@
   },
   "approvalDock": {
     "counter": "Onay {{current}} / {{total}}",
-    "keyAllow": "Bir kez izin ver",
-    "keyDeny": "Reddet",
-    "label": "Onayını bekliyor",
-    "next": "Sonraki onay",
-    "previous": "Önceki onay"
+    "label": "Onayın gerekli",
+    "next": "Sonrakini göster",
+    "previous": "Öncekini göster"
   },
   "apps": {
     "access": {
@@ -723,6 +721,9 @@
     "botsAll": "Tüm botlar",
     "botsNone": "Hiçbir bot",
     "botsSome": "Botlar: {{names}}",
+    "catalogOrder": {
+      "popular": "Popüler"
+    },
     "catalogSection": "Keşfet",
     "changed": {
       "advice": "Yalnızca bu uygulamaya güveniyorsanız ve yeni metin doğru görünüyorsa tekrar açın.",
@@ -797,7 +798,7 @@
     },
     "composioHub": {
       "accountConnected": "Composio hesabı bağlı",
-      "accountHint": "Uygulamaları görmek ve bağlamak için Composio hesabını bir kez bağla.",
+      "accountHint": "Uygulama bulup bağlamak için Composio'ya bir kez giriş yap.",
       "actionClass": {
         "destructive": "Siler",
         "money": "Para hareketi yapar",
@@ -867,6 +868,13 @@
       "useKey": "Proje API anahtarı kullan",
       "yourApps": "Uygulamaların"
     },
+    "composioRow": {
+      "hint": "Tek girişle aşağıdaki uygulamaları bağlarsın.",
+      "signIn": "Giriş yap",
+      "signInAgain": "Yeniden giriş yap",
+      "signOut": "Çıkış yap",
+      "useKey": "Anahtar kullan"
+    },
     "connect": "Bağlan",
     "connectApp": "{{name}} uygulamasını bağla",
     "connectNow": "Bağlan",
@@ -874,18 +882,7 @@
     "connectedToast": "{{name}} bağlandı",
     "custom": {
       "add": "Sunucu ekle",
-      "command": "Komut",
-      "env": "Ortam değişkenleri",
-      "envHint": "Her satıra bir KEY=değer.",
-      "errCommand": "Çalıştırılacak komutu gir.",
-      "errName": "Bir ad gir.",
-      "errUrl": "Geçerli bir HTTP URL'si gir.",
-      "http": "HTTP",
-      "intro": "Stdio veya HTTP MCP sunucusunu elle ekle.",
-      "name": "Sunucu adı",
-      "stdio": "Stdio",
-      "transport": "Taşıma",
-      "url": "Sunucu URL'si"
+      "command": "Komut"
     },
     "disconnect": "Bağlantıyı kes",
     "disconnectConfirm": "Bu sunucunun bağlantısı kesilsin mi?",
@@ -1097,6 +1094,63 @@
       "yes": "Evet"
     },
     "manage": "Yönet",
+    "mcpForm": {
+      "addedOff": "{{name}} eklendi. Hazır olduğunda listeden aç.",
+      "addedOn": "{{name}} açık ve hazır",
+      "auth": {
+        "header": "Erişim anahtarı",
+        "headerHint": "Her istekle birlikte bir başlıkta gönderilir.",
+        "none": "Yok",
+        "noneHint": "Sunucu herkese açık ya da kendi ağında.",
+        "oauth": "Tarayıcıyla giriş yap",
+        "oauthHint": "Bağlantıyı test ettiğinde giriş için tarayıcın açılır."
+      },
+      "authSection": "Giriş",
+      "commandHint": "Bu bilgisayarda senin izinlerinle çalışır. Yalnızca güvendiğin programları kullan.",
+      "commandSection": "Yerel komut",
+      "done": "Bitti",
+      "env": "Program ayarları",
+      "envHint": "Her satıra bir AD=değer. Adında KEY, SECRET ya da PASSWORD geçenlerin değeri gizli kasaya gider.",
+      "err": {
+        "commandMissing": "Çalıştırılacak komutu gir.",
+        "envLine": "Her satır AD=değer biçiminde olmalı.",
+        "headerName": "Boşluksuz bir başlık adı gir, örneğin Authorization.",
+        "headerValue": "Erişim anahtarını gir.",
+        "nameFormat": "Yalnızca harf, rakam, - ve _ kullan (en çok 48); harf ya da rakamla başlasın.",
+        "nameMissing": "Bir ad gir.",
+        "nameTaken": "Bu adı başka bir uygulama kullanıyor.",
+        "urlCredentials": "Adrese parola yazma. Bunun yerine aşağıdan Erişim anahtarı'nı seç.",
+        "urlInvalid": "Bu bir web adresi değil. https:// (ya da http://) ile başlamalı.",
+        "urlMissing": "Sunucunun adresini gir."
+      },
+      "fixFirst": "Önce işaretli alanları düzelt.",
+      "headerHint": "Bu bilgisayardaki gizli kasada saklanır, sunucu ayarlarına asla yazılmaz.",
+      "headerName": "Başlık adı",
+      "headerValue": "Erişim anahtarı",
+      "intro": "Güvendiğin bir sunucuyu adresiyle bağla. Kapalı olarak eklenir; sen açana kadar hiçbir bot onu kullanamaz.",
+      "name": "Ad",
+      "nameHint": "Uygulamalarında böyle görünür. Harf, rakam, - ve _ kullanabilirsin.",
+      "nameLocked": "Test onu kaydetti, bu yüzden ad artık değişmez. Baştan başlamak için İptal'e bas.",
+      "off": "Kapalı",
+      "offFailed": "{{name}} yeniden kapatılamadı. Aşağıdaki listeden kapat.",
+      "offNote": "Sunucu ekle onu kapalı olarak kaydeder. Bağlantıyı test et onu açar, yanıt verdiğine bakar ve araçlarını hiçbirini çalıştırmadan listeler.",
+      "onNote": "Test başarılı, sunucu açık. Saklamak için Bitti'ye bas.",
+      "signInNote": "Girişi tarayıcında tamamla. Bunun için sunucu açık kalır; bitince Bitti'ye bas.",
+      "test": "Bağlantıyı test et",
+      "testNeeds": "Bağlantıyı test etmek ya da sunucuyu eklemek için yukarıdaki alanları doldur.",
+      "title": "Kendi MCP sunucunu ekle",
+      "turnOn": "Aç",
+      "turnedOn": "{{name}} açıldı",
+      "url": "Sunucu URL'si (HTTP)",
+      "urlHint": "Sunucunun talimatlarındaki adres; çoğu zaman /mcp ile biter.",
+      "urlSection": "Sunucu adresi",
+      "useCommand": "Bunun yerine yerel bir komut çalıştır (stdio)",
+      "useUrl": "Bunun yerine sunucu URL'si kullan",
+      "warn": {
+        "urlKey": "Bu adreste bir anahtar var gibi görünüyor ve adres düz metin olarak saklanır. Aşağıdaki Erişim anahtarı'nı tercih et.",
+        "urlPlain": "Bu adres şifreli değil. Sunucu kendi ağında değilse https kullan."
+      }
+    },
     "missingSecret": "Gerekli tüm gizli anahtarları gir.",
     "reconnect": "Yeniden bağlan",
     "restApis": {
@@ -1377,7 +1431,11 @@
       "noHooks": "Bu botun henüz imzalı adresi yok. Aşağıdaki “İmzalı adresler”den bir tane oluştur, sonra burada seç.",
       "shouldPlaceholder": "Örneğin: özetle, yalnızca bugün yanıtlamam gerekiyorsa haber ver.",
       "title": {
+        "calendar": "Bir takvim etkinliğinden önce",
+        "feed": "Bir akışta yeni öğe çıktığında",
+        "home_assistant": "Bir ev cihazı değiştiğinde",
         "mail": "Bir e-posta geldiğinde",
+        "page": "Bir web sayfası değiştiğinde",
         "time": "Belirli bir saatte",
         "webhook": "Bir uygulama haber verdiğinde"
       }
@@ -1395,14 +1453,30 @@
     },
     "empty": "Henüz kendiliğinden çalışan bir şey yok. Yukarıya ne zaman ve ne yapacağını yaz; örneğin “Her pazartesi 8:00'de haftamı planla”.",
     "events": {
+      "calendar": {
+        "line": "Bir takvim etkinliği başlamak üzeredir; bot sizi hazırlayabilir.",
+        "title": "Bir takvim etkinliğinden önce"
+      },
+      "feed": {
+        "line": "Bir blog, haber ya da sürüm akışına (RSS veya Atom) yeni öğe eklenir.",
+        "title": "Bir akışta yeni öğe çıktığında"
+      },
       "file": {
         "line": "Bir klasöre dosya eklenince ya da dosya değişince. Sohbette iste (“İndirilenler'e yeni fatura gelince klasörüne taşı”); bot önce klasör iznini sorar.",
         "title": "Bir dosya geldiğinde"
+      },
+      "home_assistant": {
+        "line": "Bir Home Assistant sensörü, anahtarı ya da kilidi durum değiştirir.",
+        "title": "Bir ev cihazı değiştiğinde"
       },
       "intro": "Belirli bir saat yerine bir şey olunca başlasın:",
       "mail": {
         "line": "Bir kişiden, bir alan adından ya da bir konuyla gelen posta. Bot yalnızca başlıkları okur, gövdeyi okumaz.",
         "title": "Bir e-posta geldiğinde"
+      },
+      "page": {
+        "line": "Sayfada seçtiğiniz metin, örneğin bir fiyat ya da durum, değişir.",
+        "title": "Bir web sayfası değiştiğinde"
       },
       "title": "Bir şey olduğunda",
       "webhook": {
@@ -1477,10 +1551,14 @@
     "toggle": "{{name}} açılsın ya da kapansın",
     "what": {
       "anyone": "herkes",
+      "calendar": "Takvim etkinliğinden {{minutes}} dk önce",
+      "feed": "{{host}} adresinde yeni öğe",
       "file": "{{path}} içinde bir dosya değişince",
       "fileShort": "Bir dosya değişince",
+      "home_assistant": "{{entity}} değişir",
       "mail": "E-posta · gönderen: {{from}}",
       "mailShort": "Bir e-posta gelince",
+      "page": "{{host}} sayfasında metin değişir",
       "webhook": "Bir uygulama imzalı adresini çağırınca"
     }
   },
@@ -1603,7 +1681,7 @@
     "needsAttention": "Düzeltilmesi gerekiyor",
     "noProvidersBody": "Burada model seçebilmek için Ayarlar → Yapay zekâ bölümünden bir sağlayıcı bağla.",
     "noProvidersTitle": "Bağlı bir yapay zekâ sağlayıcısı yok",
-    "pageHint": "Bu botla ilgili her şey tek sayfada. Bellek değiştirince hemen kaydedilir, harcama limitlerinin kendi Kaydet düğmesi var; gerisi aşağıdaki Kaydet ile kaydedilir.",
+    "pageHint": "Bu botla ilgili her şey. Hafıza ve harcama sınırları kendiliğinden kaydedilir; gerisi Kaydet ile.",
     "pickModel": "Model seç",
     "placeBrowserHint": "Web sayfalarını açtığı yer.",
     "placeComputerHint": "Komut çalıştırdığı ve dosya açtığı yer.",
@@ -1663,7 +1741,7 @@
     "unsavedIn": "Kaydedilmemiş değişiklikler: {{sections}}"
   },
   "botEmpty": {
-    "body": "Burada henüz bir şey yok. Bir şey iste, sohbet bu alanda açılsın.",
+    "body": "Henüz bir şey yok. Sohbeti başlatmak için bir şey iste.",
     "createBot": "Bot oluştur",
     "goFirst": "{{name}} botuna git",
     "goneHint": "Silinmiş ya da başka bir bilgisayarda olabilir. İlk botuna git ya da yeni bir tane oluştur.",
@@ -1888,13 +1966,13 @@
       "subagents_one": "{{count}} alt ajan",
       "subagents_other": "{{count}} alt ajan",
       "thinking": "Düşünüyor…",
-      "waiting": "Onayını bekliyor"
+      "waiting": "Onayın gerekli"
     },
     "profile": "Bot profili",
     "searchChats": "Sohbetlerde ara…",
     "subagents": {
       "detail": {
-        "approval": "Onayını bekliyor. Sohbetten karar ver.",
+        "approval": "Onayın gerekli. Sohbette karar ver.",
         "result": "Sonuç",
         "steps": "Adımlar",
         "task": "Görev",
@@ -1914,7 +1992,7 @@
       "stop": "Durdur",
       "stopLabel": "Alt ajanı durdur: {{task}}",
       "title": "Alt ajanlar",
-      "waitingFor": "Onayını bekliyor: {{step}}"
+      "waitingFor": "Onayın gerekli: {{step}}"
     },
     "switcher": "Hangi bilgisayar gösterilsin",
     "tabs": {
@@ -1928,8 +2006,11 @@
     "triggers": {
       "account": "Posta kutusu",
       "add": "Kural ekle",
+      "anyCalendar": "Varsayılan takvim",
       "approvalHint": "Bu botun izinleri geçerlidir. Onayınız gereken işlemler bekler ve size bildirilir.",
       "attachment": "Eki varsa",
+      "calendar": "Takvim",
+      "calendarHint": "Botu her etkinlik için bir kez, birkaç dakikaya kadar gecikmeyle başlatır. Bunu açtığınızda zaten bu aralığa girmiş etkinlikler ve tüm gün süren etkinlikler botu başlatmaz. Bu botun okuyabildiği bağlı bir takvim gerekir.",
       "chooseAccount": "Posta kutusu seçin",
       "chooseHook": "Webhook seçin",
       "close": "Düzenleyiciyi kapat",
@@ -1942,12 +2023,15 @@
       "duringQuiet": "Sessiz saatlerde",
       "edit": "Kuralı düzenle",
       "end": "Bitiş",
+      "entity": "Varlık",
       "equals": "Adresi şu olan",
       "exampleDraft": "İncelemem için bir yanıt taslağı hazırla.",
       "exampleNotify": "Yalnızca işlem gerekiyorsa bana haber ver.",
       "exampleSummary": "İlgilenmem gerekenleri özetle.",
       "existingHint": "Önceden ayarlanmış. Sessiz saat ve sınır eklemek için açın; kaydedince kapalı başlar.",
+      "feedHint": "Bir RSS ya da Atom adresi. İlk kontrol yalnızca mevcut öğeleri not eder; sonradan çıkan yeni öğeler botu başlığı, bağlantısı ve kısa özetiyle başlatır.",
       "folder": "Klasör / etiket",
+      "haHint": "Home Assistant’ın bağlı olması ve bu bota izin verilmesi gerekir. Yaklaşık dakikada bir kontrol edilir; çok hızlı gidip gelen değişiklikler kaçabilir.",
       "hook": "İmzalı webhook",
       "hookHint": "Aşağıda imzalı bir adres oluşturup buraya bağlayın. Bağlanan çağrılar önceki talimat yerine bu kurala uyar.",
       "limitSummary": "{{hour}} / saat · {{day}} / gün",
@@ -1956,29 +2040,34 @@
       "mail": "Bir e-posta geldiğinde",
       "mailHint": "Yalnızca IMAP posta kutuları. Gövdeyi değil, başlıkları okur. İlk kontrol yeni postaları izlemeyi başlatır.",
       "manageHooks": "İmzalı adresler",
+      "minutesBefore": "Başlamadan kaç dakika önce",
       "name": "Ad",
       "off": "Kapalı",
+      "pageHint": "Sayfa nazikçe, en sık 15 dakikada bir getirilir ve bu bilgisayarın kendi ağından asla getirilmez. İlk kontrol yalnızca o anki metni not eder.",
       "per_day": "Günlük çalıştırma",
       "per_hour": "Saatlik çalıştırma",
       "poll": "Kontrol aralığı (saniye)",
+      "pollMinutes": "Kontrol aralığı (dakika, en az 15)",
       "preview": "Botun alacağı metni göster",
       "previewHint": "Boyutu sınırlanmış, tam talimat ve korumalı olay metni. Çalıştırma başlamaz, araç kullanılmaz.",
       "queueError": "Çok fazla olay bekliyor. Filtreleri daraltıp bu kuralı yeniden açın.",
       "quietHours": "Sessiz saatler",
       "remove": "Kuralı kaldır",
       "runError": "Son çalıştırma tamamlanmadı veya kuyruk dolu. Etkinliği ve filtreleri kontrol edip yeniden açın.",
-      "sample": "Örnek konu veya çağrı metni",
+      "sample": "Örnek konu, çağrı veya olay metni",
       "sampleMatches": "Bu örnek filtrelere uyuyor.",
       "sampleMisses": "Bu örnek filtrelere uymuyor.",
       "save": "Değişiklikleri kaydet",
       "saveOff": "Kaydet · kapalı başlar",
       "schedule": "Zamanlama",
       "scheduleHint": "Örnek: 0 9 * * * Europe/Istanbul (her gün 09.00). En az beş dakika arayla.",
+      "selector": "Sayfada izlenecek bölüm (CSS seçici)",
+      "selectorHint": "Örneğin #price, h1.title ya da .stock. Yalnızca seçtiği bölümün metni karşılaştırılır. Seçici hiçbir şey bulamaz olursa kural, değişiklik bildirmek yerine duraklar.",
       "sender": "Gönderen",
       "senderError": "Gönderen filtresi bir adres ya da alan adı değil; bu yüzden kural kapalı ve hiçbir postayla eşleşmiyor. Tam bir adres (ann@example.com) ya da alan adı (example.com) girip yeniden açın.",
       "senderMatch": "Gönderen kuralı",
       "should": "Bot şunu yapsın",
-      "sourceError": "Posta kutusu kontrolleri art arda başarısız oldu. Bağlantıyı ve izinleri kontrol edip yeniden açın.",
+      "sourceError": "Kaynak kontrolleri art arda başarısız oldu. Bağlantıyı, adresi ve izinleri kontrol edip yeniden açın.",
       "start": "Başlangıç",
       "subject": "Konu şunu içeriyorsa (isteğe bağlı)",
       "test": "Örnekle dene",
@@ -1987,9 +2076,16 @@
       "time": "Belirli bir zamanda",
       "timezone": "Saat dilimi",
       "title": "Bir şey olduğunda",
+      "toState": "Yalnızca şu duruma geçince (isteğe bağlı)",
+      "toStateHint": "Örneğin on, off, home ya da unlocked. Boş bırakırsanız her değişiklik sayılır.",
+      "url": "Web adresi",
       "useQuiet": "Bu bot geceleri sessiz kalsın",
       "webhook": "Bir webhook çağrıldığında",
-      "when": "Ne zaman"
+      "when": "Ne zaman",
+      "when_calendar": "Bir takvim etkinliği başlamak üzereyken",
+      "when_feed": "Bir akışta yeni öğe çıktığında",
+      "when_home_assistant": "Bir Home Assistant cihazı değiştiğinde",
+      "when_page": "Bir web sayfasındaki metin değiştiğinde"
     },
     "untitled": "Yeni sohbet",
     "upcoming": {
@@ -2044,8 +2140,6 @@
     },
     "newChat": "Yeni sohbet",
     "newChatFailed": "Sohbet başlatılamadı: {{detail}}",
-    "noModel": "Model yok",
-    "notFound": "Bu bot artık yok.",
     "skills": {
       "boundaryHint": "Bu, botun önüne konan ve beceri araçlarıyla yükleyebildiği becerileri sınırlar. Gizli bir depo değildir: dosya ya da kabuk erişimi olan bir bot, beceri klasörünü diskten yine de okuyabilir.",
       "browseLibrary": "Beceri kitaplığı",
@@ -2120,11 +2214,11 @@
         "footer": "Composio üzerinden. Yalnızca bu eylemi yukarıdaki tüm parametrelerle onayla."
       },
       "batch": {
-        "allowSelected": "Seçilenlere izin ver ({{count}})",
+        "allowSelected": "Seçilen {{count}} öğeye izin ver",
         "denyAll": "Hepsini reddet",
         "repeated": "×{{count}}",
         "select": "İzin ver: {{name}}",
-        "title": "{{count}} onay gerekiyor"
+        "title": "{{count}} öğe onayını bekliyor"
       },
       "bot": {
         "allToolsOfCaller": "bu botun kullanabildiği tüm araçlar",
@@ -2148,7 +2242,7 @@
       },
       "commandShortened": "Komut kısaltıldı: yalnızca ilk {{shown}} karakter gösteriliyor.",
       "compact": {
-        "allow": "İzin ver",
+        "allow": "Bir kez izin ver",
         "alwaysSite": "Her zaman izin ver",
         "alwaysTool": "Her zaman izin ver",
         "controlGrant": "Ekran ve klavye kontrolünü paylaş",
@@ -2204,7 +2298,7 @@
         "reviewFull": "Gönderilecek her şeyi oku"
       },
       "input": {
-        "label": "{{name}} aracının alacağı tam veri",
+        "label": "Tam veri (izin vermeden önce kontrol et)",
         "shortened": "Kısaltıldı: yalnızca ilk {{shown}} karakter gösteriliyor."
       },
       "mail": {
@@ -2309,7 +2403,7 @@
           "user": "senin bilgisayarın ({{name}})"
         }
       },
-      "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)",
+      "reasonPlaceholder": "Neden reddettiğin (isteğe bağlı)",
       "risk": {
         "allowDelete": "Silmeye izin ver",
         "allowSend": "Göndermeye izin ver",
@@ -2356,7 +2450,7 @@
         "wait": "Şunu bekle: {{what}}"
       },
       "thisChat": "Bu sohbet",
-      "title": "Onay gerekiyor",
+      "title": "Onayın gerekli",
       "why": {
         "always_ask": "Bu işlem izin düzeyi ne olursa olsun her zaman sorar (uygulamalar, gizli bilgiler, tarayıcı sayfası dışında kod, tarayıcı dosya aktarımları).",
         "browser_address": "Bu adres bir dosya, kendi bilgisayarın veya ağın; herkese açık bir web sayfası değil, bu yüzden açmadan önce sorulur.",
@@ -2530,7 +2624,7 @@
     },
     "emptyGreeting": "Merhaba, ben {{name}}",
     "emptyHint": "Sohbeti başlatmak için bir şey yaz.",
-    "emptySub": "Bir şey sor ya da hazır bir işle başla.",
+    "emptySub": "Bir soru sor ya da hazır bir görevle başla.",
     "emptyTitle": "Birlikte ne yapalım?",
     "export": {
       "done": "Sohbet kaydedildi",
@@ -2596,7 +2690,7 @@
     },
     "openBot": "{{name}} ayrıntılarını aç",
     "pendingElsewhere": "Bu botun başka bir sohbetinden: {{chat}}",
-    "pendingPinned": "Kararın bekleniyor. Kart mesaj kutusunun üstünde.",
+    "pendingPinned": "Kararını üstteki kartta ver.",
     "placeholder": "Mesaj yaz…  / komutlar · @ botlar",
     "placeholderBusy": "Bot çalışıyor. Yazarsan mesaj sıraya girer",
     "placeholderWaiting": "Yukarıdan yanıtla ya da planı değiştirmek için yaz",
@@ -2605,8 +2699,8 @@
       "answered": "Yanıtın: {{answer}}",
       "closed": "Bu soru artık açık değil.",
       "decidedElsewhere": "Bu soru daha önce yanıtlandı veya süresi doldu.",
-      "placeholder": "Başka bir yanıt yaz…",
-      "title": "Bot soruyor"
+      "placeholder": "Yanıtını yaz…",
+      "title": "Bot sorusu"
     },
     "remember": {
       "button": "Bunu hatırla",
@@ -2646,7 +2740,7 @@
       "stopUnconfirmed": "Servis durdurmayı 5 saniyedir onaylamadı, çalışma hâlâ sürüyor olabilir. Bitirmek için Zorla durdur'a bas.",
       "stopUnreachable": "Durdurma, bu botun çalıştığı bilgisayara ulaşamadı. Yeniden deniyor; bağlantıyı kontrol et.",
       "stoppingDetail": "Çalışmanın bitmesi bekleniyor…",
-      "waiting": "Onayını bekliyor"
+      "waiting": "Onayın gerekli"
     },
     "runFailed": "Çalışma başarısız oldu: {{message}}",
     "runStopped": "Senin tarafından durduruldu",
@@ -2822,6 +2916,16 @@
         "failed": "Hesaplanamadı",
         "running": "Hesaplanıyor"
       },
+      "desktop_clipboard": {
+        "done": "Pano kullanıldı",
+        "failed": "Pano kullanılamadı",
+        "running": "Pano kullanılıyor"
+      },
+      "desktop_element": {
+        "done": "Bilgisayarda bir denetim kullanıldı",
+        "failed": "Denetim kullanılamadı",
+        "running": "Bilgisayarda bir denetim kullanılıyor"
+      },
       "desktop_key": {
         "done": "Bilgisayarda tuşa basıldı",
         "failed": "Bilgisayarda tuşa basılmadı",
@@ -2851,6 +2955,11 @@
         "done": "Bilgisayarda yazıldı",
         "failed": "Bilgisayarda yazılmadı",
         "running": "Bilgisayarda yazılıyor"
+      },
+      "desktop_window": {
+        "done": "Pencere yönetildi",
+        "failed": "Pencere yönetilemedi",
+        "running": "Pencere yönetiliyor"
       },
       "doc_edit": {
         "done": "Belge güncellendi",
@@ -3155,8 +3264,8 @@
     "empty": "“Yeni sohbet”e bas ve neye ihtiyacın olduğunu yaz. Sohbetlerin burada saklanır.",
     "emptyTitle": "Henüz sohbet yok",
     "loading": "Sohbetler yükleniyor…",
-    "menuLabel": "{{title}} için sohbet seçenekleri",
-    "menuTooltip": "Sohbet seçenekleri",
+    "menuLabel": "{{title}} menüsü",
+    "menuTooltip": "Sohbet menüsünü aç",
     "pin": "Sabitle",
     "pinnedBadge": "Sabitlendi",
     "rename": "Yeniden adlandır",
@@ -3181,12 +3290,10 @@
     "save": "Kaydet"
   },
   "computerAccess": {
-    "allow": "{{name}} üzerindeki botlar bu bilgisayarı kullanabilsin",
     "allowOnce": "Bir kez izin ver",
     "allowSession": "Bu oturum için izin ver",
     "alwaysRead": "{{name}} botları ekrana bakmadan önce sorma",
     "alwaysReadNote": "Kapalıyken oturum başına bir kez sorulur. Praxi'nin kendi pencereleri asla gösterilmez.",
-    "askNote": "Bir şeyi değiştiren her işlem önce sana sorar.",
     "deny": "Reddet",
     "description": "İzin verdiğinde botların bu bilgisayarın ekranını görüp kullanabilir.",
     "details": "Tam olarak",
@@ -3425,8 +3532,6 @@
     "offline": "Seçili bilgisayara ulaşılamıyor. Çevrimiçi olduğunda bağlantıyı yeniden dene."
   },
   "dev": {
-    "runningLabel": "Bot çalışması etkin",
-    "sectionTitle": "Geliştirici",
     "simulateBotRun": "Bot çalışmasını simüle et"
   },
   "digest": {
@@ -3479,11 +3584,7 @@
       "minutes_one": "Okuma yaklaşık 1 dakika sürer."
     },
     "estimateNote": "Bu kaba bir tahmindir; büyük PDF'ler daha uzun sürer. Bu sırada çalışmaya devam edebilirsiniz.",
-    "failure": {
-      "other": "Atlandı.",
-      "secret_content": "Atlandı: özel anahtar içeriyor.",
-      "unreadable_source": "Okunamadı: korumalı, bozuk veya bir sınırı aşıyor."
-    },
+    "failure": {},
     "filesReady": "{{count}} dosya hazır",
     "filesReady_one": "1 dosya hazır",
     "forget": "Bu klasörü okumayı bırak",
@@ -3681,8 +3782,8 @@
         "title": "Bu zamanlama geçerli değil"
       },
       "bad_trigger_config": {
-        "hint": "Bir kaynak seçin, posta için gönderen filtresi ekleyin; talimatı, sessiz saatleri ve sınırları kontrol edin.",
-        "title": "Bu kuralı kontrol edin"
+        "hint": "Bir kaynak seç, posta için gönderen filtresi ekle; talimatı, sessiz saatleri ve sınırları kontrol et.",
+        "title": "Bu kuralı düzelt"
       },
       "bad_voice_config": {
         "hint": "Ayarlar bölümünde yazıya dökme servisinin adresini, modelini ve anahtarını kontrol edip yeniden dene.",
@@ -3785,8 +3886,8 @@
         "title": "O bilgisayar terminale izin vermedi"
       },
       "host_outdated": {
-        "hint": "Bilgisayar çevrimiçi, ama Praxi-Bot sürümü terminali henüz tanımıyor. Sunucuyu güncelle, sonra yeniden dene.",
-        "title": "O bilgisayarda Praxi-Bot eski sürüm"
+        "hint": "Bilgisayar çevrimiçi ama Praxi sürümü terminal için eski. Sunucuyu güncelle, sonra yeniden dene.",
+        "title": "O bilgisayarda Praxi eski sürüm"
       },
       "host_setup_conflict": {
         "hint": "Süren kurulumun bitmesini bekleyip yeniden dene.",
@@ -3797,8 +3898,8 @@
         "title": "Terminal o bilgisayarda çalışmadı"
       },
       "host_unreachable": {
-        "hint": "Oradaki kopya hâlâ çalışıyor olabilir. Yeniden dene ya da yine de geri getirmeyi onayla.",
-        "title": "Sunucu yanıt vermedi"
+        "hint": "Açık ve çevrimiçi olduğundan emin olup yeniden dene. Ya da yine de geri getirmeyi onayla.",
+        "title": "Sunucu şu an yanıt vermiyor"
       },
       "input_busy": {
         "hint": "İşini bitirmesini bekle ya da canlı görünümden devral.",
@@ -3810,7 +3911,7 @@
       },
       "install_copy_only": {
         "hint": "Gösterilen komutu ya da resmî sayfayı kullan.",
-        "title": "Bu CLI sunucuya otomatik kurulamaz"
+        "title": "Bu kodlama aracı sunucuya kendiliğinden kurulamaz"
       },
       "internal": {
         "hint": "Yeniden dene. Sürerse ayrıntıları kopyalayıp bildir.",
@@ -3839,6 +3940,10 @@
       "knowledge_busy": {
         "hint": "Hâlâ dosyalarını okuyor. Biraz sonra yeniden dene.",
         "title": "Bilgi tabanı meşgul"
+      },
+      "live_voice_not_configured": {
+        "hint": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekle, sonra Konuş'a yeniden bas.",
+        "title": "Canlı ses için Gemini anahtarı gerekli"
       },
       "login_busy": {
         "hint": "Onu bitir ya da iptal et, sonra yeniden dene.",
@@ -3881,11 +3986,11 @@
         "title": "Bunu yalnızca sahibi değiştirebilir"
       },
       "message_not_editable": {
-        "hint": "Yalnızca kendi son mesajınız düzenlenebilir veya yeniden oluşturulabilir, o da bot işini bitirdikten sonra.",
+        "hint": "Yalnızca kendi son mesajını düzenleyebilir veya yeniden oluşturabilirsin; o da bot işini bitirdikten sonra.",
         "title": "Bu mesaj düzenlenemez"
       },
       "message_not_last": {
-        "hint": "Sohbet ilerledi. Yeniden yükleyin, sonra en yeni mesajı düzenleyin ya da yeniden oluşturun.",
+        "hint": "Sohbet ilerledi. Yenile, sonra en yeni mesajı düzenle ya da yeniden oluştur.",
         "title": "Bu artık son mesaj değil"
       },
       "modified_since": {
@@ -3922,7 +4027,7 @@
       },
       "provider_model": {
         "hint": "Ayarlar → Yapay zekâ bölümünü aç ve listeden başka bir model seç. Hesabının kullanabildiği birini seç.",
-        "title": "Sağlayıcı, ayarlanan modeli bulamadı"
+        "title": "Bu model hesabında kullanılamıyor"
       },
       "reload_failed": {
         "hint": "Hatalara bak ya da yerel servisi yeniden başlat.",
@@ -4037,7 +4142,7 @@
         "title": "Aylık harcama limitine ulaşıldı"
       },
       "spend_limit_unreadable": {
-        "hint": "Kayıtlı aylık limit okunamadığı için ücretli model çağrıları engellendi. Limiti Kullanım sayfasından yeniden belirleyin.",
+        "hint": "Kayıtlı aylık limit okunamadığı için ücretli model çağrıları engellendi. Limiti Kullanım sayfasından yeniden belirle.",
         "title": "Harcama limiti okunamadı"
       },
       "starting": {
@@ -4073,7 +4178,7 @@
         "title": "Çok fazla canlı görünüm açık"
       },
       "trigger_source_unavailable": {
-        "hint": "Botun kullanabileceği bir IMAP posta kutusu bağlayın ve izinlerinde zamanlanmış posta okumalarını açın.",
+        "hint": "Botun kullanabileceği bir posta kutusu bağla ve izinlerinde zamanlanmış posta okumayı aç.",
         "title": "Bu posta kutusu henüz izlenemiyor"
       },
       "unauthorized": {
@@ -4159,8 +4264,8 @@
       "title": "Bu motor o düzeyi sunmuyor"
     },
     "engineNeedsCli": {
-      "hint": "Bir kodlama CLI'sinden gelen modeli seç, sonra kendi araçlarına izin ver.",
-      "title": "Önce bir kodlama CLI modeli seç"
+      "hint": "Bu bilgisayardaki bir kodlama uygulamasından model seç, sonra kendi araçlarını aç.",
+      "title": "Önce bir kodlama uygulaması modeli seç"
     },
     "engineNeedsNative": {
       "hint": "Kendi araçlarıyla çalışıyor. Bu bot için buna izin vermek için Düzelt'e bas.",
@@ -4181,15 +4286,15 @@
     },
     "hostBusy": {
       "hint": "Birkaç saniye bekleyip yeniden dene.",
-      "title": "Sunucu meşgul"
+      "title": "O bilgisayar şu an meşgul"
     },
     "hostManaged": {
       "hint": "Botun çalıştığı bilgisayardaki Praxi'den değiştir.",
       "title": "Bu öbür bilgisayarda yönetiliyor"
     },
     "hostSilent": {
-      "hint": "{{name}} açık ve ağa bağlı mı kontrol et, sonra yeniden dene.",
-      "title": "{{name}} yanıt vermedi"
+      "hint": "{{name}} açık ve ağa bağlı mı kontrol et, sonra Yeniden dene'ye bas.",
+      "title": "{{name}} şu an yanıt vermiyor"
     },
     "http_error": {
       "hint": "Yeniden dene. Sürerse ayrıntıları kopyalayıp bildir.",
@@ -4199,16 +4304,28 @@
       "hint": "Praxi'yi ana bilgisayarın kendisinde kullan ya da yönetici masaüstünden kaldır.",
       "title": "Bunu yalnızca ana bilgisayarın başındaki kişi yapabilir"
     },
+    "mailGuardBlocked": {
+      "hint": "Ayarlar → Güvenli gönderim bölümünde kuralı gözden geçirin veya gönderimi sizin onaylayabilmeniz için botun erişim düzeyini Sor olarak ayarlayın.",
+      "title": "Posta koruması bu gönderimi engelledi"
+    },
+    "mailGuardOptOut": {
+      "hint": "Ayarlar → Güvenli gönderim → Yazmayacağım kişiler listesinden kaldırın ya da kendiniz yazın.",
+      "title": "Bu kişi yazmayacağım listesinde"
+    },
+    "mailGuardUnreadable": {
+      "hint": "Ana bilgisayardaki hasarlı posta koruması dosyalarını düzeltip yeniden deneyin.",
+      "title": "Posta koruması kayıtlı kurallarını okuyamadı"
+    },
     "modelFailed": {
-      "hint": "Yeniden dene ya da başka bir model seç. Aşağıdaki ayrıntılar modelin ne bildirdiğini söyler.",
+      "hint": "Yeniden dene ya da Ayarlar'dan başka bir model seç.",
       "title": "Model yanıt veremedi"
     },
     "network": {
       "hint": "Yazdığın hiçbir şey kaybolmaz. Praxi denemeye devam eder; üstteki uyarı kalkınca düğmeye yeniden bas.",
-      "title": "Yerel servis şu an yanıt vermiyor"
+      "title": "Praxi'nin yerel servisi şu an yanıt vermiyor"
     },
     "noInputBackend": {
-      "hint": "Sunucuda bu ekran için klavye ve fare erişimi yok (örneğin masaüstü oturumu olmayan bir sunucu). İzleyebilirsin ama devralamazsın.",
+      "hint": "Orada bu ekran için klavye ve fare yok (örneğin masaüstü oturumu olmayan sunucu). İzleyebilirsin, devralamazsın.",
       "title": "Bu ekran denetlenemiyor"
     },
     "openSettings": "Ayarları aç",
@@ -4247,7 +4364,6 @@
       }
     },
     "reload": "Yenile",
-    "restartApp": "Praxi'yi yeniden başlat",
     "restartService": "Yerel servisi yeniden başlat",
     "restarting": "Yeniden başlatılıyor…",
     "retry": "Yeniden dene",
@@ -4261,7 +4377,7 @@
       "title": "Bu bilgisayara ekran denetimi izni verilmemiş"
     },
     "screenNoConfirm": {
-      "hint": "Ekran tuşların bırakıldığını onaylamadı, bu yüzden duraklatma korundu. Yeniden dene; sürerse sunucudaki Praxi'yi yeniden başlat.",
+      "hint": "Ekran tuşların bırakıldığını onaylamadı. Yeniden dene; sürerse botun çalıştığı bilgisayarda Praxi'yi yeniden başlat.",
       "title": "Ekran onaylamadı"
     },
     "sendFailed": {
@@ -4270,7 +4386,7 @@
     },
     "serviceConnection": {
       "hint": "Bağlantını kontrol edip yeniden dene. Bir işlemi tekrarlamadan önce gerçekleşip gerçekleşmediğini kontrol et.",
-      "title": "Bu servise ulaşılamıyor"
+      "title": "Bu servise ulaşılamadı"
     },
     "serviceDown": {
       "hint": "Yeniden başlat. Botların ve sohbetlerin güvende.",
@@ -4348,12 +4464,12 @@
       "title": "Bu ekranı başka bir cihaz kontrol ediyor"
     },
     "takeoverRecoveryRequired": {
-      "hint": "Ekran devralma açıkken sunucu yeniden başladı (ya da bağlantı koptu). Devam etmek için pencerenin üstündeki \"Duraklatmayı kaldır\" düğmesine bas.",
-      "title": "Sunucuda hâlâ açık bir ekran devralma var"
+      "hint": "Ekranı kontrol ederken sunucu yeniden başladı ya da bağlantı koptu. Devam etmek için üstteki Duraklatmayı kaldır'a bas.",
+      "title": "Sunucuda ekran denetimi hâlâ duraklatılmış"
     },
     "takeoverRequestConflict": {
-      "hint": "Aynı numaralı başka bir devralma isteği sunucuda zaten kayıtlı. Canlı görünümü kapatıp yeniden aç ve tekrar dene.",
-      "title": "Bu devralma isteği öncekiyle çakışıyor"
+      "hint": "Sunucuda hâlâ açık eski bir istek var. Canlı görünümü kapat, yeniden aç ve tekrar dene.",
+      "title": "Bu ekran denetimi isteği öncekiyle çakışıyor"
     },
     "timeout": {
       "hint": "Bağlantını kontrol edip yeniden dene.",
@@ -4402,17 +4518,16 @@
   },
   "firstRun": {
     "back": "Geri",
-    "badge": "Kurulum",
     "bot": {
       "createFailed": "Botun oluşturulamadı. Hiçbir şey kaydedilmedi. Biraz sonra yeniden dene.",
       "defaultName": "Praxi",
       "noService": "Praxi'nin arka plan servisi henüz çalışmıyor. Birkaç saniye bekleyip yeniden dene.",
       "recap": "Yapay zekâ: {{model}} · Özgürlük: {{level}}",
-      "subtitle": "Ona bir ad ve bir görünüm ver. İkisini de sonra değiştirebilirsin.",
-      "title": "Botunla tanış",
+      "subtitle": "Bir ad ve görünüm seç. İstediğin zaman değiştirirsin.",
+      "title": "Botuna ad ver",
       "tryTitle": "Önce şunu dene",
       "whereBody": "Botun, Praxi-Bot açıkken bu bilgisayarda çalışır. Yalnızca onunla paylaştığın klasörlere dokunur.",
-      "whereLater": "Bilgisayarın kapalıyken de çalışmasını mı istiyorsun? Sonra Ayarlar'dan bir sunucu ekleyebilirsin. Şimdi gerekmez.",
+      "whereLater": "Bilgisayarın kapalıyken de çalışsın mı? Sonra Ayarlar'dan sunucu ekleyebilirsin. Şimdi gerekmez.",
       "whereTitle": "Botun nerede çalışır"
     },
     "brain": {
@@ -4433,13 +4548,13 @@
         "three": "Buraya dön ve aşağıya yapıştır. Praxi-Bot anahtarı hemen kontrol eder.",
         "two": "Google ile giriş yap ve “API anahtarı oluştur”a bas. Sonra anahtarı kopyala."
       },
-      "freeSub": "Google Gemini'nin ücretsiz bir planı var. Yaklaşık iki dakika sürer ve yalnızca bir Google hesabı gerekir.",
+      "freeSub": "Google Gemini'nin ücretsiz planı var. Google hesabınla yaklaşık iki dakika sürer.",
       "freeTitle": "Ücretsiz bir model kullan",
       "getFreeKey": "Anahtarımı al",
       "getKey": "Anahtar al",
       "here": {
         "sub": "{{names}} · anahtar gerekmez",
-        "title": "Bu bilgisayarda hazır olanı kullan"
+        "title": "Burada hazır olanı kullan"
       },
       "hide": "Anahtarı gizle",
       "keyHint": "Sistem anahtarlığına kaydedilir. Bir daha gösterilmez.",
@@ -4450,7 +4565,7 @@
         "prefix": "Bu, bu servisin bir anahtarına benzemiyor. Yine de deneyebilirsin ama doğrusunu kopyaladığından emin ol.",
         "short": "Bu bir anahtar için çok kısa. Anahtarın tamamını kopyala; harf ve rakamlardan oluşan uzun bir satırdır."
       },
-      "laterNote": "Hazır değil misin? Üstteki “Bunu sonra eklerim”e bas. Etrafa göz atabilirsin; Ayarlar → Yapay zekâ'dan bir model ekler eklemez botun cevap vermeye başlar.",
+      "laterNote": "Hazır değil misin? Üstteki \"Bunu sonra eklerim\"e bas. Önce etrafa bak; hazır olunca Ayarlar → Yapay zekâ'dan model ekle.",
       "local": {
         "llamacpp": "llama.cpp sunucusu",
         "lmstudio": "LM Studio"
@@ -4466,12 +4581,11 @@
       },
       "own": {
         "sub": "Anthropic, OpenAI, OpenRouter veya DeepSeek'ten.",
-        "title": "Bir erişim anahtarım var"
+        "title": "Kendi anahtarım var"
       },
       "paste": "Yapıştır",
       "providers": {
         "anthropic": {
-          "badge": "",
           "name": "Anthropic",
           "sub": "Claude modelleri"
         },
@@ -4481,21 +4595,19 @@
           "sub": "Hızlı, cömert ücretsiz kota"
         },
         "ollama": {
-          "badge": "",
           "found": "Burada çalışıyor",
           "name": "Ollama",
           "sub": "Bu bilgisayardaki modeller, anahtarsız"
         },
         "openai": {
-          "badge": "",
           "name": "OpenAI uyumlu",
           "sub": "OpenAI, OpenRouter, DeepSeek"
         }
       },
       "recommended": "Önerilen",
       "show": "Anahtarı göster",
-      "subtitle": "Botun adına düşünen yapay zekâ budur. Sonra istediğin zaman değiştirebilirsin.",
-      "title": "Bir yapay zekâ bağla",
+      "subtitle": "Botunun düşünmesini sağlayan budur. Sonra değiştirebilirsin.",
+      "title": "Yapay zekâ bağla",
       "useCli": "{{name}} kullan"
     },
     "creating": "Oluşturuluyor…",
@@ -4540,8 +4652,8 @@
         }
       },
       "recommended": "Önerilen",
-      "subtitle": "Botunun sormadan ne kadarını yapabileceğine karar ver. Sonradan her bota ayrı seviye verebilirsin.",
-      "title": "Ne kadar serbest olsun?"
+      "subtitle": "Botunun sormadan ne kadarını yapabileceğine karar ver. Sonra her bota ayrı seviye verebilirsin.",
+      "title": "Kendi başına ne kadar yapsın?"
     },
     "help": "Yardım lazım mı?",
     "language": "Dil",
@@ -4554,12 +4666,12 @@
       "screen": "Şu an ekranımda ne var?"
     },
     "service": {
-      "body": "Praxi onu kendiliğinden başlatır. Birkaç saniye bekleyip yeniden dene; olmazsa uygulamayı yeniden başlat.",
+      "body": "Praxi onu kendiliğinden başlatır. Birkaç saniye bekle ve yeniden dene, ya da uygulamayı yeniden başlat.",
       "retry": "Yeniden dene",
-      "title": "Praxi'nin arka plan servisi henüz çalışmıyor"
+      "title": "Praxi servisi henüz çalışmıyor"
     },
     "skip": "Bunu sonra eklerim",
-    "skipTip": "Önce etrafa göz at. Kurulumu sonra “Kurulumu bitir” düğmesinden tamamlayabilirsin.",
+    "skipTip": "Önce etrafa bak. Kurulumu sonra Kurulumu bitir düğmesinden tamamla.",
     "start": "Başla",
     "steps": {
       "bot": "Botun",
@@ -4658,6 +4770,7 @@
       "slash": "Eğik çizgi komutları (yazı kutusuna / yaz)"
     },
     "intro": "Uygulama açıkken kullanışlı kısayollar.",
+    "liveVoiceEnd": "Canlı sesli sohbeti bitir",
     "menuAccept": "Vurgulanan öğeyi seç",
     "menuDismiss": "Menüyü kapat",
     "menuMove": "Eğik çizgi / anma menüsünde gezin",
@@ -4752,16 +4865,23 @@
       "tokensPerMinute": "Dakikadaki metin miktarı"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Uzun sohbetler: eski mesajlar kısa bir nota özetlenir, böylece bot konuyu kaybetmez.",
+    "hint": "Uzun bir sohbetin eski mesajları kısa bir nota özetlenir. Mesajlar kayıtlı ve aranabilir kalır.",
+    "label": "Uzun sohbetlerin eski mesajlarını özetle",
+    "noBot": "Önce bir bot oluştur.",
+    "note": "Bir sohbet çok uzayınca botun kendi modeli (özel veri varsa yalnızca o, yoksa daha ucuz yardımcı modeli) eski kısım için kısa bir not yazar. Bot da bu notu ve son mesajlarını okur. Not, güvenilmeyen metin olarak işaretlenir; asla senin sözün sayılmaz, web sayfası ya da postadan gelen yazı da öyle işaretli kalır. Asıl mesajlar değişmez ve silinmez. Kapalıyken bot, eskisi gibi yalnızca en yeni mesajları görür.",
+    "title": "Uzun sohbetler"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} bazı şeyleri kendine saklar: yürütme politikası, komut satırı araç sunucuları, beceriler ve kodlama CLI girişleri doğrudan {{name}} üzerinde değiştirilir. E-posta, arama ve dikte hesapları bu bilgisayardan bağlanabilir.",
       "noSecrets": "{{name}} henüz anahtar saklayamıyor.",
-      "notGranted": "{{name}} bu bilgisayarı henüz onaylamadı. Şunu {{name}} üzerinde bir kez çalıştır:",
-      "title": "Bu bilgisayardan kurulum"
+      "notGranted": "{{name}} bu bilgisayarı henüz onaylamadı. Şunu {{name}} üzerinde bir kez çalıştır:"
     },
     "adopted": {
       "allowPc": "İsteğe bağlı: botların istediğinde bu bilgisayarın ekranına bakabilir ve üzerinde iş yapabilir. Bir şeyi değiştiren her işlem yine burada önce sana sorar.",
-      "done": "Anladım",
       "moved": "{{name}} bilgisayarına taşınanlar",
       "stayed": "Bu bilgisayarda kalanlar",
       "stayedBody": "Bu bilgisayar elindeki her şeyi yedek olarak saklar ve bir hedef olarak kalır: bir bottan istediğin zaman bunun üzerinde iş yapmasını isteyebilirsin. Burada hiçbir şey silinmedi.",
@@ -4769,7 +4889,6 @@
     },
     "banner": {
       "back": "{{name}} konumuna geç",
-      "offline": "Botlarının bilgisayarı çevrimdışı. Yeniden bağlanılıyor… Liste en son görülen.",
       "temporary": "Botların bu bilgisayarda çalışıyor. {{name}} kurulu kalır, istediğin zaman ona geçebilirsin.",
       "workHere": "Bu bilgisayarı kullan"
     },
@@ -4784,7 +4903,6 @@
     },
     "copy": "Kopyala",
     "engines": {
-      "foundAt": "Şurada bulundu: {{path}}",
       "installFailed": "Kurulum tamamlanamadı ({{code}}). Çıktıya bak ya da komutu elle çalıştır.",
       "installOnServer": "Sunucuya kur",
       "installedUnknown": "Kurulu · giriş durumu bilinmiyor",
@@ -4795,7 +4913,6 @@
       "none": "Sunucu hiç kodlama CLI'ı bildirmedi.",
       "notInstalled": "Kurulu değil.",
       "note": "Bunlar sunucunun kendi araçları. Kurulum ve giriş {{name}} üzerinde yapılır.",
-      "officialPage": "{{name}} için resmî sayfadan kur",
       "ready": "Hazır",
       "readyAs": "Hazır · {{account}}",
       "reinstall": "Sunucuda yeniden kur",
@@ -4806,16 +4923,12 @@
       "signIn": "Giriş için sunucuda şunu çalıştır:",
       "signInAsUser": "Elle giriş yapmak için, buradaki terminalde ya da SSH ile, “{{user}}” kullanıcısı olarak:",
       "signInNote": "Giriş sunucuda bir web adresi (çoğu zaman bir kodla) gösterir. Adresi bu bilgisayarda aç, orada giriş yap ve istenirse kodu sunucudaki terminale yapıştır. Bu bilgisayardaki oturumlar sunucuya kopyalanmaz.",
-      "signInOnServer": "{{server}} üzerinde giriş yap",
-      "title": "{{name}} üzerindeki kodlama CLI'ları"
+      "signInOnServer": "{{server}} üzerinde giriş yap"
     },
     "hint": "{{name}} üzerinde",
     "menu": {
       "add": "Sunucu ekle",
       "makeHome": "{{name}} botlarımın evi olsun",
-      "pcOff": "Kapalı · botların bu bilgisayarı kullanamaz",
-      "pcOn": "Açık · her işlem burada sana sorar",
-      "sync": "Kurulumumu {{name}} ile eşitle",
       "terminal": "Sunucuda terminal",
       "viewScreen": "Ekranını gör"
     },
@@ -4839,7 +4952,6 @@
   "hostMode": {
     "managedOnServer": "Bu bilgisayar {{name}} üzerinde yönetici olarak onaylandıktan sonra anahtarları, izinleri, araçları ve e-postayı buradan da yönetirsin. Cihaz eşleştirme ve {{name}} güncellemesi {{name}} üzerinde kalır.",
     "model": {
-      "action": "{{name}} sunucusuna model bağla",
       "afterwards": "Bu uygulama birkaç saniye sonra bunu kendiliğinden fark eder.",
       "copy": "Komutu kopyala",
       "fromApp": "{{name}} için anahtarı buraya ekle.",
@@ -4879,7 +4991,7 @@
       "botHint": "Buradaki bir bot, bu bilgisayar kapalıyken de çalışır.",
       "model": "{{name}} üzerinde bir yapay zekâ bağla",
       "modelAction": "Yapay zekâ bağla",
-      "modelHint": "Bu sunucudaki botların onunla düşünür."
+      "modelHint": "Bu sunucudaki botlar düşünmek için bunu kullanır."
     },
     "stepsLabel": "{{name}} kurulumu",
     "viewScreen": "Ekranı izle"
@@ -4895,10 +5007,9 @@
     "connecting": "{{name}} sunucusuna bağlanılıyor…",
     "noModelKey": "{{name}} sunucusunda henüz model anahtarı yok. Ekranını izleyebilir ve botlarını yönetebilirsin; sunucuya bir anahtar eklenene kadar sohbetlere yanıt gelmez.",
     "notPaired": "{{name}} artık bu bilgisayarı kabul etmiyor. Yeni bir biletle yeniden eşleştir.",
-    "offline": "{{name}} çevrimdışı. Sunucuda Praxi servisinin çalıştığını kontrol et. Uygulama bağlantıyı otomatik olarak yeniden deneyecek.",
+    "offline": "{{name}} çevrimdışı. Sunucuda Praxi servisinin çalıştığını kontrol et. Uygulama kendiliğinden yeniden dener.",
     "updateApp": "Güncelleme gerekli: bu uygulama ({{local}}), {{name}} ({{host}}) sunucusundan eski. {{name}} ile çalışmak için bu uygulamayı güncelle.",
     "updateHost": "Güncelleme gerekli: {{name}} ({{host}}), bu uygulamadan ({{local}}) eski. {{name}} sunucusunu bu uygulamaya uyacak şekilde güncelle.",
-    "useThisComputer": "Bu bilgisayarı kullan",
     "versionBlocking": "Bu uygulama ({{local}}) ile {{name}} ({{host}}) farklı sürümlerde. Sunucuyu kullanmadan önce ikisini aynı sürüme getir.",
     "versionWarning": "Uygulama {{local}}, {{name}} {{host}}: küçük bir fark, her şeyin çalışması beklenir."
   },
@@ -5217,20 +5328,17 @@
     "backToChat": "Sohbete dön",
     "captureTab": "Tab tuşunu yakala",
     "chat": {
-      "approve": "Onayla",
       "button": "Sohbet",
       "close": "Sohbeti kapat",
       "collapse": "Sohbeti daralt",
       "expand": "Sohbeti büyüt",
-      "reject": "Reddet",
       "replying": "Bot yanıt yazıyor…",
       "title": "Botla sohbet",
       "working": "Bot çalışıyor…"
     },
-    "checkingTargets": "Ekranlar denetleniyor…",
+    "checkingTargets": "Ekran aranıyor…",
     "clearForeignPause": "{{owner}} duraklatmasını kaldır",
     "clearPauseAction": "Duraklatmayı kaldır",
-    "close": "Görünümü kapat",
     "connectionLost": "Ekran bağlantısı koptu. Yeniden bağlanılıyor…",
     "dismissKeepsControl": "Kapatmak yalnızca görünümü gizler: kontrol sende kalır. Panelden Bitirdim veya Yeniden dene'yi kullan.",
     "dock": {
@@ -5238,7 +5346,6 @@
       "watching": "Sadece izliyorsun"
     },
     "doneAction": "Bitirdim",
-    "doneLabel": "Bitirdim",
     "emergencyStop": "Tüm botları durdur",
     "emergencyStopHint": "Her bot o an yaptığı işi hemen bırakır.",
     "errors": {
@@ -5248,7 +5355,7 @@
       "recover_failed": "Kontrol kurtarılamadı. Yeniden dene.",
       "release_failed": "Kontrol geri verilemedi. Bot duraklatılmış kalır; Bitirdim'i yeniden dene.",
       "release_interrupted": "Bitirdim tamamlanmadan devralma kesildi, bu yüzden geri verme tamamlanmadı. Botun devam etmesi için duraklatmayı kaldır veya kontrolü yeniden devral.",
-      "release_unconfirmed": "Arka plan servisi devralmanı hâlâ etkin gösteriyor. Bitirdim'i yeniden dene.",
+      "release_unconfirmed": "Yerel servis hâlâ ekranı senin kontrol ettiğini sanıyor. Bitirdim'e yeniden bas.",
       "server_restarting": "Sunucu yeniden başlatılıyor olabilir. Çevrimiçi olduğunda yeniden dene.",
       "takeover_failed": "Kontrol devralınamadı. Yeniden dene.",
       "timeout": "Ekran zamanında başlatılamadı.",
@@ -5260,7 +5367,6 @@
     "focusTrapHint": "Klavye ekrana gider. Çıkmak için Shift+Esc.",
     "globalPauseNotice": "Devralma veya durdurma işlemi tüm bot çalışmalarını genel olarak duraklatır.",
     "handBackAction": "Bota geri ver",
-    "hostLabel": "Sunucu: {{host}}",
     "infoPanel": "Bot bilgisi",
     "interactive": "Etkileşimli",
     "kind": {
@@ -5297,7 +5403,7 @@
       "wait": "Sunucu ekranını hâlâ kontrol ediyor. Birkaç saniye bekleyip yenile.",
       "wayland": "Sunucunun masaüstünü X11 oturumuna geçir, sonra ekranı yeniden aç."
     },
-    "noTargets": "Henüz bildirilen bir ekran hedefi yok.",
+    "noTargets": "Henüz gösterilecek ekran yok.",
     "openScreen": "Ekranı aç",
     "otherOwner": "Kontrol {{owner}} tarafında",
     "outcomeHint": "Ne tamamladın? (isteğe bağlı)",
@@ -5357,7 +5463,6 @@
       "unsupported": "Bu hedef için ekran akışı desteklenmiyor."
     },
     "reconnecting": "Ekran akışına yeniden bağlanılıyor…",
-    "recoverAction": "Duraklatmayı kaldır (bot yeniden çalışabilir)",
     "refresh": "Ekran listesini yenile",
     "releaseFocus": "Klavyeden çık",
     "releaseOnClose": "Kapatmak önce kontrolü bota geri verir.",
@@ -5508,18 +5613,15 @@
     "title": "Son günlükleri görüntüle"
   },
   "main": {
-    "clearSelection": "Genel görünüme dön",
-    "daemonConnectingDescription": "Bu bilgisayardaki yerleşik Praxi-Bot arka plan servisine bağlanılıyor.",
+    "daemonConnectingDescription": "Bu bilgisayardaki Praxi servisine bağlanılıyor.",
     "daemonConnectingTitle": "Yerel servis başlatılıyor…",
-    "daemonOfflineDescription": "Praxi-Bot'un arka plan servisi yanıt vermiyor. Birkaç saniye bekleyip yeniden dene. Sorun sürerse bir güvenlik duvarının Praxi-Bot'u engellemediğini kontrol et veya uygulamayı yeniden başlat.",
-    "daemonOfflineTitle": "Yerel arka plan servisi çalışmıyor",
+    "daemonOfflineTitle": "Yerel servis çalışmıyor",
     "daemonRetry": "Bağlantıyı yeniden dene",
     "runSetupWizard": "Kurulum sihirbazını çalıştır",
-    "selectBotDescription": "Soldan bir bot seç ya da yeni bir bot oluştur.",
-    "selectBotTitle": "Konuşmak için bir bot seç",
-    "selectedBotLabel": "Etkin bot profili",
-    "welcomeDescription": "Üç kısa adımda ilk botun çalışmaya hazır.",
-    "welcomeTitle": "İlk botunu hazırlayalım"
+    "selectBotDescription": "Soldan bir bot seç ya da yeni bot oluştur.",
+    "selectBotTitle": "Sohbet için bir bot seç",
+    "welcomeDescription": "Üç kısa adım. Sonra botun çalışmaya hazır.",
+    "welcomeTitle": "İlk botunu kuralım"
   },
   "memory": {
     "add": "Hafızaya ekle",
@@ -5690,6 +5792,22 @@
     "when_month": "Son 30 gün",
     "when_week": "Son 7 gün"
   },
+  "missionChat": {
+    "eyebrow": "Görev",
+    "needsGoal": "/görev yazdıktan sonra işi yaz, örneğin: /görev Bu 20 dizin sitesine kaydol.",
+    "open": "Görevi aç",
+    "openAnswers": "Yanıtla ({{count}})",
+    "openAnswers_one": "Yanıtla ({{count}})",
+    "openAnswers_other": "Yanıtla ({{count}})",
+    "openReport": "Raporu gör",
+    "panelEmpty": "Henüz görev yok: sohbete /görev ve işi yaz ya da uzun bir işi doğrudan iste.",
+    "slash": "Görev başlat: bot uzun bir işi kendi başına bitirir (/görev de yazabilirsin)",
+    "startFailed": "Görev başlatılamadı: {{reason}}",
+    "startInChat": "Şimdi başlat",
+    "waiting": "Bekleyenler ({{count}})",
+    "waiting_one": "Bekleyenler ({{count}})",
+    "waiting_other": "Bekleyenler ({{count}})"
+  },
   "missions": {
     "chip": {
       "done": "Bitti",
@@ -5786,14 +5904,6 @@
     "sessions": "{{count}} oturum",
     "sessions_one": "{{count}} oturum",
     "sessions_other": "{{count}} oturum",
-    "start": {
-      "button": "Başlat",
-      "goalLabel": "Bot ne yapsın?",
-      "help": "Tüm işi bir kez anlat; bot başta ihtiyaç duyduklarını sorar, sonra iş bitene kadar çalışır ve sana rapor verir.",
-      "placeholder": "Örneğin: dükkânımı şu 15 sitede kaydet ve hangilerinin olduğunu söyle.",
-      "starting": "Başlatılıyor…",
-      "summary": "Görev başlat"
-    },
     "stop": "Durdur",
     "stopConfirm": "Bu görev tamamen durdurulsun mu?",
     "stopNo": "Devam etsin",
@@ -5825,11 +5935,9 @@
     "connectModel": "Model bağla",
     "connectTitle": "Sohbete başlamak için bir model bağla",
     "empty": "Eşleşen model yok.",
-    "engineError": "Bu CLI bağlanamadı.",
     "hint": {
       "new": "Yeni"
     },
-    "howToInstall": "Nasıl kurulur",
     "install": "{{name}} kur",
     "levels": {
       "high": "Yüksek",
@@ -5840,9 +5948,9 @@
     "listAge": "{{hours}} sa önce güncellendi",
     "listBundled": "Yerleşik yedek liste: CLI'ya sorulamadı.",
     "listFresh": "Az önce güncellendi",
+    "missingCliShort": "{{name}} · {{server}} üzerinde hazır değil",
     "noModels": "Kullanmak için aramaya model kimliği yaz.",
     "none": "Model yok",
-    "notOnServer": "{{name}} · {{server}} üzerinde henüz yok",
     "noteLocalClis": "Bu bilgisayardaki abonelik CLI'ları, bot “bu bilgisayarda” çalışırken kullanılır.",
     "otherId": "“{{id}}” modelini {{provider}} ile kullan",
     "recent": "Son kullanılanlar",
@@ -5852,6 +5960,7 @@
     "search": "Model ara",
     "sectionApi": "API sağlayıcıları",
     "sectionCli": "Kodlama CLI'ları (aboneliğin)",
+    "setUpCli": "Kurulum",
     "showAll": "Tüm modeller ({{count}})",
     "switched": "{{model}} modeline geçildi",
     "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı",
@@ -5876,8 +5985,8 @@
     "costUnavailable": "Maliyet alınamadı",
     "count": "{{total}} bottan {{shown}} tanesi gösteriliyor",
     "dailyLimit": "{{name}} için günlük harcama",
-    "emptyHint": "Araştırma, günlük işler veya kendi fikirleriniz için size yardımcı olacak bir bot oluşturun.",
-    "emptyTitle": "İlk botunuzu oluşturun",
+    "emptyHint": "Araştırma, günlük işler veya kendi fikirlerin için bir bot oluştur.",
+    "emptyTitle": "İlk botunu oluştur",
     "filter": "Durum",
     "grid": "Kart görünümü",
     "lastActivity": "Son etkinlik",
@@ -5907,7 +6016,7 @@
     },
     "stale": "Canlı güncellemeler kesildi. Son bilinen bilgiler gösteriliyor; değişiklik yapmadan önce yeniden bağlanın.",
     "status": {
-      "approval": "Yanıtınızı bekliyor",
+      "approval": "Onayın gerekli",
       "idle": "Boşta",
       "paused": "Duraklatıldı",
       "running": "Çalışıyor"
@@ -5925,28 +6034,42 @@
       "question": "Soru"
     },
     "open": "Sohbeti aç",
-    "subtitle": "Tüm sohbetlerde bekleyen onaylar ve sorular.",
+    "subtitle": "Tüm sohbetlerdeki onaylar ve sorular.",
     "title": "Senden bekleyenler"
   },
   "newBot": {
-    "advanced": "Gelişmiş ayarlar",
-    "advancedHint": "Talimatlar, resim, modeller, ayrıntılı izinler, uygulamalar",
-    "blankHint": "Sıfırdan başla: adını, görünümünü ve neler yapabileceğini sen seçersin.",
-    "blankTitle": "Boş bot",
     "brain": "Yapay zekâ",
     "brainAuto": "Otomatik",
     "brainHint": "Sonradan sohbetten değiştirebilirsin",
-    "changeLook": "Adı ya da görünümü değiştir",
     "create": "Oluştur",
     "creating": "Oluşturuluyor…",
-    "importHint": "Biri seninle bir bot profili dosyası paylaştıysa. Bir şey oluşturulmadan önce gözden geçirirsin.",
-    "importTitle": "Paylaşılan bir botu içe aktar",
     "nameNeeded": "Oluşturmak için botuna bir ad ver.",
     "namePlaceholder": "Bot adı",
-    "next": "İleri",
-    "quickLooks": "Hazır görünümler:",
-    "readyHint": "Talimatları ve dikkatli izinleriyle gelir. Bot oluşturulmadan önce her şeyi gözden geçirirsin.",
-    "readyTitle": "Hazır botlar",
+    "quick": {
+      "accessHelp": "Bu seviye ne demek?",
+      "brainDefault": "Varsayılanın: {{model}}",
+      "fromFile": "Dosyadan içe aktar",
+      "general": "Genel yardımcı",
+      "more": "Diğer seçenekler",
+      "moreHint": "Yapay zekâ, talimatlar, resim, uygulamalar, izinler",
+      "moreHintTemplate": "Yapay zekâ, neyle geldiği",
+      "namePlaceholder": "Botuna bir ad ver",
+      "purpose": {
+        "coder": "Kodunu okur ve düzenler",
+        "daily-briefing": "Her sabah haber ve görevler",
+        "family-helper": "Günlük işlerde sade yardım",
+        "general": "Ne istersen yardım eder",
+        "inbox-triage": "Postayı ayıklar, taslak yazar",
+        "researcher": "Araştırır, kaynak gösterir"
+      },
+      "review": "Neyle geldiğini gör",
+      "subtitle": "Adını koy, ne yapacağını seç, oluştur.",
+      "surprise": "Şaşırt beni: başka bir şekil ve renk",
+      "templateCap": "{{name}} en çok {{level}} düzeyine çıkar.",
+      "templateCli": "Hazır bir bot komut satırı motoruyla çalışamaz. Diğer seçenekler'den başka bir yapay zekâ seç.",
+      "templateNote": "{{name}} kendi talimatları ve izinleriyle gelir. Oluşturduktan sonra değiştirebilirsin.",
+      "what": "Ne yapsın?"
+    },
     "shapeGroup": "Karakter şekli",
     "shapes": {
       "boulder": "Fasulye",
@@ -5966,25 +6089,6 @@
       "star": "Yıldız",
       "tri": "Üçgen"
     },
-    "stepHints": {
-      "access": "Yapay zekasını ve ne kadar serbest çalışacağını seç, sonra oluştur.",
-      "identity": "Bir ad ve görünüm ver. İkisini de sonra değiştirebilirsin.",
-      "start": "Sıfırdan, hazır bir botla ya da paylaşılan bir dosyadan başla."
-    },
-    "steps": {
-      "access": "Neler yapabilir",
-      "identity": "Ad ve görünüm",
-      "start": "Başlangıç"
-    },
-    "stepsLabel": "Adımlar",
-    "templates": {
-      "assistant": "Asistan",
-      "blank": "Boş",
-      "coder": "Kodcu",
-      "researcher": "Araştırmacı",
-      "social": "Sosyal"
-    },
-    "templatesLabel": "Şablonlar",
     "title": "Yeni bot"
   },
   "notify": {
@@ -6041,9 +6145,9 @@
     "clear": "Temizle",
     "clearedToast": "Bildirimler temizlendi",
     "dismiss": "Kapat",
-    "empty": "Bir bot işini bitirince, sana bir şey sorunca ya da bir işte başarısız olunca burada görürsün.",
+    "empty": "Bot bir işi bitirince, sana bir şey sorunca ya da hata verince burada görürsün.",
     "emptyAction": "Bildirim ayarları",
-    "emptyTitle": "Bildirim yok",
+    "emptyTitle": "Henüz bildirim yok",
     "filterChip": {
       "all": "Tümü",
       "errors": "Başarısız",
@@ -6209,6 +6313,43 @@
     "switchBot": "{{name}} botuna geç",
     "title": "Komut paleti"
   },
+  "panelTabs": {
+    "browser": {
+      "caution": "Giriş yapılan sitelerde bot senin adına işlem yapabilir.",
+      "searchSites": "Sitelerde ara",
+      "status": {
+        "signingIn": "Giriş yapılıyor…",
+        "sites": "{{count}} kayıtlı site",
+        "sites_one": "{{count}} kayıtlı site",
+        "sites_other": "{{count}} kayıtlı site",
+        "unavailable": "Site adları okunamıyor"
+      }
+    },
+    "library": {
+      "keeps": "Sakladıkları",
+      "knows": "Bildikleri",
+      "learned": "Öğrendi",
+      "searchDocuments": "Belgelerde ara",
+      "searchNotes": "Notlarda ara",
+      "searchSkills": "Yeteneklerde ara"
+    },
+    "list": {
+      "found": "{{count}} sonuç",
+      "found_one": "{{count}} sonuç",
+      "found_other": "{{count}} sonuç",
+      "noMatches": "Aramana uyan bir şey yok.",
+      "showAll": "Tümünü göster ({{count}})",
+      "showFewer": "Daha az göster"
+    },
+    "mail": {
+      "more": "Daha fazla",
+      "status": {
+        "problem": "İlgilenmen gerekiyor",
+        "secretMissing": "Parola eksik",
+        "untested": "Henüz denenmedi"
+      }
+    }
+  },
   "pastedSecret": {
     "back": "Düzenlemeye devam et",
     "body": "Mesajınız şunu içeriyor gibi görünüyor: {{kinds}}. Gönderdiğiniz her şey yapay zekâ sağlayıcısına gider ve sohbet geçmişinde kalır.",
@@ -6256,7 +6397,7 @@
     "chatFallbackTitle": "Sohbet penceresi",
     "connecting": "Bağlanıyor...",
     "focusFailed": "Ana pencere gösterilemedi. Sistem tepsisinden açın.",
-    "focusMain": "Ana pencereye geç",
+    "focusMain": "Ana pencereyi göster",
     "openChat": "Yeni pencerede aç",
     "openChatTooltip": "Sohbeti yeni pencerede aç",
     "openFailed": "Yeni pencere açılamadı. Lütfen yeniden deneyin.",
@@ -6293,8 +6434,6 @@
     "exportHint": "Bu botun paylaşılabilir profilini kaydet: ad, yönergeler, model seçimi, araçlar ve izin düzeyi. Asla gizli anahtarlar, bellek, sohbetler, klasörler veya cihazlar yok.",
     "exportSaveFirst": "Önce değişikliklerinizi kaydedin: profil, kayıtlı bottan oluşturulur.",
     "exported": "{{name}} profili dosya olarak kaydedildi.",
-    "galleryLabel": "Bir şablonla başla",
-    "importFromFile": "Dosyadan içe aktar…",
     "level": "En yüksek izin düzeyi",
     "levelHint": "Dosya ne isterse istesin, bot bundan fazlasına sahip olmaz.",
     "levelLine": "Dosya “{{requested}}” istiyor. Bot “{{granted}}” alacak.",
@@ -6392,7 +6531,10 @@
       "bot": "Bot oluşturulamadı. Hiçbir şey başlatılmadı. Yeniden deneyin.",
       "chat": "Bot oluşturuldu ama sohbeti açılamadı. Yeniden deneyin; ikinci bir bot oluşturulmaz.",
       "check": "Bazı cevaplar eksik. Geri dönüp doldurun.",
-      "message": "Bot ve sohbeti hazır ama görev gönderilemedi. Yeniden deneyin; hiçbir şey iki kez oluşturulmaz."
+      "goal": "Görev metni uzun bir görev için çok uzun. Geri dönüp cevaplarınızı kısaltın. Hiçbir şey oluşturulmadı.",
+      "level": "Bot daha önce başka bir düzeyde oluşturuldu. Devam etmek için o düzeye dönün ya da bu pencereyi kapatıp baştan başlayın.",
+      "message": "Bot ve sohbeti hazır ama görev gönderilemedi. Yeniden deneyin; hiçbir şey iki kez oluşturulmaz.",
+      "mission": "Bot hazır ama uzun görev başlatılamadı. Yeniden deneyin; ikinci bir bot ya da görev oluşturulmaz."
     },
     "hints": {
       "pick": "İstediğiniz şeyi seçin. Hiçbir şey oluşturulmadan önce her şeyi gözden geçirirsiniz.",
@@ -6401,6 +6543,7 @@
     },
     "levelRaised": "Bu hedefin istediğinden ({{level}}) daha serbest bir düzey seçtiniz. Bot size daha seyrek soracak.",
     "levelTitle": "Ne kadar serbest çalışsın",
+    "missionHint": "{{level}} düzeyinde bu hedef uzun bir görev olarak çalışır: yeniden başlatmalarda kaybolmayan bir iş listesiyle bitene kadar sürer. Daha düşük düzeyde tek bir sohbet görevi olarak çalışır.",
     "need": {
       "app": {
         "fix": "Uygulama bağla",
@@ -6435,6 +6578,7 @@
       "bot": "\"{{name}}\" adında yeni bir bot.",
       "folder": "Bot yalnızca {{folder}} içinde okuyup yazabilir.",
       "later": "Botun adını, görünümünü ve ayarlarını sonradan değiştirebilirsiniz.",
+      "mission": "\"{{name}}\" görevi kendi sohbetinde uzun bir görev olarak hemen başlar: bot işi listeler, sormadan sırayla yürütür ve sonunda rapor verir.",
       "ownMail": "Botun için bağladığınız posta kutusunu kullanır, kişisel hesaplarınızı asla.",
       "task": "\"{{name}}\" görevi yeni bir sohbette hemen başlar."
     },
@@ -6520,7 +6664,6 @@
     "exportMarkdown": "Metin olarak kaydet",
     "exported": "Rapor kaydedildi",
     "footer": "Praxi ile hazırlandı. Özel ayrıntılar dışarıda bırakıldı.",
-    "hint": "Botun bu çalışmada neler yaptığını adım adım gör",
     "noRecordedSteps": "Bu çalışmanın adım geçmişine ulaşılamıyor.",
     "noSteps": "Bot bu çalışmada hiçbir araç kullanmadı.",
     "outcome": "Sonuç",
@@ -6547,7 +6690,7 @@
     "stopping": "Durduruluyor…",
     "waitAnswer": "Yanıtını bekliyor: {{question}}",
     "waitLost": "Burada gösterilemeyen bir yanıt bekleniyor. Devam etmek için çalışmayı durdur.",
-    "waiting": "Onayını bekliyor: {{step}}",
+    "waiting": "Onayın gerekli: {{step}}",
     "working": "Çalışıyor…"
   },
   "safeMode": {
@@ -6571,6 +6714,22 @@
       "hint": "Servisi araçlar, zamanlamalar ve kanallar kapalı başlatır; sorunu düzeltebilirsin. Hiçbir şey silinmez."
     }
   },
+  "scheduleEditor": {
+    "changeZone": "Saat dilimini değiştir",
+    "examples": "Örnekler:",
+    "more": "Diğer seçenekler",
+    "moreLine": "Haber ver: {{notify}} · {{zone}}",
+    "summary": {
+      "daily": "Her gün saat {{time}}, {{zone}}",
+      "monthly": "Her ayın {{day}}. günü saat {{time}}, {{zone}}",
+      "once": "Bir kez: {{date}}, saat {{time}}, {{zone}}",
+      "onceNoDate": "Bir kez, saat {{time}}, {{zone}}: günü seç",
+      "weekdays": "Hafta içi her gün saat {{time}}, {{zone}}",
+      "weekly": "Her {{weekday}} saat {{time}}, {{zone}}"
+    },
+    "whatPlaceholder": "Örneğin: gelen kutumu kontrol et ve yenileri özetle.",
+    "whatToDo": "Bot ne yapsın?"
+  },
   "schedules": {
     "bot": "Bot",
     "calendar": {
@@ -6593,8 +6752,8 @@
     "durationSeconds": "{{seconds}} sn",
     "edit": "Düzenle",
     "empty": {
-      "hint": "Bir botun bir istemi otomatik çalıştırması için oluştur; örneğin hafta içi her gün 09:00.",
-      "noBots": "Önce bir bot oluştur, sonra onun için bir şey zamanla.",
+      "hint": "Botun bir istemi belirli aralıklarla çalıştırsın diye bir görev oluştur; örneğin hafta içi her gün 09:00.",
+      "noBots": "Önce bir bot oluştur, sonra onun için bir görev zamanla.",
       "title": "Henüz zamanlanmış görev yok"
     },
     "enabled": "Etkin",
@@ -6634,7 +6793,12 @@
       },
       "invalid": {
         "bot": "Bir bot seç.",
+        "checklist": "Kontrol listesini yaz.",
         "cron": "Bir cron ifadesi gir.",
+        "hoursEnd": "Bitiş saatini gir (ör. 22:00; başlangıçla aynı olmasın).",
+        "hoursStart": "Başlangıç saatini gir (ör. 08:00).",
+        "hoursTz": "Etkin saatler için bilinen bir saat dilimi seç.",
+        "maxRuns": "Günlük çalışma sayısı 1 ile 288 arasında olmalı.",
         "name": "Zamanlamaya bir ad ver.",
         "prompt": "Botun ne yapacağını yaz.",
         "text": "Ne zaman çalışacağını yaz."
@@ -6642,9 +6806,7 @@
       "keepHint": "Şöyle kalır: {{spec}}",
       "kind": {
         "cron": "Cron",
-        "keep": "Mevcut kalsın",
-        "natural": "Yazarak anlat",
-        "simple": "Kolay"
+        "keep": "Mevcut kalsın"
       },
       "misfire": "Planlanan zamanda bilgisayar kapalıysa",
       "misfireHint": "Çalışma zamanı geldiğinde bilgisayar kapalı ya da uykudaysa ne olacağını belirler.",
@@ -6666,8 +6828,8 @@
         "never": "Hiçbir zaman",
         "problems": "Sadece bir sorun olursa"
       },
-      "parsedAs": "Şöyle anlaşıldı: {{what}}",
       "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
+      "payloadKeptStanding": "Bu kalıcı talimatı bir bot, onayından sonra oluşturdu. Kontrol listesini burada değiştiremezsin.",
       "preview": "Önizle",
       "prompt": "İstem",
       "promptHint": "Bottan her seferinde yapması istenen şey.",
@@ -6677,9 +6839,22 @@
         "past": "Bu zaman geçti. Daha ileri bir zaman seçin.",
         "time": "09:00 gibi bir saat seçin."
       },
-      "templates": {
-        "hint": "Formu doldurmak için birini seçin. Sonra her şeyi değiştirebilirsiniz.",
-        "title": "Bir örnekle başla"
+      "standing": {
+        "activeHours": "Yalnızca belirli saatlerde",
+        "checklist": "Kontrol listesi",
+        "checklistHint": "Bot her çalışmada bunu kontrol eder. Yalnızca bir şey gerekince haber verir.",
+        "from": "Başlangıç",
+        "hoursHint": "Gece yarısını geçebilir (bitiş hariçtir). Bu pencere dışında zamanlanmış tetiklemeler atlanır. Şimdi çalıştır yine de çalışır.",
+        "hoursZone": "Etkin saat dilimi",
+        "maxRuns": "Günde kaç kez",
+        "maxRunsHint": "Varsayılan 24, en fazla 288 (beş dakikada bir).",
+        "to": "Bitiş"
+      },
+      "taskKind": {
+        "label": "Ne tür bir görev?",
+        "prompt": "Her seferinde bota sor",
+        "standing": "Kalıcı talimat (yalnızca bir şey gerekince haber verir)",
+        "standingHint": "Her çalışma OK (bildirim yok) ya da NEEDS_OWNER (haber alırsın) ile biter."
       },
       "text": "Zamanlama cümlesi",
       "textHint": "Türkçe ya da İngilizce. Saatler {{tz}} diliminde.",
@@ -6688,7 +6863,6 @@
       "tz": "Saat dilimi",
       "tzCronHint": "Cron ifadesinde saat dilimi belirtilmemiş 5 alan varsa kullanılır.",
       "tzSearch": "Saat dilimi ara, örn. Europe/Istanbul",
-      "tzShown": "Saatler {{tz}} dilimine göre.",
       "tzUnknown": "Bilinen bir saat dilimi değil. Listeden seçin.",
       "weekday": "Haftanın hangi günü?",
       "when": "Ne zaman"
@@ -6703,16 +6877,15 @@
     "newNeedsBot": "Önce bir bot oluştur, sonra onun için bir şey zamanlayabilirsin.",
     "nextRuns": "Sonraki 5 çalışma",
     "nextRunsEmpty": "Yaklaşan çalışma yok.",
-    "noRuns": "Henüz çalışma görülmedi.",
     "openRun": "Aç",
     "originBot": "Bot oluşturdu",
     "originBotHint": "Onayınla bir bot oluşturdu. Botlar yalnızca kendi oluşturdukları zamanlamaları değiştirebilir.",
     "payload": {
+      "standingOrder": "Kalıcı talimat: {{text}}",
       "tool": "{{name}} aracını çağırır",
       "unknown": "Özel görev",
       "workflow": "{{name}} iş akışını çalıştırır"
     },
-    "recentRuns": "Son çalışmalar",
     "reclaim": "Bu bilgisayara geri getir",
     "reclaimAnyway": "Yine de geri getir",
     "reclaimUnreachable": "{{name}} yanıt vermedi; oradaki kopya hâlâ çalışıyor olabilir. Şimdi geri getirirsen iki bilgisayarda da çalışabilir.",
@@ -6756,6 +6929,14 @@
       },
       "unknown": "Özel zamanlama"
     },
+    "standing": {
+      "runsToday": "Bugün {{runs}} / {{cap}} çalışma",
+      "verdict": {
+        "needs_owner": "Son: senden bir şey istiyor",
+        "ok": "Son: sorun yok",
+        "unclear": "Son: net yanıt yok"
+      }
+    },
     "subtitle": "Botlarının zamanlayıcıyla yaptığı işler: her sabah, her saat ya da bir kez.",
     "title": "Zamanlanmış görevler",
     "viewCalendar": "Takvim",
@@ -6763,7 +6944,6 @@
     "viewList": "Liste"
   },
   "secretRequest": {
-    "allowHint": "İkisini de boş bırakırsanız, Ayarlar'dan bir yer ekleyene kadar bot bunu hiçbir yerde kullanamaz.",
     "cancel": "İptal",
     "cancelled": "İptal edildi. Hiçbir şey kaydedilmedi.",
     "closed": "Bu istek artık açık değil.",
@@ -6775,10 +6955,8 @@
     "hostRefused": "{{name}} bunu kabul etmedi. Hiçbir şey kaydedilmedi.",
     "neverSeen": "Yazdığınızı bot görmez. Yalnızca kaydedilip kaydedilmediğini öğrenir.",
     "notConnected": "Hizmete bağlanılamadı. Uygulamayı yeniden açın veya tekrar deneyin.",
-    "origins": "Yazılabileceği web siteleri (isteğe bağlı, satır başına bir)",
     "parked": "Bu istek uzun süren bir görevden geliyor. Görev yalnızca bu maddede bekliyor, diğer işlere devam ediyor. Cevabınız bu maddeyi yeniden başlatır.",
     "password": "Parola",
-    "programs": "Yazılabileceği programlar (isteğe bağlı)",
     "purposeLabel": "Bot tarafından yazıldı (Praxi doğrulamaz):",
     "replaces": "Bu işlem {{name}} için kayıtlı değerin yerine geçer.",
     "stored": "Kasaya kaydedildi. Bota kaydedildiği bildirildi.",
@@ -6860,7 +7038,7 @@
     "add": "Sunucu ekle",
     "alreadyHere": "Zaten {{name}} üzerindesin.",
     "checkNow": "Bu sunucuya geç",
-    "empty": "Henüz sunucu yok. Sorun değil: botların bu bilgisayarda çalışıyor.",
+    "empty": "Henüz sunucu yok. Botların zaten bu bilgisayarda çalışıyor.",
     "lead": "Sunucular, bu bilgisayar kapalıyken botlarını çalışır tutar.",
     "remove": "Kaldır",
     "removeBody": "Bu bilgisayar sunucuyu ve eşleşmesini unutur. Sunucunun kendisine, botlarına ve dosyalarına dokunulmaz; çalışmaya devam ederler. Sonra yeniden ekleyebilirsin.",
@@ -6898,24 +7076,16 @@
   },
   "settings": {
     "accent": {
-      "custom": "Özel renk",
-      "description": "Etkileşimli öğeler ve etkin göstergeler için bir vurgu rengi seç.",
       "presets": {
         "amber": "Kehribar",
         "blue": "Okyanus mavisi",
         "emerald": "Zümrüt",
         "rose": "Gül",
         "violet": "Mor"
-      },
-      "reset": "Tema varsayılanına sıfırla",
-      "title": "Vurgu rengi"
+      }
     },
     "autostart": {
       "description": "Windows'ta oturum açtığında Praxi-Bot otomatik olarak açılır. Varsayılan olarak kapalıdır, yalnızca kendi Windows hesabını etkiler ve yönetici izni gerektirmez. İstediğin zaman buradan kapatabilirsin.",
-      "disable": "Otomatik başlatmayı kapat",
-      "disabled": "Kapalı (varsayılan)",
-      "enable": "Otomatik başlatmayı aç",
-      "enabled": "Açık",
       "error": "Windows otomatik başlatma ayarı güncellenemedi.",
       "title": "Oturum açılışında başlat"
     },
@@ -6963,7 +7133,6 @@
       "title": "Günlük özet"
     },
     "hotkey": {
-      "currentLabel": "Aktif kısayol",
       "description": "Aktif bot çalışmalarını iptal eder. Windows masaüstü uygulamasında başka uygulamalar odaktayken de çalışır; diğer platformlarda Praxi-Bot odakta olmalıdır.",
       "presets": {
         "altShiftS": "Alt+Shift+S",
@@ -6972,7 +7141,6 @@
       },
       "record": "Kısayol kaydet",
       "recording": "Değiştirici + tuşa bas…",
-      "reset": "Ctrl+Alt+Esc varsayılanına sıfırla",
       "title": "Tümünü durdur kısayolu"
     },
     "keepInTray": {
@@ -7005,12 +7173,9 @@
       "title": "Bildirimler"
     },
     "onboarding": {
-      "description": "Model sağlayıcısını, güvenlik varsayılanlarını veya ilk botunu yapılandırmak için 5 adımlı rehberli kurulumu yeniden aç.",
+      "description": "Model bağlamak, güvenlik varsayılanlarını ayarlamak veya ilk botunu oluşturmak için kurulum sihirbazını yeniden aç.",
       "restart": "Kurulum sihirbazını yeniden çalıştır",
       "resume": "Kurulum sihirbazına devam et",
-      "statusCompleted": "Tamamlandı",
-      "statusPending": "Henüz tamamlanmadı",
-      "statusSkipped": "5 adımın {{step}}. adımında duraklatıldı",
       "title": "İlk kurulum sihirbazı"
     },
     "permissions": {
@@ -7068,7 +7233,6 @@
       "noModel": "model yok",
       "none": "Henüz sağlayıcı yapılandırılmadı.",
       "notLoaded": "Henüz yüklenmedi",
-      "offline": "Yerel servis çalışmıyor. Sağlayıcıları yönetmek için yeniden başlat.",
       "provider": "Sağlayıcı",
       "restart": "Arka plan servisini yeniden başlat",
       "restartHint": "Değişikliğin geçerli olması için arka plan servisini yeniden başlat.",
@@ -7097,15 +7261,7 @@
     "route": {
       "title": "Yönlendirme"
     },
-    "subtitle": "Tema modunu, vurgu rengini, arka plan görselini ve arayüz dilini özelleştir.",
-    "theme": {
-      "dark": "Koyu",
-      "description": "Açık, koyu veya sistem renk şeması arasında geçiş yap.",
-      "light": "Açık",
-      "system": "Sistem",
-      "title": "Tema modu"
-    },
-    "title": "Görünüm ve ayarlar"
+    "theme": {}
   },
   "settingsModal": {
     "ai": {
@@ -7115,14 +7271,11 @@
       },
       "detected": {
         "copied": "Komut kopyalandı",
-        "copyCommand": "Komutu kopyala",
         "copyDetails": "Ayrıntıları kopyala",
-        "description": "Bu bilgisayarda oturum açtığın yapay zekâ uygulamaları kendiliğinden açılır. Birini kapatırsan kapalı kalır.",
+        "description": "Tüm kodlama CLI'ları tek listede: bu bilgisayar ve sunucun. İşlemler her satırın menüsünde.",
         "detailsCopied": "Ayrıntılar kopyalandı",
-        "detailsToggle": "Ayrıntılar",
         "detectError": "Kurulu kodlama araçları denetlenemedi.",
         "dismissExpired": "Süresi dolan onayı kapat",
-        "docs": "Belgeler",
         "enabledToast": "{{name}} etkinleştirildi.",
         "experimentalChip": "Deneysel",
         "install": "Kur",
@@ -7137,16 +7290,12 @@
           "powershell_missing": "PowerShell bulunamadı. Komutu kopyalayıp terminalinden çalıştır.",
           "timeout": "Kurulum on dakikayı aştığı için durduruldu. Yeniden denemeden önce çıktıyı kontrol et."
         },
-        "installLabel": "Kurulum komutu",
         "installRunning": "Kuruluyor… bu bölümden ayrılmak verilmiş onayı iptal etmez.",
         "installSummary": "{{engine}} kur veya güncelle",
-        "loginLabel": "Giriş için",
-        "moreEngines": "Kurabileceğin diğer motorlar ({{count}})",
         "noteNative": "Kendi araçlarıyla çalışır: botun Motor ayarlarından seç.",
         "noteUnsupported": "Praxi bunu algılıyor ama henüz motor olarak çalıştıramıyor.",
         "noteUnverified": "Doğrulanmamış komut: satıcı belgelerine bak, sonra kopyalayıp kendin çalıştır.",
         "offline": "Yerel servis çalışmıyor; algılanan kodlama araçları gösterilemiyor.",
-        "onThisComputer": "Bu bilgisayarda",
         "pathLabel": "Konum",
         "problem": "İşlem başarısız oldu.",
         "refresh": "Yeniden tara",
@@ -7159,8 +7308,7 @@
           "unsupported": "Henüz desteklenmiyor"
         },
         "termsNotice": "Sağlayıcının abonelik koşulları geçerlidir; etkinleştirmeden önce otomatik kullanıma izin verildiğini doğrula.",
-        "title": "Bu bilgisayarda bulunanlar",
-        "toggle": "{{name}} kullan"
+        "title": "Kodlama CLI'ları"
       },
       "keys": {
         "add": "Ekle",
@@ -7181,36 +7329,46 @@
     "calendar": {
       "add": "Takvimi ekle",
       "addTitle": "Takvim bağla",
+      "advanced": "Gelişmiş",
+      "advancedHint": "Takvim adresi, bot adı ve davet gönderen adresi.",
       "description": "Botların takvimini okuyup yönetebilsin.",
       "emailHint": "Davetler bu adresten gider. Kullanıcı adın zaten e-posta adresinse boş bırak.",
       "emailLabel": "E-posta adresin (isteğe bağlı)",
+      "emailShort": "Davet e-postaları için. Kullanıcı adın zaten bir adres ise boş bırak.",
       "empty": "Henüz bağlı bir takvim yok.",
       "loadError": "Takvimler yüklenemedi ({{message}}).",
       "nameHint": "Harf, rakam, - ve _ kullanabilirsin. Botlar takvimi bu adla seçer.",
       "nameLabel": "Botlar için ad",
+      "nameShort": "Harf, rakam, - ve _. Botlar bu adı kullanır.",
       "note": "Botların takvimine bakabilir, boş zaman bulabilir, etkinlik ekleyip taşıyabilir ve insanları davet edebilir. Parola güvenli depoda saklanır ve bir daha gösterilmez.",
       "passwordHint": "Normal parolanı değil, bir uygulama parolası kullan. Güvenli şekilde saklanır ve geri okunamaz.",
       "passwordLabel": "Uygulama parolası",
+      "passwordShort": "Normal parola değil, uygulama parolası kullan.",
       "pickHint": "Botların hangi takvimi kullansın, seç:",
       "presets": {
         "fastmail": {
           "hint": "Fastmail adresini ve takvim erişimi olan bir uygulama parolası kullan (Ayarlar, Gizlilik ve Güvenlik, Entegrasyonlar).",
+          "hintShort": "Fastmail adresi + takvim erişimli uygulama parolası.",
           "label": "Fastmail"
         },
         "google": {
           "hint": "Tam Gmail adresini ve bir uygulama parolası kullan (Google Hesabı, Güvenlik, Uygulama parolaları; 2 adımlı doğrulama gerekir). Google bazen takvimler için uygulama parolalarını reddeder. Deneme başarısız olursa muhtemel neden budur.",
+          "hintShort": "Tam Gmail + Google uygulama parolası (2 adımlı doğrulama gerekir).",
           "label": "Google Takvim"
         },
         "icloud": {
           "hint": "Apple Kimliğini ve uygulamaya özel bir parola kullan (account.apple.com, Oturum Açma ve Güvenlik).",
+          "hintShort": "Apple Kimliği + account.apple.com uygulama parolası.",
           "label": "iCloud (Apple)"
         },
         "nextcloud": {
           "hint": "Sunucunun adresini ve kullanıcı adını yaz. Uygulama parolasını Ayarlar, Güvenlik, Cihazlar ve oturumlar bölümünden oluştur.",
+          "hintShort": "Sunucu adı, kullanıcı adı ve Nextcloud uygulama parolası.",
           "label": "Nextcloud"
         },
         "other": {
           "hint": "Takvim hizmetinin verdiği CalDAV adresini yapıştır.",
+          "hintShort": "Sağlayıcının verdiği CalDAV adresini yapıştır.",
           "label": "Diğer (CalDAV)"
         }
       },
@@ -7220,6 +7378,7 @@
       "schedulingOff": "Bu hizmet davetleri kendisi göndermez; botun davetleri e-postayla gönderir (bunun için bir e-posta hesabı gerekir).",
       "schedulingOn": "Bu hizmet davetleri kendisi gönderir.",
       "serverLabel": "Nextcloud sunucun",
+      "serverShort": "Yalnızca sunucu adı, https:// olmadan.",
       "serviceLabel": "Takvim hizmeti",
       "test": "Bağlantıyı dene",
       "testFailed": "Deneme başarısız oldu: {{error}}",
@@ -7233,6 +7392,7 @@
       },
       "urlHint": "Senin için dolduruldu. Listeden doğru takvimi seçmek için bağlantıyı dene.",
       "urlLabel": "Takvim adresi",
+      "urlShort": "Senin için dolduruldu. Listeden seçmek için bağlantıyı dene.",
       "usernameLabel": "Kullanıcı adı"
     },
     "computer": {
@@ -7529,6 +7689,7 @@
       "allGood": "Her şey yolunda görünüyor",
       "checkedAt": "Son kontrol: {{time}}",
       "checks": {
+        "account_health": "Hesap oturumları",
         "browser": "Tarayıcı",
         "capabilities": "Yetenekler",
         "catalog_freshness": "Model kataloğu güncelliği",
@@ -7553,6 +7714,7 @@
       "description": "Botun neden çalışmadığını kontrol eder ve sık görülen sorunları düzeltir.",
       "empty": "Hiç denetim sonucu gelmedi",
       "hints": {
+        "account_health": "Bildirimde listelenen posta, Composio uygulamaları veya site oturumları için Uygulamalar ya da bot tarayıcı profilinden yeniden bağlan.",
         "browser": "Chrome, Edge ya da Chromium kur (snap paketini değil).",
         "catalog_freshness": "Önerilen model listesi 90 günden eski; güncel modelleri görmek için Praxi'yi güncelleyin veya `bot catalog check` çalıştırın.",
         "cli_accounts": "Bir kez terminal açıp CLI'da oturum aç (örneğin `claude` ya da `codex login`).",
@@ -7763,27 +7925,39 @@
     },
     "emailChannel": {
       "account": "İzlenecek posta kutusu",
+      "accountHint": "Yalnızca IMAP posta kutuları izlenebilir.",
       "approve": "Tam olarak bunu gönder",
       "bot": "Postaları alacak bot",
       "choose": "Seçin…",
       "deny": "Gönderme",
       "description": "Bir botun, posta kutunuzun tek bir klasöründeki yeni postaları görmesine izin verin.",
       "enable": "E-posta kanalını aç",
+      "enableHint": "Kapalıyken bota hiç posta iletilmez.",
       "folder": "İzlenecek klasör",
       "folderHint": "Genellikle INBOX. Yalnızca bunu açtıktan sonra gelen postalar iletilir.",
       "fromLine": "Gönderen: {{from}}. Gönderim modu: her gönderim onayınızı gerektirir.",
       "full": "Bota her postanın özetini değil tüm metnini göster",
+      "fullHint": "Açık değilse bot yalnızca kısa bir özet görür.",
       "ignored": "İzin verilmeyen göndericilerden gelen ve yok sayılan e-postalar: {{n}}",
       "needsSenders": "Bu kanal izinli gönderici listesi olmadan çalışıyordu, bu yüzden artık bota HİÇ e-posta iletmiyor. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne bota yazabilecek adresleri (örneğin kendi adresini) ekle. O zamana kadar gelen tüm e-postalar posta kutusunda okunmamış kalır.",
       "noAccount": "Önce yukarıdan bir posta kutusu ekleyin.",
-      "noSenders": "Seçilen posta kutusunda izinli gönderici yok, bu yüzden bota hiç e-posta ulaşmaz. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne kendi adresini ekle.",
       "note": "Postaları başkaları yazar; bu yüzden bot onları emir değil bilgi olarak ele alır. Varsayılan olarak yalnızca göndereni, konuyu ve ilk birkaç satırı görür. Ekler hiçbir zaman açılmaz. Yanıtlara izin verip her birini burada onaylamadıkça hiçbir şey gönderilmez.",
       "replies": "Botun yanıt önermesine izin ver (her yanıt gönderilmeden önce sizin onayınızı bekler)",
+      "repliesHint": "Önerilen her yanıt burada onayınızı bekler.",
       "running": "Çalışıyor",
       "save": "Kaydet",
       "saved": "Kaydedildi.",
       "sent": "E-posta gönderildi.",
       "skipped": "Art arda başarısız olduğu için bırakılan e-postalar (örneğin bot silinmiş): {{n}}",
+      "status": {
+        "needMailbox": "Önce bir posta kutusu seçin.",
+        "noSendersDetail": "Posta kutusu kartında izinli göndericileri ekleyin, sonra burada kaydedin.",
+        "noSendersTitle": "İzinli gönderici yok",
+        "off": "Kanal kapalı.",
+        "openMailbox": "Posta kutusu ayarlarını aç",
+        "stoppedHint": "Kanalı açın, posta kutusu ve bot seçin, sonra kaydedin.",
+        "unsaved": "Kaydedilmemiş değişiklikler — uygulamak için kaydedin."
+      },
       "stopped": "Çalışmıyor",
       "subject": "Konu: {{subject}}",
       "title": "Bota e-posta",
@@ -7843,6 +8017,10 @@
           "body": "Botların her seferinde sormadan çalışabildiği klasörler. Bunların dışındaki her şey için yine onayın gerekir.",
           "title": "Güvenilen klasörler"
         },
+        "mcpTrust": {
+          "body": "Sunucu her aracını salt okunur olarak işaretler ya da işaretlemez ve bunda yanılabilir. Hayır, güvenli varsayılan: her işlem önce sana sorar. Evet: yalnızca salt okunur işaretli araçlar sormadan çalışır; bir şeyi değiştiren ya da silen her işlem yine sorar. Bunu sonra uygulamanın ayarlarından değiştirebilirsin.",
+          "title": "Sunucuya güvenmek"
+        },
         "memory": {
           "body": "Bir botun, kendini tekrar etmek zorunda kalmaman için sakladığı bilgiler ve dosyalar. Bunlara bakabilir ve silebilirsin.",
           "title": "Hafıza ve bilgi"
@@ -7868,23 +8046,28 @@
       "colTime": "Zaman",
       "colTo": "Kime",
       "daily": "Posta kutusu başına günde şu sayının üstünde uyar (0 = hiç uyarma)",
+      "dailyHelp": "0 bu uyarıyı kapatır. Gönderimi engellemez.",
       "days": "Birine bu kadar gün içinde zaten yazdıysam uyar (0 = hiç uyarma)",
+      "daysHelp": "0 bu uyarıyı kapatır. Gönderimi engellemez.",
       "description": "Sınırlar, bir çıkış listesi ve botlarınızın gönderdiği her e-postanın günlüğü.",
       "export": "CSV olarak dışa aktar",
       "footer": "Çıkış satırının metni",
       "footerHint": "{sender} gönderen adresle değiştirilir. Satırı bot değil uygulama ekler ve bot onu silemez. Bir e-postayı satırsız göndermek için kartta onaylayabilirsiniz; kartta bir uyarı görünür. Program yanıtları okumaz: biri “DURDUR” diye yanıtlarsa adresini bu listeye kendiniz ekleyin.",
       "footerPlaceholder": "Boş bırakırsanız yerleşik metin kullanılır (Türkçe ve İngilizce)",
-      "intro": "Bir botun göndereceği her e-posta yine önce size sorulur. Bu ayarlar yalnızca sorunun ne zaman uyarıyla geldiğini belirler. Uyarı sizi hiçbir zaman engellemez: her zaman \"Yine de gönder\" diyebilirsiniz ve bu seçim günlüğe yazılır.",
+      "footerShort": "Boş bırakırsanız yerleşik Türkçe ve İngilizce metin kullanılır.",
+      "intro": "Sor düzeyindeki botlarda her gönderim önce size sorulur; günlük sınır ve aynı kişiye tekrar yazma uyarılarını \"Yine de gönder\" ile geçebilirsiniz. Tam erişim düzeyinde bu ikisi yalnızca çalışma adımına not olarak yazılır — engellemez ve sormaz. Aşağıdaki çıkış listesi ise siz listeden çıkarana ya da kendiniz yazana kadar her zaman engeller.",
       "kindAddress": "adres",
       "kindDomain": "tüm alan adı",
+      "limitsTitle": "Gönderim uyarıları",
       "loading": "Yükleniyor…",
       "logEmpty": "Henüz e-posta gönderilmedi.",
       "logHint": "Kime, ne zaman ve hangi bottan e-posta gitti. Yalnızca gerçekten gönderilenler listelenir.",
       "logTitle": "Gönderilen e-posta günlüğü",
       "optOutAdd": "Ekle",
       "optOutEmpty": "Listede henüz kimse yok.",
-      "optOutHint": "Bir adres (ayse@ornek.com) ya da tüm bir alan adı (ornek.com) ekleyin. Onlara yazmaya çalışan bot, onay kartınızda bir uyarı alır.",
+      "optOutHint": "Bir adres (ayse@ornek.com) ya da tüm bir alan adı (ornek.com) ekleyin. Onlara yazmaya çalışan her bot durdurulur — Sor düzeyinde uyarıyı onay kartında görürsünüz; Tam erişimde gönderim kart olmadan reddedilir.",
       "optOutLine": "E-postalara varsayılan olarak çıkış satırı ekle",
+      "optOutLineHint": "Satırı uygulama ekler; bot kaldıramaz.",
       "optOutPlaceholder": "ayse@ornek.com ya da ornek.com",
       "optOutRemove": "{{value}} kaydını kaldır",
       "optOutTitle": "Yazmayacağım kişiler",
@@ -7892,11 +8075,16 @@
       "save": "Kaydet",
       "saved": "Kaydedildi",
       "sentAnyway": "Yine de gönderildi",
-      "softHint": "Bu ikisi engel değil, uyarıdır.",
+      "softHint": "Bunlar Sor düzeyinde uyarıdır (yine de gönderebilirsiniz). Tam erişim düzeyinde yalnızca çalışma adımına yazılır.",
+      "status": {
+        "saved": "Tüm değişiklikler kaydedildi.",
+        "unsaved": "Kaydedilmemiş değişiklikler var."
+      },
       "title": "Güvenli gönderim",
       "verifyDomains": "Doğrulama e-postasının bağlantı verebileceği ek siteler",
       "verifyDomainsHint": "Bir sitede kayıt olan bot, doğrulama e-postasından yalnızca o sitenin bağlantılarını alır. Bir site e-postalarını başka bir hizmet üzerinden gönderiyorsa (örneğin bir izleme alan adı), o alan adını buraya satır başına bir tane ekleyin (example.com). Emin değilseniz boş bırakın: bot o zaman size sorar.",
-      "verifyDomainsPlaceholder": "posta.ornek.com"
+      "verifyDomainsPlaceholder": "posta.ornek.com",
+      "verifyDomainsShort": "Doğrulama bağlantıları başka bir sunucudaysa satır başına bir alan adı."
     },
     "mode": {
       "moreHint": "Nadiren gerekir. Ayarları bir dahaki açışında yine kapalı gelir.",
@@ -8035,18 +8223,14 @@
       },
       "check": {
         "action": "Güncellemeleri denetle",
-        "description": "Daha yeni bir sürüm olup olmadığına bakar ve yenilikleri gösterir. Siz seçmeden hiçbir şey kurulmaz.",
-        "title": "Güncellemeleri denetle",
         "working": "Denetleniyor…"
       },
-      "daemon": "Arka plan servisi",
-      "daemonDescription": "Yerel arka plan bot servisi.",
-      "description": "Uygulama ve daemon sürümleri.",
       "devBuild": "Geliştirme derlemesi",
       "errors": {
         "busy": "Bir güncelleme zaten sürüyor.",
         "failed": "Güncelleme çalışmadı. Hiçbir şey değişmedi. Lütfen daha sonra yeniden deneyin.",
         "network": "Güncelleme sunucusuna ulaşılamadı. İnternet bağlantınızı kontrol edip yeniden deneyin.",
+        "no_release": "Bu kanal için henüz yayımlanmış bir güncelleme bilgisi yok. Hiçbir şey değişmedi. Daha sonra yeniden deneyin.",
         "no_rollback": "Geri dönülebilecek daha eski bir sürüm yok.",
         "not_configured": "Bu sürümde güncelleme kurulu değil.",
         "nothing_to_install": "Lütfen önce güncellemeleri denetleyin.",
@@ -8058,9 +8242,8 @@
         "hint": "Güncelleme kurulmadan önce gerçekliği denetlenir. İşlem bitince Praxi-Bot yeniden açılır.",
         "working": "Güncelleniyor…"
       },
-      "lastChecked": "Son kontrol: {{time}}",
-      "neverChecked": "Güncellemeler henüz kontrol edilmedi.",
       "notConfigured": "Güncellemeler kullanılamıyor: bu derlemede güncelleme imzalama anahtarı veya güvenli güncelleme kaynağı yapılandırılmamış. Hiçbir şey indirilmeyecek veya yüklenmeyecek.",
+      "previewBuildHint": "Önizleme sürümü kullanıyorsunuz. Güncellemelerini almak için güncelleme kanalı olarak Önizleme'yi seçin.",
       "rollback": {
         "action": "Önceki sürüme dön",
         "description": "{{version}} sürümü düzgün açılmadı. Çalışan son sürüme geri dönebilirsiniz.",
@@ -8069,7 +8252,6 @@
       },
       "skip": "Bu sürümü atla",
       "skipped": "{{version}} sürümü atlandı. Daha yeni sürümler sunulmaya devam edecek.",
-      "title": "Hakkında",
       "unknown": "Bilinmiyor",
       "upToDate": "En son sürümü kullanıyorsunuz."
     },
@@ -8105,7 +8287,6 @@
         "searxng": "Kendi SearXNG sunucunun adresi, örneğin http://127.0.0.1:8080. Web arama rehberinde sunucu için tek komutla kurulum var.",
         "tavily": "Tavily hesabında bir anahtar oluştur ve buraya yapıştır."
       },
-      "providerHint": "Botlar web'de bir arama sağlayıcısı üzerinden arar. Ücretsiz motorlar ev bilgisayarında çoğunlukla çalışır ama sunucuları genelde engeller; bu yüzden sunucuda bunlardan birini bağlaman gerekir.",
       "providerTitle": "Arama sağlayıcısı",
       "saveAndTest": "Kaydet ve dene",
       "searxngLabel": "SearXNG URL",
@@ -8127,7 +8308,6 @@
       "testing": "Aranıyor…",
       "title": "Web araması",
       "toast": {
-        "keyCleared": "API anahtarı gizli bilgi deposundan kaldırıldı",
         "providerRemoved": "Arama sağlayıcısı kaldırıldı",
         "saved": "Web araması ayarları kaydedildi"
       },
@@ -8135,6 +8315,41 @@
     }
   },
   "settingsUi": {
+    "codingClis": {
+      "accountOnServer": "{{name}} hesabı: {{account}}",
+      "actions": "{{name}} için işlemler",
+      "copyInstallLocal": "Bu bilgisayar kurulum komutunu kopyala",
+      "copyInstallServer": "Sunucu kurulum komutunu kopyala",
+      "copyLoginLocal": "Bu bilgisayar giriş komutunu kopyala",
+      "copyLoginServer": "Sunucu giriş komutunu kopyala",
+      "howToInstall": "Nasıl kurulur",
+      "local": {
+        "not_installed": "kurulu değil",
+        "off": "kapalı",
+        "on": "açık",
+        "unreachable": "denetlenemiyor"
+      },
+      "myServer": "{{name}}:",
+      "note": "Botlar bu bilgisayarda çalışırken CLI'ları buradan açıp kapat; botlar sunucudaysa girişi sunucuda yap.",
+      "pathOnServer": "{{name}} üzerindeki yol",
+      "quotaAge": "{{hours}} sa önce güncellendi",
+      "quotaFresh": "Az önce güncellendi",
+      "quotaLeft": "Planda %{{pct}} kaldı",
+      "server": {
+        "loading": "denetleniyor…",
+        "logged_in": "giriş yapıldı",
+        "not_installed": "kurulu değil",
+        "not_logged_in": "giriş yapılmadı",
+        "unknown": "giriş bilinmiyor",
+        "unreachable": "ulaşılamıyor"
+      },
+      "serverNotConnected": "Şu an bu bilgisayarda çalışıyorsun, bu yüzden {{name}} bağlı değil. Kodlama CLI'larını yönetmek için ona geri dön.",
+      "serverUnreachable": "{{name}} sunucusuna ulaşılamadı; bu yüzden kodlama CLI'ları kurulu ya da eksik diye gösterilmiyor. Yenile'yi dene.",
+      "thisComputer": "Bu bilgisayar:",
+      "title": "Kodlama CLI'ları",
+      "turnOff": "Bu bilgisayarda kapat",
+      "turnOn": "Bu bilgisayarda aç"
+    },
     "groups": {
       "troubleshooting": "Sorun giderme",
       "updates": "Güncellemeler ve sürüm"
@@ -8161,11 +8376,6 @@
         "description": "Botlarının kullanabileceği girişler ve sırlar; bu bilgisayarda saklanır.",
         "name": "Kasa"
       }
-    },
-    "serverCli": {
-      "repair": "Onar",
-      "signIn": "Giriş yap",
-      "unknown": "Giriş durumu bilinmiyor"
     },
     "updates": {
       "description": "Yeni sürüm var mı bak, nelerin değiştiğini oku ve kur.",
@@ -8218,7 +8428,6 @@
   },
   "sidebar": {
     "apps": "Uygulamalar",
-    "botsSection": "Botlar",
     "mainBotHint": "Ana bot: yeni sohbetlerin varsayılanı",
     "needsYou": "Senden bekleyenler",
     "needsYouCount": "{{count}} öğe senden bekliyor",
@@ -8226,19 +8435,16 @@
     "notifications": "Bildirimler",
     "notificationsCount": "{{count}} okunmamış bildirim",
     "notificationsCount_one": "{{count}} okunmamış bildirim",
-    "reorderBot": "{{name}} sırasını değiştir (ok tuşları yukarı/aşağı taşır)",
+    "reorderBot": "{{name}} öğesini yukarı veya aşağı taşı",
     "reorderHint": "Satırı sürükle ya da bu tutamaca odaklanıp yukarı/aşağı ok tuşuna bas",
     "reorderMoved": "{{name}} {{pos}}. sıraya taşındı",
     "schedules": "Zamanlanmış görevler",
-    "settings": "Ayarlar",
     "status": {
       "idle": "Boşta",
       "needsYou": "Seni bekliyor",
       "working": "Çalışıyor"
     },
-    "unread": "Okunmamış mesaj",
-    "unreadBot": "Bu bottan yeni mesajlar var",
-    "usage": "Kullanım"
+    "unreadBot": "Bu bottan yeni mesajlar var"
   },
   "skillFromChat": {
     "ack": "Metni ve güvenlik denetimini okudum, bu beceriyi kaydetmek istiyorum.",
@@ -8286,7 +8492,7 @@
     "files": "{{count}} dosya",
     "files_one": "{{count}} dosya",
     "installNow": "{{name}} yükle",
-    "installedEmpty": "Kitaplıktan henüz bir şey yüklenmedi. Beceri bulmak için Göz at sekmesini aç.",
+    "installedEmpty": "Kitaplıktan henüz bir şey yüklemedin. Beceri bulmak için Göz at sekmesini aç.",
     "installedToast": "{{name}} yüklendi.",
     "listFailed": "Beceri listesi yüklenemedi",
     "loadFailed": "Becerilerin yüklenemedi",
@@ -8471,7 +8677,6 @@
     "found": "Bulunan programlar: {{n}}",
     "lead": "Botlarının bu sunucuda kullanabileceği programlar.",
     "licenseMixed": "Karışık lisanslar",
-    "licenseName": "Lisans {{name}}",
     "listLabel": "Araç paketleri",
     "loading": "Sunucuya bakılıyor…",
     "noLogin": {
@@ -8595,9 +8800,9 @@
     "stillRunningBody": "Saatin yanındaki tepside çalışmaya devam ediyor. Açmak, duraklatmak veya kapatmak için tepsi simgesini kullan.",
     "stillRunningTitle": "Praxi-Bot hâlâ çalışıyor",
     "stopAll": "Hepsini durdur",
-    "toggle": "Pencereyi göster / gizle",
+    "toggle": "Pencereyi göster veya gizle",
     "tooltip": "Praxi-Bot",
-    "tooltipNeeds": "Praxi-Bot: {n} öğe seni bekliyor"
+    "tooltipNeeds": "Praxi-Bot — senden bekleyen {n} öğe"
   },
   "updateServer": {
     "available": "Güncelleme var",
@@ -8697,7 +8902,6 @@
     "safe": "Bir şey ters giderse sunucu eski sürümüne döner. Ne olduğunu ve sonra ne yapacağını görürsün.",
     "showCommands": "Bunun yerine komutları göster",
     "showLog": "Ayrıntıları göster",
-    "starting": "Güncelleme başlatılıyor…",
     "stopped": "Güncelleme bitmeden durduruldu.",
     "thisServer": "bu sunucu",
     "title": "Sunucuyu güncelle",
@@ -8717,7 +8921,6 @@
     "completion": "Yanıt",
     "cost": "Maliyet",
     "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; bilinmeyen fiyat asla sıfır olarak gösterilmez.",
-    "day": "Gün",
     "deletedBot": "Silinmiş bot",
     "empty": "Bir bota mesaj gönder; kullanımı ve tahmini maliyeti burada görünür.",
     "emptyTitle": "Henüz kullanım yok",
@@ -8925,7 +9128,6 @@
     "newItem": "Yeni öğe",
     "noBotAssigned": "Hiçbir botun erişimi yok",
     "noOrigin": "Web sitesi yok",
-    "openButton": "Kasayı aç",
     "revealConfirm": {
       "body": "Bu sırrı yalnızca ekranınızı başkası görmüyorken görüntüleyin veya kopyalayın. Kopyalanan parolalar 30 saniye sonra temizlenir.",
       "copyConfirm": "Parolayı kopyala",
@@ -8970,7 +9172,7 @@
       "openSettings": "Ayarları aç",
       "ownerRequired": "Sahip yetkilendirmesi eksik. Bu bilgisayarda Praxi-Bot uygulamasını açıp yerel arka plan hizmetine yeniden bağlanın, ardından tekrar deneyin.",
       "phase": {
-        "approval": "Onayınız bekleniyor",
+        "approval": "Onayın gerekli",
         "failed": "Arama sona erdi",
         "hearing": "Sizi dinliyor…",
         "listening": "Dinliyor",
@@ -9038,6 +9240,63 @@
       "title": "Mikrofon ve bas-konuş",
       "unsupported": "Bu pencere ses kaydedemiyor, bu yüzden burada ayarlanacak bir şey yok."
     },
+    "live": {
+      "approvalHint": "Sohbetteki karttan onayla ya da reddet. Onay sesle verilemez.",
+      "blockedByCall": "Önce sesli aramayı bitir, sonra Konuş'a bas.",
+      "blockedByLive": "Canlı ses açık. Sesli arama başlatmak için önce onu bitir.",
+      "cancel": "Vazgeç",
+      "close": "Kapat",
+      "empty": "Başlamak için bir şey söyle.",
+      "end": "Bitir",
+      "micMuted": "Mikrofon kapalı",
+      "micOn": "Mikrofon açık",
+      "mute": "Mikrofonu sustur",
+      "notice": {
+        "busy": "Başka bir canlı konuşma zaten açık. Önce onu bitir.",
+        "daemonUnavailable": "Ses hizmetine ulaşılamıyor. Bu bilgisayardaki arka plan hizmetine yeniden bağlan ve yeniden dene.",
+        "dropped": "Bağlantı koptu.",
+        "error": "Ses hizmetiyle bağlantı koptu. Şimdiye kadarki yazılı hali sohbete kaydedildi.",
+        "idle": "Bir süre hiçbir şey söylenmediği için konuşma bitti. Yazılı hali sohbete kaydedildi.",
+        "keyMissing": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekle, sonra yeniden dene.",
+        "limit": "Konuşma süre sınırına ulaştı. Yazılı hali sohbete kaydedildi.",
+        "ownerRequired": "Sahip yetkisi eksik. Praxi-Bot'u bu bilgisayarda açıp yerel arka plan hizmetine yeniden bağlan, sonra yeniden dene.",
+        "runActive": "Bir bot çalışıyor. Bitmesini bekle ya da sohbetten durdur, sonra Konuş'a bas. Mikrofon kapalı.",
+        "serviceFailed": "Google'ın ses hizmeti isteği reddetti. Ayarlar → Genel → Sesli dikte bölümünden Gemini anahtarını ve canlı modeli kontrol et.",
+        "settingsInvalid": "Canlı ses ayarları geçerli değil. Ayarlar → Genel → Sesli dikte bölümünden kontrol et.",
+        "unavailable": "Bu arka plan hizmetinde canlı ses yok. Praxi-Bot'u güncelleyip yeniden dene."
+      },
+      "openSettings": "Ayarları aç",
+      "phase": {
+        "approval": "Onayını bekliyor",
+        "ended": "Konuşma bitti",
+        "failed": "Konuşma başlatılamadı",
+        "idle": "Canlı ses",
+        "listening": "Dinliyor",
+        "reconnecting": "Bir saniye…",
+        "speaking": "{{name}} konuşuyor",
+        "starting": "Bağlanıyor…",
+        "working": "{{name}} üzerinde çalışıyor…"
+      },
+      "retry": "Yeniden dene",
+      "saveFailed": "Konuşma sohbete kaydedilemedi.",
+      "settings": {
+        "description": "Botunla Google'ın Gemini Live'ı ile gerçek zamanlı, sesli konuş. Yukarıdaki Gemini anahtarını kullanır.",
+        "keepAudio": "Canlı konuşmaların sesini bu bilgisayarda sakla",
+        "keepAudioHint": "Varsayılan olarak kapalı: ses yalnızca bellekten geçer, hiç kaydedilmez. Her konuşmanın yazılı hali iki durumda da sohbete eklenir.",
+        "model": "Canlı model",
+        "title": "Canlı sesli sohbet",
+        "voice": "Ses"
+      },
+      "speakHint": "Sözünü kesmek için konuşmaya başlaman yeter. Mikrofon açıkken sesin Google'ın Gemini'sine aktarılır.",
+      "stopTalking": "Susturma",
+      "talk": "Konuş",
+      "talkAgain": "Yeniden konuş",
+      "talkTitle": "{{name}} ile sesli konuş",
+      "title": "Canlı sesli sohbet",
+      "transcript": "Konuşma",
+      "unmute": "Mikrofonu aç",
+      "you": "Sen"
+    },
     "local": {
       "details": "{{host}} adresinden yaklaşık {{size}} MB iner (sabit bir sağlama toplamıyla doğrulanır). Lisans: {{license}}.",
       "download": "İndir ({{size}} MB)",
@@ -9052,7 +9311,39 @@
     "micBusy": "Mikrofon başka bir uygulama tarafından kullanılıyor. Onu kapatıp tekrar dene.",
     "micDenied": "Praxi-Bot için mikrofon erişimine izin verin. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde Mikrofon erişimi ve Masaüstü uygulamalarının mikrofonunuza erişmesine izin ver seçeneklerini açın. Ardından Praxi-Bot uygulamasını yeniden başlatıp tekrar deneyin.",
     "micMissing": "Mikrofon bulunamadı. Bir mikrofon bağlayıp tekrar dene.",
-    "notConfigured": "Dikte henüz ayarlanmadı. Ayarlar → Genel → Sesli dikte bölümünden bir yazıya dökme hizmeti ekle.",
+    "notConfigured": "Bu bilgisayarda dikte henüz ayarlanmadı. Ayarlar → Genel → Sesli dikte bölümünden bir yazıya dökme hizmeti ekle.",
+    "offlineDiagnostics": {
+      "both": "Dikte ve sesli okuma modellerinin dosyaları hazır.",
+      "dictationMissing": "Seçili dikte modelinin ve sesli okuma modelinin dosyaları yok veya eksik.",
+      "dictationMissingWithTts": "Seçili dikte modelinin dosyaları yok veya eksik. Sesli okuma modelinin dosyaları hazır.",
+      "hint": "Ayarlar → Genel → Sesli dikte bölümünden modeli yeniden indir.",
+      "off": "Çevrimdışı dikte kapalı. Sesli okuma modelinin dosyaları yok veya eksik.",
+      "sttOnly": "Dikte modelinin dosyaları hazır. Sesli okuma modelinin dosyaları yok veya eksik.",
+      "title": "Çevrimdışı ses",
+      "ttsOnly": "Sesli okuma modelinin dosyaları hazır. Çevrimdışı dikte kapalı.",
+      "unavailable": "Bu sürüm çevrimdışı ses özelliği içermiyor."
+    },
+    "offlineModels": {
+      "baseDescription": "Türkçe ve Almanca dahil birçok dilde hız ve doğruluk arasında denge sağlar.",
+      "baseLabel": "Whisper base (dengeli)",
+      "downloadFailed": "İndirme başarısız oldu. Yeniden denemek için İndir’e bas.",
+      "smallDescription": "Bu modeller arasında Türkçe ve Almancada en isabetli olanı. Daha fazla disk alanı ve işlemci gücü ister.",
+      "smallLabel": "Whisper small (en isabetli)",
+      "tinyDescription": "En az disk alanı ve işlemci gücü gereken model. Türkçe ve Almancada daha az isabetli.",
+      "tinyLabel": "Whisper tiny (en hızlı)",
+      "vad": "Silero VAD (MIT) dahildir."
+    },
+    "offlineReadAloud": {
+      "busy": "Çevrimdışı ses özelliği şu anda meşgul. Biraz sonra yeniden dene.",
+      "description": "Sohbet yanıtlarını bu bilgisayarda uygulamanın dilinde sesli okur. İşlemciyi kullanır ve ilk sesin gelmesi birkaç saniye sürebilir.",
+      "model": "{{name}} Türkçe, İngilizce, Almanca ve başka dilleri destekler.",
+      "notInstalled": "Yanıtları çevrimdışı okumak için Ayarlar → Genel → Ses bölümünden modeli indir.",
+      "playbackFailed": "Yanıt çevrimdışı sesli okunamadı. Ayarlar → Genel → Ses bölümünden modeli kontrol et.",
+      "ready": "Yanıtlar internet bağlantısı olmadan sesli okunabilir.",
+      "title": "Çevrimdışı sesli okuma",
+      "unavailable": "Yerel arka plan hizmetine ulaşılamıyor.",
+      "unsupported": "Bu sürüm çevrimdışı sesli okuma özelliğini içermiyor."
+    },
     "online": "çevrimiçi",
     "speak": "Sesli oku",
     "speakAuto": {

@@ -33,6 +33,7 @@
 pub mod bot_api;
 pub mod bridge;
 pub mod channel_trait;
+pub mod control;
 pub mod daemon_client;
 pub mod error;
 mod inbox;
@@ -54,6 +55,7 @@ pub use bridge::{
 pub use channel_trait::{
     Channel, ChannelCaps, ChatRef, IncomingKind, IncomingMessage, InlineButton, OutgoingMessage,
 };
+pub use control::{Answer, ControlHub};
 pub use daemon_client::{
     ApiClient, ApprovalDecision, ApprovalScope, BotSummary, ChatSummary, DaemonClient,
     DaemonStatus, DeliveryKind, HttpDaemonClient, NoticeEvent, SendOutcome,

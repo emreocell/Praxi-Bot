@@ -371,6 +371,35 @@
   font-size: var(--font-size-xs);
 }
 
+.missingCliRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-2);
+}
+
+.setupLink {
+  padding: var(--space-0);
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+}
+
+.setupLink:hover {
+  filter: brightness(1.08);
+}
+
+.setupLink:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
 .listNote {
   display: flex;
   align-items: center;

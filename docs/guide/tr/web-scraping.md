@@ -15,7 +15,7 @@ Bir site hayır derse bot durur ve bunu söyler.
 Bunu yalnızca siz, kendi bilgisayarınızdan, SSH girişinizle yapabilirsiniz.
 Sunucudaki Praxi kullanıcısının yönetici hakkı yoktur; bir bot bunu asla kuramaz.
 
-1. **Ayarlar → Bilgisayarlar** bölümünü açın, sunucuyu seçin ve **Araçlar**a basın.
+1. Üstteki **bilgisayar seçicisini** açın → **Sunucularınız**, sunucuyu seçin ve **Araç paketleri**ye basın.
 2. **Web tarama** kutusunu işaretleyin. Python gerekir (**Geliştirici araçları** ile gelir).
 3. **İncele**, hiçbir şey olmadan önce tam olarak neyin değişeceğini gösterir.
    Onaylarsanız sunucu yaklaşık 40 MB indirir.
@@ -52,7 +52,7 @@ botlar için kapatmak üzere **Kaldır** düğmesini kullanın.
 
 Praxi'nin kendi `praxi_scrape.py` dosyası: Apache-2.0. [Trafilatura](https://github.com/adbar/trafilatura)
 2.4.0: Apache-2.0. Bağımlılıklar: Apache-2.0, BSD, MIT (`certifi`: MPL-2.0,
-değiştirilmemiş). Ayarlar → Bilgisayarlar her araç paketi için lisansı ve kaynak
+değiştirilmemiş). Araç paketleri penceresi her paket için lisansı ve kaynak
 bağlantısını gösterir; ayrıntılar `THIRD_PARTY_NOTICES.md` içindedir. Ayrı copyleft
 programlar (ör. AGPL-3.0) asla pakete eklenmez; ileride biri sunulursa yazarından
 indirilir ve kurulumdan önce lisans bildirimini onaylamanız gerekir.

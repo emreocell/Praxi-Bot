@@ -7,9 +7,9 @@ import { searchPhrase, requestSearchAllChats } from "../lib/chatSearchRequest";
 import { type MenuSpec, fileMenu, imageMenu, linkMenu, messageMenu, selectionMenu } from "../lib/contextMenu";
 import { copyText, visibleMessageText } from "../lib/copyText";
 import { openExternal } from "../lib/externalLink";
-import { currentSpeakingId, speechSupported, stopSpeaking } from "../lib/speaker";
+import { currentSpeakingId, stopSpeaking } from "../lib/speaker";
 import { modKeyLabel, useContextMenu, useMenuTranslate } from "./ContextMenu";
-import { speakReply } from "./SpeakButton";
+import { replySpeechSupported, useReplySpeaker } from "./SpeakButton";
 import { useToast } from "./Toast";
 
 /** The parts of a timeline entry the menus need. */
@@ -45,7 +45,8 @@ export interface ChatMenuArgs {
  * search boxes, tool cards) keeps the browser's own menu.  Item rules live in `lib/contextMenu`.
  */
 export function useChatContextMenu(a: ChatMenuArgs) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
+  const speakReply = useReplySpeaker();
   const menuT = useMenuTranslate();
   const toast = useToast();
   const cm = useContextMenu();
@@ -119,7 +120,7 @@ export function useChatContextMenu(a: ChatMenuArgs) {
 
     // 4. the message itself
     const infoButton = row.querySelector<HTMLButtonElement>('[data-testid="message-info"]');
-    const speakable = side === "assistant" && speechSupported() && rendered.trim() !== "";
+    const speakable = side === "assistant" && replySpeechSupported() && rendered.trim() !== "";
     return messageMenu({
       t: menuT,
       side,
@@ -129,7 +130,7 @@ export function useChatContextMenu(a: ChatMenuArgs) {
       onEdit: side === "user" && entry.msgId && entry.msgId === a.editableMsgId ? () => a.onEdit(entry.msgId as string) : undefined,
       onRegenerate: side === "assistant" && entry.key === a.regenerateKey ? a.onRegenerate : undefined,
       onSpeak: speakable
-        ? () => (currentSpeakingId() === row.id ? stopSpeaking() : speakReply(row.id, entry.text ?? "", a.botId, (k) => t(k), i18n.language))
+        ? () => (currentSpeakingId() === row.id ? stopSpeaking() : speakReply(row.id, entry.text ?? "", a.botId))
         : undefined,
       speaking: currentSpeakingId() === row.id,
       onInfo: infoButton ? () => infoButton.click() : undefined

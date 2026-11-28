@@ -245,6 +245,10 @@ impl ComposioControl for ComposioHost {
             .map_err(map_err)
     }
 
+    async fn peek_app_state(&self, slug: &str) -> Result<ComposioConnState, ComposioControlError> {
+        self.svc.peek_status(slug).await.map(conn).map_err(map_err)
+    }
+
     async fn connect(&self, slug: &str) -> Result<ComposioConnectDto, ComposioControlError> {
         let link = self.svc.connect(slug).await.map_err(map_err)?;
         Ok(ComposioConnectDto {

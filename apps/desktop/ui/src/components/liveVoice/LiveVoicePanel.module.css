@@ -1,0 +1,238 @@
+/* The live voice view: a calm layer over the message list only. The approval dock and the composer
+   sit below it, so an approval card stays clickable (approvals are never given by voice). */
+.panel {
+  position: absolute;
+  inset: var(--space-0);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
+  background-color: var(--color-surface-elevated-opaque);
+  background-image: var(--surface-sheen);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
+.panel:focus-visible {
+  outline: var(--size-border-thick) solid var(--color-focus);
+  outline-offset: calc(var(--size-border-thick) * -1);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.mic {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dot {
+  width: var(--size-status-dot);
+  height: var(--size-status-dot);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-danger);
+}
+
+.dotMuted {
+  background-color: var(--color-text-faint);
+}
+
+.name {
+  font-weight: var(--font-weight-semibold);
+}
+
+.stage {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-0);
+}
+
+/* The orb: --energy / --mic / --bot (0..1) are written by the panel's animation frame. */
+.orb {
+  --tone: var(--color-accent);
+  --energy: 0;
+
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: calc(var(--space-16) * 2);
+  height: calc(var(--space-16) * 2);
+  max-width: 40vw;
+  max-height: 40vw;
+}
+
+.orb[data-tone="error"] {
+  --tone: var(--color-danger);
+}
+
+.orb[data-tone="wait"] {
+  --tone: var(--color-warning);
+}
+
+.orb[data-tone="work"] {
+  --tone: var(--color-text-muted);
+}
+
+.halo,
+.core {
+  position: absolute;
+  inset: var(--space-0);
+  border-radius: var(--radius-pill);
+}
+
+.halo {
+  background: radial-gradient(circle, color-mix(in srgb, var(--tone) 35%, transparent), transparent 70%);
+  opacity: calc(0.35 + var(--energy) * 0.65);
+  transform: scale(calc(1.05 + var(--energy) * 0.35));
+}
+
+.core {
+  inset: 18%;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--tone) 55%, var(--color-text) 20%), var(--tone));
+  box-shadow: 0 0 calc(var(--space-6) * (0.5 + var(--energy) * 2)) color-mix(in srgb, var(--tone) 50%, transparent);
+  opacity: calc(0.75 + var(--energy) * 0.25);
+  transform: scale(calc(0.96 + var(--energy) * 0.12));
+}
+
+/* Idle breathing: only when motion is welcome. */
+.orb[data-active="true"] .core {
+  animation: breathe 4s ease-in-out infinite;
+}
+
+.orb[data-tone="work"] .halo {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    filter: brightness(1.12);
+  }
+}
+
+.bars {
+  --tone: var(--color-accent);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: var(--space-8);
+}
+
+.bars[data-tone="error"] {
+  --tone: var(--color-danger);
+}
+
+.bars[data-tone="wait"] {
+  --tone: var(--color-warning);
+}
+
+.bar {
+  --h: 0.08;
+
+  width: var(--space-1);
+  height: calc(var(--space-8) * var(--h));
+  border-radius: var(--radius-pill);
+  background-color: var(--tone);
+  opacity: 0.7;
+}
+
+.status {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
+}
+
+.notice {
+  margin: var(--space-0);
+  max-width: calc(var(--space-16) * 7);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.noticeError {
+  color: var(--color-danger);
+}
+
+.lines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(100%, calc(var(--space-16) * 8));
+  min-height: var(--space-0);
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-1);
+  font-size: var(--font-size-sm);
+}
+
+.line {
+  margin: var(--space-0);
+  line-height: var(--line-height-normal);
+}
+
+.line[data-final="false"]::after {
+  content: " …";
+  color: var(--color-text-faint);
+}
+
+.who {
+  margin-right: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-faint);
+}
+
+.you {
+  color: var(--color-text-muted);
+}
+
+.bot {
+  color: var(--color-text);
+}
+
+.empty {
+  margin: var(--space-0);
+  color: var(--color-text-faint);
+  text-align: center;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.hint {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb[data-active="true"] .core,
+  .orb[data-tone="work"] .halo {
+    animation: none;
+  }
+
+  .halo,
+  .core {
+    transform: none;
+  }
+}

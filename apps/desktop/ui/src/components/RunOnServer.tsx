@@ -10,10 +10,13 @@ import { useServerTerminal } from "../state/ServerTerminalContext";
 export function RunOnServer({
   command,
   className,
+  role,
   beforeOpen
 }: {
   command: string;
   className?: string;
+  /** `menuitem` where the button sits inside a menu. */
+  role?: "menuitem";
   /** Close the dialog this hint sits in: the terminal must not open behind a modal. */
   beforeOpen?: () => void;
 }) {
@@ -25,6 +28,7 @@ export function RunOnServer({
   return (
     <button
       type="button"
+      role={role}
       className={className}
       title={t("terminal.runForMeHint")}
       data-testid="run-on-server"

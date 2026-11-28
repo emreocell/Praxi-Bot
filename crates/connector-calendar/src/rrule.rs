@@ -9,7 +9,10 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc, Weekday};
+use chrono::{
+    DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc, Weekday,
+};
+use chrono_tz::Tz;
 
 use crate::ical::{Budget, Moment, Vevent, parse_duration};
 
@@ -17,6 +20,13 @@ use crate::ical::{Budget, Moment, Vevent, parse_duration};
 const MAX_OCCURRENCES: usize = 2000;
 /// Most periods (days, weeks, months, years) one expansion walks.
 const MAX_PERIODS: u32 = 60_000;
+/// Cap for [`next_after_ms`]: a single next-instant lookup must not walk the whole calendar.
+const NEXT_AFTER_MAX_PERIODS: u32 = 5_000;
+/// Most [`next_after_ms`] work units (periods × field cardinality).
+const NEXT_AFTER_BUDGET_PERIODS: u64 = 5_000;
+const NEXT_AFTER_BUDGET_WORK: u64 = 2_000_000;
+/// When the series anchor is older than this before `after`, the walk starts nearer `after`.
+const MAX_DTSTART_BEFORE_AFTER_MS: i64 = 400 * 86_400_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Freq {
@@ -279,11 +289,21 @@ fn add_days(d: NaiveDate, n: i64) -> Option<NaiveDate> {
 impl Rule {
     /// Walk the dates of the series from `start` (local time); `visit` returns `false` to stop.
     /// Every period costs `budget`; the walk ends quietly when it is gone.
-    #[allow(clippy::too_many_lines)] // one arm per frequency, each short; splitting hides the shared `emit`
     fn walk(
         &self,
         start: NaiveDateTime,
         budget: &mut Budget,
+        visit: impl FnMut(NaiveDateTime) -> bool,
+    ) {
+        self.walk_periods(start, budget, MAX_PERIODS, visit);
+    }
+
+    #[allow(clippy::too_many_lines)] // one arm per frequency, each short; splitting hides the shared `emit`
+    fn walk_periods(
+        &self,
+        start: NaiveDateTime,
+        budget: &mut Budget,
+        max_periods: u32,
         mut visit: impl FnMut(NaiveDateTime) -> bool,
     ) {
         // A period looks at every listed value: that is what it costs.
@@ -311,7 +331,7 @@ impl Rule {
             emitted += 1;
             visit(d.and_time(time))
         };
-        for k in 0..MAX_PERIODS {
+        for k in 0..max_periods.min(MAX_PERIODS) {
             if !budget.spend(per_period) {
                 return;
             }
@@ -493,6 +513,79 @@ pub(crate) fn occurrences(
     Some(out)
 }
 
+/// The first series instant strictly after `after_ms` (Unix epoch ms).
+///
+/// `dtstart_ms` is the anchor (`DTSTART`) of the series. When `timezone` is set
+/// it names the IANA zone for local wall time; otherwise UTC is used.
+///
+/// # Errors
+/// An invalid rule, zone, or timestamp.
+pub fn next_after_ms(
+    rule_str: &str,
+    dtstart_ms: i64,
+    timezone: Option<&str>,
+    after_ms: i64,
+) -> Result<Option<i64>, String> {
+    let rule = parse(rule_str)?;
+    if !rule.expandable {
+        return Err("this recurrence rule cannot be expanded here".into());
+    }
+    let zone: Tz = timezone
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse::<Tz>()
+                .map_err(|_| "the time zone name is invalid".to_string())
+        })
+        .transpose()?
+        .unwrap_or(chrono_tz::UTC);
+    let Some(dtstart) = DateTime::<Utc>::from_timestamp_millis(dtstart_ms) else {
+        return Err("dtstart is out of range".into());
+    };
+    let mut start = dtstart.with_timezone(&zone).naive_local();
+    if dtstart_ms + MAX_DTSTART_BEFORE_AFTER_MS < after_ms {
+        let Some(after) = DateTime::<Utc>::from_timestamp_millis(after_ms) else {
+            return Err("after is out of range".into());
+        };
+        let after_local = after.with_timezone(&zone).naive_local();
+        start = after_local.date().and_time(start.time());
+        if start > after_local {
+            start = start.checked_sub_signed(Duration::days(1)).unwrap_or(start);
+        }
+    }
+    let mut found = None;
+    let mut budget = crate::ical::Budget::new(
+        usize::try_from(NEXT_AFTER_BUDGET_PERIODS).unwrap_or(usize::MAX),
+        NEXT_AFTER_BUDGET_WORK,
+    );
+    rule.walk_periods(start, &mut budget, NEXT_AFTER_MAX_PERIODS, |naive| {
+        let Some(local) = zone.from_local_datetime(&naive).earliest() else {
+            // Spring-forward gap: no civil time at this wall clock.
+            return true;
+        };
+        let utc_ms = local.with_timezone(&Utc).timestamp_millis();
+        let past_until = rule.until.is_some_and(|(u, utc)| {
+            if utc {
+                local.with_timezone(&Utc).naive_utc() > u
+            } else {
+                naive > u
+            }
+        });
+        if past_until {
+            return false;
+        }
+        if utc_ms > after_ms {
+            found = Some(utc_ms);
+            return false;
+        }
+        true
+    });
+    if budget.exhausted() && found.is_none() {
+        return Err("the recurrence rule took too long to expand".into());
+    }
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,6 +614,59 @@ mod tests {
         .into_iter()
         .map(|(s, _)| s.display())
         .collect()
+    }
+
+    #[test]
+    fn next_after_ms_honours_until() {
+        let anchor = utc("2026-01-01T09:00:00Z").timestamp_millis();
+        let after = utc("2026-11-20T00:00:00Z").timestamp_millis();
+        assert!(
+            next_after_ms(
+                "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261116T090000Z",
+                anchor,
+                None,
+                after
+            )
+            .unwrap()
+            .is_none()
+        );
+        let next = next_after_ms(
+            "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261116T090000Z",
+            anchor,
+            None,
+            utc("2026-11-09T10:00:00Z").timestamp_millis(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            DateTime::<Utc>::from_timestamp_millis(next).unwrap(),
+            utc("2026-11-16T09:00:00Z")
+        );
+    }
+
+    #[test]
+    fn next_after_ms_stays_bounded_for_a_far_past_anchor() {
+        let anchor = utc("1970-01-01T09:00:00Z").timestamp_millis();
+        let after = utc("2090-01-01T00:00:00Z").timestamp_millis();
+        let start = std::time::Instant::now();
+        assert!(
+            next_after_ms("FREQ=DAILY;INTERVAL=1", anchor, None, after)
+                .unwrap()
+                .is_some()
+        );
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn next_after_ms_finds_the_first_future_instant() {
+        let anchor = utc("2026-01-01T09:00:00Z").timestamp_millis();
+        let next = next_after_ms("FREQ=WEEKLY;BYDAY=MO", anchor, None, anchor - 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            DateTime::<Utc>::from_timestamp_millis(next).unwrap(),
+            utc("2026-01-05T09:00:00Z")
+        );
     }
 
     #[test]

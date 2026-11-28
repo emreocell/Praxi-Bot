@@ -15,6 +15,7 @@
 //! be exact selectors: if a display name looks like modified UTF-7, pass the
 //! original wire name to disambiguate.
 
+mod address;
 pub mod agentmail;
 pub mod attachment;
 pub mod channel;

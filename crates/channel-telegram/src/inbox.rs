@@ -72,7 +72,10 @@ impl InboxEntry {
             .and_then(|m| m.text.as_deref())
             .is_some_and(|text| {
                 let text = text.trim();
-                text == "/stop" || text.starts_with("/stop@")
+                // Its Turkish name (`/durdur`) is the same command.
+                ["/stop", "/durdur"]
+                    .iter()
+                    .any(|c| text == *c || text.strip_prefix(c).is_some_and(|r| r.starts_with('@')))
             })
     }
 }

@@ -9,7 +9,7 @@ use permission_engine::{ActionRequest, Decision};
 use protocol::{BotId, InitiatorKind, TaskId};
 use script_runtime::ScriptHost;
 use serde_json::{Value, json};
-use tool_registry::Effect;
+use tool_registry::{Effect, PermissionCategory};
 
 fn check(sh: &Shared, bot_id: BotId, name: &str, input: &Value) -> Result<(), String> {
     if sh.cfg.safe_mode {
@@ -132,6 +132,73 @@ impl AgentLoop {
             bot_id,
             schedule_id,
         })
+    }
+
+    /// Whether this bot may have its owner's feed or page address fetched by a rule that polls
+    /// without a run. The URL itself is the owner's: they typed it into the saved rule, so no
+    /// per-call approval exists to ask for. What stays enforced is everything that would stop
+    /// the bot browsing at all: safe mode, a profile that hides the web, a locked or denied
+    /// Browser category.
+    ///
+    /// # Errors
+    /// The bot may not use the web.
+    pub fn validate_schedule_web_poll(&self, bot_id: BotId) -> Result<(), String> {
+        let sh = &self.sh;
+        if sh.cfg.safe_mode {
+            return Err("web polling unavailable".into());
+        }
+        let profile = sh
+            .profile_for(bot_id)
+            .map_err(|_| "schedule profile unavailable")?;
+        let category = PermissionCategory::Browser;
+        if !profile.category_visible(category) || sh.locked_deny(category) {
+            return Err("this bot may not use the web".into());
+        }
+        let req = ActionRequest {
+            cwd: None,
+            category,
+            raw_command: String::new(),
+            initiator: InitiatorKind::Schedule,
+        };
+        if sh.resolver.resolve(
+            &sh.global_policy.read(),
+            profile.policy().as_ref(),
+            None,
+            &req,
+        ) == Decision::Deny
+        {
+            return Err("this bot may not use the web".into());
+        }
+        Ok(())
+    }
+
+    /// [`Self::validate_schedule_web_poll`] right before a fetch, with one audit line that
+    /// holds only local identifiers (never the address).
+    ///
+    /// # Errors
+    /// The bot may not use the web, or the audit write failed.
+    pub fn authorize_schedule_web_poll(
+        &self,
+        bot_id: BotId,
+        schedule_id: TaskId,
+    ) -> Result<(), String> {
+        self.validate_schedule_web_poll(bot_id)?;
+        let sh = &self.sh;
+        let bot = sh
+            .storage
+            .get_bot(bot_id)
+            .map_err(|_| "schedule owner unavailable")?
+            .ok_or("schedule owner unavailable")?;
+        sh.storage
+            .append_audit(
+                bot.user_id,
+                None,
+                "schedule",
+                "schedule.web_poll_intent",
+                &json!({"schedule_id": schedule_id.to_string(), "bot_id": bot_id.to_string()}),
+            )
+            .map_err(|_| "schedule read audit failed")?;
+        Ok(())
     }
 
     /// Script host backed by the real registry and the runless Read gate.

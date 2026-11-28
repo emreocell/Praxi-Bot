@@ -1,4 +1,4 @@
-import { LogIn, RefreshCw, Trash2 } from "lucide-react";
+import { Globe, LogIn, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -8,6 +8,7 @@ import { formatBytes } from "../lib/workspaceFormat";
 import { useDaemon } from "../state/DaemonContext";
 import { ConfirmDialog } from "./DialogParts";
 import { ErrorNotice } from "./ErrorNotice";
+import { PanelGroup, PanelRows, StatusChip, type StatusTone } from "./PanelRows";
 import styles from "./BotBrowserProfile.module.css";
 
 /** Owner-only housekeeping; credentials are typed in the native browser, never this form. */
@@ -52,50 +53,75 @@ export function BotBrowserProfile({ botId }: { botId: string }) {
     }
   };
 
+  const signingIn = profile?.signing_in === true;
+  const siteCount = profile?.domains.length ?? 0;
+  const status: { tone: StatusTone; label: string } | null = !profile
+    ? null
+    : signingIn
+      ? { tone: "warn", label: t("panelTabs.browser.status.signingIn") }
+      : !profile.sites_available
+        ? { tone: "muted", label: t("panelTabs.browser.status.unavailable") }
+        : siteCount === 0
+          ? { tone: "muted", label: t("browserProfile.empty") }
+          : { tone: "ok", label: t("panelTabs.browser.status.sites", { count: siteCount }) };
+
   return (
-    <section className={styles.root} aria-labelledby="browser-profile-title" data-testid="browser-profile">
-      <h3 id="browser-profile-title" className={styles.label}>{t("browserProfile.title")}</h3>
-      <p>{t("browserProfile.intro")}</p>
-      <p className={styles.warning}>{t("browserProfile.warning")}</p>
-      <div className={styles.actions}>
-        <Button disabled={!client || busy || !profile} onClick={() => {
-          if (!client) return;
-          void act(() => profile?.signing_in ? client.finishBrowserSignIn(botId) : client.startBrowserSignIn(botId));
-        }}>
-          <LogIn aria-hidden="true" />
-          {t(profile?.signing_in ? "browserProfile.done" : "browserProfile.signIn")}
-        </Button>
-        <Button variant="ghost" disabled={!client || busy} onClick={() => void load()} aria-label={t("browserProfile.refresh")}>
-          <RefreshCw aria-hidden="true" />{t("browserProfile.refresh")}
-        </Button>
+    <PanelGroup title={t("browserProfile.title")} testId="browser-profile">
+      <div className={styles.card}>
+        <div className={styles.head}>
+          {status ? <StatusChip tone={status.tone} testId="browser-profile-status">{status.label}</StatusChip> : <span />}
+          <Button size="sm" variant="primary" disabled={!client || busy || !profile} onClick={() => {
+            if (!client) return;
+            void act(() => signingIn ? client.finishBrowserSignIn(botId) : client.startBrowserSignIn(botId));
+          }}>
+            <LogIn aria-hidden="true" />
+            {t(signingIn ? "browserProfile.done" : "browserProfile.signIn")}
+          </Button>
+        </div>
+        <p className={styles.caution}>{t("panelTabs.browser.caution")}</p>
+        {signingIn ? <p className={styles.note} role="status">{t("browserProfile.manualHint")}</p> : null}
+        {error && forget === null ? <ErrorNotice error={error} compact /> : null}
+        {profile ? <>
+          {profile.sites_available && siteCount > 0 ? <PanelRows
+            testId="browser-profile-sites"
+            label={t("browserProfile.sites")}
+            searchLabel={t("panelTabs.browser.searchSites")}
+            limit={4}
+            searchFrom={6}
+            rows={profile.domains.map((domain) => ({
+              id: domain,
+              name: domain,
+              icon: Globe,
+              action: {
+                label: t("browserProfile.forgetNamed", { domain }),
+                icon: Trash2,
+                disabled: busy || signingIn,
+                onClick: () => { setError(null); setForget(domain); }
+              }
+            }))}
+          /> : null}
+          {/* The full facts about the profile, folded: the tab opens on what to do, not on a wall of text. */}
+          <details className={styles.about}>
+            <summary>{t("browserProfile.about")}</summary>
+            <p>{t("browserProfile.intro")}</p>
+            <p>{t("browserProfile.warning")}</p>
+            <p>{profile.sites_available ? t("browserProfile.siteHint") : t("browserProfile.sitesUnavailable")}</p>
+            <p>{t("browserProfile.isolation")}</p>
+            <p>{t(profile.directory_encrypted ? "browserProfile.encrypted" : "browserProfile.protection")}</p>
+            <p>{t("browserProfile.sizeHuman", { size: formatBytes(profile.size_bytes) })}</p>
+            <div className={styles.aboutActions}>
+              <Button variant="ghost" size="sm" disabled={!client || busy} onClick={() => void load()}>
+                <RefreshCw aria-hidden="true" />{t("browserProfile.refresh")}
+              </Button>
+              {/* Destructive, but behind a danger confirmation: a quiet button, not a red bar. */}
+              <Button variant="secondary" size="sm" disabled={!client || busy || signingIn || profile.size_bytes === 0}
+                onClick={() => { setError(null); setForget(""); }}>
+                <Trash2 aria-hidden="true" />{t("browserProfile.forgetAll")}
+              </Button>
+            </div>
+          </details>
+        </> : null}
       </div>
-      {profile?.signing_in ? <p role="status">{t("browserProfile.manualHint")}</p> : null}
-      {error && forget === null ? <ErrorNotice error={error} compact /> : null}
-      {profile ? <>
-        <h4 className={styles.label}>{t("browserProfile.sites")}</h4>
-        <p>{t("browserProfile.siteHint")}</p>
-        {!profile.sites_available ? <p role="status">{t("browserProfile.sitesUnavailable")}</p> : profile.domains.length ? <ul className={styles.sites}>
-          {profile.domains.map((domain) => <li key={domain}>
-            <span>{domain}</span>
-            <Button variant="ghost" disabled={busy || profile.signing_in} onClick={() => { setError(null); setForget(domain); }}
-              aria-label={t("browserProfile.forgetNamed", { domain })}>
-              <Trash2 aria-hidden="true" />{t("browserProfile.forgetSite")}
-            </Button>
-          </li>)}
-        </ul> : <p>{t("browserProfile.empty")}</p>}
-        {/* The full facts about the profile, folded: the tab opens on what to do, not on a wall of text. */}
-        <details className={styles.about}>
-          <summary>{t("browserProfile.about")}</summary>
-          <p>{t("browserProfile.isolation")}</p>
-          <p>{t(profile.directory_encrypted ? "browserProfile.encrypted" : "browserProfile.protection")}</p>
-          <p>{t("browserProfile.sizeHuman", { size: formatBytes(profile.size_bytes) })}</p>
-        </details>
-        {/* Destructive, but behind a danger confirmation: a quiet button, not a red bar. */}
-        <Button variant="secondary" size="sm" className={styles.forgetAll} disabled={!client || busy || profile.signing_in || profile.size_bytes === 0}
-          onClick={() => { setError(null); setForget(""); }}>
-          <Trash2 aria-hidden="true" />{t("browserProfile.forgetAll")}
-        </Button>
-      </> : null}
       <ConfirmDialog open={forget !== null} tone="danger" busy={busy}
         title={t(forget === "" ? "browserProfile.forgetAll" : "browserProfile.forgetSite")}
         body={<>
@@ -108,6 +134,6 @@ export function BotBrowserProfile({ botId }: { botId: string }) {
           if (!client || forget === null) return;
           void act(() => forget === "" ? client.forgetBrowserProfile(botId) : client.forgetBrowserSite(botId, forget));
         }} />
-    </section>
+    </PanelGroup>
   );
 }

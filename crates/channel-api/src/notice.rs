@@ -141,7 +141,7 @@ pub enum NoticeLang {
     Tr,
 }
 
-fn clip(text: &str, max: usize) -> String {
+pub(crate) fn clip(text: &str, max: usize) -> String {
     let one_line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if one_line.chars().count() <= max {
         return one_line;
@@ -151,7 +151,7 @@ fn clip(text: &str, max: usize) -> String {
     out
 }
 
-fn pick<'a>(lang: NoticeLang, en: &'a str, tr: &'a str) -> &'a str {
+pub(crate) fn pick<'a>(lang: NoticeLang, en: &'a str, tr: &'a str) -> &'a str {
     match lang {
         NoticeLang::En => en,
         NoticeLang::Tr => tr,
@@ -169,7 +169,7 @@ pub enum Flavor {
 
 impl Flavor {
     /// What starts a line of untrusted text.
-    fn quote(self) -> &'static str {
+    pub(crate) fn quote(self) -> &'static str {
         match self {
             Self::Plain => "▎ ",
             Self::Discord => "> ",
@@ -183,7 +183,7 @@ const ZWSP: char = '\u{200b}';
 /// bare domain), no mention, no tappable bot command, no Markdown (Discord), no control or
 /// direction-changing characters. Call it on text that is already clipped, so an escape is never
 /// cut in half.
-fn inert(text: &str, flavor: Flavor) -> String {
+pub(crate) fn inert(text: &str, flavor: Flavor) -> String {
     let chars: Vec<char> = text
         .chars()
         .filter(|c| {
@@ -217,7 +217,7 @@ fn inert(text: &str, flavor: Flavor) -> String {
 }
 
 /// One line of untrusted text, quoted so it reads as what the bot said and not as the channel.
-fn quoted(flavor: Flavor, text: &str) -> String {
+pub(crate) fn quoted(flavor: Flavor, text: &str) -> String {
     format!("{}{}", flavor.quote(), inert(text, flavor))
 }
 

@@ -72,6 +72,7 @@ impl ScheduleStore {
             Some(schedule.enabled),
             now,
             Some(schedule.revision),
+            true,
         )?
         .is_none()
         {

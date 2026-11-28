@@ -1,47 +1,55 @@
-import { ChevronDown, CircleCheck, Rocket, ShieldAlert, Square, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, ChevronDown, CircleCheck, Rocket, ShieldAlert, Square, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ApiError } from "../api/client";
 import type { Mission, MissionDetail } from "../api/types";
-import { humanLine } from "../lib/humanError";
 import type { DigestOutcome, DigestText } from "../lib/missionDigestText";
-import { isActiveMission, MISSION_POLL_MS, missionChip, missionForChat } from "../lib/missions";
+import { isActiveMission, MISSION_POLL_MS, missionForChat, waitingItems } from "../lib/missions";
+import { requestOpenChat } from "../lib/openChatLink";
 import { useDaemon } from "../state/DaemonContext";
-import { CHIP_ICONS, Digest, MissionNow, MissionProgress, NeedsYou } from "./MissionBlock";
+import { Digest, MissionBar, MissionChipView, missionErrorText, MissionNow, MissionProgress, MissionSteer, NeedsYou, WaitingFor } from "./MissionBlock";
 import blockStyles from "./MissionBlock.module.css";
 import styles from "./MissionChatHeader.module.css";
 
 export interface ChatMission {
   mission: Mission | null;
   detail: MissionDetail | null;
+  /** Every mission of the chat's bot, newest first (the cards of missions started here come from it). */
+  all: Mission[];
   refresh: () => Promise<void>;
 }
 
 /**
- * The mission that runs in this chat, if any (the daemon names a mission chat "Mission: ..."). It
- * reads the bot's missions once when the chat opens and keeps asking only while that mission can
- * still change and the chat is on screen; any other chat costs one request.
+ * The mission that runs in this chat, if any (the daemon names a mission chat "Mission: ..."), and
+ * the bot's other missions. It reads them once when the chat opens and keeps asking only while the
+ * chat is on screen and its own mission, or one `watch` picks (the ones started from it), can still
+ * change; any other chat costs one request.
  */
-export function useChatMission(botId: string | undefined, chatId: string | undefined, visible = true): ChatMission {
+export function useChatMission(
+  botId: string | undefined,
+  chatId: string | undefined,
+  visible = true,
+  watch?: (all: readonly Mission[]) => boolean
+): ChatMission {
   const { client } = useDaemon();
-  const [state, setState] = useState<{ mission: Mission | null; detail: MissionDetail | null }>({ mission: null, detail: null });
+  const [state, setState] = useState<{ mission: Mission | null; detail: MissionDetail | null; all: Mission[] }>({ mission: null, detail: null, all: [] });
   const ticket = useRef(0);
   const load = useCallback(async () => {
     if (!client || !botId || !chatId) {
-      setState({ mission: null, detail: null });
+      setState({ mission: null, detail: null, all: [] });
       return;
     }
     const mine = ++ticket.current;
     try {
-      const mission = missionForChat(await client.listMissions(botId), chatId);
+      const all = await client.listMissions(botId);
+      const mission = missionForChat(all, chatId);
       const detail = mission ? await client.getMission(mission.id).catch(() => null) : null;
       if (mine === ticket.current) {
-        setState({ mission: detail?.mission ?? mission, detail });
+        setState({ mission: detail?.mission ?? mission, detail, all });
       }
     } catch {
       // Missions off on this daemon (503) or offline: the chat simply has no mission header.
       if (mine === ticket.current) {
-        setState({ mission: null, detail: null });
+        setState({ mission: null, detail: null, all: [] });
       }
     }
   }, [client, botId, chatId]);
@@ -49,7 +57,7 @@ export function useChatMission(botId: string | undefined, chatId: string | undef
   useEffect(() => {
     void load();
   }, [load]);
-  const live = state.mission !== null && isActiveMission(state.mission) && visible;
+  const live = ((state.mission !== null && isActiveMission(state.mission)) || (watch?.(state.all) ?? false)) && visible;
   useEffect(() => {
     if (!live) {
       return;
@@ -68,7 +76,7 @@ export function useChatMission(botId: string | undefined, chatId: string | undef
 export function MissionChatHeader({ chat }: { chat: ChatMission }) {
   const { t } = useTranslation();
   const { client } = useDaemon();
-  const [open, setOpen] = useState<"answers" | "report" | null>(null);
+  const [open, setOpen] = useState<"answers" | "waiting" | "report" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panelId = useId();
@@ -76,30 +84,33 @@ export function MissionChatHeader({ chat }: { chat: ChatMission }) {
   if (!m) {
     return null;
   }
-  const chip = missionChip(m.state);
-  const ChipIcon = CHIP_ICONS[chip];
   const live = isActiveMission(m);
   const blocked = live ? (detail?.blocked ?? []) : [];
+  const waiting = live ? waitingItems(detail?.items ?? []) : [];
   const digest = !live ? (detail?.digest ?? null) : null;
-  const shown = open === "answers" && blocked.length === 0 ? null : open === "report" && !digest ? null : open;
-  const send = async (answers: Parameters<Parameters<typeof NeedsYou>[0]["onSend"]>[0]) => {
+  const shown =
+    (open === "answers" && blocked.length === 0) || (open === "waiting" && waiting.length === 0) || (open === "report" && !digest) ? null : open;
+  /** Run one owner action, then read the mission again. */
+  const act = async (run: () => Promise<unknown>, after?: () => void) => {
     if (!client || busy) {
       return false;
     }
     setBusy(true);
     setError(null);
     try {
-      await client.answerMission(m.id, answers);
+      await run();
       await refresh();
-      setOpen(null);
+      after?.();
       return true;
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 400 ? e.message : humanLine(e));
+      setError(missionErrorText(e));
       return false;
     } finally {
       setBusy(false);
     }
   };
+  const send = (answers: Parameters<Parameters<typeof NeedsYou>[0]["onSend"]>[0]) =>
+    act(() => client!.answerMission(m.id, answers), () => setOpen(null));
   return (
     <section className={styles.root} data-testid="mission-chat-header" data-state={m.state} aria-label={t("missions.header.label")}>
       <div className={styles.top}>
@@ -107,15 +118,12 @@ export function MissionChatHeader({ chat }: { chat: ChatMission }) {
         <h2 className={styles.title} title={m.goal}>
           {m.title}
         </h2>
-        <span className={blockStyles.chip} data-chip={chip}>
-          <ChipIcon aria-hidden="true" />
-          {t(`missions.chip.${chip}`)}
-        </span>
+        <MissionChipView state={m.state} />
       </div>
       <div className={styles.body}>
         <MissionProgress mission={m} />
         <MissionNow mission={m} items={detail?.items ?? []} />
-        {blocked.length > 0 || digest ? (
+        {live || digest ? (
           <div className={styles.actions}>
             {blocked.length > 0 ? (
               <button
@@ -132,6 +140,20 @@ export function MissionChatHeader({ chat }: { chat: ChatMission }) {
                 <ChevronDown aria-hidden="true" className={styles.chevron} />
               </button>
             ) : null}
+            {waiting.length > 0 ? (
+              <button
+                type="button"
+                className={styles.toggle}
+                aria-expanded={shown === "waiting"}
+                aria-controls={panelId}
+                data-testid="mission-header-waiting"
+                onClick={() => setOpen(shown === "waiting" ? null : "waiting")}
+              >
+                {t("missionChat.waiting", { count: waiting.length })}
+                <ChevronDown aria-hidden="true" className={styles.chevron} />
+              </button>
+            ) : null}
+            <MissionSteer mission={m} busy={busy} onSteer={(action) => act(() => client!.steerMission(m.id, action))} />
             {digest ? (
               <button
                 type="button"
@@ -148,13 +170,14 @@ export function MissionChatHeader({ chat }: { chat: ChatMission }) {
           </div>
         ) : null}
       </div>
+      {error ? (
+        <p className={`${blockStyles.error} ${styles.error}`} role="alert">
+          {error}
+        </p>
+      ) : null}
       <div id={panelId} className={styles.panel} hidden={shown === null}>
-        {error ? (
-          <p className={blockStyles.error} role="alert">
-            {error}
-          </p>
-        ) : null}
         {shown === "answers" ? <NeedsYou items={blocked} busy={busy} onSend={send} heading="h3" /> : null}
+        {shown === "waiting" ? <WaitingFor items={waiting} heading="h3" /> : null}
         {shown === "report" && digest ? <Digest digest={digest} bare /> : null}
       </div>
     </section>
@@ -215,5 +238,74 @@ function ReportList({ title, rows }: { title: string; rows: readonly string[] })
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * A mission started from this chat (`/mission`, or the bot starting one from the owner's message),
+ * as a compact card in the stream: the title and status, the bar, pause/stop, and the way to the
+ * mission's own chat, where its answers and report are.
+ */
+export function MissionStartedCard({ mission: m, onChanged }: { mission: Mission; onChanged: () => Promise<void> }) {
+  const { t } = useTranslation();
+  const { client } = useDaemon();
+  const titleId = useId();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const live = isActiveMission(m);
+  const steer = async (action: "pause" | "resume" | "cancel") => {
+    if (!client || busy) {
+      return false;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await client.steerMission(m.id, action);
+      await onChanged();
+      return true;
+    } catch (e) {
+      setError(missionErrorText(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const open = m.progress.blocked > 0 && live
+    ? t("missionChat.openAnswers", { count: m.progress.blocked })
+    : live
+      ? t("missionChat.open")
+      : t("missionChat.openReport");
+  return (
+    <article className={styles.card} data-testid="mission-started-card" data-state={m.state} aria-labelledby={titleId}>
+      <p className={styles.cardEyebrow}>
+        <Rocket aria-hidden="true" />
+        {t("missionChat.eyebrow")}
+      </p>
+      <div className={styles.top}>
+        <h2 className={styles.title} id={titleId} title={m.goal}>
+          {m.title}
+        </h2>
+        <MissionChipView state={m.state} />
+      </div>
+      <MissionBar mission={m} />
+      <div className={styles.actions}>
+        <MissionSteer mission={m} busy={busy} onSteer={steer} />
+        <button
+          type="button"
+          className={styles.toggle}
+          data-tone={m.progress.blocked > 0 && live ? "warning" : undefined}
+          data-testid="mission-open"
+          onClick={() => requestOpenChat(m.chat_id)}
+        >
+          {open}
+          <ArrowUpRight aria-hidden="true" />
+        </button>
+      </div>
+      {error ? (
+        <p className={blockStyles.error} role="alert">
+          {error}
+        </p>
+      ) : null}
+    </article>
   );
 }

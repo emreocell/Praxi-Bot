@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use desktop_api::{
-    Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError, Image,
-    LiveViewOptions, Quality, Region, Snapshot, WindowInfo,
+    ActGuard, Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError,
+    Image, InputTarget, LiveViewOptions, Quality, Refusal, Region, Snapshot, WindowInfo, WindowOp,
     live_view::DesktopViewTarget,
     snapshot::{AppSpec, Pid},
 };
@@ -159,6 +159,66 @@ impl DesktopBackend for LinuxBackend {
             match tokio::task::spawn_blocking(x11::list_windows).await {
                 Ok(result) => result,
                 Err(e) => Err(DesktopError::Internal(format!("windows task: {e}"))),
+            }
+        })
+        .await
+    }
+
+    async fn focus_target(&self, window_id: u64) -> Result<Option<InputTarget>, DesktopError> {
+        // The program behind a window that is there but cannot be identified is an
+        // error, not "this backend cannot tell": nothing is managed unidentified.
+        bounded("window facts", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || {
+                x11::window_info(window_id).map(|_| x11::top_level_facts(window_id))
+            })
+            .await
+            {
+                Ok(Some(Some(facts))) => Ok(Some(facts)),
+                Ok(Some(None)) => Err(DesktopError::GuardRefused(Refusal::NoIdentity.why().into())),
+                Ok(None) => Err(DesktopError::Accessibility(
+                    "window no longer exists".into(),
+                )),
+                Err(e) => Err(DesktopError::Internal(format!("window task: {e}"))),
+            }
+        })
+        .await
+    }
+
+    async fn window_op(
+        &self,
+        window_id: u64,
+        op: WindowOp,
+        guard: Option<ActGuard>,
+    ) -> Result<(), DesktopError> {
+        bounded("window operation", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::window_op(window_id, op, guard.as_ref()))
+                .await
+            {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("window task: {e}"))),
+            }
+        })
+        .await?;
+        self.notify_live_view();
+        Ok(())
+    }
+
+    async fn clipboard_text(&self) -> Result<Option<String>, DesktopError> {
+        bounded("clipboard read", X11_LIMIT, async {
+            match tokio::task::spawn_blocking(x11::clipboard_text).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("clipboard task: {e}"))),
+            }
+        })
+        .await
+    }
+
+    async fn set_clipboard_text(&self, text: &str) -> Result<(), DesktopError> {
+        let text = text.to_owned();
+        bounded("clipboard write", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::set_clipboard_text(&text)).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("clipboard task: {e}"))),
             }
         })
         .await

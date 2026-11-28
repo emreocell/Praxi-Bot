@@ -979,6 +979,27 @@ impl ComposioService {
         Ok(self.view(slug, &cfg))
     }
 
+    /// Read-only look at the authorization of one app: one account listing, nothing else.
+    /// Unlike [`Self::app_status`] it leaves the cached status, the pending timer, the
+    /// login-rejected flag, the audit log and the registered tools alone.
+    ///
+    /// # Errors
+    /// Unknown app, not configured, an ambiguous account binding, Composio errors.
+    pub async fn peek_status(&self, slug: &str) -> Result<ConnState> {
+        if !valid_slug(slug) || !self.0.state.lock().apps.contains_key(slug) {
+            return Err(ComposioError::NotFound(format!(
+                "app `{slug}` is not connected"
+            )));
+        }
+        let accounts = self
+            .client()
+            .await?
+            .list_accounts(&self.user_id(), Some(slug))
+            .await?;
+        self.check_accounts(slug, &accounts)?;
+        Ok(Self::derive(&accounts))
+    }
+
     /// Re-read the status of every known app (startup, background).
     pub async fn refresh_all(&self) {
         if !self.configured() {

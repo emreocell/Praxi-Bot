@@ -207,6 +207,8 @@ impl Core {
             chat: ChatRef(format!("email:{folder}")),
             sender,
             message_id: Some(uid.to_string()),
+            forwarded: false,
+            edited: false,
             kind: IncomingKind::Text(text),
         }
     }

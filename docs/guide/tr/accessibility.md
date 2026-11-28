@@ -54,7 +54,7 @@ Kısayolların kısa başvuru tablosu için [Klavye kısayolları](keyboard-shor
 
 ### Ayarlar (`SettingsModal`)
 
-- **Açma**: `Ctrl/Cmd+,` tuşlarına bas, hesap menüsünden **Ayarlar**'ı seç ya da başlık çubuğundaki dişli düğmesine tıkla. Odak **Ayarlarda ara** alanında başlar (`data-autofocus`).
+- **Açma**: `Ctrl/Cmd+,` tuşlarına bas, profil menüsünden **Ayarlar**'ı seç ya da başlık çubuğundaki dişli düğmesine tıkla. Odak **Ayarlarda ara** alanında başlar (`data-autofocus`).
 - **Bölümler arasında gezinme**: `Tab` ile soldaki bölüm listesine geç, sonra **Genel**, **Görünüm**, **Yapay zekâ ve modeller**, **Bilgisayar**, **Posta ve takvim**, **Kullanım**, **Tanılama** ve **Güncellemeler** arasında geçmek için `Up` / `Down` / `Home` / `End` ok tuşlarını (ya da `Tab` ve `Enter` / `Space`) kullan.
 - **Denetimler**:
   - Bölmeli hap denetimleri (`Segmented`) ve bilgisayar hedef kartları (`ComputerTargetBlock`), gezinilebilir `tabIndex` ve `Left` / `Right` / `Up` / `Down` ok tuşlarıyla `role="radiogroup"` kullanır.

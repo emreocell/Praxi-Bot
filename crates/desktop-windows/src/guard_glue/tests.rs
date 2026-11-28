@@ -415,6 +415,15 @@ fn only_type_key_the_focusing_click_and_indexed_set_value_are_covered() {
         delta_y: 1.0,
     };
     assert!(matches!(plan(&scroll), Err(DesktopError::GuardRefused(_))));
+    // An accessibility action is never covered by a task-wide permission either.
+    let element = Action::Element {
+        target: Target::ByIndex {
+            index: 1,
+            generation: 1,
+        },
+        op: desktop_api::ElementOp::Invoke,
+    };
+    assert!(matches!(plan(&element), Err(DesktopError::GuardRefused(_))));
     let by_xy = Action::SetValue {
         target: Target::ByCoordinate {
             x: 1.0,

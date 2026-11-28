@@ -143,7 +143,7 @@ async fn c225_host_timeout_fails_open_without_waiting_for_unattended_approval() 
     });
     store.insert(&s).unwrap();
     let scheduler = Scheduler::start_with_clock(store, host.clone(), clock);
-    scheduler.run_now(s.id).unwrap();
+    scheduler.run_now(s.id, true).unwrap();
     tokio::task::yield_now().await;
     assert_eq!(host.runs.lock().len(), 0);
     tokio::time::advance(precheck::TIMEOUT).await;

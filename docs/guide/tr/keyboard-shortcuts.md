@@ -2,7 +2,7 @@
 
 Praxi masaüstü uygulaması, fareye uzanmadan sohbetler arasında gezinmen, bot çalışmalarını yönetmen, pencereleri açman ve mesaj yazman için klavye kısayolları sunar.
 
-Bu listeyi uygulamada istediğin zaman da görebilirsin: hiçbir metin alanı odakta değilken **`?`** tuşuna bas, hesap menüsünden **Yardım**'ı seç ya da yazı alanına `/help` yaz. Bkz. [Klavye kısayolları ve “Yenilikler”](chatting-and-approvals.md).
+Bu listeyi uygulamada istediğin zaman da görebilirsin: hiçbir metin alanı odakta değilken **`?`** tuşuna bas, profil menüsünden **Yardım**'ı seç ya da yazı alanına `/help` yaz. Bkz. [Klavye kısayolları ve “Yenilikler”](chatting-and-approvals.md).
 
 > **Komut satırı kullananlar:** Klavye kısayolları masaüstü uygulaması içindir. Praxi ile bir terminalden konuşuyorsan komut satırı karşılıkları (`bot chat`, `bot approve`, `bot status` vb.) için [CLI başvurusu](cli-reference.md) sayfasına bak.
 

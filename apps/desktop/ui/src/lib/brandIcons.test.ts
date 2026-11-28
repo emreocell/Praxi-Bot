@@ -143,8 +143,8 @@ test('the pinned Composio apps without a bundled mark are exactly the audited on
   assert.deepEqual(missing.sort(), ['linkedin', 'microsoft_teams', 'one_drive', 'outlook', 'salesforce']);
 });
 
-test('llama.cpp, Tavily, Firecrawl, Context7 and Exa use the vendor marks, matching the provenance files', () => {
-  const colour: Record<string, boolean> = { llamacpp: true, tavily: true, context7: true, firecrawl: false, exa: false };
+test('llama.cpp, Tavily, Firecrawl, Context7, Exa and Composio use the vendor marks, matching the provenance files', () => {
+  const colour: Record<string, boolean> = { llamacpp: true, tavily: true, context7: true, firecrawl: false, exa: false, composio: true };
   for (const [key, monochrome] of Object.entries(colour)) {
     const svg = readFileSync(new URL(`../assets/brands/${key}.svg`, import.meta.url), 'utf8');
     const path = /\bd="([^"]+)"/.exec(svg)?.[1];

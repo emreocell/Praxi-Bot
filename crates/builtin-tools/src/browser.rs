@@ -37,7 +37,7 @@ mod capture;
 pub mod files;
 #[cfg(test)]
 mod files_tests;
-mod payment;
+pub(crate) mod payment;
 mod pointer;
 #[cfg(test)]
 mod pointer_tests;

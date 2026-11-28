@@ -33,12 +33,18 @@ Three ideas run through the whole product:
 
 Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 
+- **Settings redesign (eight pages, Vault and Updates).** **Settings** is grouped into You, Your bots, and App pages: **General**, **Appearance**, **AI and memory**, **Connections**, **Safety**, **Vault**, **System**, and **Updates**. Expert cards sit under **More options**; many cards have a **`?` popover**. See [Settings](settings.md).
+- **Profile menu and bot panel.** The profile menu (bottom of the left rail) opens Settings, Vault, Schedules, Updates, and Help. Each bot's **Activity**, **Automation**, **Library**, and **Tools** tabs live in the right-hand panel. See [Bots and profiles](bots-and-profiles.md) and [Managing chats](chatting-and-approvals.md#managing-chats-desktop-app).
+- **Import from other assistants.** **Settings → General** or `bot import` can copy setups from Claude, Cursor, VS Code, Codex, and others. See [Import from other assistants](import-from-assistants.md).
+- **Apps, MCP Registry, and `.mcpb` bundles.** **Apps** covers Composio, custom MCP, REST APIs, and registry search. See [Connecting apps](apps.md) and [MCP servers](mcp-servers.md).
+- **Missions and schedules in the bot panel.** Long jobs start from the **Activity** tab; scheduled jobs and webhooks are edited under **Automation**, and the full list stays in the left-rail **Schedules** item. See [Missions](missions.md) and [Automate things](automate.md).
 - **Bot-only left rail and chat management in the bot panel.** The left rail lists bots only; each bot's chats live in its right-hand panel (**Library → Chats**) with an overflow menu for rename, pin, archive, and delete. See [Managing chats](chatting-and-approvals.md#managing-chats-desktop-app).
 - **Message copy and Markdown export.** Hover or focus any message to copy its visible text, or type `/export` in the composer to save the open chat as a `.md` file. See [Copying messages and Markdown export](chatting-and-approvals.md#copying-messages-and-markdown-export).
 - **Keyboard shortcuts dialog (`?`) and "What's new" card.** Press `?` (outside text fields) or use the command palette (`Ctrl/Cmd+K`) to view all shortcuts. Bundled release notes appear once per version after an update with no network fetch. See [Keyboard shortcuts and "What's new"](chatting-and-approvals.md#keyboard-shortcuts-and-whats-new).
 - **Unread markers.** Bots with unseen replies or pending decisions show a dot in the left rail, and the open chat marks the first unseen reply with a **New messages** divider. See [Unread markers](chatting-and-approvals.md#unread-markers).
 - **Praxi as the default main bot and per-computer "Make main bot".** Fresh desktop setups default to **Praxi** (white ghost) as the main bot. Each computer (This computer and every paired host) keeps its own bot order and main bot, set with the star button (**Make main bot**) in the bot panel header. See [Main bot and bot order](bots-and-profiles.md#main-bot-and-bot-order-desktop-app).
 - **Hands-free voice call mode.** Tap the phone button in the desktop chat composer to talk to a bot with automatic voice activity detection, sentence-by-sentence speech, barge-in, push-to-talk, and click-only approvals. See [Voice call mode](voice-call.md).
+- **Live voice conversation (Talk).** Press **Talk** in the desktop composer for a low-latency spoken conversation (Gemini Live): interrupt by speaking, the bot does the work through the normal approvals, and the conversation lands in the chat as text. Audio is not stored unless you turn it on. See [Live voice conversation](voice-live.md).
 - **Integrated window controls and complete ghost app icon.** On Windows, the desktop app hides the native window frame by default and draws its own minimize, maximize/restore, and close controls in a reserved title-bar strip above the panels, alongside the complete Praxi ghost icon. See [Window controls and appearance](install-windows.md#window-controls-and-appearance).
 - **Refined satin-matte bot avatars.** Bots can use one of 16 procedural SVG shapes with layered lighting, living eyes, state motion (respecting reduced motion), or a custom uploaded image/GIF. See [Bot avatars](bots-and-profiles.md#bot-avatars-desktop-app).
 - **Host-status commands without approval fatigue.** Fixed read-only status commands (`uptime`, `df -h`, `free -m`, `uname -a`, and similar) on an always-on host's own computer no longer taint the run or trigger repeated executor asks. See [Host-status commands on an always-on host](chatting-and-approvals.md#host-status-commands-on-an-always-on-host).
@@ -56,7 +62,7 @@ Seven short pages in plain words. Read them in this order:
 
 | Page | What it is |
 | --- | --- |
-| Wake a bot when mail or a signed call arrives | [When something happens](triggers.md) |
+| Wake a bot when mail, a signed call, a feed item, a page change, a calendar event or a Home Assistant change happens | [When something happens](triggers.md) |
 | [Getting started in 5 minutes](getting-started.md) | Install, get a free key, have your first chat, and learn what a bot is. |
 | [Keep your bot safe](keep-your-bot-safe.md) | The permission levels, approvals, and what leaves your computer. |
 | [Run it on this computer or on a server](local-or-server.md) | Why you do not need a server, and how to add one if you want. |
@@ -79,9 +85,11 @@ Seven short pages in plain words. Read them in this order:
 | Run the always-on Linux host: logs, restart, upgrade, backup | [Host operations](host-operations.md) |
 | Add a server so bots run around the clock (guided, no jargon) | [Adding a server](servers.md) |
 | Understand what a host does when it is demoted or hears another active host | [Host leadership limits](host-leadership.md) |
+| Import setup from Claude, Cursor, VS Code, or another assistant | [Import from other assistants](import-from-assistants.md) |
 | Create a bot and understand its profile file | [Bots and profiles](bots-and-profiles.md) |
 | Talk to a bot, approve or deny actions | [Chatting and approvals](chatting-and-approvals.md) |
 | Talk to a bot hands-free by voice (desktop app) | [Voice call mode](voice-call.md) |
+| Have a live, interruptible spoken conversation (desktop app) | [Live voice conversation](voice-live.md) |
 | Run something every morning | [Scheduled jobs in plain words](schedules.md), [Scheduled tasks](scheduled-tasks.md) (reference) |
 | Give one big task and let the bot finish it | [Missions](missions.md) |
 | Replay a recorded sequence of steps without a model | [Workflows](workflows.md) |
@@ -100,6 +108,7 @@ Seven short pages in plain words. Read them in this order:
 | See what each model call in a run was for and what it used | [LLM call ledger](llm-call-ledger.md) |
 | Cap what a bot may spend per day, week or month | [Bot spending limits](bot-spending-limits.md) |
 | See, correct, forget and switch off what your bots remember | [Memory](memory.md) |
+| Keep one chat going for weeks: the rolling "earlier in this chat" note, and how to switch it off | [Long chats](long-chats.md) |
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |
 | Talk to your bots from Discord | [Discord](discord.md) |

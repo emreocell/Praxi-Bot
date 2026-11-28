@@ -240,6 +240,14 @@ fn model_item_transition_ok(from: ItemStatus, to: ItemStatus) -> bool {
     }
 }
 
+fn item_transition_cancels_waits(from: ItemStatus, to: ItemStatus) -> bool {
+    from == ItemStatus::Waiting
+        || matches!(
+            to,
+            ItemStatus::Done | ItemStatus::Failed | ItemStatus::Skipped
+        )
+}
+
 fn check_text(what: &str, s: &str, max: usize) -> Result<String> {
     let s = s.trim();
     if s.is_empty() {
@@ -661,7 +669,7 @@ impl MissionStore {
         if to != cur.status {
             // The item left its wait: nobody watches it any more. A wake that was meant to
             // continue the item is delivered until it is settled or parked again.
-            if cur.status == ItemStatus::Waiting {
+            if item_transition_cancels_waits(cur.status, to) {
                 waits::cancel_item_waits(&tx, id, key, now)?;
             }
             if !matches!(to, ItemStatus::Todo | ItemStatus::Doing) {

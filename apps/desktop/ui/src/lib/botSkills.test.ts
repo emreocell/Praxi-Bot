@@ -247,6 +247,29 @@ test("the panel preview lists active skills, then learned ones, with a rest coun
   assert.deepEqual(skillPreview(none, 3), { names: [], more: 0 });
 });
 
+test("the Library list has one row per skill: catalog first, then learned, then missing", async () => {
+  const { panelSkillRows } = await import("./botSkills.ts");
+  assert.deepEqual(panelSkillRows(SAMPLE_BOT_SKILLS), [
+    { name: "code-review", kind: "shared" },
+    { name: "github-triage", kind: "shared" },
+    { name: "atlas-standup", kind: "learned" }
+  ]);
+  const selected: BotSkills = {
+    ...SAMPLE_BOT_SKILLS,
+    mode: "selected",
+    assigned: [
+      { name: "code-review", state: "ok" },
+      { name: "gone-skill", state: "missing" }
+    ],
+    available: SAMPLE_BOT_SKILLS.available.map((s) => ({ ...s, assigned: s.name === "code-review" }))
+  };
+  assert.deepEqual(panelSkillRows(selected), [
+    { name: "code-review", kind: "shared" },
+    { name: "atlas-standup", kind: "learned" },
+    { name: "gone-skill", kind: "missing" }
+  ]);
+});
+
 test("the skills UI goes through the tested helpers", async () => {
   const { readFileSync } = await import("node:fs");
   const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
@@ -262,8 +285,8 @@ test("the skills UI goes through the tested helpers", async () => {
     assert.ok(modal.includes(fn), `SkillsModal uses ${fn}`);
   }
   const panel = read("../components/BotPanelSkills.tsx");
-  assert.match(panel, /summarizeBotSkills\(/);
-  assert.match(panel, /skillPreview\(/);
+  assert.match(panel, /panelSkillRows\(/);
+  assert.match(panel, /<PanelRows\b/);
 });
 
 test("an open skills draft survives a catalog refresh but not a newer assignment", async () => {

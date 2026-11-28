@@ -33,10 +33,10 @@ Open **Apps**, find the app and press **Connect**. See [Connect your apps](conne
 Open **Scheduled tasks** and press **New schedule**. See [Automate things](automate.md).
 
 **Does the bot remember me?**
-It can keep useful facts, such as your name or how you like things done. They stay on your computer. **Settings → Data & backup** shows what bots remember. See [Bots and profiles](bots-and-profiles.md).
+It can keep useful facts, such as your name or how you like things done. They stay on your computer. **Settings → AI and memory** shows what bots remember. See [Bots and profiles](bots-and-profiles.md).
 
 **Something does not work.**
 See [Fix common problems](fix-common-problems.md).
 
 **How do I change the language or the look?**
-Open **Settings** from the account menu. **General** has the language. **Appearance** has the theme.
+Open **Settings** from the profile menu. **General** has the language. **Appearance** has the theme.

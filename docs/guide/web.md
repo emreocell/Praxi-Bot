@@ -30,7 +30,7 @@ Without configuration, search uses a keyless fallback chain (`duckduckgo` → `d
 
 **On a server this chain usually does not work.** DuckDuckGo and Bing treat the addresses of data centres and cloud machines as robots and answer with a robot check instead of results. Praxi recognises these pages (a Cloudflare "Just a moment", a captcha, DuckDuckGo's "bots use DuckDuckGo too", an HTTP 403, 429 or 202) and says so in plain words: "the free search engines refused this computer as a robot", with the fix. A computer at home mostly works, a server mostly does not. The fix is a search provider that is meant to be used by programs; see [Search on a server](#search-on-a-server).
 
-You can configure backends, priority order, API keys, and run a live probe either in **Settings → Web search** in the desktop app or in `<data_dir>/web.toml`. Backends are tried in configured priority order and the first that returns results wins (default order):
+You can configure backends, priority order, API keys, and run a live probe either in **Settings → Connections → Mail and web** in the desktop app or in `<data_dir>/web.toml`. Backends are tried in configured priority order and the first that returns results wins (default order):
 
 1. a [SearXNG](https://docs.searxng.org/) instance you run (`searxng_url`),
 2. Brave Search API (`brave_key`),
@@ -56,7 +56,7 @@ max_bytes = 5242880          # response body cap (at most 64 MiB)
 max_redirects = 5            # at most 10
 ```
 
-Every key is optional. Store Brave or Tavily keys in the secret store (or enter them in Settings → Web search, which stores them write-only), then reference the secret name in `web.toml`:
+Every key is optional. Store Brave or Tavily keys in the secret store (or enter them in **Settings → Connections → Mail and web**, which stores them write-only), then reference the secret name in `web.toml`:
 
 ```sh
 bot secrets set web/brave
@@ -81,7 +81,7 @@ Pick one search provider, once. Any of these makes `web_search` work on a server
 | Tavily | an API key from your Tavily account | Hosted. Built for AI agents. Has a usage limit that depends on your plan. |
 | SearXNG | the address of a SearXNG server | Runs on your own server, no account, no per-search cost. The one-command install is below. |
 
-**In the app:** open **Settings → Web search**, choose the provider, paste the key (or the SearXNG address) and press **Save and test**. The test runs a real search through that provider and tells you if it answered. Keys are stored write-only in the secret store and are never shown again.
+**In the app:** open **Settings → Connections → Mail and web**, choose the provider, paste the key (or the SearXNG address) and press **Save and test**. The test runs a real search through that provider and tells you if it answered. Keys are stored write-only in the secret store and are never shown again.
 
 **Where you will see the warning:** the Web search page shows a notice when the computer has no screen and no provider is set, `bot doctor` prints a warning on the `web search` line, and the daemon logs the same warning at start. `bot doctor --online` and the **Search** button run a real search; when every free engine refuses, they say "refused this computer as a robot" instead of a bare HTTP code.
 
@@ -93,7 +93,7 @@ You need Docker on the server. On the server, from a checkout of this repository
 sudo bash scripts/install-searxng.sh --allow-latest
 ```
 
-Without `--allow-latest` (or a pinned `--image`, below) the script stops before it downloads anything: the container starts as root, so it will not run an image that can change under you unless you say so. It writes `/opt/praxi/searxng/settings.yml` (JSON answers on, a random secret key), starts a container named `praxi-searxng` that listens on `127.0.0.1:8080` only and restarts with the server, asks it one real search and prints the address to give to Praxi: `http://127.0.0.1:8080`. Paste that into **Settings → Web search → SearXNG**, or put it in `web.toml` (`searxng_url`) and restart Praxi.
+Without `--allow-latest` (or a pinned `--image`, below) the script stops before it downloads anything: the container starts as root, so it will not run an image that can change under you unless you say so. It writes `/opt/praxi/searxng/settings.yml` (JSON answers on, a random secret key), starts a container named `praxi-searxng` that listens on `127.0.0.1:8080` only and restarts with the server, asks it one real search and prints the address to give to Praxi: `http://127.0.0.1:8080`. Paste that into **Settings → Connections → Mail and web → SearXNG**, or put it in `web.toml` (`searxng_url`) and restart Praxi.
 
 - `--port <n>` picks another port, `--dir <path>` another settings folder, `--image <ref>` the image to run. Only the official `docker.io/searxng/searxng` is accepted, pinned by digest (`--image docker.io/searxng/searxng@sha256:<64 hex digits>`; pick one you trust on the image's Docker Hub tags page). `--allow-latest` is the alternative: it accepts a moving tag (`latest`, or one you name with `--image docker.io/searxng/searxng:<tag>`), pulls it once, prints the digest it got and runs that exact digest, with the command to pin it next time.
 - Run it again at any time: it replaces the container and keeps your `settings.yml`.

@@ -42,6 +42,8 @@ pub enum CallPurpose {
     Decider,
     /// The quarantined page reader: a tool-less call that extracts facts from page text.
     Reader,
+    /// Background summary of the older part of a long chat.
+    Summary,
 }
 
 impl CallPurpose {
@@ -57,6 +59,7 @@ impl CallPurpose {
             Self::Subagent => "subagent",
             Self::Decider => "decider",
             Self::Reader => "reader",
+            Self::Summary => "summary",
         }
     }
 }

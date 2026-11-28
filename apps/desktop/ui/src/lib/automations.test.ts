@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Schedule, ScheduleHistoryEntry } from "../api/types";
 import { botAutomationRows, confirmableAuthor, dayWord, lastOutcome, localSpecLabel, primaryAction, scheduleKind } from "./automations.ts";
-import { newTrigger, type BotTrigger } from "./triggers.ts";
+import { newSource, newTrigger, type BotTrigger } from "./triggers.ts";
 
 const schedule = (id: string, extra: Partial<Schedule> = {}): Schedule =>
   ({
@@ -10,9 +10,9 @@ const schedule = (id: string, extra: Partial<Schedule> = {}): Schedule =>
     origin: "user", author: "owner", revision: 1, payload: { kind: "agent_prompt", text: "x" }, spec: { cron: "0 9 * * *" },
     next_run_at_ms: 1000, ...extra
   }) as Schedule;
-const trigger = (id: string, origin: BotTrigger["origin"], kind: "mail" | "webhook" | "time" = "mail"): BotTrigger => {
+const trigger = (id: string, origin: BotTrigger["origin"], kind: "mail" | "webhook" | "time" | "feed" | "home_assistant" = "mail"): BotTrigger => {
   const base = newTrigger();
-  const source = kind === "mail" ? base.config.source : kind === "webhook" ? { kind: "webhook" as const, id: "h" } : { kind: "time" as const, spec: { cron: "0 9 * * *" } };
+  const source = kind === "mail" ? base.config.source : kind === "webhook" ? { kind: "webhook" as const, id: "h" } : kind === "time" ? { kind: "time" as const, spec: { cron: "0 9 * * *" } } : newSource(kind);
   return { ...base, config: { ...base.config, source }, name: id, origin, author: "owner", revision: 1, id, bot_id: "a", last_fired_at_ms: null, count_today: 0, queued: 0, last_error: null };
 };
 const entry = (status: string, extra: Partial<ScheduleHistoryEntry> = {}): ScheduleHistoryEntry =>
@@ -26,6 +26,11 @@ test("one list per bot: its schedules first, then its rules, never a schedule tw
   );
   assert.deepEqual(rows.map((r) => r.key), ["schedule:soon", "schedule:later", "trigger:mail-rule", "trigger:hook"]);
   assert.deepEqual(rows.map((r) => r.kind), ["time", "time", "mail", "webhook"]);
+});
+
+test("rules on a feed or a home device are listed by their own kind", () => {
+  const rows = botAutomationRows("a", [], [trigger("news", "rule", "feed"), trigger("door", "rule", "home_assistant")]);
+  assert.deepEqual(rows.map((r) => r.kind), ["feed", "home_assistant"]);
 });
 
 test("a schedule's kind follows its event trigger", () => {

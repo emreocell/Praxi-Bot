@@ -2,7 +2,7 @@
 
 The Praxi desktop app provides keyboard shortcuts to help you navigate chats, control bot runs, open dialogs, and compose messages quickly without reaching for the mouse.
 
-You can also view this list directly in the app at any time by pressing **`?`** when no text field has focus, choosing **Help** from the account menu, or typing `/help` in the composer. See [Keyboard shortcuts and "What's new"](chatting-and-approvals.md#keyboard-shortcuts-and-whats-new).
+You can also view this list directly in the app at any time by pressing **`?`** when no text field has focus, choosing **Help** from the profile menu, or typing `/help` in the composer. See [Keyboard shortcuts and "What's new"](chatting-and-approvals.md#keyboard-shortcuts-and-whats-new).
 
 > **CLI users:** Keyboard shortcuts apply to the desktop app. If you are interacting with Praxi from a terminal, see the [CLI reference](cli-reference.md) for command-line equivalents (`bot chat`, `bot approve`, `bot status`, etc.).
 

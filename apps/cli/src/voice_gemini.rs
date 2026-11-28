@@ -32,10 +32,19 @@ const FINAL_TIMEOUT: Duration = Duration::from_secs(15);
 const TRANSCRIPT_IDLE: Duration = Duration::from_millis(2500);
 const SYSTEM_INSTRUCTION: &str = "You are a speech transcriber. Transcribe only, do not answer.";
 
-/// `wss://` anywhere, `ws://` for a loopback host only (tests and local proxies).
+/// `wss://` anywhere, `ws://` for a loopback host only (tests and local proxies). The API key is
+/// appended to this base as a query parameter, so the base itself must not carry credentials, a
+/// query or a fragment. The error never echoes the input.
 pub(crate) fn validate_ws_base(raw: &str) -> Result<String, VoiceControlError> {
     let bad = || VoiceControlError::Internal("invalid Gemini endpoint".into());
     let url = url::Url::parse(raw).map_err(|_| bad())?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(bad());
+    }
     let loopback = match url.host() {
         Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
@@ -72,15 +81,15 @@ fn setup_message(model: &str) -> serde_json::Value {
     }
 }
 
-fn upstream(msg: &str) -> VoiceControlError {
+pub(crate) fn upstream(msg: &str) -> VoiceControlError {
     VoiceControlError::Upstream(msg.to_owned())
 }
 
-fn dropped() -> VoiceControlError {
+pub(crate) fn dropped() -> VoiceControlError {
     upstream("the Gemini Live connection dropped")
 }
 
-fn parse(msg: Message) -> Option<serde_json::Value> {
+pub(crate) fn parse(msg: Message) -> Option<serde_json::Value> {
     match msg {
         Message::Text(t) => serde_json::from_str(t.as_str()).ok(),
         // The Live API sends its JSON in binary frames.
@@ -89,7 +98,7 @@ fn parse(msg: Message) -> Option<serde_json::Value> {
     }
 }
 
-fn closed(reason: Option<String>, key: &str) -> VoiceControlError {
+pub(crate) fn closed(reason: Option<String>, key: &str) -> VoiceControlError {
     let reason = reason.unwrap_or_default().replace(key, "<key>");
     let reason: String = reason.chars().take(160).collect();
     VoiceControlError::Upstream(format!("Gemini Live closed the connection: {reason}"))
@@ -417,5 +426,12 @@ mod tests {
         assert!(validate_ws_base("ws://127.0.0.1:9").is_ok());
         assert!(validate_ws_base("ws://example.com").is_err());
         assert!(validate_ws_base("https://example.com").is_err());
+        // The key is appended as `?key=`: a base with its own query or credentials is refused.
+        assert!(validate_ws_base("wss://example.com/?a=b").is_err());
+        assert!(validate_ws_base("wss://user:pw@example.com").is_err());
+        assert!(validate_ws_base("wss://example.com/#x").is_err());
+        // A host that merely starts with a loopback name is not loopback.
+        assert!(validate_ws_base("ws://localhost.example.com").is_err());
+        assert!(validate_ws_base("ws://127.0.0.1.example.com").is_err());
     }
 }

@@ -848,7 +848,9 @@ impl Storage {
     /// # Errors
     /// Fails on SQLite errors.
     pub fn insert_message(&self, m: &Message) -> Result<()> {
-        self.conn().execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO messages (id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 m.id.to_string(),
@@ -863,6 +865,15 @@ impl Storage {
                 serde_json::to_string(&m.exposure_sources)?,
             ],
         )?;
+        // A row that sorts at or before a summary's cursor (an import, a backfill) would sit
+        // inside the part the summary stands in for and never be shown: drop the summary, as
+        // an edit does. A normal append sorts after the cursor and keeps it.
+        tx.execute(
+            "DELETE FROM chat_summaries WHERE chat_id = ?1 \
+             AND (?2 < covered_until_ms OR (?2 = covered_until_ms AND ?3 <= covered_until_id))",
+            params![m.chat_id.to_string(), m.created_at_ms, m.id.to_string()],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -979,6 +990,13 @@ impl Storage {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         for id in ids {
+            // Any edit, regenerate or restore in a chat drops its summary, wherever the message
+            // sits: no cursor comparison can then misjudge which side of the summary it is on.
+            // A new summary is written when the chat grows again.
+            tx.execute(
+                "DELETE FROM chat_summaries WHERE chat_id = (SELECT chat_id FROM messages WHERE id = ?1)",
+                [id.to_string()],
+            )?;
             tx.execute(
                 "UPDATE messages SET superseded = ?2 WHERE id = ?1",
                 params![id.to_string(), i64::from(superseded)],
@@ -1113,17 +1131,37 @@ impl Storage {
         max_messages: usize,
         max_bytes: usize,
     ) -> Result<(Vec<Message>, bool)> {
+        self.list_messages_bounded_after(chat_id, None, exclude_run, max_messages, max_bytes)
+    }
+
+    /// [`Self::list_messages_bounded`], limited to the messages that sort after `after` (the
+    /// cursor of a chat summary; `None`: the whole chat). Older messages are neither returned
+    /// nor counted as omitted: a summary stands in for them.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn list_messages_bounded_after(
+        &self,
+        chat_id: ChatId,
+        after: Option<crate::Cursor>,
+        exclude_run: Option<RunId>,
+        max_messages: usize,
+        max_bytes: usize,
+    ) -> Result<(Vec<Message>, bool)> {
         let conn = self.conn();
         let mut st = conn.prepare(
             "SELECT id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources, length(CAST(content AS BLOB)) \
              FROM messages WHERE chat_id = ?1 AND superseded = 0 AND (?2 IS NULL OR run_id IS NULL OR run_id <> ?2) \
+             AND (?4 IS NULL OR created_at_ms > ?4 OR (created_at_ms = ?4 AND id > ?5)) \
              ORDER BY created_at_ms DESC, id DESC LIMIT ?3",
         )?;
         let limit = i64::try_from(max_messages.saturating_add(1)).unwrap_or(i64::MAX);
         let mut rows = st.query(params![
             chat_id.to_string(),
             exclude_run.map(|r| r.to_string()),
-            limit
+            limit,
+            after.map(|c| c.0),
+            after.map(|c| c.1.to_string()),
         ])?;
         let mut messages = Vec::new();
         let mut used = 0usize;
@@ -2481,7 +2519,7 @@ fn chat_row(r: &Row<'_>) -> rusqlite::Result<Chat> {
     })
 }
 
-fn message_row(r: &Row<'_>) -> rusqlite::Result<Message> {
+pub(crate) fn message_row(r: &Row<'_>) -> rusqlite::Result<Message> {
     Ok(Message {
         id: uuid_at(r, 0)?,
         user_id: UserId(uuid_at(r, 1)?),
@@ -2975,6 +3013,195 @@ mod tests {
         assert_eq!(f.st.list_chats(other.id).unwrap().len(), 0);
         run(&f);
         assert_eq!(f.st.list_runs(other.id).unwrap().len(), 0);
+    }
+
+    fn dialogue(f: &Fx, n: u128) -> Vec<Uuid> {
+        (1..=n)
+            .map(|i| {
+                let id = Uuid::from_u128(i);
+                f.st.insert_message(&Message {
+                    id,
+                    user_id: f.user.id,
+                    chat_id: f.chat.id,
+                    run_id: None,
+                    role: if i % 2 == 1 { "user" } else { "assistant" }.into(),
+                    content: format!("m{i}"),
+                    // Two messages share a millisecond: the id breaks the tie.
+                    created_at_ms: i64::try_from(i / 2).unwrap(),
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
+                })
+                .unwrap();
+                id
+            })
+            .collect()
+    }
+
+    fn summary_of(f: &Fx, ids: &[Uuid], until: usize) -> crate::ChatSummary {
+        let last = f.st.get_message(ids[until]).unwrap().unwrap();
+        crate::ChatSummary {
+            chat_id: f.chat.id,
+            user_id: f.user.id,
+            content: "earlier".into(),
+            covered_until_ms: last.created_at_ms,
+            covered_until_id: last.id,
+            covered_messages: u32::try_from(until + 1).unwrap(),
+            rounds: 1,
+            first_message_ms: 0,
+            exposure_untrusted: true,
+            exposure_private: false,
+            exposure_sources: vec!["page example.com".into()],
+            model: "p/m".into(),
+            created_at_ms: 10,
+            updated_at_ms: 10,
+        }
+    }
+
+    #[test]
+    fn chat_summary_round_trips_and_a_round_replaces_the_row() {
+        let f = fx();
+        let ids = dialogue(&f, 6);
+        assert_eq!(f.st.get_chat_summary(f.chat.id).unwrap(), None);
+        let mut s = summary_of(&f, &ids, 2);
+        f.st.put_chat_summary(&s).unwrap();
+        assert_eq!(f.st.get_chat_summary(f.chat.id).unwrap(), Some(s.clone()));
+        s = crate::ChatSummary {
+            rounds: 2,
+            content: "later".into(),
+            ..summary_of(&f, &ids, 4)
+        };
+        f.st.put_chat_summary(&s).unwrap();
+        assert_eq!(f.st.get_chat_summary(f.chat.id).unwrap(), Some(s));
+        assert!(f.st.delete_chat_summary(f.chat.id).unwrap());
+        assert!(!f.st.delete_chat_summary(f.chat.id).unwrap());
+    }
+
+    #[test]
+    fn messages_after_the_cursor_are_listed_and_the_summarised_ones_stay_stored() {
+        let f = fx();
+        let ids = dialogue(&f, 6);
+        // The cursor sits on m2, which shares its millisecond with m3: the id breaks the tie.
+        let s = summary_of(&f, &ids, 1);
+        let (tail, omitted) =
+            f.st.list_messages_bounded_after(f.chat.id, Some(s.cursor()), None, 10, 100)
+                .unwrap();
+        let texts: Vec<_> = tail.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(texts, ["m3", "m4", "m5", "m6"]);
+        assert!(!omitted, "older messages are replaced, not omitted");
+        // Without a cursor the whole chat is there.
+        assert_eq!(
+            f.st.list_messages_bounded(f.chat.id, None, 10, 100)
+                .unwrap()
+                .0
+                .len(),
+            6
+        );
+        assert_eq!(f.st.list_messages(f.chat.id).unwrap().len(), 6);
+        // The bound still applies after the cursor.
+        let (two, omitted) =
+            f.st.list_messages_bounded_after(f.chat.id, Some(s.cursor()), None, 2, 100)
+                .unwrap();
+        assert_eq!(two.len(), 2);
+        assert!(omitted);
+        assert_eq!(
+            f.st.dialogue_size_after(f.chat.id, Some(s.cursor()), None)
+                .unwrap(),
+            (4, 8)
+        );
+        let after =
+            f.st.list_dialogue_after(f.chat.id, Some(s.cursor()), 2)
+                .unwrap();
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0].content, "m3");
+    }
+
+    #[test]
+    fn any_supersede_or_restore_in_the_chat_drops_its_summary() {
+        let f = fx();
+        let ids = dialogue(&f, 6);
+        // A message after the cursor, the one on it, one before it, a restore.
+        for (range, superseded) in [(4..6, true), (2..3, true), (0..1, true), (4..6, false)] {
+            f.st.put_chat_summary(&summary_of(&f, &ids, 2)).unwrap();
+            f.st.set_messages_superseded(&ids[range], superseded)
+                .unwrap();
+            assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_none());
+        }
+        // Another chat's edit leaves it alone.
+        f.st.put_chat_summary(&summary_of(&f, &ids, 2)).unwrap();
+        f.st.set_messages_superseded(&[Uuid::from_u128(999)], true)
+            .unwrap();
+        assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn the_cursor_orders_the_same_in_sql_and_in_rust() {
+        let f = fx();
+        // Random ids, many sharing a millisecond: SQL sorts the id as text, Rust as bytes.
+        let scattered = |i: u64| {
+            // splitmix64, twice: ids spread over every byte.
+            let mix = |mut z: u64| {
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                z ^ (z >> 31)
+            };
+            let seed = i.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            Uuid::from_u128((u128::from(mix(seed)) << 64) | u128::from(mix(!seed)))
+        };
+        let mut msgs: Vec<(i64, Uuid)> = (0..200)
+            .map(|i| {
+                let id = scattered(u64::try_from(i).unwrap());
+                f.st.insert_message(&Message {
+                    id,
+                    user_id: f.user.id,
+                    chat_id: f.chat.id,
+                    run_id: None,
+                    role: "user".into(),
+                    content: "x".into(),
+                    created_at_ms: i / 50,
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
+                })
+                .unwrap();
+                (i / 50, id)
+            })
+            .collect();
+        msgs.sort();
+        let listed: Vec<(i64, Uuid)> =
+            f.st.list_dialogue_after(f.chat.id, None, 1000)
+                .unwrap()
+                .iter()
+                .map(|m| (m.created_at_ms, m.id))
+                .collect();
+        assert_eq!(listed, msgs);
+        for at in [0, 37, 49, 50, 120, 199] {
+            let after: Vec<(i64, Uuid)> =
+                f.st.list_dialogue_after(f.chat.id, Some(msgs[at]), 1000)
+                    .unwrap()
+                    .iter()
+                    .map(|m| (m.created_at_ms, m.id))
+                    .collect();
+            assert_eq!(after, msgs[at + 1..]);
+            assert!(after.iter().all(|m| crate::sorts_after(*m, msgs[at])));
+            assert_eq!(
+                f.st.dialogue_size_after(f.chat.id, Some(msgs[at]), None)
+                    .unwrap()
+                    .0,
+                199 - at
+            );
+        }
+    }
+
+    #[test]
+    fn deleting_a_chat_deletes_its_summary_and_a_summary_needs_a_chat() {
+        let f = fx();
+        let ids = dialogue(&f, 4);
+        let s = summary_of(&f, &ids, 1);
+        f.st.put_chat_summary(&s).unwrap();
+        assert!(f.st.delete_chat(f.chat.id).unwrap());
+        assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_none());
+        assert!(f.st.put_chat_summary(&s).is_err());
     }
 
     #[test]

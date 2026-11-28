@@ -132,7 +132,7 @@ fn mailbox(s: &str) -> Result<(String, String), EmailError> {
     let mut iter = addresses.iter();
     let address = iter.next().ok_or_else(bad)?;
     let email = address.address.as_deref().ok_or_else(bad)?;
-    if iter.next().is_some() || email.parse::<email_address::EmailAddress>().is_err() {
+    if iter.next().is_some() || !crate::address::is_valid_address(email) {
         return Err(bad());
     }
     Ok((

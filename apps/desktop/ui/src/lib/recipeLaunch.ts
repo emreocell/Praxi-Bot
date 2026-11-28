@@ -10,18 +10,26 @@ import {
   buildKickoff,
   type Recipe,
   type RecipeBook,
+  buildMissionGoal,
+  MAX_MISSION_GOAL,
   recipeBotName,
   recipeFolder,
-  recipeText
+  recipeText,
+  runsAsMission
 } from "./recipes.ts";
 
 /** The slice of the daemon client the creation flow needs (a mock fits too). */
-export type RecipeApi = Pick<ApiClient, "createBot" | "createChat" | "sendMessage" | "createSchedule">;
+export type RecipeApi = Pick<ApiClient, "createBot" | "createChat" | "sendMessage" | "createSchedule" | "startMission">;
 
 /** What a retry must not redo: each step that already succeeded. */
 export interface LaunchProgress {
   botId?: string;
+  /** The level the bot was created with: a retry at another level is refused (the owner's choice decides, once). */
+  level?: AutonomyLevel;
+  /** The chat of the task; for a mission, the mission's own chat. */
   chatId?: string;
+  /** Set once the mission exists: a retry never starts a second one. */
+  missionId?: string;
   messageSent?: boolean;
   /** `false`: the schedule was tried and failed (the task itself is running; it is not retried). */
   scheduleId?: string | false;
@@ -43,11 +51,25 @@ export interface LaunchInput {
   onBotCreated?: (bot: Bot) => Promise<void>;
 }
 
-export type LaunchStage = "check" | "bot" | "chat" | "message";
+export type LaunchStage = "check" | "goal" | "level" | "bot" | "chat" | "message" | "mission";
 
 export type LaunchResult =
-  | { ok: true; botId: string; chatId: string; schedule: "created" | "none" | "failed"; scheduleError?: string }
+  | {
+      ok: true;
+      botId: string;
+      chatId: string;
+      /** Present when the task runs as a mission: `chatId` is then the mission's chat. */
+      missionId?: string;
+      schedule: "created" | "none" | "failed";
+      scheduleError?: string;
+    }
   | { ok: false; stage: LaunchStage; message: string; progress: LaunchProgress };
+
+/**
+ * What a mission's budget holds besides the recipe's own three limits: the daemon's defaults for the
+ * runs-stalled and runs-failed limits (`Budgets::default`), which the API wants spelled out.
+ */
+const MISSION_LIMITS = { max_stalled_sessions: 4, max_failed_sessions: 3 } as const;
 
 /** The bot profile a recipe asks for, at the level the owner confirmed. */
 export function recipeBotConfig(
@@ -72,9 +94,12 @@ export function recipeBotConfig(
 }
 
 /**
- * Create the bot, open a chat and send the task, then (if the owner asked) schedule it.  Each step
- * is recorded in `progress`, so a retry after a failure continues instead of creating a second bot
- * or sending the task twice.  A failing schedule never undoes a running task.
+ * Create the bot, then start the task, then (if the owner asked) schedule it.  The task is a mission
+ * when the recipe describes long work and the owner confirmed the Full level (`runsAsMission`), else
+ * a chat with the first message.  Each step is recorded in `progress`, so a retry after a failure
+ * continues instead of creating a second bot, a second mission or sending the task twice.  A failing
+ * schedule never undoes a running task.  A schedule keeps repeating the kickoff as a normal run: a
+ * mission is the one big first pass, not something a schedule can start.
  */
 export async function launchRecipe(api: RecipeApi, input: LaunchInput): Promise<LaunchResult> {
   const { recipe, answers, lang } = input;
@@ -85,12 +110,20 @@ export async function launchRecipe(api: RecipeApi, input: LaunchInput): Promise<
   if (Object.keys(answerProblems(recipe, answers)).length > 0) {
     return { ok: false, stage: "check", message: "incomplete", progress };
   }
+  const asMission = runsAsMission(recipe, input.level);
+  if (asMission && buildMissionGoal(input.book, recipe, answers, lang).length > MAX_MISSION_GOAL) {
+    return { ok: false, stage: "goal", message: "too long", progress };
+  }
+  if (progress.botId && progress.level && progress.level !== input.level) {
+    return { ok: false, stage: "level", message: "level changed", progress };
+  }
 
   if (!progress.botId) {
     try {
       const config = recipeBotConfig(recipe, answers, lang, input.level, input.executor);
       const bot = await api.createBot({ name: recipeBotName(recipe, lang), config });
       progress.botId = bot.id;
+      progress.level = input.level;
       await input.onBotCreated?.(bot);
     } catch (e) {
       return fail("bot", e);
@@ -98,17 +131,34 @@ export async function launchRecipe(api: RecipeApi, input: LaunchInput): Promise<
   }
   const botId = progress.botId!;
 
-  if (!progress.chatId) {
+  const kickoff = buildKickoff(input.book, recipe, answers, lang);
+  if (asMission) {
+    if (!progress.missionId) {
+      try {
+        const started = await api.startMission({
+          bot_id: botId,
+          goal: buildMissionGoal(input.book, recipe, answers, lang),
+          title: recipeText(recipe, lang).name,
+          budgets: { ...MISSION_LIMITS, ...recipe.mission!.budgets }
+        });
+        progress.missionId = started.mission.id;
+        progress.chatId = started.mission.chat_id;
+      } catch (e) {
+        return fail("mission", e);
+      }
+    }
+  } else if (!progress.chatId) {
     try {
       progress.chatId = (await api.createChat(botId, recipeText(recipe, lang).name)).id;
     } catch (e) {
       return fail("chat", e);
     }
   }
-  const chatId = progress.chatId;
+  const chatId = progress.chatId!;
+  const missionId = progress.missionId;
+  const done = { ok: true as const, botId, chatId, ...(missionId ? { missionId } : {}) };
 
-  const kickoff = buildKickoff(input.book, recipe, answers, lang);
-  if (!progress.messageSent) {
+  if (!asMission && !progress.messageSent) {
     try {
       await api.sendMessage(chatId, kickoff);
       progress.messageSent = true;
@@ -117,14 +167,14 @@ export async function launchRecipe(api: RecipeApi, input: LaunchInput): Promise<
     }
   }
 
-  if (!input.schedule) return { ok: true, botId, chatId, schedule: "none" };
-  if (progress.scheduleId) return { ok: true, botId, chatId, schedule: "created" };
-  if (progress.scheduleId === false) return { ok: true, botId, chatId, schedule: "failed" };
+  if (!input.schedule) return { ...done, schedule: "none" };
+  if (progress.scheduleId) return { ...done, schedule: "created" };
+  if (progress.scheduleId === false) return { ...done, schedule: "failed" };
   const simple: SimpleSchedule = { ...DEFAULT_SIMPLE, ...input.schedule, weekday: input.schedule.weekday ?? DEFAULT_SIMPLE.weekday };
   const spec = simpleSpec(simple, input.tz);
   if (!spec) {
     progress.scheduleId = false;
-    return { ok: true, botId, chatId, schedule: "failed", scheduleError: "time" };
+    return { ...done, schedule: "failed", scheduleError: "time" };
   }
   try {
     const made: Schedule = await api.createSchedule({
@@ -136,9 +186,9 @@ export async function launchRecipe(api: RecipeApi, input: LaunchInput): Promise<
       misfire_policy: "skip"
     });
     progress.scheduleId = made.id;
-    return { ok: true, botId, chatId, schedule: "created" };
+    return { ...done, schedule: "created" };
   } catch (e) {
     progress.scheduleId = false;
-    return { ok: true, botId, chatId, schedule: "failed", scheduleError: humanLine(e) };
+    return { ...done, schedule: "failed", scheduleError: humanLine(e) };
   }
 }

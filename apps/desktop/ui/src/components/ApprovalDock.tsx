@@ -9,10 +9,11 @@ export interface DockPage {
   key: string;
   /** A line above the card when it belongs elsewhere (another chat of the bot). */
   caption?: string | null;
-  /** `active`: this is the page on screen (it alone answers the Enter / Esc keys). */
+  /**
+   * `active`: this is the page on screen (it alone answers the Enter / Esc keys, and its buttons show
+   * which key answers them).
+   */
   render: (active: boolean) => ReactNode;
-  /** Which keys answer this page: Enter may not allow a card the owner has to read. Default both. */
-  keys?: "both" | "deny" | "none";
 }
 
 /** A little over `--motion-duration-exit`: how long the answered dock stays mounted to fade out. */
@@ -21,7 +22,8 @@ const EXIT_MS = 160;
 /**
  * The one place where a run's approvals are asked, docked directly above the composer (the
  * composer squares its top corners while this is open). Compact: one card at a time, a counter
- * with previous / next when several wait. It is a self-contained piece: the host passes the pages,
+ * with previous / next when several wait. The card shows its own keys (Enter on Allow, Esc on Deny)
+ * inside its buttons. It is a self-contained piece: the host passes the pages,
  * it owns nothing about how a card decides. After the answer the run's own step line is the trace.
  */
 export function ApprovalDock({ pages: live }: { pages: readonly DockPage[] }) {
@@ -89,22 +91,10 @@ export function ApprovalDock({ pages: live }: { pages: readonly DockPage[] }) {
           </button>
         </div>
       ) : null}
-      {page.caption ? <p className={styles.caption}>{page.caption}</p> : null}
+      {page.caption ? <p className={styles.caption} title={page.caption}>{page.caption}</p> : null}
       <div className={styles.page} key={page.key}>
         {page.render(!closing)}
       </div>
-      {page.keys === "none" ? null : (
-        <p className={styles.keys} aria-hidden="true">
-          {page.keys === "deny" ? null : (
-            <span>
-              <kbd>↵</kbd> {t("approvalDock.keyAllow")}
-            </span>
-          )}
-          <span>
-            <kbd>esc</kbd> {t("approvalDock.keyDeny")}
-          </span>
-        </p>
-      )}
     </section>
   );
 }

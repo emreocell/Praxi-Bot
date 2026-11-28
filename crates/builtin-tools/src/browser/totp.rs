@@ -9,7 +9,9 @@
 //! of the frame that holds the element and of the top page (twice, with the document
 //! unchanged in between), both must be the account's own site, and only then is the element
 //! read. The element stays masked in later snapshots until the page navigates. Typing the
-//! codes later is `browser_fill {secret: "totp:<name>"}`.
+//! codes later is `browser_fill {secret: "totp:<name>"}`. When the daily account health
+//! probe says a site session expired, sign in again in the browser (or let a bot run use
+//! these same secrets); the probe does not type passwords by itself.
 
 use std::sync::Arc;
 

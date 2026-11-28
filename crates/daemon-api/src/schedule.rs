@@ -41,6 +41,12 @@ fn exec_err(e: impl std::fmt::Display) -> SchedulerError {
     SchedulerError::Execution(e.to_string())
 }
 
+/// A failure before the run existed: nothing started and nothing was spent, which lets a
+/// standing order give its daily slot back.
+fn not_started(e: impl std::fmt::Display) -> SchedulerError {
+    SchedulerError::NotStarted(e.to_string())
+}
+
 /// Workflow parameters as the replayer wants them: string to string.
 fn string_params(v: &Value) -> Result<BTreeMap<String, String>, SchedulerError> {
     match v {
@@ -70,6 +76,11 @@ pub(crate) fn work_of(payload: &Payload) -> Result<ScheduleWork, SchedulerError>
             name: name.clone(),
             input: input.clone(),
         },
+        Payload::StandingOrder { .. } => ScheduleWork::Prompt(
+            payload
+                .standing_prompt()
+                .ok_or_else(|| exec_err("standing order prompt unavailable"))?,
+        ),
     })
 }
 
@@ -86,7 +97,10 @@ impl DaemonExecutor {
     /// The chat a firing posts to: the schedule's own, else the newest chat of
     /// the bot titled like the schedule, else a new one.
     fn chat_for(&self, s: &Schedule) -> Result<ChatId, SchedulerError> {
-        if s.external_input.is_none() && s.precheck.is_none() {
+        // A standing order runs often and mostly says "OK": each run gets a fresh chat so a
+        // long history never makes the next check dearer.
+        let fresh = matches!(s.payload, Payload::StandingOrder { .. });
+        if s.external_input.is_none() && s.precheck.is_none() && !fresh {
             if let Some(id) = s.chat_id {
                 let chat = self
                     .storage
@@ -224,7 +238,10 @@ impl DaemonExecutor {
     ) -> scheduler::Result<()> {
         // Network checks happen before a chat/run or any action exists. Only prompt payloads
         // require a model; local tools and workflow replay keep their existing gate paths.
-        if matches!(schedule.payload, Payload::AgentPrompt { .. }) {
+        if matches!(
+            schedule.payload,
+            Payload::AgentPrompt { .. } | Payload::StandingOrder { .. }
+        ) {
             let skip = schedule.misfire_policy == scheduler::MisfirePolicy::Skip;
             let attempts = if skip { 1 } else { 3 };
             let mut available = false;
@@ -263,7 +280,7 @@ impl DaemonExecutor {
                 if let Some((due, _)) = occurrence {
                     self.store.note_offline(schedule.id, due, skip)?;
                 }
-                return Err(exec_err(
+                return Err(not_started(
                     "The model service cannot be reached. Nothing was started. Retry when the connection returns.",
                 ));
             }
@@ -279,7 +296,7 @@ impl DaemonExecutor {
                             && s.next_run_at.is_none()))
             }) || self.store.frozen_for(schedule.id)?.is_some()
             {
-                return Err(exec_err(
+                return Err(not_started(
                     "This schedule was changed or stopped while waiting for the connection. Nothing was started.",
                 ));
             }
@@ -296,9 +313,12 @@ impl DaemonExecutor {
             .get_bot(schedule.bot_id)
             .map_err(exec_err)?
             .filter(|b| b.user_id == self.user_id)
-            .ok_or_else(|| exec_err(format!("bot {} of schedule is gone", schedule.bot_id)))?;
+            .ok_or_else(|| not_started(format!("bot {} of schedule is gone", schedule.bot_id)))?;
         self.wait_for_connection(schedule, occurrence).await?;
-        let chat = self.chat_for(schedule)?;
+        let chat = self.chat_for(schedule).map_err(|e| match e {
+            SchedulerError::Execution(m) => SchedulerError::NotStarted(m),
+            other => other,
+        })?;
         let external = schedule.external_input.is_some() || schedule.precheck.is_some();
         let mut payload = schedule.payload.clone();
         if let Some(input) = &schedule.external_input {
@@ -349,10 +369,10 @@ impl DaemonExecutor {
                     (false, None) => self.agent.run_scheduled(chat, schedule.id, work),
                 }
             })
-            .map_err(exec_err)?
+            .map_err(not_started)?
             .map_err(|e| match e {
-                LoopError::Busy(c) => exec_err(format!("chat {c} is busy with another turn")),
-                other => exec_err(other),
+                LoopError::Busy(c) => not_started(format!("chat {c} is busy with another turn")),
+                other => not_started(other),
             })?;
         // Display link only: the idempotency key in the run record, not this
         // row, is what keeps a retry from starting a second run.
@@ -415,6 +435,17 @@ async fn poll_trigger(
     trigger: &scheduler::Trigger,
 ) -> scheduler::Result<Vec<scheduler::watch::Observation>> {
     poll_trigger_with_rule(agent, storage, bot, id, trigger, None).await
+}
+
+#[cfg(test)]
+pub(crate) async fn poll_trigger_for_tests(
+    agent: &AgentLoop,
+    storage: &Storage,
+    bot: BotId,
+    id: protocol::TaskId,
+    trigger: &scheduler::Trigger,
+) -> scheduler::Result<Vec<scheduler::watch::Observation>> {
+    poll_trigger(agent, storage, bot, id, trigger).await
 }
 
 async fn poll_trigger_with_rule(
@@ -485,8 +516,81 @@ async fn poll_trigger_with_rule(
                 email_observations(&output, from_filter, subject_filter.as_deref())
             }
         }
+        scheduler::Trigger::Feed { url } => {
+            authorize_web_poll(agent, bot, id)?;
+            tool_registry::with_url_guard(
+                agent.schedule_url_guard(bot),
+                crate::trigger_sources::feed_observations(
+                    crate::trigger_sources::web_fetcher(),
+                    url,
+                ),
+            )
+            .await
+        }
+        scheduler::Trigger::PageChange { url, selector } => {
+            authorize_web_poll(agent, bot, id)?;
+            tool_registry::with_url_guard(
+                agent.schedule_url_guard(bot),
+                crate::trigger_sources::page_observations(
+                    crate::trigger_sources::web_fetcher(),
+                    url,
+                    selector,
+                ),
+            )
+            .await
+        }
+        scheduler::Trigger::Calendar {
+            account,
+            minutes_before,
+        } => calendar_poll(agent, bot, id, account.as_deref(), *minutes_before).await,
+        scheduler::Trigger::HomeAssistant { entity_id, .. } => {
+            let output = agent
+                .schedule_read_host(bot, id)
+                .call_tool("ha_get_state", serde_json::json!({"entity_id": entity_id}))
+                .await
+                .map_err(exec_err)?;
+            crate::trigger_sources::ha_observation(&output, entity_id)
+        }
         scheduler::Trigger::Webhook { .. } => Err(exec_err("webhooks are not polled")),
     }
+}
+
+async fn calendar_poll(
+    agent: &AgentLoop,
+    bot: BotId,
+    id: protocol::TaskId,
+    account: Option<&str>,
+    minutes_before: u32,
+) -> scheduler::Result<Vec<scheduler::watch::Observation>> {
+    let now = storage::now_ms();
+    let iso = |ms: i64| {
+        chrono::DateTime::from_timestamp_millis(ms)
+            .unwrap_or_default()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    // One extra minute: the connector lists what overlaps the range, we filter exactly.
+    let mut input = serde_json::json!({
+        "limit": 100,
+        "from": iso(now),
+        "to": iso(now.saturating_add((i64::from(minutes_before) + 1) * 60_000)),
+    });
+    if let Some(account) = account {
+        input["account"] = account.into();
+    }
+    let output = agent
+        .schedule_read_host(bot, id)
+        .call_tool("calendar_list_events", input)
+        .await
+        .map_err(exec_err)?;
+    crate::trigger_sources::calendar_observations(&output, now, minutes_before)
+}
+
+fn authorize_web_poll(
+    agent: &AgentLoop,
+    bot: BotId,
+    id: protocol::TaskId,
+) -> scheduler::Result<()> {
+    agent.authorize_schedule_web_poll(bot, id).map_err(exec_err)
 }
 
 fn email_observations(
@@ -652,7 +756,37 @@ pub(crate) async fn validate_trigger(
             .await
             .map(|_| ())
             .map_err(|_| "file watch requires an allowed, bounded workspace directory".into()),
+        // Feeds, pages, calendars and Home Assistant are created in "When something happens"
+        // (the owner's rule), never as a bare schedule trigger.
+        scheduler::Trigger::Feed { .. }
+        | scheduler::Trigger::PageChange { .. }
+        | scheduler::Trigger::Calendar { .. }
+        | scheduler::Trigger::HomeAssistant { .. } => {
+            Err("create this in “When something happens” on the bot's Automation tab".into())
+        }
     }
+}
+
+/// Last assistant line of a finished standing-order run as `ok`, `needs_owner` or `unclear`.
+pub(crate) fn standing_verdict_of_run(storage: &Storage, run: &storage::Run) -> Option<String> {
+    if !matches!(run.state.as_str(), "succeeded") {
+        return None;
+    }
+    let chat = run.chat_id?;
+    let (messages, _) = storage
+        .list_messages_bounded(chat, None, 40, 256 * 1024)
+        .ok()?;
+    let last = messages
+        .into_iter()
+        .filter(|m| {
+            m.role == "assistant" && m.run_id == Some(run.id) && !m.content.trim().is_empty()
+        })
+        .max_by_key(|m| m.created_at_ms)?;
+    Some(match scheduler::StandingVerdict::parse(&last.content) {
+        scheduler::StandingVerdict::Ok => "ok".to_owned(),
+        scheduler::StandingVerdict::NeedsOwner(_) => "needs_owner".to_owned(),
+        scheduler::StandingVerdict::Unclear => "unclear".to_owned(),
+    })
 }
 
 #[cfg(test)]

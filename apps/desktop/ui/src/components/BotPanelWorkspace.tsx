@@ -24,6 +24,11 @@ import { Modal } from "./Modal";
 import { useToast } from "./Toast";
 import styles from "./BotPanelWorkspace.module.css";
 
+/** The disk line gets its own row from this fill level on. */
+const DISK_WARN_PERCENT = 85;
+/** A folder with this many entries gets a search field. */
+const SEARCH_FROM = 8;
+
 interface PreviewState {
   entry: WorkspaceEntryDto;
   kind: "text" | "image";
@@ -230,10 +235,19 @@ export function BotPanelWorkspace({
 
   const latestUndo = data?.undo_items[0];
 
+  const diskSummary = overview?.disk
+    ? t("workspace.diskSummary", {
+        percent: overview.disk.used_percent,
+        free: formatBytes(overview.disk.available_bytes),
+        total: formatBytes(overview.disk.total_bytes),
+        botsTotal: formatBytes(overview.total_workspace_bytes)
+      })
+    : null;
+
   return (
     <div className={styles.wrap} data-testid="bot-panel-workspace">
       <div className={styles.headerRow}>
-        <span className={badgeClass} data-testid="bot-workspace-usage">
+        <span className={badgeClass} data-testid="bot-workspace-usage" title={diskSummary ?? undefined}>
           {data ? `${formatBytes(data.used_bytes)}${limitLabel}` : "—"}
         </span>
         {data?.workspace_path ? (
@@ -249,28 +263,25 @@ export function BotPanelWorkspace({
         ) : null}
       </div>
 
-      {overview?.disk ? (
-        <p className={styles.emptyNote}>
-          {t("workspace.diskSummary", {
-            percent: overview.disk.used_percent,
-            free: formatBytes(overview.disk.available_bytes),
-            total: formatBytes(overview.disk.total_bytes),
-            botsTotal: formatBytes(overview.total_workspace_bytes)
-          })}
-        </p>
+      {/* The disk line is only worth a line of its own when the disk is nearly full; otherwise it is the usage badge's tooltip. */}
+      {diskSummary && (overview?.disk?.used_percent ?? 0) >= DISK_WARN_PERCENT ? (
+        <p className={styles.emptyNote} data-testid="bot-workspace-disk">{diskSummary}</p>
       ) : null}
 
-      <div className={styles.controls}>
-        <input
-          type="search"
-          className={styles.searchInput}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("workspace.searchPlaceholder")}
-          aria-label={t("workspace.searchPlaceholder")}
-          data-testid="bot-workspace-search"
-        />
-      </div>
+      {/* A search field for a short folder is clutter: it appears once the list is long, or while a search is on. */}
+      {query.trim() || (data?.entries.length ?? 0) >= SEARCH_FROM ? (
+        <div className={styles.controls}>
+          <input
+            type="search"
+            className={styles.searchInput}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("workspace.searchPlaceholder")}
+            aria-label={t("workspace.searchPlaceholder")}
+            data-testid="bot-workspace-search"
+          />
+        </div>
+      ) : null}
 
       {crumbs.length > 0 ? (
         <nav className={styles.breadcrumbs} aria-label={t("workspace.breadcrumbs")}>

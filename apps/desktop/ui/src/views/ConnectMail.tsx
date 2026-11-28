@@ -1,12 +1,13 @@
-import { ArrowLeft, CalendarDays, CircleAlert, CircleCheck, ExternalLink, Mail, PlugZap } from "lucide-react";
+import { ArrowLeft, CircleAlert, CircleCheck, ExternalLink, PlugZap } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { ApiClient } from "../api/client";
 import type { Bot, EmailTestReport } from "../api/types";
 import { BotAccessPicker } from "../components/BotAccessPicker";
-import { Callout, DialogBody, DialogFooter, DialogHeader, Field } from "../components/DialogParts";
-import formStyles from "../components/Form.module.css";
+import { Callout, DialogBody, DialogFooter, DialogHeader } from "../components/DialogParts";
+import { FormField, formStyles } from "../components/SettingsForm";
+import { SwitchField, SwitchGrid } from "../components/SettingsUi";
 import { Modal } from "../components/Modal";
 import { MAIL_CHANGED_EVENT, mailToolsOn, mailToolsPatch } from "../lib/botMail";
 import { botFromScope } from "../lib/emailAccounts";
@@ -375,10 +376,12 @@ export function ConnectMailFlow({
                     <Link href={profile.appPasswordUrl}>{t(`${K}.appPassword.open`, { provider: providerName })}</Link>
                   </div>
                 ) : null}
-                <Field
+                <FormField
+                  id="connect-mail-password"
                   label={t(`${K}.appPassword.label`)}
-                  htmlFor="connect-mail-password"
-                  hint={t(`${K}.appPassword.hint`)}
+                  helpTitle={t(`${K}.appPassword.label`)}
+                  helpBody={t(`${K}.appPassword.hint`)}
+                  width="md"
                 >
                   <input
                     id="connect-mail-password"
@@ -393,13 +396,17 @@ export function ConnectMailFlow({
                       reset();
                     }}
                   />
-                </Field>
+                </FormField>
               </div>
             ) : null}
 
             {mailPath === "app_password" ? (
               <div className={styles.section}>
-                <Field label={t(`${K}.bot.label`)} hint={t(`${K}.bot.hint`)}>
+                <FormField
+                  label={t(`${K}.bot.label`)}
+                  helpTitle={t(`${K}.bot.label`)}
+                  helpBody={t(`${K}.bot.hint`)}
+                >
                   <BotAccessPicker
                     single
                     scope={scope}
@@ -415,27 +422,24 @@ export function ConnectMailFlow({
                       nobody: t("settingsModal.email.form.access.nobody")
                     }}
                   />
-                </Field>
+                </FormField>
                 <div className={styles.choices}>
                   <span className={styles.sectionTitle}>{t(`${K}.send.label`)}</span>
                   <p className={styles.text} data-testid="connect-mail-readonly">
                     {t(`${K}.send.readOnly`)}
                   </p>
-                  <label className={styles.choice}>
-                    <input
-                      type="checkbox"
+                  <SwitchGrid>
+                    <SwitchField
                       checked={allowSend}
-                      data-testid="connect-mail-allow-send"
-                      onChange={(e) => {
-                        setAllowSend(e.target.checked);
+                      onChange={(v) => {
+                        setAllowSend(v);
                         reset();
                       }}
+                      label={t(`${K}.send.allow`)}
+                      hint={t(`${K}.send.allowHint`)}
+                      testId="connect-mail-allow-send"
                     />
-                    <span>
-                      {t(`${K}.send.allow`)}
-                      <span className={styles.choiceHint}>{t(`${K}.send.allowHint`)}</span>
-                    </span>
-                  </label>
+                  </SwitchGrid>
                 </div>
               </div>
             ) : null}
@@ -443,10 +447,12 @@ export function ConnectMailFlow({
             {calendarPath === "app_password" ? (
               <div className={styles.section}>
                 {provider === "other" ? (
-                  <Field
+                  <FormField
+                    id="connect-mail-caldav"
                     label={t(`${K}.calendarServer.label`)}
-                    htmlFor="connect-mail-caldav"
-                    hint={t(`${K}.calendarServer.hint`)}
+                    helpTitle={t(`${K}.calendarServer.label`)}
+                    helpBody={t(`${K}.calendarServer.hint`)}
+                    width="md"
                   >
                     <input
                       id="connect-mail-caldav"
@@ -460,7 +466,7 @@ export function ConnectMailFlow({
                         reset();
                       }}
                     />
-                  </Field>
+                  </FormField>
                 ) : null}
                 <p className={styles.text}>{t(`${K}.calendarNote`)}</p>
               </div>
@@ -477,7 +483,13 @@ export function ConnectMailFlow({
                 data-testid="connect-mail-more"
               >
                 <summary>{t(`${K}.more.title`)}</summary>
-                <Field label={t(`${K}.more.login`)} htmlFor="connect-mail-login" hint={t(`${K}.more.loginHint`)}>
+                <FormField
+                  id="connect-mail-login"
+                  label={t(`${K}.more.login`)}
+                  helpTitle={t(`${K}.more.login`)}
+                  helpBody={t(`${K}.more.loginHint`)}
+                  width="md"
+                >
                   <input
                     id="connect-mail-login"
                     className={formStyles.input}
@@ -489,7 +501,7 @@ export function ConnectMailFlow({
                       reset();
                     }}
                   />
-                </Field>
+                </FormField>
                 {mailPath === "app_password" ? (
                   <div className={styles.grid}>
                     {(
@@ -500,10 +512,15 @@ export function ConnectMailFlow({
                         ["smtpPort", "settingsModal.email.form.port"]
                       ] as const
                     ).map(([key, label]) => (
-                      <Field key={key} label={t(label)} htmlFor={`connect-mail-${key}`}>
+                      <FormField
+                        key={key}
+                        id={`connect-mail-${key}`}
+                        label={t(label)}
+                        width={key.endsWith("Port") ? "sm" : "md"}
+                      >
                         <input
                           id={`connect-mail-${key}`}
-                          className={[formStyles.input, key.endsWith("Port") ? styles.port : ""].join(" ")}
+                          className={formStyles.input}
                           value={String(servers[key])}
                           autoComplete="off"
                           spellCheck={false}
@@ -512,9 +529,9 @@ export function ConnectMailFlow({
                             reset();
                           }}
                         />
-                      </Field>
+                      </FormField>
                     ))}
-                    <Field label={t(`${K}.more.smtpSecurity`)} htmlFor="connect-mail-smtpSecurity">
+                    <FormField id="connect-mail-smtpSecurity" label={t(`${K}.more.smtpSecurity`)} width="md">
                       <select
                         id="connect-mail-smtpSecurity"
                         className={formStyles.select}
@@ -533,7 +550,7 @@ export function ConnectMailFlow({
                         <option value="implicit">{t(`${K}.more.security.implicit`)}</option>
                         <option value="start_tls">{t(`${K}.more.security.start_tls`)}</option>
                       </select>
-                    </Field>
+                    </FormField>
                   </div>
                 ) : null}
               </details>
@@ -735,15 +752,14 @@ function ApproveServers({
         {caldav ? <li>{t(`${K}.approve.caldav`, { url: caldav })}</li> : null}
         {plan.calendar?.on && !caldav ? <li>{t(`${K}.approve.caldavNone`)}</li> : null}
       </ul>
-      <label className={styles.choice}>
-        <input
-          type="checkbox"
+      <SwitchGrid>
+        <SwitchField
           checked={approved}
-          data-testid="connect-mail-approve"
-          onChange={(e) => onApprove(e.target.checked)}
+          onChange={onApprove}
+          label={t(`${K}.approve.confirm`)}
+          testId="connect-mail-approve"
         />
-        <span>{t(`${K}.approve.confirm`)}</span>
-      </label>
+      </SwitchGrid>
     </div>
   );
 }
@@ -778,7 +794,13 @@ function AddressStep({
   const own = detected === "other";
   return (
     <>
-      <Field label={t(`${K}.address.label`)} htmlFor="connect-mail-address" hint={t(`${K}.address.hint`)}>
+      <FormField
+        id="connect-mail-address"
+        label={t(`${K}.address.label`)}
+        helpTitle={t(`${K}.address.label`)}
+        helpBody={t(`${K}.address.hint`)}
+        width="md"
+      >
         <input
           id="connect-mail-address"
           className={formStyles.input}
@@ -790,7 +812,7 @@ function AddressStep({
           data-testid="connect-mail-address"
           onChange={(e) => onAddress(e.target.value)}
         />
-      </Field>
+      </FormField>
 
       {provider ? (
         <div className={styles.section} data-testid="connect-mail-provider">
@@ -799,7 +821,7 @@ function AddressStep({
               ? t(`${K}.address.unknownDomain`, { domain: domainOf(address) })
               : t(`${K}.address.detected`, { provider: t(`${K}.providers.${provider}`) })}
           </p>
-          <Field label={t(`${K}.address.providerLabel`)} htmlFor="connect-mail-provider-select">
+          <FormField id="connect-mail-provider-select" label={t(`${K}.address.providerLabel`)} width="md">
             <select
               id="connect-mail-provider-select"
               className={formStyles.select}
@@ -813,41 +835,29 @@ function AddressStep({
                 </option>
               ))}
             </select>
-          </Field>
+          </FormField>
         </div>
       ) : null}
 
       {provider ? (
         <div className={styles.section}>
           <h3 className={styles.sectionTitle}>{t(`${K}.want.title`)}</h3>
-          <div className={styles.choices}>
-            <label className={styles.choice}>
-              <input
-                type="checkbox"
-                checked={wantMail}
-                data-testid="connect-mail-want-mail"
-                onChange={(e) => onWant(e.target.checked, wantCalendar)}
-              />
-              <span>
-                <Mail aria-hidden="true" /> {t(`${K}.want.mail`)}
-              </span>
-            </label>
-            <label className={styles.choice}>
-              <input
-                type="checkbox"
-                checked={wantCalendar && calendarPossible}
-                disabled={!calendarPossible}
-                data-testid="connect-mail-want-calendar"
-                onChange={(e) => onWant(wantMail, e.target.checked)}
-              />
-              <span>
-                <CalendarDays aria-hidden="true" /> {t(`${K}.want.calendar`)}
-                {!calendarPossible ? (
-                  <span className={styles.choiceHint}>{t(`${K}.calendarNone.${provider}`)}</span>
-                ) : null}
-              </span>
-            </label>
-          </div>
+          <SwitchGrid>
+            <SwitchField
+              checked={wantMail}
+              onChange={(m) => onWant(m, wantCalendar)}
+              label={t(`${K}.want.mail`)}
+              testId="connect-mail-want-mail"
+            />
+            <SwitchField
+              checked={wantCalendar && calendarPossible}
+              disabled={!calendarPossible}
+              onChange={(c) => onWant(wantMail, c)}
+              label={t(`${K}.want.calendar`)}
+              hint={!calendarPossible ? t(`${K}.calendarNone.${provider}`) : undefined}
+              testId="connect-mail-want-calendar"
+            />
+          </SwitchGrid>
         </div>
       ) : null}
     </>

@@ -57,6 +57,10 @@ pub struct GateAuthorization {
     pub expected_origin: Option<String>,
     /// This mail may run without consuming an owner's warning override.
     pub unattended_mail: bool,
+    /// The owner's own Full-level chat turn changes a bot without a card (see
+    /// [`tool_registry::ToolContext::full_waived_preview`]). Only the agent loop's own tool
+    /// call sets it; a script's call never does.
+    pub full_waived_preview: bool,
     /// Approval for a managed browser payment document, if required.
     pub payment: tool_registry::PaymentApproval,
 }
@@ -347,6 +351,7 @@ impl ScriptHost for GateHost {
             exposure_untrusted: self.gate.content_untrusted(&self.run_id),
             expected_origin: authorization.expected_origin,
             unattended_mail: authorization.unattended_mail,
+            full_waived_preview: false,
             payment: authorization.payment,
             // The gate does not say which kind it was: any taint counts as private here.
             exposure_private: self.gate.content_tainted(&self.run_id),

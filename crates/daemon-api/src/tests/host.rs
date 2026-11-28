@@ -114,7 +114,7 @@ async fn standby_blocks_fake_clock_ticks_and_activation_restarts_components() {
         .list_runs(t.state.user_id())
         .unwrap()
         .len();
-    scheduler.run_now(schedule.id).unwrap();
+    scheduler.run_now(schedule.id, true).unwrap();
     scheduler.settle().await;
     assert_eq!(
         t.state

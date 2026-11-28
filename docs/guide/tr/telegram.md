@@ -21,12 +21,54 @@ Sonra Telegram'da botunu aç ve `/pair 123456` gönder (kendi kodunla).
 | `/bots` | Botlarını listeler |
 | `/use <bot adı ya da kimliği>` | Bu sohbetin hangi botla konuşacağını seçer |
 | `/stop` | Şu anki çalışmayı durdurur |
-| `/status` | Durumu gösterir |
+| `/gorevler`, `/gorev <id>`, `/duraklat <id>`, `/surdur <id>`, `/durdur <id>`, `/gorev yeni <metin>` | Görevlerini telefondan yönet ([aşağıya bak](#görevleri-telefondan-yönet)); İngilizce adları da çalışır: `/missions`, `/mission`, `/pause`, `/resume`, `/stop`, `/mission new` |
+| `/status` ya da `/durum` | Tek bakışta: sunucunun sağlığı, botların, şu an çalışanlar ve duruma göre görevler |
+| `/help` ya da `/yardim` | Komutlar, İngilizce ve Türkçe |
 | `/lang tr` ya da `/lang en` | Bu sohbetin dilini Türkçe ya da İngilizce yapar (tek başına `/lang` şu anki dili gösterir) |
 | başka her şey | Seçili bota mesaj olarak gönderilir |
 
 Bir bot onay istediğinde ya da bir soru sorduğunda, düğmeli bir mesaj alırsın. Çalışma, birine dokunana kadar
 bekler (zamanlanmış çalışmalarda ise 30 dakikalık zaman aşımı onu duraklatana kadar).
+
+## Görevleri telefondan yönet
+
+Senin için gece gündüz çalışan bir bota uzaktan kumanda gerekir. Bu komutlar, botla olan kendi özel
+sohbetinde, senin yazdığın mesajlarda çalışır:
+
+| Mesaj | Ne yapar |
+| --- | --- |
+| `/gorevler` | Görevlerini listeler: açık olanlar önce; her birinin 8 karakterlik id'si, durumu ve `biten/toplam` sayısı |
+| `/gorev <id>` | Tek görev: durum, sayılar, seni bekleyenler ve son rapor (rapor yoksa en son sonuçlar) |
+| `/duraklat <id>` | Duraklatır: çalışan oturum durur, yenisi başlamaz |
+| `/surdur <id>` | Duraklamış ya da seni bekleyen görevi sürdürür (botun hâlâ Tam (Full) düzeyde olması gerekir) |
+| `/durdur <id>` | Görevi kalıcı olarak durdurur. Bot **önce sorar**; **Durdur** düğmesine (ya da **Devam etsin**'e) dokunana kadar hiçbir şey olmaz. Soru 5 dakikada geçer ve bir kez çalışır |
+| `/gorev yeni <metin>` | `<metin>` hedefiyle yeni görev başlatır; bu sohbetin konuştuğu botta (bkz. `/bots`, `/use`). Her görev gibi bot **Tam (Full) düzeyde** olmalı |
+| `/durum` | Sunucu sağlığı, botların, şu an çalışan sayısı; çalışan, seni bekleyen ve duraklatılmış görevler |
+
+İngilizce adları da çalışır: `/missions`, `/mission <id>`, `/pause`, `/resume`, `/stop <id>`,
+`/mission new <text>`, `/status`, `/help`. Tek başına `/durdur` (ya da `/stop`) bu sohbetin çalışmasını durdurmaya
+devam eder; `/durdur <id>` görev komutudur.
+
+**id**, `/gorevler` listesindeki 8 karakterdir (görev id'sinin sonu; başı zaman damgası olduğundan aynı anda
+başlayan görevler birbirine benzer). Büyük/küçük harf ve tireler önemli değil; id'nin daha uzun bir parçası ya da
+tamamı da olur. İki göreve uyuyorsa daha fazla karakter istenir.
+
+Nasıl güvende tutulur:
+
+- **Yalnızca sen.** Komut, eşleştirdiğin Telegram hesabından ve onun özel sohbetinden gelmeli. Başkasından, bir
+  gruptan ya da başka yerden **iletilmiş** mesajlar geri çevrilir (iletilen mesaj, başkasının sözünü senin adınla
+  taşır). Bir düğme, ancak bu botun az önce sorduğu bir soruda senin dokunuşunla geçerli olur.
+- **Tek başına komut hiçbir şeyi durdurmaz.** Durdurma geri alınamaz, bu yüzden düğme ister. Duraklatma ve sürdürme
+  geri alınabilir olduğundan hemen çalışır.
+- **Sınırlar.** Dakikada en fazla 20 komut ve 10 dakikada 3 yeni görev; fazlasında bot bunu bir kez söyler, süre
+  dolana kadar gerisini yok sayar.
+- **Yeni görev, başka sohbet metinleri gibidir.** Hedefi, eşleşmiş sahip tarafından Telegram'da yazılmış diye
+  etiketlenir (buradan gelen sohbet mesajıyla aynı konum; uygulamada başlatılan görevin bir altında), yapıştırdığın
+  bir gizli bilgi gönderilmeden önce kesilir ve görev botun kendi sınırları, bütçeleri ve onay kurallarıyla çalışır.
+  Para, e-posta gönderme ve gizli bilgiler yine **uygulamada** sorar.
+- **Kaçış.** Görev başlıkları, nedenler ve sonuçlar botun (ve onun üzerinden web sayfalarının) sözleridir. Bağlantılar,
+  anmalar ve `/komutlar` zararsız hâle getirilerek alıntı olarak gösterilir.
+- Yanıtlar daemon'ın kendi hata metnini tekrarlamaz; ne yapacağını söyleyen kısa bir satır alırsın.
 
 ## Dil
 

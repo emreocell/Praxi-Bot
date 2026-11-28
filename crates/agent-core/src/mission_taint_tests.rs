@@ -25,7 +25,8 @@ use tool_registry::{ContentClass, Effect};
 use crate::mail_tests::{account, connector};
 use crate::mission_session_tests::{World, owner_says, world};
 use crate::tests::{
-    Fake, Reply, TestTool, calls, cfg, make_loop, profile, text, until, with_class,
+    Fake, MACHINE_B, Reply, TestTool, calls, cfg, lane_cfg, make_loop, profile, text, until,
+    with_class,
 };
 
 const FULL: &str = "[permissions]\npreset = \"full\"\n";
@@ -135,8 +136,19 @@ fn session_loop(
     script: Vec<Reply>,
     account_of: impl FnOnce(&World) -> Vec<builtin_tools::connector_email::AccountConfig>,
 ) -> (crate::AgentLoop, Arc<Fake>) {
+    session_loop_with(w, kit, script, account_of, cfg(Policy::full()), FULL)
+}
+
+/// [`session_loop`] with the loop config and the bot's profile text chosen by the test.
+fn session_loop_with(
+    w: &World,
+    kit: &Kit,
+    script: Vec<Reply>,
+    account_of: impl FnOnce(&World) -> Vec<builtin_tools::connector_email::AccountConfig>,
+    mut config: crate::LoopConfig,
+    bot_toml: &str,
+) -> (crate::AgentLoop, Arc<Fake>) {
     let fake = Fake::new(script);
-    let mut config = cfg(Policy::full());
     config.guards.max_steps = 400;
     let refs: Vec<&Arc<TestTool>> = kit.all.iter().collect();
     let lp = make_loop(
@@ -144,7 +156,7 @@ fn session_loop(
         w.env.bot,
         &fake,
         &refs,
-        profile(FULL),
+        profile(bot_toml),
         config,
     );
     for tool in builtin_tools::meta::tools() {
@@ -261,6 +273,110 @@ async fn a_ten_site_mission_on_full_signs_up_everywhere_without_a_single_card() 
     assert_eq!(kit.count("browser_fill"), 20);
     assert_eq!(kit.count("email_wait_for"), 10);
     assert_eq!(kit.count("email_search"), 10);
+}
+
+/// What the owner's Full bot does first in a mission: it looks at its own inbox, opens a public
+/// site it has never seen (nothing read from that site yet, the ledger and the mailbox are the
+/// only untrusted text in the run), types its own address and a short profile text into the
+/// form and submits it.
+fn medium_sign_up() -> Vec<Reply> {
+    vec![
+        calls(&[("e", "email_search", json!({"folder": "INBOX"}))]),
+        calls(&[(
+            "o",
+            "browser_open",
+            json!({"url": "https://medium.com/m/signin"}),
+        )]),
+        calls(&[("a", "browser_fill", json!({"ref": "e1", "text": OWN}))]),
+        calls(&[("b", "browser_fill", json!({"ref": "e2", "text": BIO}))]),
+        calls(&[("s", "browser_click", json!({"ref": "e9"}))]),
+        text("Signed up on medium.com."),
+    ]
+}
+
+fn assert_medium_signed_up(kit: &Kit) {
+    assert_eq!(kit.count("browser_open"), 1);
+    assert_eq!(kit.count("browser_fill"), 2);
+    assert_eq!(kit.count("browser_click"), 1);
+}
+
+/// The owner's bug report (a Full bot's mission asked "allow sending" before it opened
+/// medium.com): the production shape of the loop, with the Full lane on, runs it without a card.
+#[tokio::test]
+async fn a_full_bots_mission_opens_a_public_site_and_fills_the_sign_up_form_without_a_card() {
+    let w = world(&["medium-com"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let (lp, _fake) = session_loop_with(
+        &w,
+        &kit,
+        medium_sign_up(),
+        own_inbox,
+        lane_cfg(Policy::full()),
+        FULL,
+    );
+    assert_eq!(
+        run_to_card(&lp, &w, "MISSION BRIEF · session 1").await,
+        None
+    );
+    assert_medium_signed_up(&kit);
+}
+
+/// The same task for a bot whose computer is the paired server: the browser calls go to the
+/// server over the link, the approvals are decided here and are no stricter for it.
+#[tokio::test]
+async fn a_full_bots_mission_on_the_server_computer_signs_up_without_a_card() {
+    use crate::server_computer_tests::{Links, ServerLink};
+    let w = world(&["medium-com"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let toml = format!("{FULL}[runtime]\ncomputer = \"server:{MACHINE_B}\"\n");
+    let (lp, _fake) = session_loop_with(
+        &w,
+        &kit,
+        medium_sign_up(),
+        own_inbox,
+        lane_cfg(Policy::full()),
+        &toml,
+    );
+    lp.set_server_links(Arc::new(Links(vec![(
+        MACHINE_B,
+        Arc::new(ServerLink::default()),
+    )])));
+    assert_eq!(
+        run_to_card(&lp, &w, "MISSION BRIEF · session 1").await,
+        None
+    );
+    assert_medium_signed_up(&kit);
+}
+
+/// Money is the one thing that still asks in the same mission.
+#[tokio::test]
+async fn the_same_mission_still_asks_before_it_pays() {
+    let w = world(&["medium-com"]);
+    owner_says(&w, GOAL);
+    let mut kit = Kit::new();
+    kit.all.push(Arc::new(with_class(
+        "pay_invoice",
+        Effect::Write,
+        PermissionCategory::Money,
+        ContentClass::none(),
+        "paid",
+    )));
+    let mut script = medium_sign_up();
+    script.insert(
+        4,
+        calls(&[("p", "pay_invoice", json!({"amount": "9.00 USD"}))]),
+    );
+    let (lp, _fake) =
+        session_loop_with(&w, &kit, script, own_inbox, lane_cfg(Policy::full()), FULL);
+    let card = run_to_card(&lp, &w, "MISSION BRIEF · session 1").await;
+    assert_eq!(card.map(|c| c.0), Some("pay_invoice".to_owned()));
+    assert_eq!(
+        kit.count("browser_fill"),
+        2,
+        "the sign-up itself needed no card"
+    );
 }
 
 #[tokio::test]

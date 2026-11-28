@@ -424,3 +424,146 @@ fn registry_queue_overflow_pauses_with_a_distinct_bounded_reason() {
     assert_eq!(state.pending.len(), registry::QUEUE_CAP);
     assert_eq!(state.last_error.as_deref(), Some("queue"));
 }
+
+fn owner_rule(source: TriggerSource) -> Rule {
+    Rule {
+        source,
+        filters: Filters::default(),
+        ..mail_rule()
+    }
+}
+fn feed_rule(url: &str, poll_seconds: u64) -> Rule {
+    owner_rule(TriggerSource::Feed {
+        url: url.into(),
+        poll_seconds,
+    })
+}
+
+#[test]
+fn owner_sources_validate_their_own_bounds() {
+    let ok = |rule: Rule| rule.validate().is_ok();
+    assert!(ok(feed_rule("https://example.test/feed.xml", 900)));
+    // Other people's servers: never faster than every 15 minutes.
+    assert!(!ok(feed_rule("https://example.test/feed.xml", 899)));
+    assert!(!ok(feed_rule("https://example.test/feed.xml", 86_401)));
+    for bad in [
+        "ftp://example.test/feed",
+        "file:///etc/passwd",
+        "https://user:pw@example.test/feed",
+        "https:///nohost",
+        "https://example.test/a b",
+        "https://example.test/\u{202e}x",
+        "example.test/feed",
+    ] {
+        assert!(!ok(feed_rule(bad, 900)), "{bad} must be refused");
+    }
+    let page = |selector: &str, poll_seconds| {
+        owner_rule(TriggerSource::Page {
+            url: "https://example.test/p".into(),
+            selector: selector.into(),
+            poll_seconds,
+        })
+    };
+    assert!(ok(page("#price", 900)));
+    assert!(!ok(page("", 900)));
+    assert!(!ok(page("#price", 60)));
+    let calendar = |minutes_before, poll_seconds| {
+        owner_rule(TriggerSource::Calendar {
+            account: None,
+            minutes_before,
+            poll_seconds,
+        })
+    };
+    assert!(ok(calendar(10, 120)));
+    assert!(!ok(calendar(0, 120)));
+    assert!(!ok(calendar(1441, 120)));
+    assert!(!ok(calendar(10, 59)));
+    let ha = |entity: &str, poll_seconds| {
+        owner_rule(TriggerSource::HomeAssistant {
+            entity_id: entity.into(),
+            to_state: Some("on".into()),
+            poll_seconds,
+        })
+    };
+    assert!(ok(ha("binary_sensor.door", 60)));
+    assert!(!ok(ha("", 60)));
+    assert!(!ok(ha("light kitchen", 60)));
+    assert!(!ok(ha("light.kitchen", 29)));
+}
+
+#[test]
+fn owner_sources_map_to_polled_triggers_that_only_the_owner_may_define() {
+    let rule = feed_rule("https://example.test/feed.xml", 900);
+    let trigger = rule.trigger().unwrap();
+    assert!(trigger.is_polled() && trigger.is_owner_source());
+    assert_eq!(rule.label(), "trigger.feed");
+    assert!(!mail_rule().trigger().unwrap().is_owner_source());
+    assert!(!Trigger::Webhook { secret: "s".into() }.is_polled());
+    // The stored kind is what the timer query excludes; it must match the serde name.
+    let kind = |t: &Trigger| {
+        serde_json::to_value(t).unwrap()["kind"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(kind(&trigger), "feed");
+    assert_eq!(
+        kind(&Trigger::PageChange {
+            url: "https://e.test".into(),
+            selector: "p".into()
+        }),
+        "page_change"
+    );
+    assert_eq!(
+        kind(&Trigger::Calendar {
+            account: None,
+            minutes_before: 5
+        }),
+        "calendar"
+    );
+    assert_eq!(
+        kind(&Trigger::HomeAssistant {
+            entity_id: "light.a".into(),
+            to_state: None
+        }),
+        "home_assistant"
+    );
+}
+
+#[tokio::test]
+async fn a_feed_rule_polls_at_its_own_pace_runs_only_for_new_items_and_never_on_a_timer() {
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let host = Host::new();
+    let clock = Arc::new(FakeClock::new(0));
+    let rule = feed_rule("https://example.test/feed.xml", 900);
+    let s = definition(BotId::new());
+    store
+        .insert_registry_config(&s, rule.trigger().as_ref(), Some(&rule))
+        .unwrap();
+    let item = |id: &str| watch::Observation {
+        key: id.into(),
+        fingerprint: "x".into(),
+        input: json!({"title": id}),
+    };
+    *host.entries.lock() = vec![item("old")];
+    let scheduler = Scheduler::start_with_clock(store.clone(), host.clone(), clock.clone());
+    scheduler.settle().await;
+    // The 5-minute timer of the definition never starts a run: this rule is event driven.
+    clock.advance_ms(600_000);
+    scheduler.settle().await;
+    assert!(host.runs.lock().is_empty());
+    *host.entries.lock() = vec![item("new"), item("old")];
+    // Not due yet: a new item is only seen at the next poll (15 minutes after the first).
+    clock.advance_ms(200_000);
+    scheduler.settle().await;
+    assert!(host.runs.lock().is_empty());
+    clock.advance_ms(200_000);
+    scheduler.settle().await;
+    assert_eq!(host.runs.lock().len(), 1);
+    let input = host.runs.lock()[0].external_input.clone().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<Value>>(&input).unwrap()[0]["title"],
+        "new"
+    );
+    scheduler.shutdown().await;
+}

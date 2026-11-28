@@ -151,6 +151,10 @@ fn codex_native_args(turn: &Turn) -> Vec<String> {
     args
 }
 
+fn exposes_approve(driver: Driver, plan: &LevelPlan) -> bool {
+    driver == Driver::Claude && plan.applied != ApprovalLevel::Full
+}
+
 #[allow(clippy::too_many_lines)] // Mirrors `session`: one linear, security-critical launch.
 async fn session(
     command: &str,
@@ -190,26 +194,28 @@ async fn session(
     let (resolved, executable_lock) = crate::detect::lock_executable(resolved)?;
     #[cfg(windows)]
     let job = crate::detect::SharedJob::new();
+    let plan = level_plan(driver, nt.level);
     let bridge = Bridge {
-        capability: format!("Bearer {}{}", uuid::Uuid::now_v7(), uuid::Uuid::now_v7()),
+        capability: format!("Bearer {}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()),
         tools: Arc::new(nt.turn.tools.clone()),
         host: host.clone(),
         stop: stop.clone(),
-        native: true,
+        expose_approve: exposes_approve(driver, &plan),
         #[cfg(not(windows))]
         child_pid: Arc::new(AtomicU32::new(0)),
         #[cfg(windows)]
         job: job.clone(),
         listen: Arc::new(OnceLock::new()),
         active_tools: tokio::sync::watch::Sender::new(0),
+        tools_delivered: Arc::new(AtomicBool::new(false)),
     };
-    let server = BridgeServer::open(bridge.clone()).await?;
+    let server =
+        BridgeServer::open(bridge.clone(), driver.transport() == Transport::StreamJson).await?;
     if stop.is_cancelled() {
         return Err(CliError::Cancelled);
     }
     let pin = binary_pin(&resolved.program).ok_or(CliError::NotInstalled)?;
     let version = native_version(driver, &resolved, env).await?;
-    let plan = level_plan(driver, nt.level);
     if !plan.enforced {
         // Never start a CLI below a level Praxi cannot make it keep.
         return Err(CliError::NativeToolsOpen);
@@ -230,9 +236,12 @@ async fn session(
         return Err(CliError::BinaryChanged);
     }
     let argv = match driver.transport() {
-        Transport::StreamJson => {
-            claude_native_args(&nt.turn, &plan, &claude_mode_arg, server.file.path())
-        }
+        Transport::StreamJson => claude_native_args(
+            &nt.turn,
+            &plan,
+            &claude_mode_arg,
+            server.file.as_ref().expect("stream JSON sidecar").path(),
+        ),
         Transport::CodexAppServer => codex_native_args(&nt.turn),
         Transport::Acp => {
             // Vibe saves a model chosen over ACP as the user's default model, so Praxi never
@@ -725,6 +734,13 @@ impl Run<'_> {
                 continue;
             }
             if v.get("error").is_some() {
+                if v["id"] == 2
+                    && self.nt.driver == Driver::Agy
+                    && !self.nt.turn.tools.is_empty()
+                    && v["error"]["code"] == -32602
+                {
+                    return Err(CliError::PraxiBridgeUnavailable);
+                }
                 let classified = child_error(&v);
                 if classified == CliError::Protocol
                     && (v["error"]["code"] == -32000
@@ -737,7 +753,13 @@ impl Run<'_> {
             match v["id"].as_i64() {
                 Some(1) => {
                     let http = v["result"]["agentCapabilities"]["mcpCapabilities"]["http"] == true;
-                    let servers = if http && !self.nt.turn.tools.is_empty() {
+                    // Antigravity omits mcpCapabilities. Try HTTP rather than treating
+                    // omission as an explicit refusal.
+                    let bridge = http || self.nt.driver == Driver::Agy;
+                    if !bridge && !self.nt.turn.tools.is_empty() {
+                        return Err(CliError::PraxiBridgeUnavailable);
+                    }
+                    let servers = if bridge && !self.nt.turn.tools.is_empty() {
                         json!([{"type":"http","name":"praxi","url":self.server.url,
                             "headers":[{"name":"Authorization","value":self.server.authorization}]}])
                     } else {
@@ -746,6 +768,17 @@ impl Run<'_> {
                     send(stdin, json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":cwd,"mcpServers":servers}})).await?;
                 }
                 Some(2) => {
+                    // Session acceptance alone does not establish that agy loaded the tools.
+                    // Never send the system prompt claiming them until it requested the catalog.
+                    if self.nt.driver == Driver::Agy
+                        && !self.nt.turn.tools.is_empty()
+                        && !self
+                            .bridge
+                            .tools_delivered
+                            .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        return Err(CliError::PraxiBridgeUnavailable);
+                    }
                     let id = v["result"]["sessionId"]
                         .as_str()
                         .ok_or(CliError::Protocol)?;
@@ -1046,6 +1079,24 @@ mod tests {
     fn kimi_ask(options: &Value, title: &str) -> Value {
         json!({"sessionId":"s","options":options,"toolCall":{"toolCallId":"t:ask","title":title,
             "content":[{"type":"content","content":{"type":"text","text":"Which one?"}}]}})
+    }
+
+    #[test]
+    fn approve_is_only_exposed_for_claude_permission_prompts() {
+        for (driver, level, expected) in [
+            (Driver::Claude, ApprovalLevel::Ask, true),
+            (Driver::Claude, ApprovalLevel::AcceptEdits, true),
+            (Driver::Claude, ApprovalLevel::Full, false),
+            (Driver::Agy, ApprovalLevel::Ask, false),
+            (Driver::Agy, ApprovalLevel::Full, false),
+            (Driver::Cursor, ApprovalLevel::Ask, false),
+            (Driver::Codex, ApprovalLevel::Ask, false),
+        ] {
+            assert_eq!(
+                exposes_approve(driver, &level_plan(driver, level)),
+                expected
+            );
+        }
     }
 
     #[test]

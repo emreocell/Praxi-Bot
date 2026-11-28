@@ -93,7 +93,7 @@ readonly NODE_SHA256_X64="c54118104acc524633b5abe106bbf44a53126ec8b4e5fa105cb92b
 readonly NODE_SHA256_ARM64="8bd3dc69eee8f3f226315a80d7d1d4faccf217a4c8fae500168ac2e38f3bdba3"
 # Root-owned directories first, the ones the service user can write last: a program the user (or a model
 # running as it) installs never shadows a system one. Mirrors identity::path_with_install_dirs (append only).
-SERVICE_PATH="/usr/local/bin:/usr/bin:/bin:${NODE_DIR}/bin:${DATA_DIR}/.local/bin:${NPM_PREFIX}/bin"
+SERVICE_PATH="/usr/local/bin:/usr/bin:/bin:${NODE_DIR}/bin:${DATA_DIR}/.local/bin:${NPM_PREFIX}/bin:${DATA_DIR}/runtimes/npm-global/bin"
 
 VERSION="latest"
 LOCAL_FILE=""

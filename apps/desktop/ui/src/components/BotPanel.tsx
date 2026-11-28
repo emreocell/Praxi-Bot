@@ -47,6 +47,7 @@ import { SubagentDetail } from "./SubagentDetail";
 import { SubagentList, useNow } from "./SubagentList";
 import { formatElapsed } from "../lib/activityPanel";
 import { UpcomingBlock, useUpcoming } from "./UpcomingBlock";
+import { missionCommandWord, requestCompose } from "../lib/slash";
 
 export interface BotPanelChat {
   id: string;
@@ -395,7 +396,7 @@ export function BotPanel({
             })}
           </>
         ) : tab === "automation" ? (
-          <BotPanelAutomation key={bot.id} botId={bot.id} botName={bot.name} botIsFull={preset === "full"} visible={visible} onOpenSchedules={onOpenSchedules} onOpenMissions={() => setTab("activity")} />
+          <BotPanelAutomation key={bot.id} botId={bot.id} botName={bot.name} botIsFull={preset === "full"} visible={visible} onOpenSchedules={onOpenSchedules} onOpenMissions={() => requestCompose(`/${missionCommandWord(i18n.language)}`)} />
         ) : tab === "tools" ? (
           <>
             <BotBrowserProfile key={bot.id} botId={bot.id} />

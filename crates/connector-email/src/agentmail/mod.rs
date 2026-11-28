@@ -232,7 +232,7 @@ impl AgentMailProvider {
         let wire: InboxWire = parse(value)?;
         let well_formed = check_id(&wire.inbox_id, "inbox id").is_ok()
             && wire.email.len() <= crate::config::MAX_LOGIN_LEN
-            && wire.email.parse::<email_address::EmailAddress>().is_ok();
+            && crate::address::is_valid_address(&wire.email);
         if !well_formed {
             return Err(ProviderError::BadResponse.into());
         }
@@ -397,7 +397,7 @@ impl MailboxProvider for AgentMailProvider {
         let inbox: InboxWire = parse(value)?;
         let well_formed = check_inbox_id(&inbox.inbox_id).is_ok()
             && inbox.email.len() <= crate::config::MAX_LOGIN_LEN
-            && inbox.email.parse::<email_address::EmailAddress>().is_ok();
+            && crate::address::is_valid_address(&inbox.email);
         if !well_formed {
             return Err(ProviderError::BadResponse.into());
         }

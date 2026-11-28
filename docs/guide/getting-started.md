@@ -80,4 +80,5 @@ Good first questions:
 - [Fix common problems](fix-common-problems.md): when something does not work.
 - [Quick answers](quick-faq.md): short answers to common questions.
 
-You can also open **Help** from the account menu at any time.
+You can also open **Help** from the profile menu at any time. Coming from Claude,
+Cursor, or another assistant? See [Import from other assistants](import-from-assistants.md).

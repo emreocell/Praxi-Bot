@@ -8,8 +8,9 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 
 | Sayfa | Ne anlatır |
 | --- | --- |
-| [Bir şey olduğunda](triggers.md) | E-posta veya imzalı çağrıyla botu uyandırma. |
+| [Bir şey olduğunda](triggers.md) | E-posta, imzalı çağrı, akış, web sayfası, takvim veya Home Assistant ile botu uyandırma. |
 | [5 dakikada başlangıç](getting-started.md) | Kur, ücretsiz anahtar al, ilk sohbetini yap, bot nedir öğren. |
+| [Diğer asistanlardan içe aktarma](import-from-assistants.md) | Claude, Cursor, VS Code ve diğer kurulumları Praxi'ye taşıma. |
 | [Botunu güvende tut](keep-your-bot-safe.md) | İzin seviyeleri, onaylar ve bilgisayarından ne çıkar. |
 | [Bu bilgisayarda mı, sunucuda mı çalışsın](local-or-server.md) | Neden sunucuya ihtiyacın yok ve istersen nasıl eklenir. |
 | [İşleri otomatikleştir](automate.md) | Zamanlanmış işler ve kopyalayabileceğin üç örnek. |
@@ -20,6 +21,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Zamanlanmış işler](schedules.md) | Bir botun belirli zamanlarda kendiliğinden çalışması. |
 | [Bot harcama sınırları](bot-spending-limits.md) | Günlük, haftalık ve aylık sınırlar. |
 | [Bellek](memory.md) | Botların neyi hatırladığını gör, düzelt, unutturup kapat. |
+| [Uzun sohbetler](long-chats.md) | Bir sohbeti haftalarca sürdür: kayan "bu sohbette daha önce" notu ve nasıl kapatılır. |
 | [Telegram](telegram.md) | Botlarınla telefonundan konuşmak. |
 | [Discord](discord.md) | Botlarınla Discord üzerinden konuşmak. |
 | [Takvim](calendar.md) | Botların CalDAV takviminde etkinlik okuması ve eklemesi. |

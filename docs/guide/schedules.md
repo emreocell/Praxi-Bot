@@ -7,16 +7,18 @@ runs by itself. (The technical reference is [Scheduled tasks](scheduled-tasks.md
 ## Make your first job
 
 1. Open **Schedules** and press **New**.
-2. Pick an **example** to start fast (Daily briefing, Weekly review, Inbox triage,
-   Price watcher, Backup reminder), or leave the form empty. Everything the example
-   fills in can be changed.
-3. Choose **how often**: *Once*, *Every day*, *Weekdays*, *Every week*, *Every month*
-   or *Other*.
-4. Pick the **time** (and the day, if it asks). Under the picker you see which
-   timezone is used. Below that you see the **next 5 times** it will run, so you can
-   check it is what you meant.
-5. Write what the bot should do, in your own words.
-6. Choose when you want to be **told** about it, then press **Create**.
+2. Write the whole job in **one sentence** at the top, for example *"Every weekday
+   at 9:00 check my inbox and summarise it"*, and press **Fill in**. It fills in the
+   timing, the task and a name. Or click one of the small **example** chips under it
+   (Daily briefing, Weekly review, Inbox triage, Price watcher, Backup reminder).
+   Everything can be changed afterwards.
+3. Check **when**: *Once*, *Every day*, *Weekdays*, *Every week*, *Every month* or
+   *Other*, and the time (and the day, if it asks). One line sums it up, for example
+   *"Every weekday at 09:00, Istanbul"*, with the first run under it; **Next 5 runs**
+   unfolds the next times. **Change time zone** opens the zone field.
+4. Pick the **bot** and give the job a **name**.
+5. Write **what the bot should do**, in your own words.
+6. Press **Create**.
 
 ### Typing it in words
 
@@ -27,10 +29,13 @@ words. You always see what was understood and the next run times first; press
 **Create** again to confirm. If the words are not understood, you get a message
 saying so; use the chips instead.
 
-### Advanced (collapsed)
+### More options (collapsed)
 
-*Advanced* holds the raw **cron expression** for people who know cron, and the
-**missed-run** setting. Most people never need it.
+*More options* holds when you want to be **told** about a run (every time, only if
+something goes wrong, never), the **time zone**, the on/off switch, the raw **cron
+expression** for people who know cron, and the **missed-run** setting. Its title
+line shows the current notification choice and zone, so nothing is hidden. Most
+people never need to open it.
 
 ## If the computer was off
 

@@ -54,7 +54,7 @@ All three steps of the first-run wizard (**Connect a brain**, **Set freedom**, *
 
 ### Settings (`SettingsModal`)
 
-- **Opening**: Press `Ctrl/Cmd+,`, choose **Settings** from the account menu, or click the gear button in the title bar. Focus starts in the **Search settings** input (`data-autofocus`).
+- **Opening**: Press `Ctrl/Cmd+,`, choose **Settings** from the profile menu, or click the gear button in the title bar. Focus starts in the **Search settings** input (`data-autofocus`).
 - **Section navigation**: Move into the left section list with `Tab`, then use `Up` / `Down` / `Home` / `End` arrow keys (or `Tab` and `Enter` / `Space`) to switch between **General**, **Appearance**, **AI & Models**, **Computer**, **Mail & Calendar**, **Usage**, **Diagnostics**, and **Updates**.
 - **Controls**:
   - Segmented pill controls (`Segmented`) and computer target cards (`ComputerTargetBlock`) use `role="radiogroup"` with roving `tabIndex` and `Left` / `Right` / `Up` / `Down` arrow keys.

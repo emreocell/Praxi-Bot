@@ -22,6 +22,7 @@ import { openSettingsTarget } from "../lib/settingsLink";
 import { useDaemon } from "../state/DaemonContext";
 import type { BotSkillsState } from "../state/useBotSkills";
 import { BotPanelSkills } from "./BotPanelSkills";
+import { PanelGroup, PanelRows } from "./PanelRows";
 import { BotPanelWorkspace } from "./BotPanelWorkspace";
 import { useToast } from "./Toast";
 import styles from "./BotPanelLibrary.module.css";
@@ -35,10 +36,11 @@ const KIND_ICONS: Record<KnowledgeSourceKind, LucideIcon> = {
   note: StickyNote,
   shared_brain: Brain
 };
-/** How many rows a shelf shows before "and N more" (the rest is one click away in Settings). */
-const SHOWN = 3;
-
-/** One shelf: icon, title, count and one action on the first line; what it is on the second. */
+/**
+ * One shelf: icon, title, count and one action on one line, then its rows. What the shelf is
+ * ("Files, folders and saved pages it looks things up in") is its description for assistive
+ * technology; sighted users get it from the title and, while it is empty, from the empty text.
+ */
 function Shelf({
   id,
   icon: Icon,
@@ -59,7 +61,7 @@ function Shelf({
   children?: ReactNode;
 }) {
   return (
-    <section className={styles.shelf} aria-labelledby={id} data-testid={testId}>
+    <section className={styles.shelf} aria-labelledby={id} aria-describedby={`${id}-line`} data-testid={testId}>
       <div className={styles.head}>
         <Icon className={styles.headIcon} aria-hidden="true" />
         <h3 className={styles.title} id={id}>
@@ -68,7 +70,9 @@ function Shelf({
         {count ? <span className={styles.count}>{count}</span> : null}
         {action ? <span className={styles.action}>{action}</span> : null}
       </div>
-      <p className={styles.line}>{line}</p>
+      <p className={styles.srOnly} id={`${id}-line`}>
+        {line}
+      </p>
       {children}
     </section>
   );
@@ -132,17 +136,16 @@ export function BotPanelLibrary({
   const shelves = libraryShelves(botId, sources ?? [], memories ?? [], pending);
   const loading = sources === null || memories === null;
   const openCard = (card: "knowledge" | "memory") => openSettingsTarget(libraryTarget(card, botId));
-  const more = (n: number) => (n > SHOWN ? <li className={styles.more}>{t("library.more", { count: n - SHOWN })}</li> : null);
 
   return (
-    <div className={styles.root} data-testid="bot-library">
-      <p className={styles.intro}>{t("library.intro", { name: botName })}</p>
+    <div className={styles.root} role="region" aria-label={t("library.intro", { name: botName })} data-testid="bot-library">
       {error ? (
         <p className={styles.error} role="alert">
           {error}
         </p>
       ) : null}
 
+      <PanelGroup title={t("panelTabs.library.knows")} testId="library-group-knows">
       <Shelf
         id="library-skills"
         icon={Sparkles}
@@ -156,7 +159,7 @@ export function BotPanelLibrary({
           </button>
         }
       >
-        <BotPanelSkills skills={skills} onManage={onManageSkills} onAdd={onAddSkill} bare />
+        <BotPanelSkills skills={skills} onManage={onManageSkills} />
       </Shelf>
 
       <Shelf
@@ -176,26 +179,19 @@ export function BotPanelLibrary({
         {loading ? null : shelves.documents.length === 0 ? (
           <p className={styles.empty}>{t("library.documents.empty")}</p>
         ) : (
-          <ul className={styles.rows}>
-            {shelves.documents.slice(0, SHOWN).map((s) => {
-              const Icon = KIND_ICONS[s.kind] ?? FileText;
-              return (
-                <li key={s.id}>
-                  <button type="button" className={styles.row} onClick={() => openCard("knowledge")}>
-                    <Icon aria-hidden="true" />
-                    <span className={styles.rowName}>{s.label || s.locator}</span>
-                    <span className={styles.rowMeta}>
-                      {s.kind === "folder"
-                        ? t("library.documents.files", { count: s.documents })
-                        : t(`library.kind.${s.kind}`)}
-                      {s.enabled ? "" : ` · ${t("library.off")}`}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-            {more(shelves.documents.length)}
-          </ul>
+          <PanelRows
+            testId="library-document-rows"
+            label={t("library.documents.title")}
+            searchLabel={t("panelTabs.library.searchDocuments")}
+            rows={shelves.documents.map((d) => ({
+              id: d.id,
+              name: d.label || d.locator,
+              icon: KIND_ICONS[d.kind] ?? FileText,
+              meta: d.kind === "folder" ? t("library.documents.files", { count: d.documents }) : t(`library.kind.${d.kind}`),
+              status: d.enabled ? undefined : { tone: "muted", label: t("library.off") },
+              onOpen: () => openCard("knowledge")
+            }))}
+          />
         )}
       </Shelf>
 
@@ -227,17 +223,17 @@ export function BotPanelLibrary({
         {loading || noteOpen ? null : shelves.notes.length === 0 ? (
           <p className={styles.empty}>{t("library.notes.empty")}</p>
         ) : (
-          <ul className={styles.rows}>
-            {shelves.notes.slice(0, SHOWN).map((s) => (
-              <li key={s.id}>
-                <button type="button" className={styles.row} onClick={() => openCard("knowledge")}>
-                  <StickyNote aria-hidden="true" />
-                  <span className={styles.rowName}>{s.label || t("library.notes.untitled")}</span>
-                </button>
-              </li>
-            ))}
-            {more(shelves.notes.length)}
-          </ul>
+          <PanelRows
+            testId="library-note-rows"
+            label={t("library.notes.title")}
+            searchLabel={t("panelTabs.library.searchNotes")}
+            rows={shelves.notes.map((n) => ({
+              id: n.id,
+              name: n.label || t("library.notes.untitled"),
+              icon: StickyNote,
+              onOpen: () => openCard("knowledge")
+            }))}
+          />
         )}
       </Shelf>
 
@@ -265,6 +261,9 @@ export function BotPanelLibrary({
         ) : null}
       </Shelf>
 
+      </PanelGroup>
+
+      <PanelGroup title={t("panelTabs.library.keeps")} testId="library-group-keeps">
       <Shelf
         id="library-files"
         icon={FolderOpen}
@@ -287,6 +286,7 @@ export function BotPanelLibrary({
           {chats}
         </Shelf>
       ) : null}
+      </PanelGroup>
     </div>
   );
 }

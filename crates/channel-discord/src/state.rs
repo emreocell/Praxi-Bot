@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use channel_api::control::OwnerId;
 use channel_api::pairing::{PAIR_CODE_TTL, PairingInvites, PairingMatch};
 use parking_lot::Mutex;
 use protocol::{BotId, ChatId};
@@ -185,6 +186,12 @@ impl DiscordState {
     #[must_use]
     pub fn is_owner(&self, user_id: &str) -> bool {
         self.inner.lock().file.owner_id.as_deref() == Some(user_id)
+    }
+
+    /// Is `id` the paired owner's account? The comparison is of the numeric ids only.
+    #[must_use]
+    pub fn is_owner_id(&self, id: OwnerId) -> bool {
+        self.is_owner(&id.get().to_string())
     }
 
     /// Number of paired accounts (0 or 1).

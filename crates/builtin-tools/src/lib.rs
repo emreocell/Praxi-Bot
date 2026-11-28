@@ -21,6 +21,9 @@ pub mod browser;
 pub mod checkpoint;
 pub mod control;
 pub mod desktop;
+mod desktop_open;
+#[cfg(test)]
+mod desktop_open_tests;
 pub mod files;
 pub mod fill_secret;
 #[cfg(test)]
@@ -74,8 +77,8 @@ pub use account_register::{
     account_list_tool, account_register_tool,
 };
 pub use bots::{
-    BOT_PRESETS, BOT_TOOL_NAMES, BotCaller, BotChange, BotHost, BotPreview, BotRequest, BotView,
-    FieldChange,
+    BOT_PRESETS, BOT_SHAPES, BOT_TOOL_NAMES, BotCaller, BotChange, BotHost, BotPreview, BotRequest,
+    BotView, FieldChange,
 };
 pub use browser::{
     ACCOUNT_TOTP_SAVE, BROWSER_CAPTURE_SECRET, BrowserDriver, BrowserSettings, CdpDriver, Wait,
@@ -307,16 +310,6 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     if let Some(email) = &cfg.email {
         mail.set(Arc::clone(email));
     }
-    if cfg.desktop.is_some() || cfg.dynamic_desktop {
-        all.extend(desktop::tools_dynamic_with_secrets(
-            cfg.desktop,
-            cfg.ocr,
-            &cfg.data_dir,
-            cfg.desktop_settings,
-            cfg.control.clone(),
-            cfg.fill_secrets.clone(),
-        ));
-    }
     // The file tools are built first: the browser's `browser_upload` and download folder judge
     // paths with the very same rules (scope, roots, credential denylist, provenance).
     let fs_home = cfg
@@ -331,6 +324,19 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         fs_home.clone(),
         cfg.provenance.clone(),
     );
+    // `desktop_open` judges a file with the file tools' own rules, so the desktop tools come
+    // after them.
+    if cfg.desktop.is_some() || cfg.dynamic_desktop {
+        all.extend(desktop::tools_dynamic_with_files(
+            cfg.desktop,
+            cfg.ocr,
+            &cfg.data_dir,
+            cfg.desktop_settings,
+            cfg.control.clone(),
+            cfg.fill_secrets.clone(),
+            Some(file_gate.clone()),
+        ));
+    }
     let file_gate = Some(Arc::new(file_gate));
     if let Some(driver) = cfg.browser {
         all.extend(browser::tools_with_files(
@@ -609,6 +615,7 @@ mod tests {
         for name in [
             "desktop_list_apps",
             "desktop_launch",
+            "desktop_open",
             "desktop_get_state",
             "desktop_focus",
             "desktop_wait",
@@ -618,6 +625,10 @@ mod tests {
             "desktop_key",
             "desktop_scroll",
             "desktop_drag",
+            "desktop_element",
+            "desktop_window",
+            "desktop_clipboard_read",
+            "desktop_clipboard_write",
         ] {
             assert!(
                 crate::util::classify(name).is_some_and(tool_registry::ContentClass::is_declared),
@@ -631,6 +642,7 @@ mod tests {
             "desktop_set_value",
             "desktop_key",
             "desktop_drag",
+            "desktop_clipboard_write",
             "browser_tabs",
         ] {
             assert!(
@@ -641,6 +653,9 @@ mod tests {
         for name in [
             "desktop_click",
             "desktop_scroll",
+            "desktop_element",
+            "desktop_window",
+            "desktop_clipboard_read",
             "browser_scroll",
             "browser_hover",
         ] {
@@ -683,6 +698,7 @@ mod tests {
         vec![
             ("desktop_list_apps", R, De),
             ("desktop_launch", W, De),
+            ("desktop_open", W, De),
             ("desktop_get_state", R, De),
             ("desktop_click", W, De),
             ("desktop_type", W, De),
@@ -692,6 +708,10 @@ mod tests {
             ("desktop_focus", W, De),
             ("desktop_wait", R, De),
             ("desktop_drag", W, De),
+            ("desktop_element", W, De),
+            ("desktop_window", W, De),
+            ("desktop_clipboard_read", R, De),
+            ("desktop_clipboard_write", W, De),
             ("browser_open", W, B),
             ("browser_snapshot", R, B),
             ("browser_click", W, B),
@@ -1364,7 +1384,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 48 + 8 + 2 + 2 + 1 + 1 + 1 + 1);
+        assert_eq!(added, 48 + 4 + 1 + 8 + 2 + 2 + 1 + 1 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg

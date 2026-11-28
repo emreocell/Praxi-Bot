@@ -5,7 +5,7 @@ use std::ffi::c_void;
 use std::os::windows::io::AsRawHandle;
 
 use desktop_api::{
-    DesktopError,
+    DesktopError, WindowOp,
     snapshot::{AppSpec, Pid, Rect, WindowInfo},
 };
 use windows::{
@@ -39,8 +39,10 @@ use windows::{
                 BringWindowToTop, EnumWindows, GA_ROOT, GWL_EXSTYLE, GetAncestor,
                 GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
                 GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
-                SW_RESTORE, SW_SHOWNORMAL, SetForegroundWindow, ShowWindow, WS_EX_TOOLWINDOW,
-                WindowFromPoint,
+                IsZoomed, PostMessageW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNORMAL,
+                SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                SetForegroundWindow, SetWindowPos, ShowWindow, ShowWindowAsync, WM_CLOSE,
+                WS_EX_TOOLWINDOW, WindowFromPoint,
             },
         },
     },
@@ -227,6 +229,79 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, DesktopError> {
         .filter_map(window_info)
         .filter(|w| !w.title.is_empty())
         .collect())
+}
+
+/// Minimise, maximise, restore, move, resize or close a top-level window.
+///
+/// Every call is asynchronous towards the window's own thread (`ShowWindowAsync`,
+/// `SWP_ASYNCWINDOWPOS`, `PostMessage`): a program that has stopped answering
+/// cannot block the UI Automation thread this runs on. A move or a resize of a
+/// minimised or maximised window restores it first, in the same queue, so the
+/// new place is the one that shows.
+pub fn window_op(hwnd: HWND, op: WindowOp) -> Result<(), DesktopError> {
+    let gone = || DesktopError::Accessibility("window no longer exists".into());
+    let refused = |what: &str, e: windows::core::Error| {
+        DesktopError::Accessibility(format!("{what} was refused: {e}"))
+    };
+    // SAFETY: handle validity is checked by the API; all calls are plain FFI
+    // that only post work to the window's own thread.
+    unsafe {
+        if !IsWindow(Some(hwnd)).as_bool() {
+            return Err(gone());
+        }
+        let restore_first = || {
+            if IsIconic(hwnd).as_bool() || IsZoomed(hwnd).as_bool() {
+                let _ = ShowWindowAsync(hwnd, SW_RESTORE);
+            }
+        };
+        match op {
+            WindowOp::Minimize => {
+                let _ = ShowWindowAsync(hwnd, SW_MINIMIZE);
+                Ok(())
+            }
+            WindowOp::Maximize => {
+                let _ = ShowWindowAsync(hwnd, SW_MAXIMIZE);
+                Ok(())
+            }
+            WindowOp::Restore => {
+                let _ = ShowWindowAsync(hwnd, SW_RESTORE);
+                Ok(())
+            }
+            WindowOp::Move { x, y } => {
+                restore_first();
+                SetWindowPos(
+                    hwnd,
+                    None,
+                    x,
+                    y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+                )
+                .map_err(|e| refused("moving the window", e))
+            }
+            WindowOp::Resize { width, height } => {
+                restore_first();
+                SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    i32::try_from(width).unwrap_or(i32::MAX),
+                    i32::try_from(height).unwrap_or(i32::MAX),
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+                )
+                .map_err(|e| refused("resizing the window", e))
+            }
+            WindowOp::Close => PostMessageW(
+                Some(hwnd),
+                WM_CLOSE,
+                windows::Win32::Foundation::WPARAM(0),
+                windows::Win32::Foundation::LPARAM(0),
+            )
+            .map_err(|e| refused("closing the window", e)),
+        }
+    }
 }
 
 /// Bring a window to the foreground.

@@ -1,7 +1,9 @@
 # When something happens
 
 Open a bot's panel, choose **Automation**, then **When something happens**.
-Add a rule for new mail, a signed incoming call, or a time schedule. Write what
+Add a rule for new mail, a signed incoming call, a new item in a feed, a
+change on a web page, a calendar event about to start, a Home Assistant device
+changing state, or a time schedule. Write what
 the bot should do, such as “Prepare a reply for me to review.” Save it, review
 the rule, and turn it on. New rules always start off.
 
@@ -30,6 +32,59 @@ Once linked, that address queues events for this rule instead of starting its
 original run. The rule's instruction takes over. Turning off a linked rule
 does not restore the original webhook instruction; calls are refused until it
 is enabled or the rule is removed.
+
+## Feeds, web pages, calendar events and Home Assistant
+
+These four rules work like mail: the first check only notes what already
+exists, so old items never start a run, and a burst becomes one run. They share
+the quiet hours, limits, queue, **Test with a sample** and approval behaviour
+below. The builder shows each one only for you: a bot cannot create them, and
+the schedule API and tools refuse them.
+
+**A feed has something new.** Give an RSS or Atom address. A new item starts the
+bot with its title, link, date and a short summary (not the full article). The
+default check is every 30 minutes; the fastest allowed is every 15.
+
+**A web page changes.** Give the address and a CSS selector for the part to
+watch, such as `#price` or `h1.title`. The bot receives the selected text when
+it differs from the last check (at most 4,000 characters). Pages whose selected
+text always changes, such as a clock, would start a run at every check; pick a
+steadier part. If the selector stops finding anything, or the page cannot be
+read, the check fails instead of reporting “the text became empty”; ten failed
+checks in a row pause the rule. Default every hour, at most every 15 minutes.
+
+Both fetch only the address you saved, never a link found inside the data.
+Requests go out with the same web guard as the bot's browsing tools: only
+`http` and `https`, never to this computer, your local network, link-local or
+cloud-metadata addresses (checked on every redirect and every resolved
+address), at most three redirects, a 15-second limit, and 1 MB for a feed or 2
+MB for a page. The address cannot carry a user name or password. The bot must
+be allowed to use the web at all: safe mode, a locked or denied web category,
+or a profile without it stops the rule. Saving the rule with the address is
+your approval of exactly that address; the web is not asked about again for
+each check.
+
+**A calendar event is about to start.** Choose a calendar and how many minutes
+before (1 to 1,440). The rule needs a connected calendar the bot may read,
+allowed for scheduled runs the same way as mailbox reads. It checks about every
+two minutes, so the run starts up to a couple of minutes later than the time
+you chose, once per event. An event you move to another time counts as a new
+one. Events already inside the window when you turn the rule on, all-day
+events and events marked free do not start it. The bot receives the title,
+start, minutes until start and place, never the description or attendees.
+
+**A Home Assistant device changes.** Enter the entity (for example
+`binary_sensor.front_door`) and, if you like, the state it must become (`on`,
+`unlocked`, …). Home Assistant must be connected and this bot allowed to use
+it; otherwise the rule cannot be saved. It checks about once a minute and
+compares the state only, not attributes such as a brightness or a reading, so
+changes that flip and flip back within a minute can be missed. The bot receives
+the entity, its name, the new state and the previous one.
+
+Event text from all four is written by someone else. It is shortened, stripped
+of control and invisible characters, and handed over as untrusted data like
+every other event. Ten checks in a row that fail pause the rule and show
+“Needs attention”.
 
 Quiet hours use the time zone you choose, including daylight-saving changes.
 You can skip events or save them for one summary after the window. By default

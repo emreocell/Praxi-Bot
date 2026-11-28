@@ -72,8 +72,8 @@ fn chat_for(d: &Value) -> Option<ChatRef> {
     })
 }
 
-/// Turn a gateway `MESSAGE_CREATE` into an event. Bots (including this one), system messages
-/// and forwarded messages are dropped.
+/// Turn a gateway `MESSAGE_CREATE` into an event. Bots (including this one) and system messages
+/// are dropped. A forward or an edit is kept and marked: the bridge never runs one as a command.
 #[must_use]
 pub fn message_event(d: &Value) -> Option<IncomingMessage> {
     let author = &d["author"];
@@ -85,14 +85,12 @@ pub fn message_event(d: &Value) -> Option<IncomingMessage> {
         return None;
     }
     // A forward (`message_reference.type` 1, with `message_snapshots`) carries someone else's
-    // words under the forwarder's name: it is never read as the sender's own text or command.
-    if d["message_reference"]["type"].as_u64() == Some(1)
+    // words under the forwarder's name; an edited message was not typed as it now stands.
+    let forwarded = d["message_reference"]["type"].as_u64() == Some(1)
         || d["message_snapshots"]
             .as_array()
-            .is_some_and(|a| !a.is_empty())
-    {
-        return None;
-    }
+            .is_some_and(|a| !a.is_empty());
+    let edited = d["edited_timestamp"].is_string();
     let id = d["id"].as_str()?;
     let sender = SenderIdentity {
         id: author["id"].as_str()?.to_owned(),
@@ -128,6 +126,8 @@ pub fn message_event(d: &Value) -> Option<IncomingMessage> {
         chat: chat_for(d)?,
         sender,
         message_id: Some(id.to_owned()),
+        forwarded,
+        edited,
         kind,
     })
 }
@@ -154,6 +154,8 @@ pub fn interaction_event(d: &Value) -> Option<IncomingMessage> {
             display_name: None,
         },
         message_id: d["message"]["id"].as_str().map(str::to_owned),
+        forwarded: false,
+        edited: false,
         kind: IncomingKind::Callback {
             query_id: format!("{id}:{token}"),
             data: d["data"]["custom_id"].as_str()?.to_owned(),

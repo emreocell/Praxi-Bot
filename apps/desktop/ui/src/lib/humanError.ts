@@ -68,6 +68,7 @@ export const DAEMON_ERROR_CODES = [
   "invalid_skill_name",
   "invite_rate_limit",
   "knowledge_busy",
+  "live_voice_not_configured",
   "login_busy",
   "login_files_changed",
   "login_forbidden",
@@ -185,6 +186,7 @@ const ACTIONS: Record<string, ErrorAction> = {
   setup_required: "settings",
   secret_store_failed: "retry",
   composio_not_configured: "settings",
+  live_voice_not_configured: "settings",
   disabled: "settings",
   engineNeedsNative: "fixEngine",
   cliSignedOut: "settings",
@@ -246,6 +248,10 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, string, ((m: RegExpExecArray) =>
   [/spend_limit_reached[\s\S]*saved limit could not be read/, "codes.spend_limit_unreadable"],
   [/spend_limit_reached/, "codes.spend_limit_reached"],
   [/providers_require_app_daemon|_outside_tauri|daemon_unavailable/i, "desktop_only"],
+  // Mail guard refusals on Full-level bots (before the generic OS permission mapping).
+  [/Mail guard stopped this send \(opt-out list\)/i, "mailGuardOptOut"],
+  [/Mail guard stopped this send \(unreadable guard file\)/i, "mailGuardUnreadable"],
+  [/Mail guard stopped this send/i, "mailGuardBlocked"],
   // Before the generic "denied": an operating-system refusal is not the owner saying no.
   [/permission denied|access is denied|os error 5(?![0-9])|\beacces\b|operation not permitted/i, "toolNoPermission"],
   // The web search tool: every backend blocked it or none is set up (the raw text is written for the model).
@@ -314,6 +320,10 @@ export function humanError(err: unknown): HumanError {
   if (code === "email_provider_error") {
     const kind = emailProviderKind(raw);
     return pack(kind === "other" ? "codes.email_provider_error" : `emailProvider.${kind}`, "email_provider_error", details);
+  }
+  // The host DID answer: its transcription service failed behind a 502. Say that, not "no answer".
+  if (code === "voice_upstream_failed") {
+    return pack("codes.voice_upstream_failed", "voice_upstream_failed", details);
   }
   // The host never answered (no connection, or the proxy timed out waiting for it): not a refusal.
   if (host && (code === "network" || status === 502 || status === 504)) {

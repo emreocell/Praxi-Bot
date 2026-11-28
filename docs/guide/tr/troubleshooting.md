@@ -4,7 +4,7 @@
 
 ## Son günlükler ve destek paketi
 
-**Ayarlar → Yardım → Son günlükleri görüntüle** yolunu aç (Yardım penceresinde
+Profil menüsünden **Yardım → Son günlükleri görüntüle** yolunu aç (Yardım penceresinde
 de bulunur). Ara veya düzey seç; **Gösterilen günlükleri kopyala**, ekranda
 gördüğün arındırılmış kayıtları kopyalar. **Destek paketini önizle** dört dosya
 hazırlar: `versions.json`, `diagnostics.json` (servisin hazır olma ve güvenli mod
@@ -30,7 +30,7 @@ sunucularında aynı çıktı sistem günlüğüne gider: `journalctl -u praxi.s
 `GET /v1/logs/recent?level=warn&since=<milisaniye>` hem API erişim anahtarını hem
 yerel sahip anahtarını gerektirir. Eşleşmiş cihazların tümüne kapalıdır.
 
-## Tanılama (Ayarlar → Tanılama, `bot doctor`)
+## Tanılama (Ayarlar → Sistem, `bot doctor`)
 
 **Hata bildirmek için:** Yardım'ı aç ve *Tanılama bilgisini kopyala* düğmesini kullan. Önce kopyalayacağı metnin tamamını gösterir (sürümler, platform, kontrol sonuçları; anahtarlar, parolalar, e-posta adresleri ve kullanıcı klasörün gizlenir, hiçbir mesaj eklenmez) ve yalnızca sen *Kopyala*'ya basınca kopyalar. Hiçbir yere bir şey gönderilmez.
 
@@ -108,10 +108,10 @@ Kendi kendine iş yapan bir şey sorunu düzeltmene engel olduğunda kullan: her
 
 Güvenli mod **yalnızca servis başlarken** ve yalnızca senin tarafından seçilir:
 
-- **Masaüstü uygulaması:** Ayarlar → Tanılama → **Güvenli modda yeniden başlat**, ya da servis ayağa kalkmayınca görünen ekrandaki **Güvenli modda başlat**.
+- **Masaüstü uygulaması:** Ayarlar → Sistem → **Güvenli modda yeniden başlat** (gerekirse **Daha fazla seçenek**), ya da servis ayağa kalkmayınca görünen ekrandaki **Güvenli modda başlat**.
 - **Terminal:** `bot serve --safe` ya da `bot serve` öncesinde `BOT_SAFE_MODE=1` ayarla.
 
-Açıkken uygulama bir şerit gösterir ("Güvenli mod. Araçlar, zamanlamalar ve kanallar kapalı.") ve `bot doctor`, Ayarlar → Tanılama ile `GET /v1/health` (`safe_mode`) da bunu söyler. Yine de sohbet edebilirsin (model araçsız yanıt verir; her araç çağrısı reddedilir) ve botları, zamanlamaları ve ayarları okuyup değiştirebilirsin.
+Açıkken uygulama bir şerit gösterir ("Güvenli mod. Araçlar, zamanlamalar ve kanallar kapalı.") ve `bot doctor`, Ayarlar → Sistem ile `GET /v1/health` (`safe_mode`) da bunu söyler. Yine de sohbet edebilirsin (model araçsız yanıt verir; her araç çağrısı reddedilir) ve botları, zamanlamaları ve ayarları okuyup değiştirebilirsin.
 
 Kapalı olanlar: tüm araçlar, zamanlamalar ve iş akışları (hiçbir şey tetiklenmez), Telegram köprüsü ve diğer kanallar, MCP sunucuları ve uygulamalar, e-posta / takvim / web bağlayıcıları, belleğin hatırlaması ve geri yazması, masaüstü arka ucu, eş ya da sunucu ağı. Kayıtlı iş akışları asla yeniden oynatılmaz (eşleşen bir sohbet satırına model yanıt verir, çalıştırma yolu reddedilir) ve kodlama CLI yürütücüleri reddedilir. Yarım kalan çalışmalar sürdürülmez: servis başlarken çalışan ya da onay bekleyen çalışmalar, her yeniden başlatmada olduğu gibi duraklatılmış işaretlenir ve sonraki normal başlangıç da onları sürdürmez; görünür kalırlar. Kapalı parçaların ayar sayfaları, güvenli moddan çıkana kadar "ayarlanmamış" yanıtı verir.
 

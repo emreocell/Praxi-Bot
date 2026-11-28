@@ -27,6 +27,13 @@ export const SETTINGS_PAGES = [
 ] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
+/** Pages whose cards save through the daemon (Save on the card), not the app settings store. */
+export const MANUAL_SAVE_PAGES: ReadonlySet<SettingsPageId> = new Set(["connections"]);
+
+export function pageUsesManualCardSave(page: SettingsPageId): boolean {
+  return MANUAL_SAVE_PAGES.has(page);
+}
+
 /**
  * The titled groups of each page, in order.  Rarely used cards of a group sit under the page's one
  * collapsed "Advanced settings" disclosure, under the same group title.
@@ -69,7 +76,7 @@ export function groupTextKey(group: SettingsGroupId): string {
 }
 
 /** Words that get a short plain-language "What is this?" popover (and a docs link). */
-export type LearnTerm = "apiKey" | "permissions" | "folders" | "memory" | "provider" | "safeMode";
+export type LearnTerm = "apiKey" | "permissions" | "folders" | "memory" | "provider" | "safeMode" | "mcpTrust";
 
 export interface CardMeta {
   page: SettingsPageId;
@@ -91,6 +98,7 @@ export const CARD_META: Record<string, CardMeta> = {
   times: { page: "general", group: "you", advanced: true },
   notifications: { page: "general", group: "notifications" },
   "speak-replies": { page: "general", group: "voice" },
+  "offline-read-aloud": { page: "general", group: "voice" },
   dictation: { page: "general", group: "voice" },
   voice: { page: "general", group: "voice", advanced: true },
   "voice-input": { page: "general", group: "voice", advanced: true },
@@ -123,6 +131,7 @@ export const CARD_META: Record<string, CardMeta> = {
   helpers: { page: "models", group: "models", advanced: true },
   providers: { page: "models", group: "models", advanced: true, risk: "providers", learn: "provider" },
   memory: { page: "models", group: "memory", learn: "memory", risk: "memory" },
+  historySummary: { page: "models", group: "memory", learn: "memory" },
   documents: { page: "models", group: "memory", learn: "folders" },
   knowledge: { page: "models", group: "memory", learn: "memory", advanced: true },
 
@@ -264,6 +273,7 @@ const RESET_KEYS: Partial<Record<SettingsPageId, readonly (keyof AppSettings)[]>
     "digestLastDay",
     "voiceName",
     "voiceRate",
+    "offlineReadAloud",
     "speakReplies",
     "pttEnabled",
     "pttKey",

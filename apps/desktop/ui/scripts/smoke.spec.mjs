@@ -97,7 +97,9 @@ export async function flows(ctx) {
       // The big screen opens a session by itself, so a page that reloads can ask for one a moment before the old
       // page's DELETE lands: the daemon answers 429 (quota) once and the page ends the leftover and retries.
       const quotaRace = (f) => f === '429 POST /v1/view/sessions';
-      if (failed.length > 0 && failed.every((f) => (f.startsWith('404 ') && f.includes(' /v1/view/sessions/')) || quotaRace(f))) real = real.filter((p) => !p.startsWith('console: Failed to load resource'));
+      // A site the daemon has no icon for answers 404 on /v1/favicons/<host>; the vault row falls back to a letter tile.
+      const noFavicon = (f) => f.startsWith('404 ') && f.includes(' /v1/favicons/');
+      if (failed.length > 0 && failed.every((f) => (f.startsWith('404 ') && f.includes(' /v1/view/sessions/')) || quotaRace(f) || noFavicon(f))) real = real.filter((p) => !p.startsWith('console: Failed to load resource'));
       if (real.length) throw new Error(`browser problems: ${[...new Set(real)].join(' | ')} (failed requests: ${[...new Set(failed)].join(', ') || 'none'})`);
     } catch (e) {
       error = String(e.message ?? e);
@@ -173,10 +175,13 @@ export async function flows(ctx) {
           await page.getByTestId('ws-entry-summary.md').getByRole('button', { name: 'Delete', exact: true }).click();
           await page.getByTestId('workspace-undo-button').click();
           await page.getByTestId('ws-entry-summary.md').waitFor(T);
+          // The panel shows its search field only once a folder is long; a short fixture folder has none.
           const search = page.getByTestId('bot-workspace-search');
-          await search.fill('summary');
-          await page.getByTestId('ws-entry-preview.png').waitFor({ state: 'hidden', ...T });
-          await search.fill('');
+          if (await search.count()) {
+            await search.fill('summary');
+            await page.getByTestId('ws-entry-preview.png').waitFor({ state: 'hidden', ...T });
+            await search.fill('');
+          }
           await page.getByTestId('ws-entry-preview.png').locator('button').first().click();
           await page.getByTestId('workspace-preview-modal').locator('img').waitFor(T);
           await page.screenshot({ path: join(ctx.shots, 'workspace-image-preview.png') });
@@ -327,10 +332,8 @@ export async function flows(ctx) {
   });
   await run(s, 'create a second bot from the New-bot modal', async (page) => {
     await page.getByRole('button', { name: /new bot/i }).first().click();
-    // Three steps: how to start (blank), name and look, what it can do (then Create).
-    await page.getByTestId('new-bot-start-blank').click();
+    // One page: name it, (what it should do: the general helper), the access level, Create.
     await page.getByTestId('new-bot-name').fill('Nova');
-    await page.getByTestId('new-bot-next').click();
     await page.getByTestId('new-bot-access-read-and-draft').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
@@ -338,10 +341,8 @@ export async function flows(ctx) {
   // Created here, early: the New-bot modal's Create stays disabled in the later part of a full run (Auto brain unresolved).
   await run(s, 'a Full-level bot is created', async (page) => {
     await page.getByRole('button', { name: /new bot/i }).first().click();
-    // Three steps: how to start (blank), name and look, what it can do (then Create).
-    await page.getByTestId('new-bot-start-blank').click();
+    // One page: name it, (what it should do: the general helper), the access level, Create.
     await page.getByTestId('new-bot-name').fill('Fulla');
-    await page.getByTestId('new-bot-next').click();
     await page.getByTestId('new-bot-access-full').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
@@ -453,7 +454,7 @@ export async function flows(ctx) {
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByTestId('settings-nav-models').click();
     await page.getByTestId('api-key-paste').waitFor(T);
-    await page.getByTestId('detected-accounts-block').waitFor(T);
+    await page.getByTestId('coding-clis-block').waitFor(T);
     await page.getByText('stub', { exact: false }).first().waitFor(T);
     await page.keyboard.press('Escape');
   });
@@ -479,6 +480,56 @@ export async function flows(ctx) {
     }
   });
   if (await s.page.getByRole('dialog', { name: 'Apps' }).isVisible()) await s.page.keyboard.press('Escape');
+  await run(s, 'vault: open from Settings and save a login', async (page) => {
+    await gotoChat(page, 'Atlas');
+    const composer = page.locator('[data-composer-input]');
+    await composer.fill('/vault');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /^send$/i }).click();
+    await page.getByTestId('vault-manager').waitFor(T);
+    await page.getByTestId('vault-new-item').click();
+    await page.getByTestId('vault-new-login').click();
+    await page.locator('#vault-site').fill('smoke-vault.test');
+    await page.locator('#vault-origin').fill('https://smoke-vault.test');
+    await page.locator('#vault-login-id').fill('smoke@vault.test');
+    await page.locator('#vault-secret-val').fill('vault-smoke-secret');
+    await page.getByTestId('vault-save').click();
+    await page.locator('[data-testid^=vault-row-]').filter({ hasText: 'smoke-vault.test' }).waitFor(T);
+    await page.keyboard.press('Escape');
+  });
+  await run(s, 'apps: add a custom MCP server by HTTP URL', async (page) => {
+    await page.getByTestId('open-apps').click();
+    await page.getByRole('dialog', { name: 'Apps' }).waitFor(T);
+    await page.getByTestId('apps-advanced').click();
+    const form = page.getByTestId('mcp-custom-form');
+    await form.waitFor(T);
+    const name = `smoke-http-${Date.now()}`;
+    await form.getByLabel('Server URL (HTTP)').fill('https://example.invalid/mcp');
+    await form.getByLabel('Name', { exact: true }).fill(name);
+    let created = null;
+    page.on('response', async (r) => {
+      if (r.request().method() === 'POST' && r.url().endsWith('/v1/mcp/servers')) created = `${r.status()} ${(await r.text().catch(() => '')).slice(0, 300)}`;
+    });
+    await page.getByTestId('mcp-add').click();
+    // The form stays open (fresh) and the new server's row, switched off, shows in the list below it.
+    const row = page.getByTestId(`mcp-server-${name}`);
+    const alert = form.locator('[role=alert]').first();
+    await Promise.race([row.waitFor(T), alert.waitFor(T)]).catch(() => null);
+    if (!(await row.count())) {
+      throw new Error(`custom MCP server row missing; daemon answered: ${created}; form says: ${(await alert.textContent().catch(() => null)) ?? (await form.textContent().catch(() => '')).slice(-200)}`);
+    }
+    await page.keyboard.press('Escape');
+  });
+  await run(s, 'mission: /mission starts a mission card in chat', async (page) => {
+    // Always switch to Fulla (the Full-level bot): gotoChat keeps whatever chat is open, which may be Atlas's.
+    await page.locator('[class*="railItem"]', { hasText: 'Fulla' }).first().click();
+    await openFirstChat(page);
+    const composer = page.locator('[data-composer-input]');
+    await composer.fill('/mission Smoke mission: list workspace files');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /^send$/i }).click();
+    await page.getByTestId('mission-started-card').first().waitFor(T);
+  });
   await run(s, 'add-server wizard opens and validates input without SSH', async (page) => {
     await page.getByTestId('computer-picker').click();
     await page.getByTestId('computer-add').click();

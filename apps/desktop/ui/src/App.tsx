@@ -57,7 +57,6 @@ import {
   screenPanelStep,
   type SidePanelMode
 } from "./lib/sidePanelState";
-import { useMcp } from "./state/useMcp";
 import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { MessageSearch } from "./components/MessageSearch";
 import { botDotStatus, railNavIndex } from "./lib/railNav";
@@ -376,7 +375,6 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const [newChatError, setNewChatError] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchSeed, setSearchSeed] = useState<SearchRequest | null>(null);
-  const { servers: appServers } = useMcp(true);
   const [helpOpen, setHelpOpen] = useState(false);
   // The offline demo: `null` task = closed. It lives only here, never as a chat.
   const [demo, setDemo] = useState<{ task: DemoTaskId | null } | null>(null);
@@ -1398,7 +1396,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
               </div>
             </div>
           </SidebarHeader>
-          <SidebarSection>
+          <SidebarSection className={styles.railScroll}>
             <span className={styles.srOnly} role="status" aria-live="polite">{orderNote}</span>
             <div
               ref={reorder.containerRef}
@@ -1449,7 +1447,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                   </span>
                   <span className={styles.srOnly}>{dotLabel}</span>
                   <div className={`${styles.botMeta} ${styles.railText}`}><span className={styles.botName}><span className={styles.botNameText}>{view.name}</span>{index === 0 && botIds.length > 1 ? <span className={styles.mainMark} role="img" title={t("sidebar.mainBotHint")} aria-label={t("sidebar.mainBotHint")}><Star aria-hidden="true" /></span> : null}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? chatTitleLabel(latest?.title, t("bots.newChat"))}</span></div>
-                  {unreadBots.has(bot.id) ? <span className={styles.unreadDot} role="img" aria-label={t("sidebar.unreadBot")} data-testid="bot-unread" /> : null}
+                  {unreadBots.has(bot.id) && routeBotId !== bot.id ? <span className={styles.unreadDot} role="img" aria-label={t("sidebar.unreadBot")} data-testid="bot-unread" /> : null}
                 </SidebarItem>
                 {canReorder && !mini && botIds.length > 1 ? <button type="button" className={styles.grip} aria-label={t("sidebar.reorderBot", { name: view.name })} title={t("sidebar.reorderHint")} {...reorder.gripProps(bot.id)}><GripVertical aria-hidden="true" /></button> : null}
               </div>;
@@ -1473,7 +1471,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             {import.meta.env.DEV && new URLSearchParams(window.location.search).get("dev") === "1" ? <Button variant="ghost" onClick={handleSimulateBotRun}><FlaskConical />{mini ? null : t("dev.simulateBotRun")}</Button> : null}
             <div className={styles.footRow}>
               <AccountMenu name={settings.accountName} computerTarget={settings.computerTarget} compact={mini} onAction={handleAccountAction} />
-              <AppsPill connected={appServers.filter(s => s.status === "connected").map(s => s.name)} onClick={() => setAppsOpen(true)} />
+              <AppsPill onClick={() => setAppsOpen(true)} />
             </div>
           </SidebarFooter>
         </Sidebar>

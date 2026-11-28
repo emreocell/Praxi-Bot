@@ -1612,6 +1612,7 @@ pub fn serve(
             support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "mcp: {configured} server(s) configured");
         }
         step("components and apps wired");
+        daemon_api::account_health::spawn_daily(state.clone());
         // Loopback only: never bind another interface.
         let listener = tokio::net::TcpListener::from_std(socket)?;
         let addr = listener.local_addr()?;
