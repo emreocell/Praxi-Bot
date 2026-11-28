@@ -720,6 +720,9 @@ pub struct MissionHandoverNotice {
     pub site: String,
 }
 
+/// Daemon hook when a mission parks a CAPTCHA or phone step for the owner on the live page.
+pub type MissionHandoverNotifyHook = Arc<dyn Fn(MissionHandoverNotice) + Send + Sync>;
+
 /// What a parked `secret_request` asks for: names and flags only, never a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretRequestInfo {
@@ -1213,7 +1216,7 @@ pub(crate) struct Shared {
     /// item in it instead of waiting for the owner, and ask the owner once.
     pub mission_store: RwLock<Option<Arc<missions::MissionStore>>>,
     /// When a mission parks a CAPTCHA or phone step for the owner on the live page.
-    pub mission_handover_notify: Mutex<Option<Arc<dyn Fn(MissionHandoverNotice) + Send + Sync>>>,
+    pub mission_handover_notify: Mutex<Option<MissionHandoverNotifyHook>>,
     /// Paired servers a bot may use as ITS computer while it runs here.
     pub server_links: RwLock<Option<Arc<dyn builtin_tools::pc::ServerLinks>>>,
     /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when

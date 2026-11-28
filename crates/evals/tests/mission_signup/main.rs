@@ -76,8 +76,7 @@ async fn a_full_mission_registers_on_four_sites_with_its_own_mailbox_and_reports
     assert_eq!(end["mission"]["progress"]["done"], 3);
     assert_eq!(end["mission"]["progress"]["failed"], 0);
     assert_eq!(
-        end["mission"]["progress"]["blocked"],
-        1,
+        end["mission"]["progress"]["blocked"], 1,
         "the CAPTCHA site waits for the owner on the page"
     );
 

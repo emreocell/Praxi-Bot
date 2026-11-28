@@ -1259,15 +1259,20 @@ async fn a_captcha_parks_only_that_item_and_the_session_carries_on() {
         t0.elapsed() < std::time::Duration::from_secs(5),
         "nobody waited for the owner"
     );
-    let blocked = w.store.items(&w.mission, Some(ItemStatus::Blocked)).unwrap();
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
     assert_eq!(blocked.len(), 1);
     assert_eq!(blocked[0].key, "a.example");
     assert!(blocked[0].live_only);
-    assert!(blocked[0]
-        .blocked_reason
-        .as_deref()
-        .unwrap()
-        .contains("CAPTCHA"));
+    assert!(
+        blocked[0]
+            .blocked_reason
+            .as_deref()
+            .unwrap()
+            .contains("CAPTCHA")
+    );
     assert_eq!(w.store.progress(&w.mission).unwrap().done, 1);
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(2)));
     assert!(
@@ -1305,7 +1310,10 @@ async fn captcha_give_ups_never_use_up_the_per_run_handover_limit() {
         .run_mission_session(w.env.chat, &w.mission, "brief")
         .unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    let blocked = w.store.items(&w.mission, Some(ItemStatus::Blocked)).unwrap();
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
     assert_eq!(blocked.len(), 4, "{blocked:?}");
     assert!(blocked.iter().all(|i| i.live_only));
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(8)));
@@ -1336,9 +1344,9 @@ async fn without_a_single_doing_item_the_model_is_told_to_park_it_itself() {
     );
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(1)));
     assert!(
-        tools
-            .iter()
-            .any(|t| t.contains("Mark the item you are working on as failed")),
+        tools.iter().any(|t| {
+            t.contains("Mark the item you are working on as blocked") && t.contains("mission_item")
+        }),
         "{tools:?}"
     );
 }

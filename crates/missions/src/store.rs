@@ -873,13 +873,7 @@ impl MissionStore {
     ///
     /// # Errors
     /// Unknown mission or item, SQLite failure.
-    pub fn release_live_blocked(
-        &self,
-        id: &str,
-        key: &str,
-        note: &str,
-        now: i64,
-    ) -> Result<bool> {
+    pub fn release_live_blocked(&self, id: &str, key: &str, note: &str, now: i64) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let note = check_text("answer", note, MAX_TEXT_CHARS)?;
@@ -899,7 +893,9 @@ impl MissionStore {
             )?;
             bump(&tx, id, now)?;
             let state: String =
-                tx.query_row("SELECT state FROM missions WHERE id = ?1", [id], |r| r.get(0))?;
+                tx.query_row("SELECT state FROM missions WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?;
             if matches!(
                 MissionState::parse(&state),
                 Some(MissionState::Blocked | MissionState::Waiting)

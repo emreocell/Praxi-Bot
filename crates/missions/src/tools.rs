@@ -378,14 +378,14 @@ impl MissionTool {
 
     fn item(&self, m: &Mission, input: Value) -> Result<String, ToolError> {
         let i: ItemIn = serde_json::from_value(input).map_err(invalid)?;
-        let mut status = ItemStatus::parse(i.status.trim()).ok_or_else(|| {
+        let status = ItemStatus::parse(i.status.trim()).ok_or_else(|| {
             ToolError::InvalidInput(
                 "status must be todo, doing, done, blocked, failed or skipped".into(),
             )
         })?;
-        let (mut error, mut reason) = (i.error, i.reason);
-        let live_page = status == ItemStatus::Blocked
-            && reason.as_deref().is_some_and(needs_owner_on_page);
+        let (error, reason) = (i.error, i.reason);
+        let live_page =
+            status == ItemStatus::Blocked && reason.as_deref().is_some_and(needs_owner_on_page);
         let it = self
             .store
             .update_item(

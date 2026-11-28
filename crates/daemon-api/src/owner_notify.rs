@@ -690,13 +690,9 @@ impl AppState {
         let Ok(store) = self.mission_store() else {
             return;
         };
-        let blocked = if m.state == missions::MissionState::Blocked {
-            store
-                .items(&m.id, Some(missions::ItemStatus::Blocked))
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let blocked = store
+            .items(&m.id, Some(missions::ItemStatus::Blocked))
+            .unwrap_or_default();
         let bot = BotId(Uuid::parse_str(&m.bot_id).unwrap_or_default());
         if let Some(d) = mission_draft(m, &self.bot_name(bot), &blocked) {
             self.owner_notify().publish(d, storage::now_ms());
@@ -725,7 +721,11 @@ impl AppState {
                     .map(|i| i.title)
             })
             .unwrap_or_else(|| notice.item.clone());
-        let mut d = Draft::new(NoticeKind::Blocked, NoticeSource::Mission, clip(&m.title, 90));
+        let mut d = Draft::new(
+            NoticeKind::Blocked,
+            NoticeSource::Mission,
+            clip(&m.title, 90),
+        );
         self.bot_name(bot).clone_into(&mut d.bot_name);
         d.bot_id = Some(notice.bot_id);
         d.mission_id = Some(notice.mission_id);

@@ -564,10 +564,7 @@ impl AgentLoop {
     }
 
     /// Called when a mission parks a CAPTCHA or phone step for the owner on the live page.
-    pub fn set_mission_handover_notify(
-        &self,
-        hook: Arc<dyn Fn(crate::shared::MissionHandoverNotice) + Send + Sync>,
-    ) {
+    pub fn set_mission_handover_notify(&self, hook: crate::shared::MissionHandoverNotifyHook) {
         *self.sh.mission_handover_notify.lock() = Some(hook);
     }
 

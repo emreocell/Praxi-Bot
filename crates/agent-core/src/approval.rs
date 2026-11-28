@@ -4077,6 +4077,7 @@ impl Shared {
     /// A CAPTCHA or 2FA in a mission session blocks only the item it stops: nobody
     /// waits for the owner. The item the bot is working on is parked in the ledger
     /// (the owner finds it in the blocked list and the digest) and the session moves on.
+    #[allow(clippy::too_many_lines)] // Park ledger item, hold browser, notify owner, arm expiry.
     fn park_item_for_handover(
         self: &Arc<Self>,
         ctx: &RunCtx,
@@ -4096,14 +4097,9 @@ impl Shared {
         };
         let store = self.mission_store.read().clone();
         let key = store.and_then(|s| {
-            s.block_sole_doing_item(
-                mission,
-                &reason,
-                true,
-                storage::now_ms(),
-            )
-            .ok()
-            .flatten()
+            s.block_sole_doing_item(mission, &reason, true, storage::now_ms())
+                .ok()
+                .flatten()
         });
         if kind == HandoverKind::Code {
             builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
@@ -4367,6 +4363,7 @@ impl Shared {
     ///
     /// Refused (nothing shown) unless the run was started by the owner at the
     /// desktop and the per-run limit is not used up.
+    #[allow(clippy::too_many_lines)] // One linear park / wait / outcome sequence.
     pub(crate) async fn request_handover(
         self: &Arc<Self>,
         ctx: &RunCtx,
@@ -4396,14 +4393,18 @@ impl Shared {
                 "only a run the owner started at the desktop can hand a step over; tell the owner in your answer instead",
             );
         }
-        let mut st = ctx.state.lock();
-        if st.handovers >= self.cfg.max_handovers_per_run {
-            drop(st);
-            return refuse("this run has asked for help too often");
+        let mission_park = ctx.mission.clone();
+        let skip_handover_limit = mission_park.is_some() && kind == HandoverKind::Captcha;
+        if !skip_handover_limit {
+            {
+                let mut st = ctx.state.lock();
+                if st.handovers >= self.cfg.max_handovers_per_run {
+                    return refuse("this run has asked for help too often");
+                }
+                st.handovers += 1;
+            }
         }
-        st.handovers += 1;
-        drop(st);
-        if let Some(mission) = &ctx.mission {
+        if let Some(mission) = mission_park.as_deref() {
             return self.park_item_for_handover(ctx, call_id, mission, kind, card);
         }
         let tainted = self

@@ -18,15 +18,14 @@ use protocol::ToolCallId;
 use protocol::event::HandoverKind;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use storage::now_ms;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use agent_core::MissionTarget;
 use crate::AppState;
 use crate::error::{ApiError, ErrorBody};
 use crate::fill_routes::audit;
 use crate::live_view::Actor;
+use agent_core::MissionTarget;
 
 /// Body of `POST /v1/handovers/{call_id}/code`.
 #[derive(Deserialize, ToSchema)]
@@ -74,9 +73,8 @@ fn release_mission_handover(s: &AppState, target: &MissionTarget, solved: bool) 
     let Ok(supervisor) = s.mission_supervisor() else {
         return false;
     };
-    let store = match s.mission_store() {
-        Ok(store) => store,
-        Err(_) => return false,
+    let Ok(store) = s.mission_store() else {
+        return false;
     };
     let now = storage::now_ms();
     if solved {
