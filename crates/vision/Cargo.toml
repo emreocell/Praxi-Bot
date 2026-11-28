@@ -15,7 +15,7 @@ windows-ocr = ["dep:windows"]
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 ocrs = { version = "0.13", default-features = false, features = ["onnx", "rten"] }
 rten = { version = "0.26", default-features = false, features = ["onnx_format", "rten_format"] }
-rten-imageproc = "0.26"
+rten-imageproc = "0.28"
 sha2 = "0.10"
 thiserror = "2"
 tracing = "0.1"
