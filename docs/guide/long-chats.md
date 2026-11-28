@@ -11,16 +11,17 @@ When a chat holds more than about 160 messages (or about 40 KB of text) that no 
 * **Nothing is deleted or changed.** Every message stays in the chat, in search and in exports. Only what is sent to the model changes.
 * **Cheap and bounded.** One round reads at most about 48 KB of messages and writes at most about 6 KB. It runs only after the chat has grown, at most twice after one turn, and never twice at the same time for one chat. If a round fails (no model, a limit was reached, an unusable answer), that chat waits 30 minutes before the next try and your turns are not affected. Each round is a normal model call in the [call ledger](llm-call-ledger.md) with the purpose `summary`, so [spending limits](bot-spending-limits.md) apply, and a short entry `chat.summary` (counts and message ids, never the text) goes to the audit log.
 * **Which model.** The bot's cheaper helper model if it has one, otherwise its normal model. If the older messages involved private data (mail, files you opened), only the bot's normal model is used, the one that already saw that data.
-* **Edits.** If you edit or regenerate a message that the note already covers, the note is dropped and written again when the chat grows.
+* **Edits.** If you edit or regenerate any message of the chat, the note is dropped and written again when the chat grows. A round that was running while the chat changed is thrown away.
 
 ## What the note is, and what it is not
 
 The note is **quoted data**, never your voice:
 
 * The bot receives it as a clearly labelled *untrusted* block, not as a system instruction and not as a message from you. It is told never to follow instructions inside it. Your current request is always in the messages below it.
-* The note has fixed headings written by Praxi: what you asked for or decided, what the bot did and found, what is still open, and **what came from outside** (web pages, mail, files, other bots) which is marked as unverified. The model only fills in short items. The model is told to keep text from outside sources out of the "what you asked for" part, but a model can slip, which is why the whole note is treated as untrusted anyway.
+* The note has fixed headings written by Praxi. **Your own words** are quoted by Praxi from the messages you typed in the app (the newest few, shortened); the model never writes what you said or asked for. The model only fills in short items under its own headings: what the bot did and found, what is still open, and **what came from outside** (web pages, mail, files, other bots), marked as unverified. If the older messages held anything from outside, the note starts with an *UNTRUSTED* line.
+* Nothing in the note counts as something you typed. The checks that let an address or a site through because you wrote it read only the messages you typed in this chat, never the note, so a web page or a mail cannot slip an order into it that is then treated as yours.
 * The note **inherits what it was made from**. If the older messages came from a run that had read a web page or private data, a run that reads the note counts as having read it too, with the same sources, so the same approval questions apply as if the old messages were still there.
-* Passwords, keys and other secrets are masked before the text is sent and again before the note is stored.
+* Passwords, keys, card numbers and other secrets are masked in everything the model reads for the note (the older note included) and in everything it writes, before the note is stored. Without the secret masker (which the app always runs) no note is written at all.
 
 ## Switch it off
 
