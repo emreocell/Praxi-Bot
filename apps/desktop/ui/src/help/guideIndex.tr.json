@@ -955,6 +955,7 @@
     "title": "Web araçları: ara ve sayfa oku",
     "headings": [
       "Arama arka ucu",
+      "Firecrawl araması (elle yapılandırma)",
       "Sunucuda arama",
       "Sunucuya SearXNG kur (tek komut)",
       "Gizlilik",
