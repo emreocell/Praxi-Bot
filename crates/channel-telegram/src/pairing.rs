@@ -504,6 +504,40 @@ impl PairingStore {
         self.commit(&mut guard, candidate)
     }
 
+    /// How many Telegram chats chose `bot_id` with `/use`.
+    #[must_use]
+    pub fn chats_using(&self, bot_id: BotId) -> usize {
+        let guard = self.inner.lock();
+        guard
+            .persisted
+            .chat_bots
+            .values()
+            .filter(|b| **b == bot_id)
+            .count()
+    }
+
+    /// Forget what is mapped to a deleted bot: the chats that chose it and their daemon threads.
+    /// Returns how many mappings were removed. Pairing and languages are the owner's, so they stay.
+    ///
+    /// # Errors
+    /// Returns [`TelegramError::Storage`] if persistence fails (nothing changes then).
+    pub fn forget_bot(&self, bot_id: BotId) -> Result<usize> {
+        let mut guard = self.inner.lock();
+        let suffix = format!(":{bot_id}");
+        let mut candidate = guard.persisted.clone();
+        candidate.chat_bots.retain(|_, b| *b != bot_id);
+        candidate
+            .chat_threads
+            .retain(|key, _| !key.ends_with(&suffix));
+        let removed = (guard.persisted.chat_bots.len() - candidate.chat_bots.len())
+            + (guard.persisted.chat_threads.len() - candidate.chat_threads.len());
+        if removed == 0 {
+            return Ok(0);
+        }
+        self.commit(&mut guard, candidate)?;
+        Ok(removed)
+    }
+
     /// Language of `telegram_chat_id`; English when none (or an unknown one) is stored.
     pub(crate) fn chat_language(&self, telegram_chat_id: i64) -> Language {
         self.inner

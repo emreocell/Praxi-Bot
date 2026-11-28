@@ -11,9 +11,11 @@
 //! * `bot_create`, `bot_update` and `bot_delete` are [`Tool::always_ask`]: the
 //!   user sees the complete resulting profile first, and no standing grant
 //!   ("always allow", "this chat") waives it. The one exception is decided by the loop, not
-//!   here: on the owner's own Full-level chat nothing asks but money, so the call arrives with
-//!   [`ToolContext::full_waived_preview`] set (a flag of its own, never `unattended_mail`) and
-//!   the tool freezes the preview itself before it applies it (the host's rules are the same).
+//!   here: on the owner's own Full-level chat nothing asks but money, so a create or an update
+//!   arrives with [`ToolContext::full_waived_preview`] set (a flag of its own, never
+//!   `unattended_mail`) and the tool freezes the preview itself before it applies it (the host's
+//!   rules are the same). A delete is never waived: it cannot be undone, so
+//!   [`Tool::full_access_asks_for`] keeps its card on the Full level too;
 //!   Without a card and without that flag nothing froze a preview, and the host refuses;
 //! * the tools are visible only to bots whose profile enables them
 //!   (`tools.manage_bots`, the "Can create bots" switch) and to bots at the Full level, where
@@ -298,7 +300,7 @@ pub fn tools(host: &Arc<dyn BotHost>) -> Vec<Arc<dyn Tool>> {
         ),
         mk(
             "bot_delete",
-            "Delete a bot you created. Refused when it already has chats or runs. Unless the user is on the Full level, they approve it.",
+            "Delete a bot you created that has no more permissions, tools, files or providers than you. Refused when it already has chats or runs. The user always approves it, on the Full level too.",
             id_schema,
             Effect::Destructive,
             Op::Delete,
@@ -355,6 +357,11 @@ impl Tool for BotTool {
         self.op != Op::List
     }
 
+    /// Deleting a bot cannot be undone: the owner approves it on a card on the Full level too.
+    fn full_access_asks_for(&self, _input: &Value) -> bool {
+        self.op == Op::Delete
+    }
+
     fn approval_closed(&self, ctx: &ToolContext, input: &Value, token: Option<&str>) {
         if let (Some(token), Ok(who), Ok(Some(change))) = (token, caller(ctx), self.change(input)) {
             self.host.discard(&who, &change, token);
@@ -393,7 +400,10 @@ impl Tool for BotTool {
         // turn, so nothing froze the preview the host applies: freeze it now. The host refuses
         // what its ceiling forbids, as for a card. Only that flag does it: a call with no card
         // and no flag has no frozen preview and the host refuses it.
+        // Never for a delete: it always has the owner's card (`full_access_asks_for`), so a
+        // delete without one has no frozen preview and the host refuses it.
         if ctx.full_waived_preview
+            && self.op != Op::Delete
             && let Some(change) = self.change(&input)?
         {
             h.preview(&who, &change).await.map_err(exec_err)?;
@@ -636,6 +646,29 @@ mod tests {
             .unwrap_err();
         assert!(e.to_string().contains("ceiling"), "{e}");
         assert!(!strict.calls.lock().iter().any(|l| l.starts_with("create")));
+    }
+
+    /// A delete always asks the owner, on the Full level too, and never freezes its own
+    /// preview: a delete that arrives without a card has nothing frozen and the host refuses it.
+    #[tokio::test]
+    async fn a_delete_always_needs_the_owners_card() {
+        let host = on();
+        let delete = tool(&host, "bot_delete");
+        assert!(delete.always_ask());
+        assert!(delete.full_access_asks_for(&json!({"id": "x"})));
+        for name in ["bot_create", "bot_update", "bot_list"] {
+            assert!(
+                !tool(&host, name).full_access_asks_for(&json!({})),
+                "{name}"
+            );
+        }
+        let c = ToolContext {
+            full_waived_preview: true,
+            ..ctx(Some("bot-a"))
+        };
+        delete.call(&c, json!({"id": "x"})).await.unwrap();
+        let calls = host.calls.lock().clone();
+        assert!(!calls.iter().any(|l| l.starts_with("preview")), "{calls:?}");
     }
 
     /// Only the loop's own flag freezes a preview. A call the Full level let through for another

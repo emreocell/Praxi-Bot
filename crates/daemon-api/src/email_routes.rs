@@ -72,7 +72,33 @@ pub(crate) fn canonical_bot(s: &AppState, raw: &str) -> Result<String, ApiError>
     let id = raw
         .parse()
         .map_err(|_| ApiError::bad_request("malformed bot id"))?;
-    Ok(s.bot_of_user(BotId(id))?.id.to_string())
+    let bot = s.bot_of_user(BotId(id))?.id.to_string();
+    refuse_deleted_bots(s, [bot.as_str()])?;
+    Ok(bot)
+}
+
+/// A mailbox is not given (bound, shared or made the default) to a bot that is being deleted.
+fn refuse_deleted_bots<'a>(
+    s: &AppState,
+    bots: impl IntoIterator<Item = &'a str>,
+) -> Result<(), ApiError> {
+    if bots
+        .into_iter()
+        .any(|b| crate::bot_delete_routes::is_being_deleted(s, b))
+    {
+        return Err(ApiError::conflict("that bot is being deleted"));
+    }
+    Ok(())
+}
+
+/// The bot ids a patch shares the account with or makes it the default of.
+fn listed_bots(patch: &serde_json::Value) -> Vec<&str> {
+    ["shared_with", "default_for"]
+        .into_iter()
+        .filter_map(|key| patch.get(key).and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect()
 }
 
 fn check_input(s: &AppState, input: &mut EmailAccountInput) -> Result<(), ApiError> {
@@ -97,6 +123,14 @@ fn check_input(s: &AppState, input: &mut EmailAccountInput) -> Result<(), ApiErr
     if let Some(bot) = input.bot.take() {
         input.bot = Some(canonical_bot(s, &bot)?);
     }
+    refuse_deleted_bots(
+        s,
+        input
+            .shared_with
+            .iter()
+            .chain(&input.default_for)
+            .map(String::as_str),
+    )?;
     Ok(())
 }
 
@@ -190,6 +224,7 @@ pub(crate) async fn update_email_account(
             Some(_) => return Err(ApiError::bad_request("`bot` must be a string or null")),
         }
     }
+    refuse_deleted_bots(&s, listed_bots(&patch))?;
     let before = control.list().into_iter().find(|a| a.name == name);
     let previous = before.as_ref().map(|a| a.bot.clone());
     let bound = patch
@@ -265,25 +300,40 @@ pub(crate) async fn delete_email_account(
     Query(q): Query<DeleteAccountQuery>,
 ) -> Result<StatusCode, ApiError> {
     let control = email(&s)?;
-    let before = control.list().into_iter().find(|a| a.name == name);
     let permit = crate::knowledge::worker_permit(s.data_dir())?;
     tokio::spawn(async move {
-        let _knowledge_authority = crate::knowledge::email_authorities(&s, &name).await?;
-        control.remove_account(&name, q.delete_inbox).await?;
-        let s2 = s.clone();
-        crate::knowledge::blocking_with_permit(permit, move || {
-            crate::knowledge::revoke_email_sources(&s2, &name)
-        })
-        .await?;
-        // The bots that owned this mailbox lose the tools it gave them (and
-        // only those), unless another account still binds them.
-        if let Some(before) = &before {
-            email_bot_tools::sync(&s, &control.list(), &email_bot_tools::bots_of(before));
-        }
+        remove_account_with_links(&s, &control, &name, q.delete_inbox, permit).await?;
         Ok(StatusCode::NO_CONTENT)
     })
     .await
     .map_err(|_| ApiError::internal("email authority task failed"))?
+}
+
+/// Remove one account (and, when asked, its inbox at the provider), then everything that hung
+/// off it: the knowledge sources read from it and the tools it gave bots. Shared by the account
+/// route and the bot delete.
+pub(crate) async fn remove_account_with_links(
+    s: &AppState,
+    control: &Arc<dyn EmailControl>,
+    name: &str,
+    delete_inbox: bool,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<(), ApiError> {
+    let before = control.list().into_iter().find(|a| a.name == name);
+    let _knowledge_authority = crate::knowledge::email_authorities(s, name).await?;
+    control.remove_account(name, delete_inbox).await?;
+    let s2 = s.clone();
+    let owned = name.to_owned();
+    crate::knowledge::blocking_with_permit(permit, move || {
+        crate::knowledge::revoke_email_sources(&s2, &owned)
+    })
+    .await?;
+    // The bots that owned this mailbox lose the tools it gave them (and
+    // only those), unless another account still binds them.
+    if let Some(before) = &before {
+        email_bot_tools::sync(s, &control.list(), &email_bot_tools::bots_of(before));
+    }
+    Ok(())
 }
 
 /// Try IMAP login and SMTP authentication for a stored account. TLS exactly as

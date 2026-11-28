@@ -9,6 +9,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
 use crate::assistant_import_routes;
+use crate::bot_delete_routes;
 use crate::bot_limits_routes;
 use crate::calendar;
 use crate::calendar_routes;
@@ -336,7 +337,8 @@ impl Modify for Security {
         routes::create_schedule,
         routes::decide_approval,
         routes::decide_control,
-        routes::delete_bot,
+        bot_delete_routes::delete_bot,
+        bot_delete_routes::delete_preview,
         routes::delete_chat,
         routes::delete_schedule,
         routes::detect_providers,
@@ -592,6 +594,13 @@ impl Modify for Security {
         dto::CatalogProviderDto,
         dto::CategoryDecisionDto,
         dto::ChannelDto,
+        bot_delete_routes::BotDeletePreview,
+        bot_delete_routes::BotDeleteReport,
+        bot_delete_routes::BotDeleteMailbox,
+        bot_delete_routes::BotDeleteMailboxFate,
+        bot_delete_routes::BotDeleteChannel,
+        bot_delete_routes::BotDeleteStep,
+        crate::email::EmailInboxNotDeleted,
         dto::ChatDto,
         dto::CliAuthState,
         dto::ConfiguredProviderDto,

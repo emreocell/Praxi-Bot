@@ -141,6 +141,9 @@ pub struct Event {
 /// The mission database.
 pub struct MissionStore {
     conn: Mutex<Connection>,
+    /// Bots being deleted (lowercase ids): no mission is created and no session starts for them
+    /// ([`MissionStore::retire_bot`]).
+    retired: Mutex<std::collections::HashSet<String>>,
 }
 
 impl std::fmt::Debug for MissionStore {
@@ -284,6 +287,84 @@ fn event(
     Ok(())
 }
 
+/// How many missions a bot leads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BotMissionCounts {
+    /// All of them, whatever their state.
+    pub total: u64,
+    /// Those in the `running` state.
+    pub running: u64,
+    /// Those in the `waiting` state (a timer, a mail or a webhook wakes them on its own).
+    pub waiting: u64,
+    /// Those with a session in flight (a leased run), whatever their state says.
+    pub leased: u64,
+}
+
+impl BotMissionCounts {
+    /// Something of the bot's missions is alive or can wake on its own: a delete must wait.
+    #[must_use]
+    pub const fn alive(&self) -> bool {
+        self.running > 0 || self.waiting > 0 || self.leased > 0
+    }
+}
+
+/// What [`MissionStore::delete_for_bot_if_idle`] did.
+#[derive(Debug)]
+pub enum IdleDelete<T> {
+    /// A mission of the bot is alive ([`BotMissionCounts::alive`]): nothing was deleted and the
+    /// follow-up step did not run.
+    Busy(BotMissionCounts),
+    /// The follow-up step succeeded. `missions` is how many missions were deleted, or why their
+    /// delete could not be committed after the step had (they stay; retry with
+    /// [`MissionStore::delete_for_bot`]).
+    Done {
+        /// What the follow-up step returned.
+        outcome: T,
+        /// Missions deleted.
+        missions: Result<u64>,
+    },
+}
+
+const BOT_IS: &str = "lower(bot_id) = lower(?1)";
+
+fn bot_counts(conn: &Connection, bot_id: &str) -> Result<BotMissionCounts> {
+    let (total, running, waiting, leased): (i64, i64, i64, i64) = conn.query_row(
+        &format!(
+            "SELECT COUNT(*), COALESCE(SUM(state = 'running'), 0), COALESCE(SUM(state = 'waiting'), 0), \
+             COALESCE(SUM(lease_run_id IS NOT NULL), 0) FROM missions WHERE {BOT_IS}"
+        ),
+        [bot_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    let n = |v: i64| u64::try_from(v).unwrap_or(0);
+    Ok(BotMissionCounts {
+        total: n(total),
+        running: n(running),
+        waiting: n(waiting),
+        leased: n(leased),
+    })
+}
+
+fn delete_bot_rows(tx: &Transaction<'_>, bot_id: &str) -> Result<u64> {
+    for table in [
+        "mission_items",
+        "mission_notes",
+        "mission_sessions",
+        "mission_events",
+        "mission_waits",
+        "mission_wakes",
+    ] {
+        tx.execute(
+            &format!(
+                "DELETE FROM {table} WHERE mission_id IN (SELECT id FROM missions WHERE {BOT_IS})"
+            ),
+            [bot_id],
+        )?;
+    }
+    let n = tx.execute(&format!("DELETE FROM missions WHERE {BOT_IS}"), [bot_id])?;
+    Ok(n as u64)
+}
+
 impl MissionStore {
     /// Open (creating and migrating) the database at `path`.
     ///
@@ -330,6 +411,7 @@ impl MissionStore {
         }
         Ok(Self {
             conn: Mutex::new(conn),
+            retired: Mutex::default(),
         })
     }
 
@@ -352,7 +434,8 @@ impl MissionStore {
     /// transaction, so two callers racing for the last place cannot both get it.
     ///
     /// # Errors
-    /// As [`MissionStore::create`]; [`MissionError::Invalid`] when the cap is reached.
+    /// As [`MissionStore::create`]; [`MissionError::Invalid`] when the cap is reached or the bot
+    /// is being deleted.
     pub fn create_capped(
         &self,
         new: &NewMission,
@@ -371,6 +454,7 @@ impl MissionStore {
         };
         let id = uuid::Uuid::now_v7().to_string();
         let mut conn = self.conn();
+        self.refuse_retired(&new.bot_id)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some(max) = max_open {
             let open: i64 = tx.query_row(
@@ -572,6 +656,75 @@ impl MissionStore {
             [bot_id],
             |r| r.get(0),
         )?)
+    }
+
+    /// How many missions `bot_id` leads, and how many of them are alive (running, waiting or
+    /// with a session in flight).
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn bot_mission_counts(&self, bot_id: &str) -> Result<BotMissionCounts> {
+        bot_counts(&self.conn(), bot_id)
+    }
+
+    /// A bot is being deleted: from now on no mission is created and no session starts for it.
+    /// Returns `false` when it already was. Undone by [`MissionStore::restore_bot`] when the
+    /// delete does not happen; a deleted bot stays retired.
+    pub fn retire_bot(&self, bot_id: &str) -> bool {
+        self.retired.lock().insert(bot_id.to_ascii_lowercase())
+    }
+
+    /// The delete of a retired bot did not happen: it may start missions again.
+    pub fn restore_bot(&self, bot_id: &str) {
+        self.retired.lock().remove(&bot_id.to_ascii_lowercase());
+    }
+
+    fn refuse_retired(&self, bot_id: &str) -> Result<()> {
+        if self.retired.lock().contains(&bot_id.to_ascii_lowercase()) {
+            return Err(MissionError::Invalid("this bot is being deleted".into()));
+        }
+        Ok(())
+    }
+
+    /// Delete every mission `bot_id` leads, with its items, notes, sessions, events, waits and
+    /// wakes, in one transaction. Returns the number of missions removed.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn delete_for_bot(&self, bot_id: &str) -> Result<u64> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let n = delete_bot_rows(&tx, bot_id)?;
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Delete the bot's missions only if none is alive ([`BotMissionCounts::alive`]), and commit
+    /// that only after `then` succeeded: the check, the delete and `then` (the caller's own
+    /// commit, e.g. the bot's rows in another database) happen while this store is held, so no
+    /// mission can start, wake or take a session in between. When `then` fails nothing is
+    /// deleted here either. `then` gets the number of missions that will go and must not
+    /// reenter this store.
+    ///
+    /// # Errors
+    /// SQLite failure before `then` ran ([`MissionError`] converted), or the error of `then`.
+    pub fn delete_for_bot_if_idle<T, E: From<MissionError>>(
+        &self,
+        bot_id: &str,
+        then: impl FnOnce(u64) -> std::result::Result<T, E>,
+    ) -> std::result::Result<IdleDelete<T>, E> {
+        let mut conn = self.conn();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MissionError::from)?;
+        let counts = bot_counts(&tx, bot_id)?;
+        if counts.alive() {
+            return Ok(IdleDelete::Busy(counts));
+        }
+        let n = delete_bot_rows(&tx, bot_id)?;
+        let outcome = then(n)?;
+        let missions = tx.commit().map(|()| n).map_err(MissionError::from);
+        Ok(IdleDelete::Done { outcome, missions })
     }
 
     // ---- items ----
@@ -975,17 +1128,19 @@ impl MissionStore {
     ///
     /// # Errors
     /// Unknown mission, [`MissionError::Busy`] when the mission is not `running` or already
-    /// has a session, SQLite failure.
+    /// has a session, [`MissionError::Invalid`] while its bot is being deleted, SQLite failure.
     pub fn begin_session(&self, id: &str, now: i64) -> Result<i64> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let exists: i64 =
-            tx.query_row("SELECT COUNT(*) FROM missions WHERE id = ?1", [id], |r| {
+        let bot: Option<String> = tx
+            .query_row("SELECT bot_id FROM missions WHERE id = ?1", [id], |r| {
                 r.get(0)
-            })?;
-        if exists == 0 {
+            })
+            .optional()?;
+        let Some(bot) = bot else {
             return Err(MissionError::NotFound(id.to_owned()));
-        }
+        };
+        self.refuse_retired(&bot)?;
         tx.execute(
             "INSERT INTO mission_sessions (mission_id, started_at_ms) VALUES (?1, ?2)",
             params![id, now],
@@ -2218,5 +2373,112 @@ mod tests {
         };
         let s = MissionStore::open(&path).unwrap();
         assert_eq!(s.progress(&id).unwrap().total, 1);
+    }
+
+    #[test]
+    fn deleting_a_bots_missions_takes_the_whole_ledger_and_only_that_bot() {
+        let s = store();
+        let mine = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        s.add_note(&mine.id, "learned", "a note", false, 2).unwrap();
+        let mut other = new_mission(&[("b.com", "y")]);
+        other.bot_id = "other".into();
+        let theirs = s.create(&other, 1).unwrap();
+        assert_eq!(
+            s.bot_mission_counts("b").unwrap(),
+            BotMissionCounts {
+                total: 1,
+                running: 1,
+                waiting: 0,
+                leased: 0
+            }
+        );
+        assert_eq!(s.delete_for_bot("b").unwrap(), 1);
+        assert!(s.get(&mine.id).unwrap().is_none());
+        assert_eq!(s.items(&mine.id, None).unwrap().len(), 0);
+        assert_eq!(s.notes(&mine.id, false).unwrap().len(), 0);
+        assert_eq!(
+            s.bot_mission_counts("b").unwrap(),
+            BotMissionCounts::default()
+        );
+        assert!(s.get(&theirs.id).unwrap().is_some());
+        assert_eq!(s.items(&theirs.id, None).unwrap().len(), 1);
+        assert_eq!(s.delete_for_bot("b").unwrap(), 0);
+    }
+
+    fn idle_delete(s: &MissionStore, bot: &str) -> IdleDelete<u64> {
+        s.delete_for_bot_if_idle(bot, Ok::<_, MissionError>)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    #[test]
+    fn an_alive_mission_keeps_the_bots_missions_and_the_next_step_does_not_run() {
+        let s = store();
+        let m = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        // running
+        let mut ran = false;
+        let out = s
+            .delete_for_bot_if_idle("b", |_| {
+                ran = true;
+                Ok::<_, MissionError>(())
+            })
+            .unwrap();
+        assert!(matches!(out, IdleDelete::Busy(c) if c.running == 1));
+        assert!(!ran);
+        // waiting: a timer, a mail or a webhook would wake it on its own
+        s.set_state(&m.id, MissionState::Waiting, None, 2).unwrap();
+        assert!(matches!(idle_delete(&s, "b"), IdleDelete::Busy(c) if c.waiting == 1));
+        // paused, but a session still holds a run
+        s.set_state(&m.id, MissionState::Running, None, 3).unwrap();
+        s.set_state(&m.id, MissionState::Paused, None, 4).unwrap();
+        s.set_lease(&m.id, Some("run-1")).unwrap();
+        assert!(matches!(idle_delete(&s, "b"), IdleDelete::Busy(c) if c.leased == 1));
+        assert!(s.get(&m.id).unwrap().is_some());
+        // released: now it goes, whatever the case of the bot id
+        s.set_lease(&m.id, None).unwrap();
+        match idle_delete(&s, "B") {
+            IdleDelete::Done { outcome, missions } => {
+                assert_eq!((outcome, missions.unwrap()), (1, 1));
+            }
+            IdleDelete::Busy(c) => panic!("busy: {c:?}"),
+        }
+        assert!(s.get(&m.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_failing_next_step_deletes_no_mission() {
+        let s = store();
+        let m = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        s.set_state(&m.id, MissionState::Paused, None, 2).unwrap();
+        let err = s
+            .delete_for_bot_if_idle("b", |_| {
+                Err::<(), _>(MissionError::Invalid("the other commit failed".into()))
+            })
+            .unwrap_err();
+        assert!(matches!(err, MissionError::Invalid(_)));
+        assert!(s.get(&m.id).unwrap().is_some());
+        assert_eq!(s.items(&m.id, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_retired_bot_gets_no_new_mission_or_session_until_restored() {
+        let s = store();
+        let m = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        assert!(s.retire_bot("B"));
+        assert!(!s.retire_bot("b"));
+        assert!(matches!(
+            s.create(&new_mission(&[("b.com", "y")]), 2),
+            Err(MissionError::Invalid(_))
+        ));
+        assert!(matches!(
+            s.begin_session(&m.id, 3),
+            Err(MissionError::Invalid(_))
+        ));
+        // Another bot is not affected.
+        let mut other = new_mission(&[("c.com", "z")]);
+        other.bot_id = "other".into();
+        s.create(&other, 4).unwrap();
+        s.restore_bot("b");
+        s.create(&new_mission(&[("b.com", "y")]), 5).unwrap();
+        s.begin_session(&m.id, 6).unwrap();
     }
 }

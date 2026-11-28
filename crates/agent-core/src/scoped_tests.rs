@@ -296,6 +296,39 @@ async fn an_origin_grant_covers_that_origin_survives_restart_and_is_revocable() 
 }
 
 #[tokio::test]
+async fn forgetting_a_deleted_bot_drops_its_standing_rules_and_only_its_own() {
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(ASK),
+        cfg(Policy::approve_destructive()),
+    );
+    let other = protocol::BotId::new();
+    for bot in [env.bot, other] {
+        lp.sh.grants.lock().always.push(crate::Grant {
+            bot_id: bot,
+            target: GrantTarget::Tool("web_search".into()),
+            granted_at_ms: 0,
+            computer: None,
+            inert: false,
+        });
+    }
+    assert_eq!(lp.count_standing_rules(env.bot), 1);
+    lp.forget_bot(env.bot);
+    assert_eq!(lp.count_standing_rules(env.bot), 0);
+    assert!(lp.list_grants(env.bot).is_empty());
+    assert_eq!(
+        lp.list_grants(other).len(),
+        1,
+        "another bot keeps its rules"
+    );
+}
+
+#[tokio::test]
 async fn destructive_credential_and_payment_actions_refuse_always_allow() {
     for (name, effect, cat, input) in [
         (

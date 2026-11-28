@@ -599,7 +599,7 @@ async fn deleting_a_bot_asks_the_embedder_to_forget_its_accounts() {
     let r = call(&t, Method::DELETE, &format!("/v1/bots/{spare}"), None).await;
     // The deletion itself succeeds even when the cleanup failed (the leftover
     // account is bound to an id that is never reused, so it stays inert).
-    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(r.status, StatusCode::OK);
     assert_eq!(*fake.forgotten.lock(), vec![spare]);
 }
 

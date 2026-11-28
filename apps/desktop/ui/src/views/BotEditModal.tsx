@@ -44,6 +44,7 @@ import {
   dialogStyles
 } from "../components/DialogParts";
 import { BotLimitsField } from "../components/BotLimitsField";
+import { DeleteBotDialog } from "../components/DeleteBotDialog";
 import { BotVoiceField } from "../components/BotVoiceField";
 import { BotEngineBlock } from "../components/BotEngineBlock";
 import { Modal } from "../components/Modal";
@@ -54,13 +55,11 @@ import {
   BOT_EDITOR_SECTIONS,
   type BotEditorSection,
   closeAction,
-  deleteBlock,
   dirtySections,
   editorProblems,
   SEPARATE_SAVE,
   sectionAtScroll
 } from "../lib/botEditor";
-import { botChats } from "../lib/botLanding";
 import { type BotDraft, draftFromBot, formatModelRef, runtimeTargetLabel } from "../lib/botProfile";
 import { performEditorSave, type ProfilePart } from "../lib/botSave";
 import { buildPutSkillsPayload, isBotSkillsDirty } from "../lib/botSkills";
@@ -155,7 +154,7 @@ function BotEditDialog({
   const { t } = useTranslation();
   const toast = useToast();
   const uid = useId();
-  const { client, bots, chats, refreshBots } = useDaemon();
+  const { client, bots, refreshBots } = useDaemon();
   const { askEngine, applyEngine } = useEngineConsent();
   const { providersDto, servers, setServers, allowed, setAllowed, initialApps, setInitialApps } =
     useBotFormDeps(client, bot.id, true);
@@ -169,21 +168,6 @@ function BotEditDialog({
   // Hand-typed model ids as typed (Advanced); kept here so they survive a section change.
   const { customText, setCustom, forgetFor, reset: resetCustom } = useCustomText(setDraft);
   const [pendingFallback, setPendingFallback] = useState("");
-  // Runs of this bot the daemon still holds (it refuses to delete a bot with any); `null` until known.
-  const [runCount, setRunCount] = useState<number | null>(null);
-  useEffect(() => {
-    if (!client) return undefined;
-    let cancelled = false;
-    client
-      .listRuns()
-      .then((runs) => {
-        if (!cancelled) setRunCount(runs.filter((r) => r.bot_id === bot.id).length);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [client, bot.id]);
   const [conflict, setConflict] = useState<{ parts: ProfilePart[]; fresh: Bot } | null>(null);
   const pendingLeave = useRef<(() => void) | null>(null);
   // The section in view (the jump list highlights it); it follows the scroll.
@@ -204,9 +188,7 @@ function BotEditDialog({
   const [error, setError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const sectionRefs = useRef<Partial<Record<BotEditorSection, HTMLElement | null>>>({});
 
@@ -250,7 +232,7 @@ function BotEditDialog({
   const executorMissing = problems.some((p) => p.problem === "executorMissing");
 
   const requestClose = () => {
-    const action = closeAction(dirty, saving || deleting);
+    const action = closeAction(dirty, saving);
     if (action === "close") onClose();
     else if (action === "confirm") {
       pendingLeave.current = null;
@@ -262,7 +244,7 @@ function BotEditDialog({
   });
   // Route changes (another bot, a chat, the palette, the panel) ask the same question.
   useLeaveGuard({
-    state: () => ({ dirty, busy: saving || deleting }),
+    state: () => ({ dirty, busy: saving }),
     confirm: (proceed) => {
       pendingLeave.current = proceed;
       setConfirmClose(true);
@@ -403,23 +385,6 @@ function BotEditDialog({
     setConflict(null);
   };
 
-  const remove = async () => {
-    if (!client || deleting) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await client.deleteBot(bot.id);
-      await refreshBots().catch(() => {});
-      toast.show(t("botEdit.deleted", { name: bot.name }), "info");
-      onDeleted(bot.id);
-    } catch (e) {
-      setDeleteError(humanLine(e));
-      setDeleting(false);
-    }
-  };
-
-  const chatCount = botChats(chats, bot.id).length;
-  const deleteBlocked = deleteBlock(chatCount, runCount);
   const headId = (s: BotEditorSection) => `${uid}-section-${s}`;
 
   /** One section of the page: icon, title, one line of what it is for, then its fields. */
@@ -496,7 +461,7 @@ function BotEditDialog({
           />
           <span className={styles.navBotName}>{draft.name.trim() || bot.name}</span>
         </div>
-        <ul className={styles.tabs} inert={saving || deleting}>
+        <ul className={styles.tabs} inert={saving}>
           {BOT_EDITOR_SECTIONS.map((s) => {
             const Icon = SECTION_ICONS[s];
             const active = s === section;
@@ -533,11 +498,11 @@ function BotEditDialog({
         <DialogHeader
           title={t("botForm.editTitle")}
           subtitle={t("botEdit.pageHint")}
-          closeDisabled={saving || deleting}
+          closeDisabled={saving}
           onClose={requestClose}
           actions={<HomeHint />}
         />
-        <DialogBody scrollRef={bodyRef} inert={saving || deleting} testId="bot-edit-page">
+        <DialogBody scrollRef={bodyRef} inert={saving} testId="bot-edit-page">
           {block(
             "identity",
             <>
@@ -620,7 +585,7 @@ function BotEditDialog({
                 </div>
                 <Button
                   variant="secondary"
-                  disabled={saving || deleting || exporting || dirty || serviceBlocked}
+                  disabled={saving || exporting || dirty || serviceBlocked}
                   data-testid="bot-edit-export"
                   onClick={() => void exportProfile()}
                 >
@@ -632,13 +597,7 @@ function BotEditDialog({
                 draft={draft}
                 customText={customText}
                 onCustomText={setCustom}
-                deleteBlocked={deleteBlocked}
-                chatCount={chatCount}
-                runCount={runCount ?? 0}
-                onDelete={() => {
-                  setDeleteError(null);
-                  setConfirmDelete(true);
-                }}
+                onDelete={() => setConfirmDelete(true)}
               />
             </>
           )}
@@ -677,12 +636,12 @@ function BotEditDialog({
           </div>
         ) : null}
         <DialogFooter noteTone={problems.length > 0 && !saving ? "warning" : "info"} note={footerNote}>
-          <Button variant="ghost" disabled={saving || deleting} onClick={requestClose}>
+          <Button variant="ghost" disabled={saving} onClick={requestClose}>
             {t("common.cancel")}
           </Button>
           <Button
             variant="primary"
-            disabled={saving || deleting || !dirty || serviceBlocked}
+            disabled={saving || !dirty || serviceBlocked}
             data-testid="bot-edit-save"
             onClick={() => void save()}
           >
@@ -710,16 +669,14 @@ function BotEditDialog({
           proceed?.();
         }}
       />
-      <ConfirmDialog
+      <DeleteBotDialog
         open={confirmDelete}
-        title={t("botEdit.deleteConfirmTitle", { name: bot.name })}
-        body={t("botEdit.deleteConfirmBody")}
-        confirmLabel={t("botEdit.delete")}
-        tone="danger"
-        busy={deleting}
-        error={deleteError}
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => void remove()}
+        bot={bot}
+        onClose={() => setConfirmDelete(false)}
+        onDeleted={() => {
+          setConfirmDelete(false);
+          onDeleted(bot.id);
+        }}
       />
     </div>
   );

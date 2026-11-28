@@ -403,6 +403,13 @@ async fn a_bot_the_user_widened_is_read_only_to_its_maker() {
         .await
         .unwrap_err();
     assert!(e.contains("more permissions than you"), "{e}");
+    // Nor can it delete it: a bot with more rights than its maker is the owner's to remove.
+    let ch = BotChange::Delete { id: v.id.clone() };
+    let e = host.preview(&c, &ch).await.unwrap_err();
+    assert!(e.contains("more permissions than you"), "{e}");
+    let e = host.delete(&c, &v.id).await.unwrap_err();
+    assert!(e.contains("more permissions than you"), "{e}");
+    assert!(t.state.storage().get_bot(bid(&v.id)).unwrap().is_some());
 }
 
 #[tokio::test]

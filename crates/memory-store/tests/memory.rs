@@ -914,6 +914,25 @@ fn deleting_a_chat_removes_its_messages_from_search() {
 }
 
 #[test]
+fn deleting_several_chats_removes_all_their_messages_and_only_theirs() {
+    let s = store();
+    let (u, kept) = (UserId::new(), ChatId::new());
+    let gone = [ChatId::new(), ChatId::new()];
+    s.index_message(&message(u, kept, "quarterly invoice stays"))
+        .unwrap();
+    s.index_message(&message(u, gone[0], "quarterly invoice first"))
+        .unwrap();
+    s.index_message(&message(u, gone[1], "quarterly invoice second"))
+        .unwrap();
+    assert_eq!(s.erase_chats(&gone).unwrap(), 2);
+    let hits = s.search_sessions(u, "invoice", 10).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].chat_id, kept);
+    assert_eq!(s.erase_chats(&gone).unwrap(), 0, "idempotent");
+    assert_eq!(s.erase_chats(&[]).unwrap(), 0);
+}
+
+#[test]
 fn deleting_a_bot_erases_its_own_memories_but_not_shared_ones() {
     let s = store();
     let (u, b1, b2) = (UserId::new(), BotId::new(), BotId::new());
@@ -944,7 +963,10 @@ fn deleting_a_bot_erases_its_own_memories_but_not_shared_ones() {
         )
         .unwrap();
 
+    // The preview counts the live ones only; the erase also takes the forgotten one.
+    assert_eq!(s.count_bot(u, b1).unwrap(), 1);
     assert_eq!(s.erase_bot(u, b1).unwrap(), 2);
+    assert_eq!(s.count_bot(u, b1).unwrap(), 0);
     assert!(s.get(own.id).unwrap().is_none());
     assert!(s.get(forgotten.id).unwrap().is_none());
     assert!(s.get(shared.id).unwrap().is_some());

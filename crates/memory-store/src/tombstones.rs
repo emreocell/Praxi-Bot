@@ -296,6 +296,19 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// How many memories only `bot` knows (what [`Self::erase_bot`] would remove).
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn count_bot(&self, user: UserId, bot: BotId) -> Result<usize> {
+        let n: i64 = self.conn().query_row(
+            "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND bot_id = ?2 AND deleted = 0",
+            params![user.0.to_string(), bot.0.to_string()],
+            |r| r.get(0),
+        )?;
+        Ok(usize::try_from(n).unwrap_or(0))
+    }
+
     /// Drop everything a deleted bot left in memory: its own memories (with
     /// their journal) and tombstones.  Memories shared across the user's bots
     /// stay: they belong to the user.

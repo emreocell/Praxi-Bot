@@ -776,19 +776,41 @@ async fn knowledge_bot_deletion_removes_only_its_index_and_preserves_referenced_
     let directory = t.state.data_dir().join("bots").join(&bot);
     std::fs::write(directory.join("profile.toml"), "human-owned profile").unwrap();
     let deleted = request(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
-    assert_eq!(deleted.status, StatusCode::NO_CONTENT, "{}", deleted.json());
+    assert_eq!(deleted.status, StatusCode::OK, "{}", deleted.json());
     assert!(!directory.join("knowledge.db").exists());
     assert_eq!(
         std::fs::read_to_string(directory.join("profile.toml")).unwrap(),
         "human-owned profile"
     );
-    let (kept, _) = make_chat(&t).await;
+    let (kept, kept_chat) = make_chat(&t).await;
     add(
         &t,
         &kept,
         json!({"kind":"note","label":"Keep me","content":"Retained quasar evidence"}),
     )
     .await;
+    // A delete the daemon refuses (the bot has a run in progress) must leave its index alone.
+    t.state
+        .storage()
+        .insert_run(&storage::Run {
+            id: protocol::RunId::new(),
+            user_id: t.state.user_id(),
+            bot_id: protocol::BotId(kept.parse().unwrap()),
+            chat_id: Some(protocol::ChatId(kept_chat.parse().unwrap())),
+            kind: "turn".into(),
+            state: "running".into(),
+            error: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            parent_run_id: None,
+            spec: None,
+            computer_target: None,
+            computer_node: None,
+            computer_node_name: None,
+            paused_at_ms: None,
+            pause_reason: None,
+        })
+        .unwrap();
     assert_eq!(
         request(&t, Method::DELETE, &format!("/v1/bots/{kept}"), None)
             .await

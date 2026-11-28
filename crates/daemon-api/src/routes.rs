@@ -969,7 +969,8 @@ pub(crate) async fn forget_bot_links(s: &AppState, bot: &Bot) {
 
 /// Delete a bot that has no chats or runs, together with everything that hangs
 /// off it (knowledge index and grants, browser slot, MCP and e-mail links).
-/// Shared by the HTTP route and the bot-management tool.
+/// Used by the bot-management tool; the owner's delete of a bot with history is
+/// [`crate::bot_delete_routes`].
 pub(crate) async fn remove_bot(s: &AppState, bot: &Bot) -> Result<(), ApiError> {
     let permit = crate::knowledge::worker_permit(s.data_dir())?;
     let authority = crate::knowledge::authority_lock(s, bot.id)
@@ -992,7 +993,9 @@ pub(crate) async fn remove_bot(s: &AppState, bot: &Bot) -> Result<(), ApiError> 
                     .map_err(storage::StorageError::Io)?;
                 // Memories only this bot knew, their journal and its forgotten
                 // items go with it (shared memories belong to the user).
-                if let Some(memory) = state.memory_store_if_present() {
+                if let Some(memory) = state.memory_store_if_present().map_err(|e| {
+                    storage::StorageError::Io(std::io::Error::other(e.message().to_owned()))
+                })? {
                     memory
                         .erase_bot(removed.user_id, removed.id)
                         .map_err(|e| storage::StorageError::Io(std::io::Error::other(e)))?;
@@ -1012,19 +1015,6 @@ pub(crate) async fn remove_bot(s: &AppState, bot: &Bot) -> Result<(), ApiError> 
     s.live_view().registry.retire_bot(bot.id.0);
     forget_bot_links(s, bot).await;
     Ok(())
-}
-
-/// Delete a bot that has no chats or runs.
-#[utoipa::path(delete, path = "/v1/bots/{id}", tag = "bots", security(("bearer" = [])),
-    params(("id" = Uuid, Path, description = "Bot id")),
-    responses((status = 204), (status = 404, body = ErrorBody), (status = 409, body = ErrorBody)))]
-pub(crate) async fn delete_bot(
-    State(s): State<AppState>,
-    Path(bid): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    let bot = s.bot_of_user(BotId(id(&bid)?))?;
-    remove_bot(&s, &bot).await?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 // ----------------------------------------------------------------- chats
@@ -1121,10 +1111,19 @@ pub(crate) async fn delete_chat(
     })?;
     agent_core::attachments::remove_chat(&s.data_dir(), chat.id);
     // The deleted chat must not stay searchable through past-session search.
-    if let Some(memory) = s.memory_store_if_present()
-        && let Err(e) = memory.erase_chat(chat.id)
-    {
-        eprintln!("daemon-api: warning: could not erase a deleted chat from memory search: {e}");
+    match s.memory_store_if_present() {
+        Ok(Some(memory)) => {
+            if let Err(e) = memory.erase_chat(chat.id) {
+                eprintln!(
+                    "daemon-api: warning: could not erase a deleted chat from memory search: {e}"
+                );
+            }
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!(
+            "daemon-api: warning: could not erase a deleted chat from memory search: {}",
+            e.message()
+        ),
     }
     Ok(StatusCode::NO_CONTENT)
 }

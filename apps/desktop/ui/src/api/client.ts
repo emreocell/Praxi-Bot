@@ -42,6 +42,8 @@ import type {
   PageReader,
   MemoryEmbedding,
   MemoryEmbeddingInput,
+  BotDeletePreview,
+  BotDeleteReport,
   IncomingWebhook,
   IncomingWebhookAccepted,
   IncomingWebhookCreated,
@@ -953,8 +955,21 @@ export class ApiClient {
   runImport(input: ImportRunInput): Promise<ImportRunOutput> {
     return this.request("POST", "/import/run", { body: input });
   }
-  deleteBot(id: string): Promise<void> {
-    return this.request("DELETE", `/bots/${id}`);
+  /**
+   * Owner-only: what deleting the bot would remove (counts, mailboxes, channels). Changes nothing.
+   */
+  botDeletePreview(id: string): Promise<BotDeletePreview> {
+    return this.request("GET", `/bots/${encodeURIComponent(id)}/delete-preview`);
+  }
+  /**
+   * Owner-only: delete the bot and everything only it owns, chats and runs included. Refused
+   * (409) while it has a run or a mission in progress. `deleteInbox` also
+   * deletes the AgentMail inbox only this bot used, at the provider (mail in it is lost).
+   */
+  deleteBot(id: string, opts: { deleteInbox?: boolean } = {}): Promise<BotDeleteReport> {
+    return this.request("DELETE", `/bots/${encodeURIComponent(id)}`, {
+      query: opts.deleteInbox ? { delete_inbox: "true" } : undefined
+    });
   }
   /** Webhooks that start this bot. The secret is not included. */
   listIncomingWebhooks(botId: string): Promise<IncomingWebhook[]> {

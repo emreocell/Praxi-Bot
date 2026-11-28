@@ -646,9 +646,6 @@ function NewBotDialogContent({
                       if (role === "executor") setBrainMode("manual");
                       setCustom(role, text);
                     }}
-                    deleteBlocked={null}
-                    chatCount={0}
-                    runCount={0}
                   />
                 </>
               )}

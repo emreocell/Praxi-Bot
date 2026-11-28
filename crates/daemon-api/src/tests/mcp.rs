@@ -606,7 +606,7 @@ async fn deleting_a_bot_removes_its_id_from_every_server_and_never_widens_access
     }
 
     let r = call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
-    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(r.status, StatusCode::OK);
 
     let list = call(&t, Method::GET, "/v1/mcp/servers", None).await.json();
     let bots_of = |n: &str| {
@@ -627,11 +627,33 @@ async fn deleting_a_bot_removes_its_id_from_every_server_and_never_widens_access
 #[tokio::test]
 async fn failed_bot_delete_keeps_the_server_lists() {
     let (t, _) = with_mcp();
-    let (bot, _chat) = make_chat(&t).await;
+    let (bot, chat) = make_chat(&t).await;
     let mut body = stdio_body("mine");
     body["bots"] = json!([bot]);
     let r = call(&t, Method::POST, "/v1/mcp/servers", Some(body)).await;
     assert_eq!(r.status, StatusCode::CREATED);
+    // A delete the daemon refuses (the bot is working) must not touch the lists.
+    t.state
+        .storage()
+        .insert_run(&storage::Run {
+            id: protocol::RunId::new(),
+            user_id: t.state.user_id(),
+            bot_id: protocol::BotId(bot.parse().unwrap()),
+            chat_id: Some(protocol::ChatId(chat.parse().unwrap())),
+            kind: "turn".into(),
+            state: "running".into(),
+            error: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            parent_run_id: None,
+            spec: None,
+            computer_target: None,
+            computer_node: None,
+            computer_node_name: None,
+            paused_at_ms: None,
+            pause_reason: None,
+        })
+        .unwrap();
     let r = call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
     assert_eq!(r.status, StatusCode::CONFLICT);
     let list = call(&t, Method::GET, "/v1/mcp/servers", None).await.json();

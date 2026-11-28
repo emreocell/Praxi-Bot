@@ -320,7 +320,7 @@ async fn deleting_a_bot_removes_its_view_target_and_retires_its_driver() {
     let (status, _) = t
         .call(None, Method::DELETE, &format!("/v1/bots/{id}"), None)
         .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(t.state.live_view().registry.targets().len(), before - 1);
     assert!(
         t.state

@@ -54,6 +54,9 @@ export type MemoryEmbedding = S["MemoryEmbeddingDto"];
 export type MemoryEmbeddingInput = S["MemoryEmbeddingInput"];
 
 export type Bot = S["BotDto"];
+/** What deleting a bot would remove (`GET /v1/bots/{id}/delete-preview`) and what it removed. */
+export type BotDeletePreview = S["BotDeletePreview"];
+export type BotDeleteReport = S["BotDeleteReport"];
 export type BotInput = S["BotInput"];
 export type BotPatchInput = S["BotPatchInput"];
 

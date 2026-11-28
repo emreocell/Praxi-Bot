@@ -434,6 +434,16 @@ impl ChannelControl for DiscordRuntime {
         }
     }
 
+    fn chats_using_bot(&self, bot: protocol::BotId) -> usize {
+        let channel = self.channel.lock().clone();
+        channel.map_or(0, |c| c.channels_using(bot))
+    }
+
+    async fn forget_bot(&self, bot: protocol::BotId) -> usize {
+        let channel = self.channel.lock().clone();
+        channel.map_or(0, |c| c.forget_bot(bot).unwrap_or(0))
+    }
+
     fn info(&self) -> ChannelDto {
         let channel = self.channel.lock();
         let running = channel.as_ref().is_some_and(DiscordChannel::is_running);

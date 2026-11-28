@@ -979,12 +979,37 @@ export interface paths {
         /** Replace a bot profile using its loaded `expected_version` (required; missing is 428). */
         put: operations["update_bot"];
         post?: never;
-        /** Delete a bot that has no chats or runs. */
+        /**
+         * Delete a bot and everything only it owns, whatever chats and runs it has. Irreversible.
+         *     Refused (`409`) while the bot has a run or a mission in progress or waiting (stop or cancel
+         *     it first); then nothing is deleted. With `delete_inbox=true` the `AgentMail` inbox only this
+         *     bot used is deleted at the provider as the last step, after the bot is gone here; when the
+         *     provider fails, the report says so (`inboxes_not_deleted`). Cleanup steps that fail after the
+         *     bot's rows are gone are reported in `cleanup_pending`; the same request retries them (also for
+         *     a bot that is already gone). Files in the owner's folders are never deleted.
+         */
         delete: operations["delete_bot"];
         options?: never;
         head?: never;
         /** Change only the listed fields of a bot, atomically, if `expected_version` is current. */
         patch: operations["patch_bot"];
+        trace?: never;
+    };
+    "/v1/bots/{id}/delete-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What deleting a bot would remove. Changes nothing. */
+        get: operations["delete_preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/bots/{id}/engine": {
@@ -6447,6 +6472,184 @@ export interface components {
             /** @description `false`: no bot pointer on the desktop, in the browser page or in the live viewer. */
             enabled: boolean;
         };
+        /** @description How many chats of a messaging channel chose this bot. */
+        BotDeleteChannel: {
+            /** @description Channel id (`telegram`, `discord`). */
+            channel: string;
+            /**
+             * Format: int64
+             * @description Chats (channels) that chose the bot. Their choice is forgotten; pairing stays.
+             */
+            chats: number;
+        };
+        /** @description A mailbox the bot owns, shares or uses by default. */
+        BotDeleteMailbox: {
+            /** @description Address mail is sent from. */
+            address: string;
+            /** @description What happens to it. */
+            fate: components["schemas"]["BotDeleteMailboxFate"];
+            /**
+             * @description The inbox at the provider can be deleted with the bot (an `AgentMail` inbox only this bot
+             *     used). Offered as a separate choice; mail in it is lost for good.
+             */
+            inbox_deletable: boolean;
+            /** @description Account name. */
+            name: string;
+            /** @description Kind of mailbox. */
+            provider: components["schemas"]["EmailProviderKind"];
+        };
+        /**
+         * @description What happens to a mailbox when the bot is deleted.
+         * @enum {string}
+         */
+        BotDeleteMailboxFate: "removed" | "handed_over" | "unlinked";
+        /** @description What deleting a bot would remove (`GET /v1/bots/{id}/delete-preview`). Nothing is changed. */
+        BotDeletePreview: {
+            /**
+             * Format: int64
+             * @description Runs that have not finished. Deleting is refused while there are any.
+             */
+            active_runs: number;
+            /**
+             * Format: int64
+             * @description Approvals decided in those runs.
+             */
+            approvals: number;
+            /**
+             * Format: uuid
+             * @description The bot.
+             */
+            bot_id: string;
+            /** @description Messaging channels that map chats to this bot. */
+            channels: components["schemas"]["BotDeleteChannel"][];
+            /**
+             * Format: int64
+             * @description Chats.
+             */
+            chats: number;
+            /**
+             * Format: int64
+             * @description "Always allow" and per-site or per-app rules the owner gave this bot.
+             */
+            grants: number;
+            /** @description Mailboxes it owns, shares or uses by default. */
+            mailboxes: components["schemas"]["BotDeleteMailbox"][];
+            /**
+             * Format: int64
+             * @description Memories only this bot knows (memories shared across bots stay).
+             */
+            memories: number;
+            /**
+             * Format: int64
+             * @description Messages in those chats.
+             */
+            messages: number;
+            /**
+             * Format: int64
+             * @description Missions the bot leads.
+             */
+            missions: number;
+            /** @description Its name, which the owner types to confirm. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Steps of those runs.
+             */
+            run_steps: number;
+            /**
+             * Format: int64
+             * @description Missions in the running state (or holding a session). Deleting is refused while there are
+             *     any.
+             */
+            running_missions: number;
+            /**
+             * Format: int64
+             * @description Runs, subagent and scheduled runs included.
+             */
+            runs: number;
+            /**
+             * Format: int64
+             * @description Schedules and triggers of the bot.
+             */
+            schedules: number;
+            /**
+             * Format: int64
+             * @description Missions waiting for a timer, a mail or a webhook (they would wake on their own).
+             *     Deleting is refused while there are any: cancel them first.
+             */
+            waiting_missions: number;
+            /**
+             * Format: int64
+             * @description Incoming webhooks bound to the bot.
+             */
+            webhooks: number;
+            /** @description The bot's workspace folder on this computer. It is never deleted. */
+            workspace_folder?: string | null;
+        };
+        /** @description What was removed (`DELETE /v1/bots/{id}`). The bot is gone, whatever else it says. */
+        BotDeleteReport: {
+            /**
+             * Format: int64
+             * @description Chats removed.
+             */
+            chats: number;
+            /**
+             * @description Cleanup steps that did not finish. The bot is gone; `DELETE /v1/bots/{id}` again (with
+             *     the same `delete_inbox`) retries them.
+             */
+            cleanup_pending: components["schemas"]["BotDeleteStep"][];
+            /** @description Addresses of the `AgentMail` inboxes deleted at the provider. */
+            inboxes_deleted: string[];
+            /** @description Inboxes asked for that were not deleted at the provider, and why. */
+            inboxes_not_deleted: components["schemas"]["EmailInboxNotDeleted"][];
+            /**
+             * Format: int64
+             * @description Mailbox accounts that stay for other bots.
+             */
+            mailboxes_kept: number;
+            /**
+             * Format: int64
+             * @description Mailbox accounts removed from this app.
+             */
+            mailboxes_removed: number;
+            /**
+             * Format: int64
+             * @description Memories removed.
+             */
+            memories: number;
+            /**
+             * Format: int64
+             * @description Messages removed.
+             */
+            messages: number;
+            /**
+             * Format: int64
+             * @description Missions removed.
+             */
+            missions: number;
+            /** @description The bot's name. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Runs removed.
+             */
+            runs: number;
+            /**
+             * Format: int64
+             * @description Schedules and triggers removed.
+             */
+            schedules: number;
+            /**
+             * Format: int64
+             * @description Incoming webhooks removed.
+             */
+            webhooks: number;
+        };
+        /**
+         * @description A cleanup step after the bot's rows were deleted.
+         * @enum {string}
+         */
+        BotDeleteStep: "knowledge" | "memory" | "files" | "secrets" | "missions" | "schedules" | "links" | "mailboxes";
         /** @description Public bot representation. */
         BotDto: {
             /** @description Bot profile (ADR-0011) as JSON. */
@@ -8273,6 +8476,18 @@ export interface components {
              * @description Port, default 993.
              */
             port?: number;
+        };
+        /** @description An `AgentMail` inbox that was not deleted at the provider with its bot. */
+        EmailInboxNotDeleted: {
+            /**
+             * @description Account name. It stays in the mail settings (no bot can use it: its bot is gone), so the
+             *     owner can delete it with its inbox there, or delete the bot again to retry.
+             */
+            account: string;
+            /** @description The inbox's address. */
+            address: string;
+            /** @description Why: the provider's answer, or that another bot uses the account now. */
+            reason: string;
         };
         /**
          * @description One row of `GET /v1/email/accounts/{name}/messages`: header data only, no
@@ -16624,7 +16839,13 @@ export interface operations {
     };
     delete_bot: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Also delete the `AgentMail` inbox(es) only this bot used, at the provider. Default `false`:
+                 *     the mail in an inbox would be lost for good.
+                 */
+                delete_inbox?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Bot id */
@@ -16634,11 +16855,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["BotDeleteReport"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
             404: {
                 headers: {
@@ -16709,6 +16940,44 @@ export interface operations {
                 };
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bot id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotDeletePreview"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

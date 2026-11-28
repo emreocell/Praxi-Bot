@@ -1622,6 +1622,8 @@ pub fn serve(
         }
         step("components and apps wired");
         daemon_api::account_health::spawn_daily(state.clone());
+        // A bot delete that did not finish its cleanup (a failing step, a stop half way).
+        daemon_api::spawn_pending_cleanups(state.clone());
         // Loopback only: never bind another interface.
         let listener = tokio::net::TcpListener::from_std(socket)?;
         let addr = listener.local_addr()?;

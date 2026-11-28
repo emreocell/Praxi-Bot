@@ -1591,6 +1591,93 @@
     "description": "Bot bilgisayarınızı veya tarayıcısını kullanırken kendi imlecini ve tıkladığı yerde bir dalga çizer. Böylece nereye tıklayacağını görürsünüz. Sizin imlecinize hiç dokunulmaz. Her yerde gizlemek için bunu kapatın.",
     "title": "Botun imlecini göster"
   },
+  "botDelete": {
+    "back": "Geri",
+    "backup": {
+      "body": "Silme geri alınamaz. Sohbetlerini veya hafızasını ileride istersen, önce şifreli bir yedek al. Zorunlu değil.",
+      "link": "Yedek nasıl alınır",
+      "title": "Önce yedek al (önerilir)"
+    },
+    "confirm": {
+      "button": "Botu sil",
+      "hint": "Kırmızı düğme yalnızca ad tam eşleşince çalışır.",
+      "inbox": "{{address}} gelen kutusu da AgentMail'de, içindeki tüm postalarla birlikte silinecek.",
+      "label": "Onaylamak için {{name}} yaz",
+      "nothingElse": "ayarları",
+      "subtitle": "Bir adım daha: bu işlem geri alınamaz.",
+      "title": "Emin misin?",
+      "warn": "{{name}} kalıcı olarak silinecek. Birlikte silinenler: {{items}}.",
+      "warnTitle": "Bu işlem geri alınamaz"
+    },
+    "continue": "Devam et",
+    "deleting": "Siliniyor…",
+    "done": "{{name}} silindi. Kaldırılanlar: {{items}}.",
+    "doneEmpty": "{{name}} silindi.",
+    "doneInbox": "AgentMail'de silinen gelen kutusu: {{list}}",
+    "goes": {
+      "settings": "Ayarları, becerileri, uygulama erişimi, kayıtlı izinleri ve bilgi dizini",
+      "title": "Silinecekler"
+    },
+    "hint": "Botu ve yalnızca ona ait her şeyi siler; sohbetler ve çalışmalar da buna dahil. Hiçbir şey silinmeden önce nelerin gideceğini görürsün.",
+    "inbox": {
+      "hint": "Varsayılan olarak kapalı. Gelen kutusunu AgentMail'de, içindeki tüm postalarla birlikte kalıcı olarak siler.",
+      "label": "{{address}} gelen kutusunu da sil"
+    },
+    "item": {
+      "channels": "Bu bota ayarlı Telegram ve Discord sohbetleri",
+      "chats": "Sohbet",
+      "grants": "Her zaman izin kuralları",
+      "mailboxes": "E-posta hesapları",
+      "memories": "Yalnızca bu botun bildiği hafıza kayıtları",
+      "messages": "Mesaj",
+      "missions": "Görev",
+      "runs": "Çalışma",
+      "schedules": "Zamanlama ve tetikleyiciler",
+      "webhooks": "Webhook"
+    },
+    "leftover": {
+      "inbox": "AgentMail'de silinmeyen gelen kutusu: {{list}}. Hesabı hâlâ Ayarlar › E-posta'daysa oradan gelen kutusuyla birlikte silebilirsin.",
+      "steps": "Henüz kaldırılamayanlar: {{list}}. Tamamlamak için yeniden dene.",
+      "text": "{{name}} silindi, ancak her şey kaldırılamadı. {{problems}}"
+    },
+    "loadFailed": "Nelerin silineceği kontrol edilemedi",
+    "loading": "Bu bota ait olanlar kontrol ediliyor…",
+    "mailbox": {
+      "handed_over": "{{address}}: başka bir botla paylaşılıyor; bu yüzden kalır ve o bota geçer.",
+      "removed": "{{address}}: kayıtlı parolası veya anahtarıyla birlikte bu uygulamadan kaldırılır. Posta kutusunun kendisine dokunulmaz.",
+      "unlinked": "{{address}}: başkalarına ait; bu yüzden yalnızca bu bottan ayrılır."
+    },
+    "retry": "Yeniden dene",
+    "stays": {
+      "audit": "Etkinlik günlüğü: eski kayıtlar durur, bir de “bot silindi” kaydı eklenir.",
+      "files": "Botun klasörlerine kaydettiği dosyalar asla silinmez.",
+      "filesWithFolder": "Botun klasörlerine kaydettiği dosyalar ve çalışma klasörü ({{folder}}) asla silinmez. İhtiyacın kalmadıysa onları kendin sil.",
+      "shared": "Diğer botlarınla paylaşılan hafıza kayıtları.",
+      "title": "Kalacaklar"
+    },
+    "step": {
+      "files": "çalışma kayıtları ve ekler",
+      "knowledge": "bilgi dizini",
+      "links": "uygulama bağlantıları",
+      "mailboxes": "e-posta hesapları",
+      "memory": "hafıza kayıtları",
+      "missions": "görevler",
+      "schedules": "zamanlamalar",
+      "secrets": "webhook gizli anahtarları"
+    },
+    "subtitle": "Yalnızca bu bota ait her şey onunla birlikte silinir.",
+    "title": "{{name}} silinsin mi?",
+    "working": {
+      "cancelWaiting": "Bekleyen görevi iptal et",
+      "cancelling": "İptal ediliyor…",
+      "mission": "{{name}} şu an çalışan bir görevi yönetiyor. Önce görevi durdur, sonra botu sil.",
+      "run": "{{name}} şu an bir çalışma yürütüyor. Önce çalışmayı durdur, sonra botu sil.",
+      "stop": "Durdur",
+      "stopping": "Durduruluyor…",
+      "title": "Bu bot şu an çalışıyor",
+      "waiting": "{{name}}, bir zamanlayıcı, e-posta veya webhook bekleyen bir görevi yönetiyor; görev kendiliğinden yeniden başlayabilir. Önce görevi iptal et, sonra botu sil."
+    }
+  },
   "botEdit": {
     "addFallback": "Yedek ekle",
     "allSaved": "Kaydedilmemiş değişiklik yok",
@@ -1637,14 +1724,7 @@
     "customTitle": "Özel model kimliği",
     "dangerTitle": "Tehlikeli bölge",
     "delete": "Botu sil",
-    "deleteBlocked": "Bu botun sohbetleri var ({{count}}); bu yüzden silinemez. Yalnızca sohbeti ve çalışması olmayan bot silinebilir.",
-    "deleteBlockedRuns": "Bu botun saklanan {{count}} çalışması var; bu yüzden silinemez. Yalnızca sohbeti ve çalışması olmayan bot silinebilir.",
-    "deleteBlockedRuns_one": "Bu botun saklanan {{count}} çalışması var; bu yüzden silinemez. Yalnızca sohbeti ve çalışması olmayan bot silinebilir.",
-    "deleteConfirmBody": "Bot, uygulama erişimi ve e-posta hesapları kaldırılacak; yalnızca bu botun öğrendiği hafıza kayıtları da kalıcı olarak silinecek. Diğer botlarınla paylaşılan hafıza kayıtları kalır. Bu işlem geri alınamaz. Hâlâ sohbeti veya çalışması olan bot silinemez: bu durumda hiçbir şey kaldırılmaz ve nedenini görürsün.",
-    "deleteConfirmTitle": "{{name}} silinsin mi?",
-    "deleteHint": "Botu, uygulama erişimini, e-posta hesaplarını ve yalnızca onun öğrendiği hafıza kayıtlarını kaldırır. Yalnızca sohbeti veya çalışması yokken yapılabilir. Geri alınamaz.",
     "deleteTitle": "Bu botu sil",
-    "deleted": "{{name}} silindi.",
     "discard": "Vazgeç ve kapat",
     "discardBody": "Kaydedilmemiş değişikliklerin var. Şimdi kapatırsan kaybolur.",
     "discardTitle": "Değişiklikler silinsin mi?",

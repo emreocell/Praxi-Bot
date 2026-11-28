@@ -94,26 +94,39 @@ impl MemoryStore {
     /// # Errors
     /// SQLite failure.
     pub fn erase_chat(&self, chat: ChatId) -> Result<usize> {
+        self.erase_chats(&[chat])
+    }
+
+    /// [`Self::erase_chat`] for several chats in one transaction (a deleted bot's chats): all or
+    /// none are removed.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn erase_chats(&self, chats: &[ChatId]) -> Result<usize> {
         let n = {
             let mut conn = self.conn();
             let tx = conn.transaction()?;
-            let rowids: Vec<i64> = {
-                let mut st = tx.prepare("SELECT rowid FROM session_msgs WHERE chat_id = ?1")?;
-                st.query_map([chat.0.to_string()], |r| r.get(0))?
-                    .collect::<rusqlite::Result<_>>()?
-            };
-            for rowid in &rowids {
-                tx.execute("DELETE FROM session_fts WHERE rowid = ?1", [rowid])?;
-                tx.execute("DELETE FROM session_msgs WHERE rowid = ?1", [rowid])?;
+            let mut removed = 0;
+            for chat in chats {
+                let rowids: Vec<i64> = {
+                    let mut st = tx.prepare("SELECT rowid FROM session_msgs WHERE chat_id = ?1")?;
+                    st.query_map([chat.0.to_string()], |r| r.get(0))?
+                        .collect::<rusqlite::Result<_>>()?
+                };
+                for rowid in &rowids {
+                    tx.execute("DELETE FROM session_fts WHERE rowid = ?1", [rowid])?;
+                    tx.execute("DELETE FROM session_msgs WHERE rowid = ?1", [rowid])?;
+                }
+                removed += rowids.len();
             }
-            if !rowids.is_empty() {
+            if removed > 0 {
                 tx.execute(
                     "INSERT INTO session_fts(session_fts) VALUES ('optimize')",
                     [],
                 )?;
             }
             tx.commit()?;
-            rowids.len()
+            removed
         };
         if n > 0 {
             self.checkpoint();

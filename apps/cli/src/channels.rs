@@ -272,6 +272,16 @@ impl ChannelControl for TelegramRuntime {
         }
     }
 
+    fn chats_using_bot(&self, bot: protocol::BotId) -> usize {
+        let channel = self.channel.lock().clone();
+        channel.map_or(0, |c| c.pairing().chats_using(bot))
+    }
+
+    async fn forget_bot(&self, bot: protocol::BotId) -> usize {
+        let channel = self.channel.lock().clone();
+        channel.map_or(0, |c| c.pairing().forget_bot(bot).unwrap_or(0))
+    }
+
     fn info(&self) -> ChannelDto {
         let channel = self.channel.lock();
         ChannelDto {

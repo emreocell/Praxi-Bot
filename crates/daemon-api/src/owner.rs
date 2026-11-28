@@ -157,6 +157,11 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("GET", "/v1/bot-cursor"),
     ("HEAD", "/v1/bot-cursor"),
     ("PUT", "/v1/bot-cursor"),
+    // erasing a bot with its chats, memory and mailbox links is the owner's decision alone: the
+    // preview names the mailbox and channels, so it is owner-only too
+    ("DELETE", "/v1/bots/{}"),
+    ("GET", "/v1/bots/{}/delete-preview"),
+    ("HEAD", "/v1/bots/{}/delete-preview"),
     // per-bot spending limits: a bot or token holder must not lift its own cap
     ("PUT", "/v1/bots/{}/spend-limits"),
     // how outside text reaches a bot (the quarantined page reader): a bot must not switch off
@@ -456,8 +461,9 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
 ];
 
 /// Mutating routes an ordinary client may call with the general token: chat,
-/// runs, live-view sessions, bot create/edit/delete (execution authority inside
-/// a profile is checked by the handlers, see [`execution_changed`]), previews and
+/// runs, live-view sessions, bot create/edit (execution authority inside
+/// a profile is checked by the handlers, see [`execution_changed`]; deleting a bot
+/// is the owner's alone), previews and
 /// connection tests, the peer-only `/v1/admin/*` (refused without a paired
 /// identity) and the routes with their own credential (webhook HMAC, scoped MCP
 /// token). A test requires every documented mutating route to be in one of the
@@ -467,7 +473,6 @@ pub const TOKEN_OK_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/bots"),
     ("PUT", "/v1/bots/{}"),
     ("PATCH", "/v1/bots/{}"),
-    ("DELETE", "/v1/bots/{}"),
     ("POST", "/v1/chats"),
     ("PATCH", "/v1/chats/{}"),
     ("DELETE", "/v1/chats/{}"),

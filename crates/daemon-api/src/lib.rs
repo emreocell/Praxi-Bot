@@ -20,6 +20,7 @@ mod attachment_routes;
 mod audit_routes;
 pub mod auth;
 mod bot_cursor_routes;
+mod bot_delete_routes;
 mod bot_engine;
 mod bot_tools;
 pub mod changes;
@@ -149,6 +150,7 @@ pub use auth::{
     OWNER_KEY_FILE_NAME, TOKEN_FILE_NAME, TokenInfo, load_or_create_owner_key,
     load_or_create_token, read_owner_key, read_token, token_path,
 };
+pub use bot_delete_routes::spawn_pending_cleanups;
 pub use calendar::{CalendarControl, CalendarControlError};
 pub use cli_login::record_cli_install_pin;
 pub use components::{ComponentControl, ComponentError};
@@ -285,6 +287,17 @@ pub trait ChannelControl: Send + Sync {
     /// Notify the paired owner that an MCP server's form waits in the local desktop chat.
     /// Same rule: a chat id is navigation only, and no form text is sent.
     async fn notify_elicitation(&self, _chat: protocol::ChatId) {}
+    /// How many chats of this channel chose the bot (what [`ChannelControl::forget_bot`] forgets
+    /// first), for the delete preview.
+    fn chats_using_bot(&self, _bot: protocol::BotId) -> usize {
+        0
+    }
+    /// A bot was deleted: drop what the channel remembers about it (which chats chose it, the
+    /// threads it had there). Pairing stays: it belongs to the owner. Returns how many entries
+    /// were removed.
+    async fn forget_bot(&self, _bot: protocol::BotId) -> usize {
+        0
+    }
     /// Current state of the channel.
     fn info(&self) -> dto::ChannelDto;
     /// A fresh one-time pairing code.
@@ -1082,14 +1095,26 @@ impl AppState {
     /// The memory store when memory has ever been used here (the agent's store,
     /// one opened earlier, or a `memory.db` on disk); never creates a database.
     /// Used by deletions, which must clean up memory but must not start it.
-    pub(crate) fn memory_store_if_present(&self) -> Option<Arc<memory_store::MemoryStore>> {
-        if self.0.agent.memory_store().is_some()
-            || self.0.memory.lock().is_some()
-            || self.data_dir().join("memory.db").exists()
-        {
-            return self.memory_store().ok();
+    ///
+    /// `Ok(None)` only when memory was never used here. A `memory.db` that is there but cannot
+    /// be looked at or opened is an error, never "nothing to clean up".
+    pub(crate) fn memory_store_if_present(
+        &self,
+    ) -> Result<Option<Arc<memory_store::MemoryStore>>, ApiError> {
+        let on_disk = if self.0.agent.memory_store().is_some() || self.0.memory.lock().is_some() {
+            true
+        } else {
+            match std::fs::metadata(self.data_dir().join("memory.db")) {
+                Ok(_) => true,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                Err(_) => return Err(ApiError::internal("memory store unavailable")),
+            }
+        };
+        if on_disk {
+            self.memory_store().map(Some)
+        } else {
+            Ok(None)
         }
-        None
     }
 
     /// The running scheduler, or `503` when the daemon did not start one.
@@ -1843,7 +1868,11 @@ fn api_routes() -> Router<AppState> {
             get(r::get_bot)
                 .put(r::update_bot)
                 .patch(r::patch_bot)
-                .delete(r::delete_bot),
+                .delete(bot_delete_routes::delete_bot),
+        )
+        .route(
+            "/v1/bots/{id}/delete-preview",
+            get(bot_delete_routes::delete_preview),
         )
         .route("/v1/chats/search", get(chat_history::search))
         .route("/v1/chats/{id}/export", get(chat_history::export))

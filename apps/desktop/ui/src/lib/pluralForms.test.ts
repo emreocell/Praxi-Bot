@@ -88,17 +88,6 @@ const cases: Array<{ key: string; en: [string, string]; de: [string, string] }> 
     ]
   },
   {
-    key: "botEdit.deleteBlockedRuns",
-    en: [
-      "This bot still has 1 retained run, so it cannot be deleted. Only a bot without chats or runs can be removed.",
-      "This bot still has 3 retained runs, so it cannot be deleted. Only a bot without chats or runs can be removed."
-    ],
-    de: [
-      "Dieser Bot hat noch einen gespeicherten Lauf (1) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden.",
-      "Dieser Bot hat noch gespeicherte Läufe (3) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden."
-    ]
-  },
-  {
     key: "settingsModal.diagnostics.problems",
     en: ["1 item needs attention", "3 items need attention"],
     de: ["1 Punkt braucht Aufmerksamkeit", "3 Punkte brauchen Aufmerksamkeit"]

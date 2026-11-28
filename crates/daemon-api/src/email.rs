@@ -95,6 +95,59 @@ fn default_smtp_port() -> u16 {
     465
 }
 
+/// Whether `bot` is `id` (bot ids are UUIDs: the case does not matter).
+fn is_bot(id: &str, bot: &str) -> bool {
+    id.eq_ignore_ascii_case(bot)
+}
+
+/// The bot an account bound to `bot` passes to when `bot` is deleted: the first other bot it
+/// was shared with. Being some bot's default (`default_for`) alone is not a share: such a bot
+/// could not use the account, so it does not inherit it (that would widen who may use it).
+#[must_use]
+pub fn mailbox_heir<'a>(shared_with: &'a [String], bot: &str) -> Option<&'a str> {
+    shared_with
+        .iter()
+        .find(|b| !is_bot(b, bot))
+        .map(String::as_str)
+}
+
+/// Whether an account bound to `bot` is the deleted bot's alone, so its `AgentMail` inbox may be
+/// deleted at the provider with it: no other bot shares it, and no other bot even lists it as
+/// its default.
+#[must_use]
+pub fn mailbox_exclusive(shared_with: &[String], default_for: &[String], bot: &str) -> bool {
+    shared_with
+        .iter()
+        .chain(default_for)
+        .all(|b| is_bot(b, bot))
+}
+
+/// An `AgentMail` inbox that was not deleted at the provider with its bot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EmailInboxNotDeleted {
+    /// Account name. It stays in the mail settings (no bot can use it: its bot is gone), so the
+    /// owner can delete it with its inbox there, or delete the bot again to retry.
+    pub account: String,
+    /// The inbox's address.
+    pub address: String,
+    /// Why: the provider's answer, or that another bot uses the account now.
+    pub reason: String,
+}
+
+/// What [`EmailControl::forget_bot_mailboxes`] did with the mailboxes of a deleted bot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForgottenMailboxes {
+    /// Accounts removed from this app (only the deleted bot could use them).
+    pub removed: Vec<String>,
+    /// Accounts that stay for other bots: handed over to the first bot they were shared with, or
+    /// only unlinked from the deleted bot.
+    pub kept: Vec<String>,
+    /// Addresses of the `AgentMail` inboxes deleted at the provider.
+    pub inboxes_deleted: Vec<String>,
+    /// Inboxes that were asked for and not deleted.
+    pub inboxes_not_deleted: Vec<EmailInboxNotDeleted>,
+}
+
 /// A configured account (`GET /v1/email/accounts`): the non-secret fields only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct EmailAccountDto {
@@ -439,6 +492,19 @@ pub enum EmailControlError {
     Upstream(String),
 }
 
+/// The text of the failure (already coarse: a provider's own words and secrets never get here).
+impl std::fmt::Display for EmailControlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(m)
+            | Self::Conflict(m)
+            | Self::Invalid(m)
+            | Self::Internal(m)
+            | Self::Upstream(m) => f.write_str(m),
+        }
+    }
+}
+
 /// What `/v1/email/*` needs from the embedder: the accounts, their persistence
 /// (`<data dir>/email.toml`, written atomically), the secret store and the
 /// connection test. Changes take effect for the next tool call.
@@ -592,6 +658,47 @@ pub trait EmailControl: Send + Sync {
     /// # Errors
     /// The first [`EmailControlError`] (the remaining accounts are still tried).
     async fn forget_bot(&self, bot_id: &str) -> Result<usize, EmailControlError>;
+    /// A bot was deleted: [`EmailControl::forget_bot`], saying what became of each account.
+    /// With `delete_inboxes` the `AgentMail` inbox of every account that is still the bot's
+    /// alone ([`mailbox_exclusive`], decided again at this moment, under the same lock as every
+    /// other account change) is deleted at the provider first; when that fails, the account
+    /// stays (bound to the gone bot, so no bot can use it) for a retry and is reported.
+    ///
+    /// The default lists the accounts, then calls [`EmailControl::forget_bot`]; it cannot
+    /// delete an inbox at a provider.
+    ///
+    /// # Errors
+    /// [`EmailControlError`]; nothing is changed when it fails before the account list is saved.
+    async fn forget_bot_mailboxes(
+        &self,
+        bot_id: &str,
+        delete_inboxes: bool,
+    ) -> Result<ForgottenMailboxes, EmailControlError> {
+        let mut out = ForgottenMailboxes::default();
+        for a in self.list() {
+            let owned = a.bot.as_deref().is_some_and(|b| is_bot(b, bot_id));
+            if owned && mailbox_heir(&a.shared_with, bot_id).is_none() {
+                if delete_inboxes
+                    && a.provider == EmailProviderKind::Agentmail
+                    && mailbox_exclusive(&a.shared_with, &a.default_for, bot_id)
+                {
+                    return Err(EmailControlError::Invalid(
+                        "deleting the inbox at the provider is not supported here".into(),
+                    ));
+                }
+                out.removed.push(a.name);
+            } else if owned
+                || a.shared_with
+                    .iter()
+                    .chain(&a.default_for)
+                    .any(|b| is_bot(b, bot_id))
+            {
+                out.kept.push(a.name);
+            }
+        }
+        self.forget_bot(bot_id).await?;
+        Ok(out)
+    }
 }
 
 fn guard_unsupported() -> EmailControlError {
