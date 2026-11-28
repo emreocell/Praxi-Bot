@@ -134,10 +134,15 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
  * already says it all.
  */
 export function placeLabel(t: Translate, row: UnifiedCliRow, serverName: string, showServer: boolean): string {
+  const detected = row.local?.detected;
+  // Sign-in seen only in the CLI's own files: the app has not checked it with the provider.
+  const seenLocally = detected?.auth === "unknown" && detected.detail === "auth_metadata_only";
   const reason =
     row.localPlace === "off" && row.localDetail !== "ready" && row.localDetail !== "na"
       ? ` (${t(`settingsModal.ai.detected.status.${STATUS_I18N[row.localDetail]}`)})`
-      : "";
+      : seenLocally && row.localPlace !== "not_installed"
+        ? ` (${t("settingsModal.ai.detected.status.seenLocally")})`
+        : "";
   const parts = [`${t("settingsUi.codingClis.thisComputer")} ${t(`settingsUi.codingClis.local.${row.localPlace}`)}${reason}`];
   if (showServer) {
     parts.push(`${t("settingsUi.codingClis.myServer", { name: serverName })} ${t(`settingsUi.codingClis.server.${row.serverPlace}`)}`);

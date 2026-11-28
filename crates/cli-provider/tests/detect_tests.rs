@@ -271,30 +271,191 @@ async fn qwen_sign_in_is_file_metadata_only() {
     assert!(!format!("{qwen:?}").contains("SENTINEL_TOKEN"));
 }
 
-#[tokio::test]
-async fn copilot_sign_in_is_never_claimed() {
-    let temp = fixture_dir();
-    install_fake(temp.path(), "copilot");
+#[cfg(unix)]
+fn chmod(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
 
-    let copilot_dir = temp.path().join("home").join(".copilot");
-    std::fs::create_dir_all(&copilot_dir).unwrap();
-    std::fs::write(
-        copilot_dir.join("config.json"),
-        r#"// managed
-{"loggedInUsers":[{"host":"github.com","login":"ada@example.com"}],"lastLoggedInUser":{"host":"github.com","login":"ada@example.com"}}"#,
-    )
-    .unwrap();
-    let env = PathEnv::for_test(temp.path().to_path_buf())
-        .with_home(temp.path().join("home"))
+/// A sign-in file as a CLI leaves it: private to its owner whatever the umask of the test run.
+fn write_private(path: &Path, content: &str) {
+    std::fs::write(path, content).unwrap();
+    #[cfg(unix)]
+    chmod(path, 0o600);
+}
+
+async fn copilot_row(temp: &Path, home: Option<PathBuf>) -> cli_provider::DetectedCli {
+    let mut env = PathEnv::for_test(temp.to_path_buf())
         .with_env_var("COPILOT_GITHUB_TOKEN", "copilot_secret_token")
         .with_env_var("GH_TOKEN", "copilot_secret_token");
+    if let Some(home) = home {
+        env = env.with_home(home);
+    }
     let detected = Detector::with_env(env).detect(true).await;
-    let copilot = detected.iter().find(|c| c.id == "copilot").unwrap();
-    assert!(copilot.installed);
-    assert_eq!(copilot.auth, AuthState::SignedIn);
-    assert_eq!(copilot.account_label.as_deref(), Some("ada@example.com"));
-    let debug = format!("{copilot:?}");
+    let row = detected.into_iter().find(|c| c.id == "copilot").unwrap();
+    assert!(row.installed);
+    let debug = format!("{row:?}");
     assert!(!debug.contains("copilot_secret_token"));
+    assert!(!debug.contains("SENTINEL_TOKEN"));
+    row
+}
+
+#[tokio::test]
+async fn copilot_sign_in_is_seen_but_never_claimed_or_read() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "copilot");
+    let home = temp.path().join("home");
+    let copilot_dir = home.join(".copilot");
+    std::fs::create_dir_all(&copilot_dir).unwrap();
+
+    // No file: signed out. No home folder at all: nobody can say.
+    let row = copilot_row(temp.path(), Some(home.clone())).await;
+    assert_eq!(row.auth, AuthState::SignedOut);
+    let row = copilot_row(temp.path(), None).await;
+    assert_eq!(row.auth, AuthState::Unknown);
+    assert_eq!(row.detail.as_deref(), Some("auth_unverified"));
+
+    // A config that names a user and holds a token: seen, never SignedIn, nothing is read
+    // (the label would have been `ada@example.com`).
+    let config = copilot_dir.join("config.json");
+    write_private(
+        &config,
+        r#"// managed
+{"loggedInUsers":[{"host":"github.com","login":"ada@example.com"}],"lastLoggedInUser":{"host":"github.com","login":"ada@example.com"},"copilot_tokens":{"github.com:ada":"SENTINEL_TOKEN"}}"#,
+    );
+    let row = copilot_row(temp.path(), Some(home.clone())).await;
+    assert_eq!(row.auth, AuthState::Unknown);
+    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    assert!(row.account_label.is_none());
+
+    // Stale history is not a sign-in either way: an empty user list still only "seen".
+    write_private(&config, r#"{"lastLoggedInUser":{"login":"old"}}"#);
+    let row = copilot_row(temp.path(), Some(home)).await;
+    assert_eq!(row.auth, AuthState::Unknown);
+    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_copilot_config_that_is_a_link_or_open_to_others_is_not_even_seen() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "copilot");
+    let home = temp.path().join("home");
+    let copilot_dir = home.join(".copilot");
+    std::fs::create_dir_all(&copilot_dir).unwrap();
+    let real = temp.path().join("elsewhere.json");
+    std::fs::write(&real, r#"{"loggedInUsers":[{"login":"ada"}]}"#).unwrap();
+    let config = copilot_dir.join("config.json");
+    std::os::unix::fs::symlink(&real, &config).unwrap();
+    let row = copilot_row(temp.path(), Some(home.clone())).await;
+    assert_eq!(row.auth, AuthState::Unknown, "a link proves nothing");
+    assert_eq!(row.detail.as_deref(), Some("auth_unverified"));
+
+    std::fs::remove_file(&config).unwrap();
+    std::fs::write(&config, "{}").unwrap();
+    for mode in [0o620, 0o602, 0o666] {
+        chmod(&config, mode);
+        let row = copilot_row(temp.path(), Some(home.clone())).await;
+        assert_eq!(row.detail.as_deref(), Some("auth_unverified"), "{mode:o}");
+    }
+    chmod(&config, 0o600);
+    let row = copilot_row(temp.path(), Some(home)).await;
+    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+}
+
+#[tokio::test]
+async fn antigravity_credentials_are_seen_but_never_claimed_or_read() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "agy");
+    let home = temp.path().join("home");
+    let dir = home.join(".gemini/antigravity-cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    let detect = |home: Option<PathBuf>| {
+        let mut env = PathEnv::for_test(temp.path().to_path_buf());
+        if let Some(home) = home {
+            env = env.with_home(home);
+        }
+        async move {
+            let row = Detector::with_env(env)
+                .detect(true)
+                .await
+                .into_iter()
+                .find(|c| c.id == "agy")
+                .unwrap();
+            assert!(row.installed);
+            assert!(!format!("{row:?}").contains("SENTINEL_TOKEN"));
+            assert!(row.account_label.is_none());
+            row
+        }
+    };
+
+    assert_eq!(detect(Some(home.clone())).await.auth, AuthState::SignedOut);
+    let row = detect(None).await;
+    assert_eq!(row.auth, AuthState::Unknown);
+    assert_eq!(row.detail.as_deref(), Some("auth_unverified"));
+
+    // `auth.json` carries the account but is never read for it.
+    std::fs::write(
+        dir.join("auth.json"),
+        r#"{"email":"ada@example.com","token":"SENTINEL_TOKEN"}"#,
+    )
+    .unwrap();
+    assert_eq!(detect(Some(home.clone())).await.auth, AuthState::SignedOut);
+
+    for file in ["antigravity-oauth-token", "authstore.enc"] {
+        let path = dir.join(file);
+        write_private(&path, "SENTINEL_TOKEN");
+        let row = detect(Some(home.clone())).await;
+        assert_eq!(row.auth, AuthState::Unknown, "{file}");
+        assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"), "{file}");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    // Even an empty regular file is only unverified local evidence.
+    std::fs::write(dir.join("authstore.enc"), "").unwrap();
+    let row = detect(Some(home.clone())).await;
+    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    let row = detect(Some(home.join("missing"))).await;
+    assert_eq!(row.auth, AuthState::Unknown);
+    assert_eq!(row.detail.as_deref(), Some("auth_unverified"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_antigravity_credential_that_is_a_link_or_open_to_others_is_not_even_seen() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "agy");
+    let home = temp.path().join("home");
+    let dir = home.join(".gemini/antigravity-cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    let detect = || async {
+        Detector::with_env(PathEnv::for_test(temp.path().to_path_buf()).with_home(home.clone()))
+            .detect(true)
+            .await
+            .into_iter()
+            .find(|c| c.id == "agy")
+            .unwrap()
+    };
+    let token = dir.join("antigravity-oauth-token");
+    let foreign = temp.path().join("foreign-token");
+    std::fs::write(&foreign, "SENTINEL_TOKEN").unwrap();
+    std::os::unix::fs::symlink(&foreign, &token).unwrap();
+    let row = detect().await;
+    assert_eq!(row.auth, AuthState::Unknown, "a link proves nothing");
+    assert_eq!(row.detail.as_deref(), Some("auth_unverified"));
+
+    std::fs::remove_file(&token).unwrap();
+    std::fs::write(&token, "SENTINEL_TOKEN").unwrap();
+    for mode in [0o620, 0o602, 0o666] {
+        chmod(&token, mode);
+        assert_eq!(
+            detect().await.detail.as_deref(),
+            Some("auth_unverified"),
+            "{mode:o}"
+        );
+    }
+    chmod(&token, 0o600);
+    assert_eq!(detect().await.detail.as_deref(), Some("auth_metadata_only"));
 }
 
 #[tokio::test]
@@ -320,11 +481,11 @@ async fn headless_cli_detection_uses_the_service_home_for_install_and_sign_in() 
     assert!(row.installed);
     assert_eq!(row.auth, AuthState::SignedOut);
 
-    std::fs::write(service_home.join(credential), b"fixture").unwrap();
+    write_private(&service_home.join(credential), "fixture");
     let after = detector.detect(true).await;
     let row = after.iter().find(|row| row.id == "agy").unwrap();
-    assert_eq!(row.auth, AuthState::SignedIn);
-    assert!(row.detail.is_none());
+    assert_eq!(row.auth, AuthState::Unknown);
+    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
 }
 
 #[tokio::test]

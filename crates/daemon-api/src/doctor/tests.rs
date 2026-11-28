@@ -29,6 +29,30 @@ fn native_only_clis_are_ready_when_installed_and_signed_in() {
 }
 
 #[test]
+fn native_only_clis_with_a_sign_in_note_are_not_masked() {
+    for note in ["auth_unverified", "auth_metadata_only", "auth_unparsed"] {
+        let mut row = cli("agy", true, cli_provider::AuthState::Unknown, false);
+        row.detail = Some(note.to_owned());
+        assert!(
+            matches!(cli_state("cli:agy", Some(&[row])), CliState::Problem(_)),
+            "{note}"
+        );
+    }
+}
+
+#[test]
+fn a_native_only_cli_whose_probe_failed_is_a_problem_not_unverified() {
+    for code in ["shim_refused", "timeout", "output_too_large"] {
+        let mut row = cli("agy", true, cli_provider::AuthState::Unknown, false);
+        row.detail = Some(code.to_owned());
+        let CliState::Problem(text) = cli_state("cli:agy", Some(&[row])) else {
+            panic!("{code} must not be masked as unverified");
+        };
+        assert!(text.contains(code), "{text}");
+    }
+}
+
+#[test]
 fn table_rendering_is_unchanged_for_ok_warn_fail() {
     // Snapshot of the `bot doctor` table as it printed before the checks
     // moved into this module.
@@ -702,6 +726,20 @@ fn node_runtime_check_names_where_global_installs_go() {
         check_node_runtime(&toolchain("v22.23.5", "/x", None), true, None).status,
         Status::Ok
     );
+}
+
+/// A desktop (or any local) `bot doctor` on a machine that also has the installer's wrapper
+/// has its own data folder and PATH: the service PATH is not its business.
+#[test]
+fn node_runtime_check_does_not_apply_the_service_path_to_another_data_folder() {
+    let data = tempfile::tempdir().unwrap();
+    for dir in [".local/bin", "runtimes/npm-global/bin"] {
+        std::fs::create_dir_all(data.path().join(dir)).unwrap();
+    }
+    let tc = toolchain("v22.23.5", "/x", Some(true));
+    let c = check_node_runtime(&tc, true, Some(data.path()));
+    assert_eq!(c.status, Status::Ok, "{}", c.detail);
+    assert!(!c.detail.contains("service PATH"), "{}", c.detail);
 }
 
 #[test]

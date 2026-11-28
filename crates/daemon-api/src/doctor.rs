@@ -784,10 +784,7 @@ fn cli_state(provider_id: &str, detected: Option<&[cli_provider::DetectedCli]>) 
             "{provider_id}: CLI is installed but signed out; sign in with `{}`",
             sign_in_command(engine)
         )),
-        Some(d)
-            if !d.runnable
-                && !cli_provider::engine_spec(engine).is_some_and(cli_provider::CliEngineSpec::can_enable) =>
-        {
+        Some(d) if !d.runnable && !runs_with_its_own_driver(engine, d) => {
             CliState::Problem(format!(
                 "{provider_id}: CLI cannot run turns ({})",
                 d.detail.as_deref().unwrap_or("not runnable")
@@ -802,6 +799,14 @@ fn cli_state(provider_id: &str, detected: Option<&[cli_provider::DetectedCli]>) 
         )),
         None => CliState::Problem(format!("{provider_id}: unknown coding CLI")),
     }
+}
+
+/// A native-tools engine is not `runnable` by design (only the confined engine is), so that alone
+/// is no fault. A probe that failed (`shim_refused`, `timeout`, `output_too_large`, ...) is one:
+/// only a probe without a detail leaves such an engine unflagged.
+fn runs_with_its_own_driver(engine: &str, d: &cli_provider::DetectedCli) -> bool {
+    d.detail.is_none()
+        && cli_provider::engine_spec(engine).is_some_and(|spec| spec.driver().is_some())
 }
 
 /// Terminal command that signs in to a coding CLI.
@@ -1055,7 +1060,10 @@ pub fn check_node_runtime(
         npm.display()
     );
     if server {
+        // The service PATH belongs to the installer's data folder: a desktop or local `bot
+        // doctor` on a machine that also has the service wrapper has another PATH, by design.
         let missing = data_dir
+            .filter(|d| cli_provider::identity::is_service_data_dir(d))
             .map(cli_provider::node_runtime::missing_service_path_entries)
             .filter(|m| !m.is_empty());
         if let Some(missing) = missing {

@@ -7262,6 +7262,7 @@
           "notInstalled": "Not installed",
           "outdated": "Update needed",
           "ready": "Ready",
+          "seenLocally": "Signed in locally, not verified",
           "signIn": "Sign-in needed",
           "unsupported": "Not supported yet"
         },
