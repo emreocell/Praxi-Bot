@@ -217,6 +217,27 @@ impl PolicyHttpClient {
             .map_err(|e| OAuthNetError::Transport(transport_kind(&e)))
     }
 
+    /// `POST` a form to `url` under the same policy (vetted addresses, no
+    /// proxy, no redirects) and return the status. The answer's body is
+    /// never read: a revocation endpoint has nothing to tell.
+    pub(crate) async fn post_form(
+        &self,
+        url: reqwest::Url,
+        form: &[(&str, &str)],
+        timeout: Duration,
+    ) -> Result<reqwest::StatusCode, OAuthNetError> {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(form)
+            .finish();
+        let mut request = reqwest::Request::new(reqwest::Method::POST, url);
+        request.headers_mut().insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
+        *request.body_mut() = Some(body.into());
+        Ok(self.send(request, timeout).await?.status())
+    }
+
     async fn run(&self, request: OAuthHttpRequest) -> Result<oauth2::HttpResponse, OAuthNetError> {
         let OAuthHttpRequest {
             request,

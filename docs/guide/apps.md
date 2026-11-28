@@ -166,12 +166,15 @@ Inside **Manage** you can:
   `tool_allow` list in `mcp.toml`, Praxi notes that tools are limited by that
   allow-list.
 - **Sign out** (HTTP OAuth servers when signed in): clears the stored OAuth
-  tokens from the daemon's secret store while keeping the server configured. The
-  server moves to **Sign-in required** until you click **Sign in** again.
+  tokens from the daemon's secret store while keeping the server configured, and
+  asks the authorization server to end the sign-in too when it offers that (best
+  effort; a server that is down does not stop the sign-out). The server moves to
+  **Sign-in required** until you click **Sign in** again.
 - **Reconnect** (when `Error`, `Disconnected`, or `Quarantined`): tells the
   daemon to restart or reconnect the server immediately.
 - **Disconnect**: asks for confirmation (**Disconnect this server?**), then
-  removes the server configuration from `mcp.toml`.
+  signs out as above and removes the server configuration from `mcp.toml`; no
+  stored sign-in is left behind.
 - **Test connection**: starts the server and lists its tools, without running
   any of them (see [Test connection](connection-test.md)).
 

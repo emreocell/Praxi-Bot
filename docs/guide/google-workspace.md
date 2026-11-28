@@ -61,6 +61,21 @@ rules ([Security model](security.md)): a Google app starts as one whose labels
 are **not** trusted, so each action asks first unless you change that under
 **Manage**.
 
+## Letting a bot send mail or create events
+
+Writing is your decision, made in three steps; nothing widens by itself.
+
+1. In `mcp.toml` (see below), add the write tool to the app's `tool_allow` and
+   the matching permission to `scopes` (for example
+   `https://www.googleapis.com/auth/gmail.send` or
+   `https://www.googleapis.com/auth/calendar.events`).
+2. **Manage → Sign out**, then **Sign in** again: the permissions you agreed to
+   on Google's page are fixed when you sign in, so Google refuses a write
+   (a 403 saying the scopes are insufficient) until you do.
+3. The tool shows **a tool you never approved** under **Manage**: it stays off
+   until you press its approve button. Then it follows your usual approval
+   rules, so each send or new event still asks first unless you trusted the app.
+
 ## Praxi on a server
 
 If Praxi runs on a server, sign in the same way. The page opens in your browser,
@@ -90,9 +105,11 @@ nothing has to be registered for the server.
 ## Sign out and remove
 
 **Manage → Sign out** forgets the stored sign-in on the computer where Praxi
-runs; **Disconnect** removes the app. To revoke Praxi's access on Google's side
-as well, open your Google account's **Security → Third-party access** and remove
-the client you created.
+runs and asks Google to end it too. **Disconnect** does the same and removes the
+app, including its stored sign-in. Asking Google is best effort: if Google
+cannot be reached, you are still signed out here. To check or to revoke Praxi's
+access on Google's side yourself, open your Google account's **Security →
+Third-party access** and remove the client you created.
 
 All Google apps share one client secret. **Disconnect** offers **Also forget the
 saved client secret**; it is ticked when no other Google app uses the secret, and

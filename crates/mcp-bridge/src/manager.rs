@@ -1102,6 +1102,14 @@ impl McpManager {
         let store = self.secrets.clone().ok_or_else(|| {
             McpError::Config(format!("server `{id}`: no secret store is configured"))
         })?;
+        // What the authorization server is asked to forget, read before the
+        // local copy goes.
+        let revoke = match &server.config.transport {
+            McpTransport::Http { url, .. } => crate::oauth::token_to_revoke(id, url, &store)
+                .await
+                .map(|token| (url.clone(), token)),
+            McpTransport::Stdio { .. } => None,
+        };
         // Revoke first: a sign-in exchange or refresh in flight can no longer
         // save, so the delete below is final.
         let existed = server
@@ -1113,15 +1121,26 @@ impl McpManager {
             })
             .map_err(|_| McpError::Store("cannot delete OAuth credentials".to_owned()))?;
         server.drop_session().await;
-        let mut state = server.state.lock();
-        state.generation = state.generation.wrapping_add(1);
-        state.auth_required = false;
-        state.last_error = None;
-        if state.status == ServerStatus::Connected {
-            state.status = ServerStatus::Disconnected;
+        {
+            let mut state = server.state.lock();
+            state.generation = state.generation.wrapping_add(1);
+            state.auth_required = false;
+            state.last_error = None;
+            if state.status == ServerStatus::Connected {
+                state.status = ServerStatus::Disconnected;
+            }
+            for tool in state.tools.drain(..) {
+                server.registry.unregister(&tool);
+            }
         }
-        for tool in state.tools.drain(..) {
-            server.registry.unregister(&tool);
+        // Then end the sign-in at the provider too. Best effort: the local
+        // copy is already gone and a provider that is down must not keep the
+        // owner from signing out.
+        if let Some((url, token)) = revoke {
+            let options = server
+                .oauth_options(crate::oauth::SignInOptions::default())
+                .unwrap_or_default();
+            let _ = crate::oauth::revoke_at_issuer(id, &url, token, &options).await;
         }
         Ok(existed)
     }

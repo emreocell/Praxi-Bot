@@ -1001,6 +1001,122 @@ async fn stored_bearer_quietly(
     }
 }
 
+/// The token to hand back to the authorization server on sign-out, read
+/// before the local copy is forgotten.
+pub struct TokenToRevoke {
+    token: String,
+    hint: &'static str,
+    client_id: String,
+    issuer: Option<String>,
+}
+
+impl std::fmt::Debug for TokenToRevoke {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenToRevoke").finish_non_exhaustive()
+    }
+}
+
+/// How long sign-out waits for the authorization server to confirm.
+const REVOKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The stored sign-in of `server` at `url` as something to revoke: the refresh
+/// token when there is one (the server ends the access tokens with it), else
+/// the access token. No network; `None` when nothing is stored.
+pub async fn token_to_revoke(
+    server: &str,
+    url: &str,
+    store: &Arc<dyn SecretStore>,
+) -> Option<TokenToRevoke> {
+    let stored = SecretCredentialStore::new(Arc::clone(store), server, url, None)
+        .ok()?
+        .load()
+        .await
+        .ok()
+        .flatten()?;
+    let response = stored.token_response.as_ref()?;
+    let (token, hint) = match response.refresh_token() {
+        Some(refresh) => (refresh.secret().clone(), "refresh_token"),
+        None => (response.access_token().secret().clone(), "access_token"),
+    };
+    Some(TokenToRevoke {
+        token,
+        hint,
+        client_id: stored.client_id.clone(),
+        issuer: stored.issuer.clone(),
+    })
+}
+
+/// Ask the authorization server to end a sign-in (RFC 7009), so removing
+/// Praxi here also removes its access there. Best effort: `Ok(false)` when
+/// the server advertises no `revocation_endpoint`, and the caller ignores an
+/// error (the local copy is already gone). The endpoint is held to the same
+/// policy as the others; the client secret goes along only to the issuer the
+/// client is bound to.
+///
+/// # Errors
+/// Discovery, policy or transport failure, or a refusal by the server.
+pub async fn revoke_at_issuer(
+    server: &str,
+    url: &str,
+    revoke: TokenToRevoke,
+    options: &SignInOptions,
+) -> Result<bool> {
+    let http = options.http_client();
+    let manager = AuthorizationManager::new_with_oauth_http_client(url, http.clone())
+        .await
+        .map_err(|e| auth_error(server, &e))?;
+    let metadata = manager
+        .resolve_metadata()
+        .await
+        .map_err(|e| auth_error(server, &e))?
+        .metadata;
+    check_metadata(server, &metadata, options.allow_loopback_http)?;
+    let Some(endpoint) = metadata
+        .additional_fields
+        .get("revocation_endpoint")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(false);
+    };
+    let endpoint = reqwest::Url::parse(endpoint).map_err(|_| {
+        McpError::Config(format!(
+            "server `{server}`: authorization server refused: an endpoint is not a valid URL"
+        ))
+    })?;
+    let bound = options
+        .check_issuer(server, metadata.issuer.as_deref())
+        .is_ok()
+        && !options.expected_issuer.as_ref().is_some_and(|expected| {
+            revoke
+                .issuer
+                .as_deref()
+                .is_some_and(|issued| !same_issuer(issued, expected))
+        });
+    let mut form = vec![
+        ("token", revoke.token.as_str()),
+        ("token_type_hint", revoke.hint),
+        ("client_id", revoke.client_id.as_str()),
+    ];
+    if let Some(secret) = options.client_secret.as_deref().filter(|_| bound) {
+        form.push(("client_secret", secret));
+    }
+    let status = http
+        .post_form(endpoint, &form, REVOKE_TIMEOUT)
+        .await
+        .map_err(|e| McpError::Transport {
+            server: server.to_owned(),
+            message: format!("revoking the sign-in failed: {e}"),
+        })?;
+    if status.is_success() {
+        Ok(true)
+    } else {
+        Err(McpError::Transport {
+            server: server.to_owned(),
+            message: format!("revoking the sign-in was refused ({status})"),
+        })
+    }
+}
+
 /// DNS lookup used by the OAuth policy client, independent of any proxy.
 /// Injectable so policy tests never use real DNS.
 #[async_trait::async_trait]
