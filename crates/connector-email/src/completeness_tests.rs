@@ -1164,10 +1164,55 @@ fn a_reply_recipient_is_one_plain_address_or_nothing() {
         "ann@",
         "ann@example.com\u{0}",
         "ann@exam\u{200B}ple.com",
+        "ann@exam\u{200C}ple.com",
+        "ann@exam\u{200D}ple.com",
+        "ann@exam\u{2060}ple.com",
+        "ann@exam\u{FEFF}ple.com",
+        "ann@exam\u{AD}ple.com",
+        "ann@exam\u{34F}ple.com",
+        "ann@exam\u{3164}ple.com",
+        "ann@exam\u{FE0F}ple.com",
+        "ann@exam\u{E0041}ple.com",
+        "ann@exam\u{A0}ple.com",
+        "ann@example.com\u{200B}",
+        "\u{200B}ann@example.com",
+        "an\u{200B}n@example.com",
+        "an\u{202E}n@example.com",
+        "ann@example\u{202E}moc.com",
+        "ann@example\u{2066}.com",
+        "ann@example.com\u{2028}",
         "undisclosed-recipients:;",
     ] {
         assert_eq!(bare_mailbox(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn the_guard_never_reads_a_hidden_character_away_into_another_mailbox() {
+    use crate::guard::{canonical_address, canonical_domain};
+    // IDNA drops zero-width characters, so these would otherwise collapse onto `example.com`.
+    for bad in [
+        "ann@exam\u{200B}ple.com",
+        "Ann <ann@exam\u{2060}ple.com>",
+        "ann@exam\u{FEFF}ple.com",
+        "ann@exam\u{AD}ple.com",
+        "an\u{200B}n@example.com",
+        "ann@example.com\u{200E}",
+    ] {
+        assert_eq!(canonical_address(bad), None, "{bad:?}");
+    }
+    assert_eq!(canonical_domain("exam\u{200D}ple.com"), None);
+    assert_eq!(canonical_domain("example\u{202E}.com"), None);
+    assert_eq!(
+        canonical_domain("example.com").as_deref(),
+        Some("example.com")
+    );
+    assert_eq!(
+        canonical_address("Ann <ann@Example.COM>")
+            .map(|k| k.full)
+            .as_deref(),
+        Some("ann@example.com")
+    );
 }
 
 // ---- The one-hop resolver asks nothing it should not -----------------------------------------------

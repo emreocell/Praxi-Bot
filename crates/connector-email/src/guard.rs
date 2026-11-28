@@ -333,7 +333,7 @@ pub struct AddressKeys {
 #[must_use]
 pub fn canonical_domain(d: &str) -> Option<String> {
     let d = d.trim().trim_end_matches('.');
-    if d.is_empty() || d.contains(['@', '/', '\\']) || d.contains(char::is_whitespace) {
+    if d.is_empty() || d.contains(['@', '/', '\\']) || crate::address::has_hidden_char(d) {
         return None;
     }
     idna::domain_to_ascii(d).ok().filter(|x| !x.is_empty())
@@ -350,7 +350,7 @@ pub fn canonical_address(s: &str) -> Option<AddressKeys> {
         _ => t,
     };
     let inner = inner.trim();
-    if inner.contains(char::is_whitespace) {
+    if crate::address::has_hidden_char(inner) {
         return None;
     }
     let (local, domain) = inner.rsplit_once('@')?;
