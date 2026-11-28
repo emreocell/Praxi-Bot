@@ -40,6 +40,30 @@ assert_file_not_contains() {
   fi
 }
 
+# The production unit: Type=notify so a start is "up" only when the daemon answers; a start long
+# enough for database migrations; a watchdog the daemon can keep (it beats every quarter of
+# WatchdogSec, only while its own /v1/health answers); and the notice socket open to the main
+# process only.
+assert_praxi_unit_is_notify() {
+  local unit="$1"
+  assert_file_contains "${unit}" "Type=notify"
+  assert_file_not_contains "${unit}" "Type=simple" "praxi.service must not stay Type=simple (systemd would ignore READY=1)"
+  assert_file_contains "${unit}" "TimeoutStartSec=600"
+  assert_file_contains "${unit}" "WatchdogSec=180"
+  assert_file_contains "${unit}" "NotifyAccess=main"
+  assert_file_contains "${unit}" "Restart=on-failure"
+  # Every setting sits in [Service] (a stray one in [Unit] or [Install] would be ignored).
+  awk '/^\[/ { sect=$0 } /^(Type|TimeoutStartSec|WatchdogSec|NotifyAccess)=/ { if (sect != "[Service]") bad=1 } END { exit bad }' "${unit}" \
+    || fail "notify settings must be in [Service] of ${unit}"
+  local timeout_start watchdog
+  timeout_start="$(sed -n 's/^TimeoutStartSec=//p' "${unit}")"
+  watchdog="$(sed -n 's/^WatchdogSec=//p' "${unit}")"
+  # The start may be longer than one watchdog period (migrations), and the watchdog may not be so
+  # short that a daemon that answers slowly is killed.
+  [[ "${timeout_start}" -ge 300 ]] || fail "TimeoutStartSec=${timeout_start} is too short for database migrations"
+  [[ "${watchdog}" -ge 120 ]] || fail "WatchdogSec=${watchdog} is too short"
+}
+
 run_timed() {
   local rc=0
   command -v timeout >/dev/null 2>&1 || fail "timeout command is required for test-packaging.sh"
@@ -106,7 +130,9 @@ EOF
 # Build fake release archive
 mkdir -p "${TMP_ROOT}/pkg/praxi-linux-x86_64/bin"
 for b in bot bot-node; do
-  printf '#!/bin/sh\necho fixture %s\n' "$b" > "${TMP_ROOT}/pkg/praxi-linux-x86_64/bin/${b}"
+  # The installer writes Type=notify only for a daemon that sends READY=1 / STATUS=serving: the real
+  # binary carries that text, so the fixture does too.
+  printf '#!/bin/sh\n# systemd notify: READY=1 STATUS=serving\necho fixture %s\n' "$b" > "${TMP_ROOT}/pkg/praxi-linux-x86_64/bin/${b}"
   chmod +x "${TMP_ROOT}/pkg/praxi-linux-x86_64/bin/${b}"
 done
 printf '0.1.0-fixture\n' > "${TMP_ROOT}/pkg/praxi-linux-x86_64/VERSION"
@@ -662,8 +688,10 @@ sed -i '/^BOT_MAX_COMPUTER_RUNS=/d;/^BOT_BROWSER_IDLE_SECONDS=/d' "${SANDBOX}/et
 # 5b-host. --host-mode writes 'bot serve --host' and a later plain re-install keeps it
 run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz"   --skip-packages --no-start --host-mode > "${TMP_ROOT}/host-mode.log" 2>&1
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "/bot serve --host"
-assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "WatchdogSec=120"
-assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "NotifyAccess=main"
+assert_praxi_unit_is_notify "${SANDBOX}/etc/systemd/system/praxi.service"
+# bot-node never sends READY=1: its unit must stay Type=simple, or systemd kills it after the start timeout.
+assert_file_contains "${SANDBOX}/etc/systemd/system/praxi-node.service" "Type=simple"
+assert_file_not_contains "${SANDBOX}/etc/systemd/system/praxi-node.service" "Type=notify"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "WorkingDirectory=${SANDBOX}/opt/praxi"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "/.local/bin:"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "Environment=NPM_CONFIG_PREFIX=${SANDBOX}/var/lib/praxi/.npm-global"
@@ -1436,6 +1464,7 @@ fi
 run_timed bash "${SB_INSTALL}" --update --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
   --skip-packages --no-start > "${TMP_ROOT}/update.log" 2>&1
 assert_file_contains "${TMP_ROOT}/update.log" "updating in place"
+assert_praxi_unit_is_notify "${SVC_FILE}"
 : > "${SANDBOX_STATE}/systemctl.log"
 run_timed bash "${SB_INSTALL}" --uninstall > "${TMP_ROOT}/uninstall.log" 2>&1
 # praxi-xvfb.service has Upholds=praxi.service: the display must be stopped before the daemon, or the
@@ -1449,6 +1478,73 @@ assert_file_contains "${JOURNALD_FILE}" "SystemMaxUse=2G"
 assert_file_not_contains "${SANDBOX_STATE}/systemctl.log" "journald"
 rm -f "${JOURNALD_FILE}"
 pass "host polish: restart limits, per-unit log limit, no journald changes, dry-run, --update, uninstall cleanup"
+
+# 10c. An install from before the watchdog (Type=simple, no WatchdogSec) updated with --update comes
+#      back up on the new unit: rewritten, reloaded before the start, started, and ready.
+setup_prev_install
+cat > "${SVC_FILE}" <<EOF
+[Unit]
+Description=Praxi-Bot daemon (bot serve --host, 127.0.0.1 only)
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=praxi
+ExecStart=${SANDBOX}/opt/praxi/bin/bot serve --host
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+: > "${SANDBOX_STATE}/systemctl.log"
+FAKE_STATEFUL_SYSTEMCTL=1 run_timed bash "${SB_INSTALL}" --update --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages > "${TMP_ROOT}/update-from-simple.log" 2>&1 \
+  || { cat "${TMP_ROOT}/update-from-simple.log" >&3; fail "--update from a Type=simple install failed"; }
+assert_praxi_unit_is_notify "${SVC_FILE}"
+assert_file_contains "${SVC_FILE}" "/bot serve --host" "--update must keep the host mode of the old unit"
+assert_file_contains "${SVC_FILE}" "StartLimitBurst=10"
+assert_file_contains "${TMP_ROOT}/update-from-simple.log" "daemon ready on loopback"
+assert_file_not_contains "${TMP_ROOT}/update-from-simple.log" "does not report readiness"
+grep -Fxq "praxi.service" "${SANDBOX_STATE}/active_units" || fail "praxi.service is not active after --update"
+reload_line="$(grep -n '^daemon-reload' "${SANDBOX_STATE}/systemctl.log" | tail -n1 | cut -d: -f1)"
+start_line="$(grep -n '^start praxi.service' "${SANDBOX_STATE}/systemctl.log" | tail -n1 | cut -d: -f1)"
+[[ -n "${reload_line}" && -n "${start_line}" && "${reload_line}" -lt "${start_line}" ]] \
+  || fail "the new unit must be reloaded before praxi.service starts (reload ${reload_line:-never}, start ${start_line:-never})"
+
+# A release whose daemon does not speak the notify protocol (an older one picked with --version) must
+# get the plain unit: under Type=notify it would be killed after TimeoutStartSec at every start.
+OLD_PKG="${TMP_ROOT}/old-pkg/praxi-linux-x86_64"
+OLD_RELEASE="${TMP_ROOT}/old-release"
+mkdir -p "${OLD_PKG}/bin" "${OLD_RELEASE}"
+for b in bot bot-node; do
+  printf '#!/bin/sh\necho old fixture %s\n' "$b" > "${OLD_PKG}/bin/${b}"
+  chmod +x "${OLD_PKG}/bin/${b}"
+done
+printf '0.0.9-fixture\n' > "${OLD_PKG}/VERSION"
+tar -czf "${OLD_RELEASE}/praxi-linux-x86_64.tar.gz" -C "${TMP_ROOT}/old-pkg" praxi-linux-x86_64
+sha256sum "${OLD_RELEASE}/praxi-linux-x86_64.tar.gz" > "${OLD_RELEASE}/praxi-linux-x86_64.tar.gz.sha256"
+cp "${RELEASE_DIR}/praxi-linux.sigstore.json" "${OLD_RELEASE}/"
+FAKE_STATEFUL_SYSTEMCTL=1 run_timed bash "${SB_INSTALL}" --update --version v0.0.9 --file "${OLD_RELEASE}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages > "${TMP_ROOT}/update-old-daemon.log" 2>&1 \
+  || { cat "${TMP_ROOT}/update-old-daemon.log" >&3; fail "--update to a daemon without notify support failed"; }
+assert_file_contains "${SVC_FILE}" "Type=simple"
+assert_file_not_contains "${SVC_FILE}" "Type=notify"
+assert_file_not_contains "${SVC_FILE}" "WatchdogSec="
+assert_file_not_contains "${SVC_FILE}" "TimeoutStartSec="
+assert_file_not_contains "${SVC_FILE}" "NotifyAccess="
+assert_file_contains "${TMP_ROOT}/update-old-daemon.log" "does not report readiness to systemd"
+grep -Fxq "praxi.service" "${SANDBOX_STATE}/active_units" || fail "praxi.service is not active after the update to an older daemon"
+# ...and updating forward again restores the watchdog.
+run_timed bash "${SB_INSTALL}" --update --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/update-forward.log" 2>&1
+assert_praxi_unit_is_notify "${SVC_FILE}"
+: > "${SANDBOX_STATE}/active_units"
+: > "${SANDBOX_STATE}/enabled_units"
+pass "--update brings a Type=simple install back up on the notify unit; an older daemon keeps the plain unit"
 
 # 10b. Node.js for the coding CLIs: a pinned, SHA-256-verified runtime in a Praxi-owned prefix and an npm
 #      for the service user that needs no root (dry-run output, install, re-run, update, failures, uninstall).

@@ -13,9 +13,11 @@ workspace = true
 [dependencies]
 futures.workspace = true
 parking_lot.workspace = true
+support-logs = { path = "../support-logs", version = "0.1.0" }
 tokio.workspace = true
 tokio-util.workspace = true
-tracing = "0.1"
 
 [dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

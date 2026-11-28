@@ -4864,9 +4864,11 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "parking_lot",
+ "serde_json",
+ "support-logs",
+ "tempfile",
  "tokio",
  "tokio-util",
- "tracing",
 ]
 
 [[package]]

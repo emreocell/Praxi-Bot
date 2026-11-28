@@ -49,31 +49,20 @@ pub struct Health {
     /// channels, no MCP servers or apps. Fixed for the life of the process.
     #[serde(default)]
     pub safe_mode: bool,
-    /// The background loops (schedules, mission wake-ups, mission drivers).
+    /// Whether the loops that make the daemon act on its own run. Only the overall status is
+    /// public here: which loop and how often it restarted is in the owner's doctor.
     #[serde(default)]
     pub background: BackgroundHealth,
 }
 
-/// Whether the loops that make the daemon act on its own are running.
+/// Whether the loops that make the daemon act on its own (schedules, mission wake-ups, mission
+/// drivers) are running. This is part of the unauthenticated `GET /v1/health`, so it says nothing
+/// about the loops themselves; `GET /v1/doctor` (owner only) has the detail.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct BackgroundHealth {
     /// `ok`, or `degraded` when a loop crashed too often and was given up on (it stays down
     /// until the daemon restarts; the owner got a notice).
     pub status: String,
-    /// The loops this daemon runs (none on a standby node or in safe mode).
-    #[serde(default)]
-    pub loops: Vec<BackgroundLoop>,
-}
-
-/// One supervised background loop.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct BackgroundLoop {
-    /// `scheduler`, `mission_wakes` or `mission_drivers`.
-    pub name: String,
-    /// Given up on after repeated crashes.
-    pub degraded: bool,
-    /// Crashes (and restarts) since the daemon started.
-    pub restarts: u32,
 }
 
 fn default_ready() -> crate::host::StartupPhase {

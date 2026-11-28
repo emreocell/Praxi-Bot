@@ -614,14 +614,90 @@ async fn a_bridge_that_reconnects_replays_what_it_missed() {
         .conclude(&id)
         .await
         .unwrap();
-    // A new bridge starts with nothing; one that last saw seq 0 gets the notice.
-    let mut fresh = open_stream(&t, "").await;
-    let f = read_until(&mut fresh, |f| f.iter().any(|(_, ev, _)| ev == "hello")).await;
+    // A bridge that connects after the notice was pushed (this run) still gets it, and the hello
+    // names the newest seq.
+    let mut late = open_stream(&t, "").await;
+    let f = read_until(&mut late, |f| !notices(f).is_empty()).await;
     assert_eq!(f[0].2["latest_seq"], 1);
+    assert_eq!(notices(&f)[0]["kind"], "blocked");
+    // One that says it last saw seq 1 gets nothing, one that last saw seq 0 gets the notice.
+    let mut caught_up = open_stream(&t, "?after=1").await;
+    let f = read_until(&mut caught_up, |f| f.iter().any(|(_, ev, _)| ev == "hello")).await;
     assert_eq!(notices(&f).len(), 0);
     let mut back = open_stream(&t, "?after=0").await;
     let f = read_until(&mut back, |f| !notices(f).is_empty()).await;
     assert_eq!(notices(&f)[0]["kind"], "blocked");
+}
+
+/// Ask a stream for more for a moment, as the HTTP connection does once it has taken a frame.
+async fn poll_a_little(body: &mut Body) {
+    let _ = tokio::time::timeout(Duration::from_millis(150), async {
+        use http_body_util::BodyExt as _;
+        let _ = body.frame().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_restarted_bridge_gets_what_it_was_not_handed_and_nothing_twice() {
+    let t = setup();
+    let hub = t.state.owner_notify();
+    let publish = |title: &str| {
+        let mut d = crate::owner_notify::Draft::new(
+            channel_api::notice::NoticeKind::Finished,
+            channel_api::notice::NoticeSource::Run,
+            title.to_owned(),
+        );
+        d.bot_name = "Scout".into();
+        hub.publish(d, storage::now_ms()).unwrap();
+    };
+    let titles = |f: &[(String, String, Value)]| -> Vec<String> {
+        notices(f)
+            .iter()
+            .map(|n| n["title"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    publish("one");
+    publish("two");
+
+    // The bridge connects, is handed both and keeps listening.
+    let mut telegram = open_stream(&t, "?bridge=telegram").await;
+    let f = read_until(&mut telegram, |f| notices(f).len() == 2).await;
+    assert_eq!(titles(&f), vec!["one", "two"]);
+    poll_a_little(&mut telegram).await;
+    drop(telegram);
+
+    // It restarts (no cursor): nothing is repeated. Another notice came while it was away.
+    publish("three");
+    let mut telegram = open_stream(&t, "?bridge=telegram").await;
+    let f = read_until(&mut telegram, |f| !notices(f).is_empty()).await;
+    assert_eq!(titles(&f), vec!["three"]);
+
+    // The connection broke before the bridge read past it: the notice is still owed.
+    drop(telegram);
+    let mut telegram = open_stream(&t, "?bridge=telegram").await;
+    let f = read_until(&mut telegram, |f| !notices(f).is_empty()).await;
+    assert_eq!(
+        titles(&f),
+        vec!["three"],
+        "taken but not confirmed: sent again"
+    );
+    poll_a_little(&mut telegram).await;
+    drop(telegram);
+
+    // A second bridge has its own cursor and was handed nothing yet.
+    let mut discord = open_stream(&t, "?bridge=discord").await;
+    let f = read_until(&mut discord, |f| notices(f).len() == 3).await;
+    assert_eq!(titles(&f), vec!["one", "two", "three"]);
+    poll_a_little(&mut discord).await;
+    drop(discord);
+
+    // Both are up to date now.
+    for bridge in ["telegram", "discord"] {
+        let mut s = open_stream(&t, &format!("?bridge={bridge}")).await;
+        let f = read_until(&mut s, |f| f.iter().any(|(_, ev, _)| ev == "hello")).await;
+        assert!(notices(&f).is_empty(), "{bridge} was handed everything");
+    }
 }
 
 #[tokio::test]

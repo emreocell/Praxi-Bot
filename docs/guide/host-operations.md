@@ -54,7 +54,7 @@ Units:
 
 | Unit | Role | Enabled by the installer |
 | --- | --- | --- |
-| `praxi.service` | `bot serve` or `bot serve --host`, loopback only. `Restart=on-failure`, `RestartSec=5`, `WatchdogSec=120` | yes |
+| `praxi.service` | `bot serve` or `bot serve --host`, loopback only. `Type=notify`, `TimeoutStartSec=600`, `WatchdogSec=180`, `Restart=on-failure`, `RestartSec=5` | yes |
 | `praxi-xvfb.service` | virtual display | with desktop |
 | `praxi-desktop.service` | Xfce session on that display | with a desktop session |
 | `praxi-node.service` | `bot-node run`. `RestartSec=10` | installed, not enabled |
@@ -98,18 +98,39 @@ Three things keep a host running without you:
   `GET /v1/health` shows `background.status: "degraded"`, and `bot doctor` shows
   `background loops` as failed. Restart the daemon (`sudo systemctl restart praxi.service`) to
   bring it back.
-- **A hung daemon is restarted by systemd.** The unit has `WatchdogSec=120`. The daemon sends
-  a heartbeat every 40 seconds, but only after its own `GET /v1/health` answered over the
-  loopback within 10 seconds. A daemon that is stuck stops beating and systemd kills and
-  restarts it (`Restart=on-failure`).
+- **A start is "up" when the daemon answers, and a hung daemon is restarted by systemd.** The
+  unit is `Type=notify`: the daemon tells systemd it is ready (`READY=1`) only after its own
+  `GET /v1/health` answered over the loopback, so `systemctl start praxi` (and the installer)
+  return when the daemon really serves. Everything before that, a long database migration
+  included, runs under `TimeoutStartSec=600` and not under the watchdog, which systemd starts
+  only after `READY=1`. From then on the daemon sends a heartbeat every 45 seconds
+  (a quarter of `WatchdogSec=180`), each one only after another `GET /v1/health` answered within
+  10 seconds. A probe that fails is retried after 5 seconds, not after a whole interval, so a
+  short hiccup costs nothing; a daemon that stays stuck for the 180 seconds is killed and
+  restarted (`Restart=on-failure`). Outside systemd (no `NOTIFY_SOCKET`) none of this runs.
 - **Notices survive a restart.** The notices behind the app's notification panel and the
   Telegram / Discord pushes are kept in `owner-notices.json` in the data directory (the newest
-  200, readable by the daemon's user only). A notice held back by quiet hours is still pushed
-  when the window ends, and a notice that no bridge had been handed when the daemon went down
-  (and is less than 12 hours old) goes to the first bridge that connects.
+  200, readable by the daemon's user only), written in the background. The daemon also keeps,
+  per bridge, the newest notice its stream handed over. A notice held back by quiet hours is
+  still pushed when the window ends. A bridge that connects without a position of its own (it
+  just started) gets what it was not handed yet and is less than 12 hours old; a bridge the
+  daemon has never seen gets what was pushed since the daemon started.
+
+`/v1/health` says only whether the background loops are `ok` or `degraded`, because it answers
+without a token. Which loop crashed and how often is in the app's Settings > Doctor
+(`GET /v1/doctor`, owner only). The crash itself is in the support log (`daemon.jsonl`, also in
+the journal) as `loop_panicked`, `loop_ended` or `loop_gave_up` with the loop's name and the
+count, never the panic message.
 
 A degraded loop does not stop the heartbeat on purpose: restarting the daemon over and over
 would not fix a bug that comes back at every start, and chat keeps working meanwhile.
+
+The installer writes `Type=notify` only when the installed `bot` binary sends the readiness
+message. An older release picked with `install-linux.sh --version` gets the plain unit
+(`Type=simple`, no watchdog) and a warning, because under `Type=notify` it would be killed after
+`TimeoutStartSec` at every start. The same goes for putting an older `bot` back by hand
+(`<prefix>.backup-*`): run that release's own `install-linux.sh --update` so the unit matches the
+program.
 
 ## Upgrade and repair
 

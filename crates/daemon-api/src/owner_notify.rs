@@ -12,8 +12,9 @@
 //!   (`app_only`); only the questions of blocked mission items and of a run can be answered from
 //!   a chat.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::StreamItem;
@@ -27,7 +28,7 @@ use channel_api::notice::{
     MAX_LISTED, NoticeItem, NoticeKind, NoticeProgress, NoticeSource, OwnerNotice,
 };
 use chrono::{NaiveTime, TimeZone, Timelike, Utc};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use protocol::{BotId, Event, RunId, TaskId, ToolCallId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -44,9 +45,14 @@ pub const SETTINGS_FILE: &str = "owner-notify.json";
 /// File of the notices (the panel log, the push log, the held ones), in the data directory, so a
 /// restart loses none of them.
 pub const NOTICES_FILE: &str = "owner-notices.json";
-/// A notice that no bridge was handed before a restart is replayed to the first bridge that
-/// connects, unless it is older than this (a day-old "finished" is not news).
+/// A notice that a bridge was not handed (it was down, or the daemon restarted) is replayed to it
+/// when it connects without a cursor, unless it is older than this (a day-old "finished" is not
+/// news).
 const UNSENT_MAX_AGE_MS: i64 = 12 * 60 * 60 * 1000;
+/// Bridges whose delivery cursor is kept (Telegram and Discord today).
+const BRIDGES_MAX: usize = 8;
+/// The cursor name of a bridge that sends none, or a name that is not valid.
+const DEFAULT_BRIDGE: &str = "bridge";
 /// Notices the panel log keeps.
 const LOG_MAX: usize = 200;
 /// Notices the push log keeps for a bridge that reconnects.
@@ -263,8 +269,14 @@ struct HubState {
     milestones: HashMap<String, u32>,
     /// Notices whose questions were answered (only ids still in `log`).
     answered: HashSet<String>,
-    /// The newest notice a bridge was handed, so a restart knows what is still unsent.
-    delivered_seq: u64,
+    /// Per bridge (`telegram`, `discord`): the newest notice its stream handed over. A bridge
+    /// that connects without a cursor of its own gets what is newer than this, so a restart or a
+    /// reconnect neither repeats an old notice nor skips one that was not handed over.
+    delivered: BTreeMap<String, u64>,
+    /// `seq` when this process started: a bridge never seen before starts after it (what was
+    /// pushed in an earlier run is not new to it), but gets what is pushed from the start of this
+    /// run, also before it connected.
+    boot_seq: u64,
 }
 
 /// What survives a restart: the bounded logs (see [`LOG_MAX`], [`PUSH_MAX`], [`HELD_MAX`]).
@@ -272,7 +284,7 @@ struct HubState {
 struct Persisted {
     seq: u64,
     #[serde(default)]
-    delivered_seq: u64,
+    delivered: BTreeMap<String, u64>,
     log: Vec<OwnerNotice>,
     pushed: Vec<OwnerNotice>,
     held: Vec<OwnerNotice>,
@@ -302,14 +314,142 @@ pub(crate) struct Hub {
     state: Mutex<HubState>,
     tx: broadcast::Sender<OwnerNotice>,
     path: Option<PathBuf>,
-    /// Where the notices are kept (none: in memory only).
-    notices_path: Option<PathBuf>,
-    /// One writer at a time, so the file ends with the newest state.
-    write_lock: Mutex<()>,
-    /// With a notices file from an earlier run: the `seq` up to which a bridge had been handed
-    /// notices when that run ended. The first bridge to connect without a cursor gets the newer
-    /// ones.
-    resume_after: Option<u64>,
+    /// Keeps the notices on disk (none: in memory only).
+    writer: Option<Writer>,
+}
+
+/// What a bridge gets when it opens the notice stream.
+pub(crate) struct PushSubscription {
+    /// The pushed notices it has not been handed, oldest first.
+    pub replay: Vec<OwnerNotice>,
+    /// The next ones.
+    pub rx: broadcast::Receiver<OwnerNotice>,
+    /// The newest pushed `seq` at the moment of subscribing (0: none).
+    pub latest_seq: u64,
+}
+
+/// Writes the notices file on a thread of its own: the fsyncs of a save never run on an async
+/// worker (a slow disk would stall `GET /v1/health` and the rest of the API with it). Saves that
+/// pile up while one is running collapse into the newest; dropping the hub (and
+/// [`Writer::flush`]) waits for the last one.
+struct Writer {
+    shared: Arc<WriterShared>,
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+struct WriterShared {
+    path: PathBuf,
+    save: fn(&Path, &Persisted) -> std::io::Result<()>,
+    queue: Mutex<WriterQueue>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct WriterQueue {
+    pending: Option<Persisted>,
+    writing: bool,
+    closed: bool,
+}
+
+impl Writer {
+    fn new(path: PathBuf, save: fn(&Path, &Persisted) -> std::io::Result<()>) -> Self {
+        Self {
+            shared: Arc::new(WriterShared {
+                path,
+                save,
+                queue: Mutex::new(WriterQueue::default()),
+                changed: Condvar::new(),
+            }),
+            thread: Mutex::new(None),
+        }
+    }
+
+    /// Queue `snapshot` (the newest one wins) and return at once. `snapshot` runs under the
+    /// queue's lock, so two callers cannot leave the older state last.
+    fn submit(&self, snapshot: impl FnOnce() -> Persisted) {
+        {
+            let mut thread = self.thread.lock();
+            if thread.is_none() {
+                let shared = Arc::clone(&self.shared);
+                *thread = std::thread::Builder::new()
+                    .name("owner-notices".into())
+                    .spawn(move || shared.run())
+                    .ok();
+            }
+            if thread.is_none() {
+                // No thread to be had: save here rather than not at all.
+                drop(thread);
+                self.shared.write(&snapshot());
+                return;
+            }
+        }
+        let mut queue = self.shared.queue.lock();
+        queue.pending = Some(snapshot());
+        self.shared.changed.notify_all();
+    }
+
+    /// Wait until everything submitted is on disk.
+    fn flush(&self) {
+        let mut queue = self.shared.queue.lock();
+        while queue.pending.is_some() || queue.writing {
+            self.shared.changed.wait(&mut queue);
+        }
+    }
+}
+
+impl WriterShared {
+    fn write(&self, snapshot: &Persisted) {
+        if let Err(error) = (self.save)(&self.path, snapshot) {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", %error, "owner notices could not be saved");
+        }
+    }
+
+    fn run(&self) {
+        loop {
+            let job = {
+                let mut queue = self.queue.lock();
+                loop {
+                    if let Some(job) = queue.pending.take() {
+                        queue.writing = true;
+                        break Some(job);
+                    }
+                    if queue.closed {
+                        break None;
+                    }
+                    self.changed.wait(&mut queue);
+                }
+            };
+            let Some(job) = job else { return };
+            self.write(&job);
+            self.queue.lock().writing = false;
+            self.changed.notify_all();
+        }
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        self.shared.queue.lock().closed = true;
+        self.shared.changed.notify_all();
+        if let Some(thread) = self.thread.lock().take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The name a bridge's delivery cursor is kept under: what it sends as `bridge`, if that is a
+/// short lowercase word, else the shared default. The table is bounded.
+fn bridge_key(known: &BTreeMap<String, u64>, raw: Option<&str>) -> String {
+    let valid = raw.filter(|b| {
+        !b.is_empty()
+            && b.len() <= 16
+            && b.bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_')
+    });
+    match valid {
+        Some(b) if known.contains_key(b) || known.len() < BRIDGES_MAX => b.to_owned(),
+        _ => DEFAULT_BRIDGE.to_owned(),
+    }
 }
 
 /// A notice before it has an id and a place in the log.
@@ -358,63 +498,69 @@ impl Draft {
 
 impl Hub {
     pub(crate) fn load(data_dir: &Path) -> Self {
+        Self::load_with(data_dir, save_json)
+    }
+
+    fn load_with(data_dir: &Path, save: fn(&Path, &Persisted) -> std::io::Result<()>) -> Self {
         let path = data_dir.join(SETTINGS_FILE);
         let notices_path = data_dir.join(NOTICES_FILE);
         let mut state = HubState {
             settings: load_settings(&path),
             ..HubState::default()
         };
-        let mut resume_after = None;
         if let Some(p) = load_notices(&notices_path) {
             state.seq = p.seq;
-            state.delivered_seq = p.delivered_seq;
+            state.delivered = p.delivered;
             state.log = newest(p.log, LOG_MAX);
             state.pushed = newest(p.pushed, PUSH_MAX);
             state.held = newest(p.held, HELD_MAX);
             state.answered = p.answered.into_iter().collect();
-            resume_after = Some(p.delivered_seq);
         }
+        state.boot_seq = state.seq;
         Self {
             state: Mutex::new(state),
             tx: broadcast::channel(64).0,
             path: Some(path),
-            notices_path: Some(notices_path),
-            write_lock: Mutex::new(()),
-            resume_after,
+            writer: Some(Writer::new(notices_path, save)),
         }
     }
 
-    /// Write the notices down. A failure is logged and does not stop the notice: it still goes
-    /// out, it only would not survive a restart.
+    /// Write the notices down, off the caller's thread. A failure is logged and does not stop
+    /// the notice: it still goes out, it only would not survive a restart.
     fn persist(&self) {
-        let Some(path) = &self.notices_path else {
+        let Some(writer) = &self.writer else {
             return;
         };
-        let _one_writer = self.write_lock.lock();
-        let snapshot = {
+        writer.submit(|| {
             let st = self.state.lock();
             Persisted {
                 seq: st.seq,
-                delivered_seq: st.delivered_seq,
+                delivered: st.delivered.clone(),
                 log: st.log.iter().cloned().collect(),
                 pushed: st.pushed.iter().cloned().collect(),
                 held: st.held.iter().cloned().collect(),
                 answered: st.answered.iter().cloned().collect(),
             }
-        };
-        if let Err(error) = save_json(path, &snapshot) {
-            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", %error, "owner notices could not be saved");
+        });
+    }
+
+    /// Wait until the notices are on disk (the daemon calls it when it stops).
+    pub(crate) fn flush(&self) {
+        if let Some(writer) = &self.writer {
+            writer.flush();
         }
     }
 
-    /// A bridge was handed the notice `seq`.
-    pub(crate) fn mark_delivered(&self, seq: u64) {
+    /// `bridge`'s stream handed over the notice `seq`.
+    pub(crate) fn mark_delivered(&self, bridge: Option<&str>, seq: u64) {
         {
             let mut st = self.state.lock();
-            if seq <= st.delivered_seq {
+            let key = bridge_key(&st.delivered, bridge);
+            let at = st.delivered.entry(key).or_insert(0);
+            if seq <= *at {
                 return;
             }
-            st.delivered_seq = seq;
+            *at = seq;
         }
         self.persist();
     }
@@ -425,9 +571,7 @@ impl Hub {
             state: Mutex::new(HubState::default()),
             tx: broadcast::channel(64).0,
             path: None,
-            notices_path: None,
-            write_lock: Mutex::new(()),
-            resume_after: None,
+            writer: None,
         }
     }
 
@@ -593,37 +737,45 @@ impl Hub {
         self.persist();
     }
 
-    /// The pushed notices after `after`, and a receiver for the next ones, taken together so
-    /// none is missed or repeated.
+    /// What `bridge` has not been handed, and a receiver for the next notices, taken together
+    /// (with the newest `seq`) under one lock so none is missed or repeated.
+    ///
+    /// With a cursor (`after`) it is every pushed notice after it. Without one (a bridge that
+    /// just started) it is what is newer than what this bridge's stream last handed over, or, for
+    /// a bridge never seen before, newer than what an earlier run pushed: nothing is resent that
+    /// the bridge had, and nothing pushed in this run is skipped because the bridge connected
+    /// late. A notice older than [`UNSENT_MAX_AGE_MS`] is not replayed without a cursor.
     pub(crate) fn subscribe_push(
         &self,
+        bridge: Option<&str>,
         after: Option<u64>,
-    ) -> (Vec<OwnerNotice>, broadcast::Receiver<OwnerNotice>) {
+    ) -> PushSubscription {
         let st = self.state.lock();
         let rx = self.tx.subscribe();
-        // No cursor: a bridge that has never connected starts with what is new from now on, plus
-        // what an earlier run pushed and no bridge was handed before it ended.
         let now_ms = storage::now_ms();
-        let replay = match (after, self.resume_after) {
-            (Some(after), _) => st
-                .pushed
+        let replay = if let Some(after) = after {
+            st.pushed
                 .iter()
                 .filter(|n| n.seq > after)
                 .cloned()
-                .collect(),
-            (None, Some(resume)) => st
-                .pushed
+                .collect()
+        } else {
+            let seen = st
+                .delivered
+                .get(&bridge_key(&st.delivered, bridge))
+                .copied()
+                .unwrap_or(st.boot_seq);
+            st.pushed
                 .iter()
-                .filter(|n| n.seq > resume && now_ms.saturating_sub(n.at_ms) < UNSENT_MAX_AGE_MS)
+                .filter(|n| n.seq > seen && now_ms.saturating_sub(n.at_ms) < UNSENT_MAX_AGE_MS)
                 .cloned()
-                .collect(),
-            (None, None) => Vec::new(),
+                .collect()
         };
-        (replay, rx)
-    }
-
-    pub(crate) fn latest_push_seq(&self) -> u64 {
-        self.state.lock().pushed.back().map_or(0, |n| n.seq)
+        PushSubscription {
+            replay,
+            rx,
+            latest_seq: st.pushed.back().map_or(0, |n| n.seq),
+        }
     }
 
     /// Whether a milestone (1..=3) of `mission` is new; remembers it.
@@ -1160,67 +1312,112 @@ pub(crate) async fn put_notice_settings(
     Ok(Json(input))
 }
 
+/// `GET /v1/owner-notices/stream` query.
+#[derive(Debug, Deserialize)]
+pub(crate) struct StreamQuery {
+    /// Replay pushed notices with a larger `seq`.
+    #[serde(default)]
+    after: Option<u64>,
+    /// Which bridge is asking (`telegram`, `discord`), so the daemon keeps what each was handed.
+    #[serde(default)]
+    bridge: Option<String>,
+}
+
 /// The pushed notices as server-sent events (`event: notice`, one JSON `OwnerNotice` per event),
-/// for the Telegram and Discord bridges. `after` replays the pushed notices missed since that
-/// `seq`; without it the stream starts with what is new from now on. A `hello` event first says
-/// the newest pushed `seq`.
+/// for the Telegram and Discord bridges. A `hello` event first says the newest pushed `seq`.
+///
+/// * With `after`, the pushed notices missed since that `seq` are replayed first.
+/// * Without it (a bridge that just started), the notices this `bridge` was not handed yet are:
+///   the daemon remembers, per bridge and across restarts, the newest notice its stream handed
+///   over, and a notice that is more than 12 hours old is not replayed. A bridge the daemon has
+///   not seen before gets what was pushed since the daemon started.
+///
+/// A notice counts as handed over once the connection has taken its event, so a connection that
+/// breaks first leaves it for the next one.
 #[utoipa::path(get, path = "/v1/owner-notices/stream", tag = "notifications",
     security(("bearer" = [])),
-    params(("after" = Option<u64>, Query, description = "Replay pushed notices with a larger seq")),
+    params(
+        ("after" = Option<u64>, Query, description = "Replay pushed notices with a larger seq"),
+        ("bridge" = Option<String>, Query, description = "The bridge asking (telegram, discord): its own delivery cursor decides what is replayed when there is no `after`")
+    ),
     responses((status = 200, content_type = "text/event-stream")))]
 pub(crate) async fn stream_notices(
     State(s): State<AppState>,
     headers: HeaderMap,
-    Query(q): Query<AfterQuery>,
+    Query(q): Query<StreamQuery>,
 ) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>>, ApiError>
 {
     // Owner only like the rest of the notice routes; a stream that never ends cannot sit in the
     // owner-route table, whose sweep test waits for each response to finish.
     s.require_owner(&headers)?;
     let hub = s.owner_notify();
-    let (replay, rx) = hub.subscribe_push(q.after);
+    let PushSubscription {
+        replay,
+        rx,
+        latest_seq,
+    } = hub.subscribe_push(q.bridge.as_deref(), q.after);
     let hello = SseEvent::default()
         .event("hello")
-        .data(json!({"latest_seq": hub.latest_push_seq()}).to_string());
-    let shutdown = s.shutdown_token();
-    let first: VecDeque<SseEvent> = std::iter::once(hello)
-        .chain(replay.iter().filter_map(notice_event))
+        .data(json!({"latest_seq": latest_seq}).to_string());
+    let first: VecDeque<(SseEvent, Option<u64>)> = std::iter::once((hello, None))
+        .chain(
+            replay
+                .iter()
+                .filter_map(|n| notice_event(n).map(|ev| (ev, Some(n.seq)))),
+        )
         .collect();
-    if let Some(last) = replay.last() {
-        hub.mark_delivered(last.seq);
-    }
-    let state = s.clone();
-    let stream = futures::stream::unfold(
-        (first, rx, shutdown),
-        move |(mut first, mut rx, shutdown)| {
-            let state = state.clone();
-            async move {
-                if let Some(ev) = first.pop_front() {
-                    return Some((Ok(ev), (first, rx, shutdown)));
-                }
-                loop {
-                    tokio::select! {
-                        () = shutdown.cancelled() => return None,
-                        got = rx.recv() => match got {
-                            Ok(n) => {
-                                if let Some(ev) = notice_event(&n) {
-                                    state.owner_notify().mark_delivered(n.seq);
-                                    return Some((Ok(ev), (first, rx, shutdown)));
-                                }
-                            }
-                            // The bridge fell behind: say so and let it replay with `after`.
-                            Err(broadcast::error::RecvError::Lagged(_)) => {
-                                let ev = SseEvent::default().event("lagged").data("{}");
-                                return Some((Ok(ev), (first, rx, shutdown)));
-                            }
-                            Err(broadcast::error::RecvError::Closed) => return None,
-                        },
+    let feed = Feed {
+        first,
+        rx,
+        shutdown: s.shutdown_token(),
+        handed: None,
+        state: s.clone(),
+        bridge: q.bridge,
+    };
+    let stream = futures::stream::unfold(feed, |mut feed| async move {
+        // The connection asked for more: it has taken the notice it was given last.
+        if let Some(seq) = feed.handed.take() {
+            feed.state
+                .owner_notify()
+                .mark_delivered(feed.bridge.as_deref(), seq);
+        }
+        if let Some((ev, seq)) = feed.first.pop_front() {
+            feed.handed = seq;
+            return Some((Ok(ev), feed));
+        }
+        loop {
+            tokio::select! {
+                () = feed.shutdown.cancelled() => return None,
+                got = feed.rx.recv() => match got {
+                    Ok(n) => {
+                        if let Some(ev) = notice_event(&n) {
+                            feed.handed = Some(n.seq);
+                            return Some((Ok(ev), feed));
+                        }
                     }
-                }
+                    // The bridge fell behind: say so and let it replay with `after`.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let ev = SseEvent::default().event("lagged").data("{}");
+                        return Some((Ok(ev), feed));
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                },
             }
-        },
-    );
+        }
+    });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// One open notice stream.
+struct Feed {
+    /// Events not sent yet, each with the `seq` of the notice it carries (none: not a notice).
+    first: VecDeque<(SseEvent, Option<u64>)>,
+    rx: broadcast::Receiver<OwnerNotice>,
+    shutdown: CancellationToken,
+    /// The notice whose event was just given to the connection.
+    handed: Option<u64>,
+    state: AppState,
+    bridge: Option<String>,
 }
 
 fn notice_event(n: &OwnerNotice) -> Option<SseEvent> {

@@ -778,11 +778,11 @@ fn check_daemon(dir: &Path, port: u16) -> Check {
 
 /// Whether the daemon answering on `port` runs in safe mode (`false` when none answers).
 fn daemon_safe_mode(port: u16) -> bool {
-    daemon_health(port).is_some_and(|v| v["safe_mode"] == true)
+    daemon_health_json(port).is_some_and(|v| v["safe_mode"] == true)
 }
 
 /// The daemon's `GET /v1/health` reply, or `None` when no daemon answers on `port`.
-fn daemon_health(port: u16) -> Option<Value> {
+fn daemon_health_json(port: u16) -> Option<Value> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -800,49 +800,30 @@ fn daemon_health(port: u16) -> Option<Value> {
     })
 }
 
-/// `background loops`, as the running daemon reports them in `GET /v1/health`.
+/// `background loops`, as the running daemon reports them in `GET /v1/health`: only the overall
+/// status, which is all that endpoint says without the API token. Which loop it is and how often
+/// it restarted is in the daemon's own (authenticated) doctor, Settings > Doctor.
 fn check_background_loops(port: u16) -> Check {
     const ID: &str = "background_loops";
     const N: &str = "background loops";
-    let Some(health) = daemon_health(port) else {
+    let Some(health) = daemon_health_json(port) else {
         return Check::skipped(ID, N, "the daemon is not running");
     };
-    let loops = health["background"]["loops"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let names = |keep: &dyn Fn(&Value) -> bool| -> Vec<String> {
-        loops
-            .iter()
-            .filter(|l| keep(l))
-            .filter_map(|l| l["name"].as_str().map(str::to_owned))
-            .collect()
-    };
-    let degraded = names(&|l| l["degraded"] == true);
-    if !degraded.is_empty() {
-        return Check::fail(
+    background_loops_check(health["background"]["status"].as_str())
+}
+
+fn background_loops_check(status: Option<&str>) -> Check {
+    const ID: &str = "background_loops";
+    const N: &str = "background loops";
+    match status {
+        Some("ok") => Check::ok(ID, N, "running"),
+        Some("degraded") => Check::fail(
             ID,
             N,
-            format!(
-                "degraded: {} crashed too often and stopped; schedules and missions that depend on it do not run",
-                degraded.join(", ")
-            ),
-            "restart the daemon (for a host: `systemctl restart praxi`); if it comes back, send the support log",
-        );
-    }
-    let restarted = names(&|l| l["restarts"].as_u64().unwrap_or(0) > 0);
-    if restarted.is_empty() {
-        Check::ok(ID, N, "running")
-    } else {
-        Check::warn(
-            ID,
-            N,
-            format!(
-                "restarted after a crash since the daemon started: {}",
-                restarted.join(", ")
-            ),
-            "the daemon recovered by itself; if this keeps happening, send the support log",
-        )
+            "degraded: a background loop crashed too often and stopped; schedules and missions that depend on it do not run",
+            "restart the daemon (for a host: `systemctl restart praxi`); Settings > Doctor in the app names the loop; if it comes back, send the support log",
+        ),
+        _ => Check::skipped(ID, N, "this daemon does not report its background loops"),
     }
 }
 
@@ -1230,6 +1211,18 @@ pub fn write_report(env: &DoctorEnv<'_>, checks: &[Check], path: &Path) -> Resul
 mod tests {
     use super::*;
     use provider_catalog::ProviderSettings;
+
+    #[test]
+    fn background_loops_follow_the_public_status_only() {
+        assert_eq!(background_loops_check(Some("ok")).status, Status::Ok);
+        let degraded = background_loops_check(Some("degraded"));
+        assert_eq!(degraded.status, Status::Fail);
+        // The public health reply names no loop, so neither does the check.
+        assert!(!degraded.detail.contains("scheduler"));
+        // A daemon from before the field (or an unknown value) is not reported as healthy.
+        assert_eq!(background_loops_check(None).status, Status::Skipped);
+        assert_eq!(background_loops_check(Some("")).status, Status::Skipped);
+    }
 
     #[test]
     fn the_live_link_comes_from_the_daemons_host_answer() {

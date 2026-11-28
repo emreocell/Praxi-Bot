@@ -2387,6 +2387,9 @@ async fn serve_with_startup_timeout(
                 support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: leader startup task failed: {e}");
             }
             stopping.stop_components().await;
+            // The notices are written on a thread of their own: wait for the last save.
+            let notices = stopping.clone();
+            let _ = tokio::task::spawn_blocking(move || notices.owner_notify().flush()).await;
         })
         .await;
     served?;

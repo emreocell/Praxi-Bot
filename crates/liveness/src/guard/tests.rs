@@ -85,10 +85,19 @@ async fn too_many_crashes_in_a_row_give_up_and_say_so() {
 #[tokio::test(start_paused = true)]
 async fn a_long_healthy_stretch_resets_the_streak() {
     let guard = Guard::new(quick(3));
-    assert!(matches!(guard.record_crash("demo", "x"), Verdict::Retry(_)));
-    assert!(matches!(guard.record_crash("demo", "x"), Verdict::Retry(_)));
+    assert!(matches!(
+        guard.record_crash("demo", Cause::Panicked),
+        Verdict::Retry(_)
+    ));
+    assert!(matches!(
+        guard.record_crash("demo", Cause::Panicked),
+        Verdict::Retry(_)
+    ));
     tokio::time::advance(Duration::from_secs(61)).await;
-    assert!(matches!(guard.record_crash("demo", "x"), Verdict::Retry(_)));
+    assert!(matches!(
+        guard.record_crash("demo", Cause::Panicked),
+        Verdict::Retry(_)
+    ));
     let status = guard.statuses().pop().unwrap();
     assert_eq!((status.restarts, status.crashes_in_row), (3, 1));
     assert!(!guard.is_degraded());
@@ -103,7 +112,7 @@ async fn the_backoff_doubles_up_to_its_cap() {
         stable_after: Duration::from_secs(600),
     });
     let waits: Vec<_> = (0..5)
-        .map(|_| match guard.record_crash("demo", "x") {
+        .map(|_| match guard.record_crash("demo", Cause::Panicked) {
             Verdict::Retry(d) => d.as_secs(),
             Verdict::GiveUp => 0,
         })
@@ -183,4 +192,62 @@ async fn an_injected_fault_fires_the_requested_number_of_times() {
     // Another loop and another place are not hit.
     guard.inject_panic("demo", Fault::Task, 1);
     assert!(guard.guarded("demo", async {}).await.is_ok());
+}
+
+/// What the support log (`daemon.jsonl`) holds after `run` made loops crash: it is the only place
+/// a crash is recorded for the owner's support bundle, and it keeps no free text.
+fn support_log_of(run: impl FnOnce()) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let subscriber = support_logs::subscriber(dir.path(), "daemon", "info").unwrap();
+    support_logs::tracing::subscriber::with_default(subscriber, run);
+    std::fs::read_to_string(dir.path().join("logs/daemon.jsonl")).unwrap_or_default()
+}
+
+#[test]
+fn a_crash_reaches_the_support_log_without_the_panic_text() {
+    const CANARY: &str = "sk-canary-12345678901234567890 /home/canary/private";
+    let log = support_log_of(|| {
+        let guard = Guard::new(quick(2));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            for _ in 0..2 {
+                let outcome = guard.guarded("demo", async { panic!("{CANARY}") }).await;
+                assert!(outcome.is_err());
+            }
+        });
+    });
+    for secret in ["sk-canary", "canary/private", "12345678901234567890"] {
+        assert!(
+            !log.contains(secret),
+            "the panic text reached the log: {log}"
+        );
+    }
+    let lines: Vec<serde_json::Value> = log
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2, "one record per crash: {log}");
+    let fields = |i: usize| &lines[i]["fields"];
+    assert_eq!(fields(0)["reason"], "loop_panicked");
+    assert_eq!(fields(0)["loop_name"], "demo");
+    assert_eq!(fields(0)["crashes"], "1");
+    assert!(fields(0)["restart_in_ms"].is_string());
+    assert_eq!(fields(1)["reason"], "loop_gave_up");
+    assert_eq!(fields(1)["crashes"], "2");
+    assert_eq!(lines[1]["level"], "error");
+}
+
+#[test]
+fn a_loop_that_ended_by_itself_says_so_in_the_support_log() {
+    let log = support_log_of(|| {
+        let guard = Guard::new(quick(5));
+        assert!(matches!(
+            guard.record_crash("demo", Cause::Ended),
+            Verdict::Retry(_)
+        ));
+    });
+    assert!(log.contains("loop_ended"), "{log}");
 }

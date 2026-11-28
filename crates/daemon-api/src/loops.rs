@@ -6,10 +6,10 @@
 //! and a health field.
 
 use channel_api::notice::{NoticeKind, NoticeSource};
-use liveness::{EventKind, LoopEvent, LoopState};
+use liveness::{EventKind, LoopEvent};
 
 use crate::AppState;
-use crate::dto::{BackgroundHealth, BackgroundLoop};
+use crate::dto::BackgroundHealth;
 use crate::owner_notify::Draft;
 
 /// What the owner calls a loop.
@@ -64,27 +64,17 @@ impl AppState {
             }));
     }
 
-    /// The loops and whether they are running, for `GET /v1/health`.
+    /// Whether the loops are running, for the unauthenticated `GET /v1/health`: the overall status
+    /// only. The loops by name and their restarts are in the owner's doctor
+    /// ([`crate::doctor::check_background_loops`]).
     pub(crate) fn background_health(&self) -> BackgroundHealth {
-        let loops: Vec<BackgroundLoop> = self
-            .0
-            .loop_guard
-            .statuses()
-            .into_iter()
-            .map(|s| BackgroundLoop {
-                name: s.name.to_owned(),
-                degraded: s.state == LoopState::Degraded,
-                restarts: s.restarts,
-            })
-            .collect();
         BackgroundHealth {
-            status: if loops.iter().any(|l| l.degraded) {
+            status: if self.0.loop_guard.is_degraded() {
                 "degraded"
             } else {
                 "ok"
             }
             .to_owned(),
-            loops,
         }
     }
 }

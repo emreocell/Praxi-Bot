@@ -20,8 +20,9 @@ const MAX_RECONNECT: Duration = Duration::from_secs(30);
 const BOOK_MAX: usize = 32;
 
 /// Follow the daemon's owner-notice stream until `cancel`, calling `on_notice` for each notice
-/// in order. A dropped connection is reopened with the last `seq` seen, so a notice pushed in
-/// between is replayed once; a bridge that never connected before starts with what is new.
+/// in order. A dropped connection is reopened with the last `seq` handled, so a notice pushed in
+/// between is replayed once. Before the first notice the daemon decides what a (re)connecting
+/// bridge has not been handed yet, from the delivery cursor it keeps for it.
 /// `retry` is the first wait after a failed connection (it doubles up to 30 s).
 pub async fn follow_notices<F>(
     client: Arc<dyn DaemonClient>,
@@ -51,9 +52,11 @@ pub async fn follow_notices<F>(
                     };
                     match ev {
                         None | Some(NoticeEvent::Lagged) => break,
-                        Some(NoticeEvent::Hello { latest_seq }) => {
-                            after = after.or(Some(latest_seq));
-                        }
+                        // Not a cursor: the newest `seq` says nothing of the replay that comes
+                        // after it. A connection that drops before the replay arrived must ask
+                        // again as before, so only a notice that was handled moves `after`. The
+                        // daemon itself remembers what it handed over to this bridge.
+                        Some(NoticeEvent::Hello { .. }) => {}
                         Some(NoticeEvent::Notice(n)) => {
                             after = Some(after.map_or(n.seq, |a| a.max(n.seq)));
                             on_notice(*n).await;
@@ -275,6 +278,49 @@ mod tests {
             &afters[..4],
             &[None, Some(5), Some(5), Some(6)],
             "a new bridge starts fresh, then always asks after the last seq"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_connection_dropped_after_hello_does_not_skip_the_replay() {
+        // The daemon says "latest 9" and would replay 7..=9, but the connection breaks first.
+        let client = Arc::new(Scripted {
+            connections: Mutex::new(VecDeque::from([
+                Ok(vec![NoticeEvent::Hello { latest_seq: 9 }]),
+                Ok(vec![
+                    NoticeEvent::Hello { latest_seq: 9 },
+                    NoticeEvent::Notice(Box::new(notice(7, NoticeKind::Finished))),
+                    NoticeEvent::Notice(Box::new(notice(9, NoticeKind::Failed))),
+                ]),
+            ])),
+            afters: Mutex::new(vec![]),
+        });
+        let seen = Arc::new(Mutex::new(Vec::<u64>::new()));
+        let cancel = CancellationToken::new();
+        let task = {
+            let (client, cancel, seen) = (client.clone(), cancel.clone(), seen.clone());
+            tokio::spawn(async move {
+                follow_notices(client, cancel, Duration::from_millis(5), move |n| {
+                    let seen = seen.clone();
+                    Box::pin(async move { seen.lock().push(n.seq) })
+                })
+                .await;
+            })
+        };
+        for _ in 0..200 {
+            if client.afters.lock().len() >= 3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        cancel.cancel();
+        task.await.unwrap();
+        assert_eq!(*seen.lock(), vec![7, 9]);
+        let afters = client.afters.lock().clone();
+        assert_eq!(
+            &afters[..3],
+            &[None, None, Some(9)],
+            "Hello is not a cursor: the reconnect asks again as a fresh bridge"
         );
     }
 

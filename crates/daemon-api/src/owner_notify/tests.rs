@@ -21,6 +21,20 @@ fn draft(kind: NoticeKind) -> Draft {
     Draft::new(kind, NoticeSource::Mission, "Backlinks".into())
 }
 
+/// What `bridge` gets when it opens the stream (with `after`, or without).
+fn sub(
+    hub: &Hub,
+    bridge: &str,
+    after: Option<u64>,
+) -> (Vec<OwnerNotice>, broadcast::Receiver<OwnerNotice>) {
+    let s = hub.subscribe_push(Some(bridge), after);
+    (s.replay, s.rx)
+}
+
+fn seqs(replay: &[OwnerNotice]) -> Vec<u64> {
+    replay.iter().map(|n| n.seq).collect()
+}
+
 #[test]
 fn defaults_push_finish_failure_and_blocked_but_not_progress() {
     let s = OwnerNotifySettings::default();
@@ -84,7 +98,7 @@ fn settings_survive_a_restart_and_a_broken_file_falls_back_to_the_defaults() {
 #[test]
 fn a_finished_notice_is_pushed_and_kept_for_the_panel() {
     let hub = Hub::in_memory();
-    let (_, mut rx) = hub.subscribe_push(None);
+    let (_, mut rx) = sub(&hub, "test", None);
     let n = hub.publish(draft(NoticeKind::Finished), DAY).unwrap();
     assert_eq!(n.seq, 1);
     assert_eq!(rx.try_recv().unwrap().id, n.id);
@@ -99,7 +113,7 @@ fn a_finished_notice_is_pushed_and_kept_for_the_panel() {
 #[test]
 fn a_disabled_event_stays_in_the_panel_but_is_not_pushed() {
     let hub = Hub::in_memory();
-    let (_, mut rx) = hub.subscribe_push(None);
+    let (_, mut rx) = sub(&hub, "test", None);
     hub.publish(draft(NoticeKind::Progress), DAY).unwrap();
     assert!(rx.try_recv().is_err(), "progress is off by default");
     assert_eq!(hub.recent(0).len(), 1);
@@ -117,7 +131,7 @@ fn quiet_hours_hold_pushes_and_release_them_late_and_in_order() {
     let hub = Hub::in_memory();
     hub.set_settings(window("22:00", "08:00", "UTC"), DAY)
         .unwrap();
-    let (_, mut rx) = hub.subscribe_push(None);
+    let (_, mut rx) = sub(&hub, "test", None);
     let night = DAY + 23 * HOUR;
     let a = hub.publish(draft(NoticeKind::Blocked), night).unwrap();
     let b = hub
@@ -149,7 +163,7 @@ fn a_milestone_missed_during_quiet_hours_is_dropped_not_sent_late() {
     let mut s = window("22:00", "08:00", "UTC");
     s.progress = true;
     hub.set_settings(s, DAY).unwrap();
-    let (_, mut rx) = hub.subscribe_push(None);
+    let (_, mut rx) = sub(&hub, "test", None);
     hub.publish(draft(NoticeKind::Progress), DAY + 23 * HOUR)
         .unwrap();
     hub.release_held(DAY + 33 * HOUR);
@@ -161,7 +175,7 @@ fn a_new_notice_flushes_what_is_held_first_so_the_order_holds() {
     let hub = Hub::in_memory();
     hub.set_settings(window("22:00", "08:00", "UTC"), DAY)
         .unwrap();
-    let (_, mut rx) = hub.subscribe_push(None);
+    let (_, mut rx) = sub(&hub, "test", None);
     let held = hub
         .publish(draft(NoticeKind::Blocked), DAY + 23 * HOUR)
         .unwrap();
@@ -174,19 +188,93 @@ fn a_new_notice_flushes_what_is_held_first_so_the_order_holds() {
 }
 
 #[test]
-fn a_reconnecting_bridge_replays_what_it_missed_and_a_new_one_starts_fresh() {
+fn a_reconnecting_bridge_replays_what_it_missed() {
     let hub = Hub::in_memory();
-    let one = hub.publish(draft(NoticeKind::Finished), DAY).unwrap();
-    let two = hub.publish(draft(NoticeKind::Failed), DAY + 1).unwrap();
-    let (fresh, _rx) = hub.subscribe_push(None);
-    assert!(
-        fresh.is_empty(),
-        "a bridge that never connected starts from now"
+    let now = storage::now_ms();
+    let one = hub.publish(draft(NoticeKind::Finished), now).unwrap();
+    let two = hub.publish(draft(NoticeKind::Failed), now + 1).unwrap();
+    let subscription = hub.subscribe_push(Some("test"), Some(one.seq));
+    assert_eq!(seqs(&subscription.replay), vec![two.seq]);
+    assert_eq!(
+        subscription.latest_seq, two.seq,
+        "the newest seq is taken together with the replay"
     );
-    let (replay, _rx) = hub.subscribe_push(Some(one.seq));
-    assert_eq!(replay.len(), 1);
-    assert_eq!(replay[0].id, two.id);
-    assert_eq!(hub.latest_push_seq(), two.seq);
+}
+
+#[test]
+fn a_bridge_that_connects_late_gets_what_was_pushed_since_the_daemon_started() {
+    let hub = Hub::in_memory();
+    let now = storage::now_ms();
+    hub.publish(draft(NoticeKind::Finished), now).unwrap();
+    hub.publish(draft(NoticeKind::Failed), now + 1).unwrap();
+    let (first, _rx) = sub(&hub, "telegram", None);
+    assert_eq!(
+        seqs(&first),
+        vec![1, 2],
+        "nothing pushed before it came is skipped"
+    );
+}
+
+#[test]
+fn a_bridge_is_not_resent_what_its_stream_handed_over() {
+    let hub = Hub::in_memory();
+    let now = storage::now_ms();
+    for i in 0..3 {
+        hub.publish(draft(NoticeKind::Finished), now + i).unwrap();
+    }
+    hub.mark_delivered(Some("telegram"), 2);
+    // The same bridge connecting again without a cursor (it restarted) gets only the third.
+    let (again, _rx) = sub(&hub, "telegram", None);
+    assert_eq!(seqs(&again), vec![3]);
+    // Another bridge has its own cursor: it was handed nothing.
+    let (other, _rx) = sub(&hub, "discord", None);
+    assert_eq!(seqs(&other), vec![1, 2, 3]);
+    hub.mark_delivered(Some("discord"), 3);
+    hub.mark_delivered(Some("telegram"), 3);
+    assert_eq!(seqs(&sub(&hub, "discord", None).0), Vec::<u64>::new());
+    assert_eq!(seqs(&sub(&hub, "telegram", None).0), Vec::<u64>::new());
+    // A cursor never moves back.
+    hub.mark_delivered(Some("telegram"), 1);
+    assert_eq!(seqs(&sub(&hub, "telegram", None).0), Vec::<u64>::new());
+}
+
+#[test]
+fn a_second_connection_without_a_cursor_does_not_replay_the_whole_run() {
+    let hub = Hub::in_memory();
+    let now = storage::now_ms();
+    hub.publish(draft(NoticeKind::Finished), now).unwrap();
+    hub.publish(draft(NoticeKind::Failed), now + 1).unwrap();
+    let (first, _rx) = sub(&hub, "telegram", None);
+    assert_eq!(seqs(&first), vec![1, 2]);
+    hub.mark_delivered(Some("telegram"), 2);
+    hub.publish(draft(NoticeKind::Blocked), now + 2).unwrap();
+    // The bridge restarts hours later: it gets the one it has not seen, not all three again.
+    let (second, _rx) = sub(&hub, "telegram", None);
+    assert_eq!(seqs(&second), vec![3]);
+}
+
+#[test]
+fn a_cursor_name_must_be_a_short_word_and_the_table_is_bounded() {
+    let mut known = BTreeMap::new();
+    assert_eq!(bridge_key(&known, Some("telegram")), "telegram");
+    assert_eq!(bridge_key(&known, None), DEFAULT_BRIDGE);
+    assert_eq!(bridge_key(&known, Some("")), DEFAULT_BRIDGE);
+    assert_eq!(bridge_key(&known, Some("Tele gram")), DEFAULT_BRIDGE);
+    assert_eq!(bridge_key(&known, Some("../etc")), DEFAULT_BRIDGE);
+    assert_eq!(bridge_key(&known, Some(&"a".repeat(17))), DEFAULT_BRIDGE);
+    for i in 0..BRIDGES_MAX {
+        known.insert(format!("b{i}"), 1);
+    }
+    assert_eq!(
+        bridge_key(&known, Some("b3")),
+        "b3",
+        "a known bridge keeps its cursor"
+    );
+    assert_eq!(
+        bridge_key(&known, Some("newcomer")),
+        DEFAULT_BRIDGE,
+        "no more cursors than BRIDGES_MAX"
+    );
 }
 
 #[test]
@@ -535,7 +623,7 @@ fn notices_and_their_numbering_survive_a_restart() {
         "the numbering goes on, a bridge's cursor stays valid"
     );
     // A bridge that reconnects with its cursor gets what it missed.
-    let (replay, _rx) = hub.subscribe_push(Some(1));
+    let (replay, _rx) = sub(&hub, "test", Some(1));
     assert_eq!(replay.iter().map(|n| n.seq).collect::<Vec<_>>(), vec![2, 3]);
 }
 
@@ -550,7 +638,7 @@ fn a_notice_held_by_quiet_hours_is_pushed_after_a_restart() {
     drop(hub);
     // The daemon restarts inside the window: the notice is still held, not lost.
     let hub = Hub::load(dir.path());
-    let (_, mut rx) = hub.subscribe_push(None);
+    let (_, mut rx) = sub(&hub, "test", None);
     hub.release_held(night + 1000);
     assert!(rx.try_recv().is_err(), "still quiet");
     hub.release_held(DAY + 32 * HOUR);
@@ -560,38 +648,98 @@ fn a_notice_held_by_quiet_hours_is_pushed_after_a_restart() {
 }
 
 #[test]
-fn a_notice_no_bridge_was_handed_goes_to_the_first_bridge_after_a_restart() {
+fn after_a_restart_each_bridge_resumes_after_what_it_was_handed() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::load(dir.path());
     let now = storage::now_ms();
-    let seen = hub.publish(draft(NoticeKind::Finished), now).unwrap();
-    hub.mark_delivered(seen.seq);
-    let unsent = hub.publish(draft(NoticeKind::Failed), now).unwrap();
+    for i in 0..3 {
+        hub.publish(draft(NoticeKind::Finished), now + i).unwrap();
+    }
     let mut old = draft(NoticeKind::Failed);
     old.title = "Last week".into();
     hub.publish(old, now - 2 * 24 * HOUR).unwrap();
+    hub.mark_delivered(Some("telegram"), 3);
+    hub.mark_delivered(Some("discord"), 1);
     drop(hub);
     let hub = Hub::load(dir.path());
-    let (replay, _rx) = hub.subscribe_push(None);
-    let ids: Vec<_> = replay.iter().map(|n| n.id.clone()).collect();
-    assert_eq!(
-        ids,
-        vec![unsent.id],
-        "only what was not handed over, and not what is days old"
+    assert!(
+        sub(&hub, "telegram", None).0.is_empty(),
+        "telegram had everything"
     );
+    let (discord, _rx) = sub(&hub, "discord", None);
+    assert_eq!(
+        seqs(&discord),
+        vec![2, 3],
+        "discord gets what it was not handed, and not what is days old"
+    );
+    // A bridge the daemon never saw starts after what the earlier run pushed...
+    let (newcomer, _rx) = sub(&hub, "signal", None);
+    assert!(newcomer.is_empty(), "history is not new to a new bridge");
+    // ...but gets what this run pushes before it has connected.
+    hub.publish(draft(NoticeKind::Failed), storage::now_ms())
+        .unwrap();
+    assert_eq!(seqs(&sub(&hub, "signal", None).0), vec![5]);
 }
 
 #[test]
-fn a_first_start_has_nothing_to_replay() {
+fn a_first_start_replays_what_was_pushed_before_the_bridge_connected() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::load(dir.path());
     hub.publish(draft(NoticeKind::Failed), storage::now_ms())
         .unwrap();
-    let (replay, _rx) = hub.subscribe_push(None);
-    assert!(
-        replay.is_empty(),
-        "without an earlier run a bridge starts with what is new"
+    let (replay, _rx) = sub(&hub, "telegram", None);
+    assert_eq!(
+        seqs(&replay),
+        vec![1],
+        "a notice pushed in the seconds before the bridge connected is not lost"
     );
+}
+
+// ---- the notices are written off the caller's thread
+
+fn slow_save(path: &Path, p: &Persisted) -> std::io::Result<()> {
+    std::thread::sleep(Duration::from_millis(300));
+    save_json(path, p)
+}
+
+#[test]
+fn publishing_does_not_wait_for_the_disk_and_the_newest_state_is_what_ends_up_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load_with(dir.path(), slow_save);
+    let now = storage::now_ms();
+    let started = std::time::Instant::now();
+    for i in 0..20 {
+        let mut d = draft(NoticeKind::Finished);
+        d.title = format!("n{i}");
+        hub.publish(d, now + i).unwrap();
+    }
+    assert!(
+        started.elapsed() < Duration::from_millis(250),
+        "20 publishes took {:?}: a save blocks the caller",
+        started.elapsed()
+    );
+    hub.mark_delivered(Some("telegram"), 20);
+    assert!(
+        started.elapsed() < Duration::from_millis(250),
+        "marking a notice delivered waits for the disk"
+    );
+    hub.flush();
+    // Saves that piled up behind the slow one were collapsed, and the file holds the newest.
+    let saved = load_notices(&dir.path().join(NOTICES_FILE)).unwrap();
+    assert_eq!(saved.seq, 20);
+    assert_eq!(saved.log.len(), 20);
+    assert_eq!(saved.delivered.get("telegram"), Some(&20));
+}
+
+#[test]
+fn dropping_the_hub_waits_for_the_last_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let hub = Hub::load_with(dir.path(), slow_save);
+    hub.publish(draft(NoticeKind::Failed), storage::now_ms())
+        .unwrap();
+    drop(hub);
+    let saved = load_notices(&dir.path().join(NOTICES_FILE)).unwrap();
+    assert_eq!(saved.log.len(), 1);
 }
 
 #[test]
@@ -624,6 +772,8 @@ fn only_the_daemons_user_can_read_the_saved_notices() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::load(dir.path());
     hub.publish(draft(NoticeKind::Finished), DAY).unwrap();
+    // The notices are written in the background.
+    hub.flush();
     let mode = std::fs::metadata(dir.path().join(NOTICES_FILE))
         .unwrap()
         .permissions()

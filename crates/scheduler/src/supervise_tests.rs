@@ -100,3 +100,33 @@ async fn a_loop_that_keeps_panicking_is_given_up_and_nobody_waits_for_it() {
         .expect("a tick does not hang on a loop that is gone");
     scheduler.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_loop_that_dies_at_every_start_is_given_up_and_a_waiting_tick_returns() {
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let exec = RecordingExecutor::new();
+    let clock = Arc::new(FakeClock::new(0));
+    // Slow restarts, so a tick is already waiting when the guard gives up.
+    let guard = Guard::new(Policy {
+        max_crashes: 3,
+        backoff_base: Duration::from_millis(100),
+        backoff_max: Duration::from_millis(100),
+        stable_after: Duration::from_secs(60),
+    });
+    // The task itself panics before it reaches a pass: the loop never gets to say it is gone.
+    guard.inject_panic(LOOP_NAME, Fault::Task, 10);
+    let scheduler = Scheduler::start_guarded(store, exec, clock, &guard);
+    let waiting = {
+        let scheduler = scheduler.clone();
+        tokio::spawn(async move { scheduler.tick().await })
+    };
+    tokio::time::timeout(Duration::from_secs(10), waiting)
+        .await
+        .expect("a tick that was waiting returns when the scheduler is given up")
+        .unwrap();
+    assert!(guard.is_degraded());
+    tokio::time::timeout(Duration::from_secs(10), scheduler.tick())
+        .await
+        .expect("and so does a tick after it");
+    scheduler.shutdown().await;
+}

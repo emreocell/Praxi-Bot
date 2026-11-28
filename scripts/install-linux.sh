@@ -93,6 +93,11 @@ readonly NODE_SHA256_X64="c54118104acc524633b5abe106bbf44a53126ec8b4e5fa105cb92b
 readonly NODE_SHA256_ARM64="8bd3dc69eee8f3f226315a80d7d1d4faccf217a4c8fae500168ac2e38f3bdba3"
 # Root-owned directories first, the ones the service user can write last: a program the user (or a model
 # running as it) installs never shadows a system one. Mirrors identity::path_with_install_dirs (append only).
+# praxi.service timing (Type=notify): a start has this long to answer on its port (database migrations
+# of a big install run before that), and a started daemon must prove it is alive every WATCHDOG_SECS
+# (it beats every quarter of that, only while its own /v1/health answers).
+readonly START_TIMEOUT_SECS=600
+readonly WATCHDOG_SECS=180
 SERVICE_PATH="/usr/local/bin:/usr/bin:/bin:${NODE_DIR}/bin:${DATA_DIR}/.local/bin:${NPM_PREFIX}/bin"
 
 VERSION="latest"
@@ -371,7 +376,7 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
     if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
       log "[dry-run] virtual display: Xvfb ${DISPLAY_NUM} screen ${SCREEN_SPEC} (praxi-xvfb.service)"
     fi
-    log "[dry-run] would write ${UNIT_DIR}/praxi.service (Restart=on-failure, sandboxed) (log rate limit on our own units only; journald settings are not touched)"
+    log "[dry-run] would write ${UNIT_DIR}/praxi.service (Type=notify with a ${START_TIMEOUT_SECS}s start and a ${WATCHDOG_SECS}s watchdog when the daemon supports it, Restart=on-failure, sandboxed) (log rate limit on our own units only; journald settings are not touched)"
   fi
   log "[dry-run] nothing was changed"
   exit 0
@@ -1542,6 +1547,23 @@ fi
 SERVE_ARGS="serve"
 [[ "${HOST_MODE}" -eq 0 ]] || SERVE_ARGS="serve --host"
 
+# Type=notify: `systemctl start` returns once the daemon answers on its port (it sends READY=1 only
+# after its own GET /v1/health did, so migrations before that are covered by TimeoutStartSec, not by
+# the watchdog, which systemd starts after READY=1), and a hung daemon is restarted by WatchdogSec.
+# Only for a daemon that speaks the protocol: an older release picked with --version never sends
+# READY=1, and under Type=notify it would be killed after TimeoutStartSec at every start. Those get
+# the plain unit (no watchdog), as before.
+SERVICE_TYPE="simple"
+NOTIFY_LINES=""
+if grep -aqF 'STATUS=serving' "${PREFIX}/bin/bot" 2>/dev/null; then
+  SERVICE_TYPE="notify"
+  NOTIFY_LINES="TimeoutStartSec=${START_TIMEOUT_SECS}
+WatchdogSec=${WATCHDOG_SECS}
+NotifyAccess=main"
+else
+  warn "this bot binary does not report readiness to systemd; praxi.service is written as Type=simple without a watchdog"
+fi
+
 cat > "${UNIT_DIR}/praxi.service" <<UNIT
 [Unit]
 Description=Praxi-Bot daemon (bot ${SERVE_ARGS}, 127.0.0.1 only)
@@ -1551,7 +1573,7 @@ StartLimitIntervalSec=600
 StartLimitBurst=10
 
 [Service]
-Type=simple
+Type=${SERVICE_TYPE}
 ${SLICE_LINE:+${SLICE_LINE}
 }User=${SVC_USER}
 Group=${SVC_USER}
@@ -1564,10 +1586,8 @@ ExecStart=${PREFIX}/bin/bot ${SERVE_ARGS}
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
-# The daemon beats only while its own /v1/health answers; a hung daemon is killed and restarted.
-WatchdogSec=120
-NotifyAccess=main
-${HARDENING}
+${NOTIFY_LINES:+${NOTIFY_LINES}
+}${HARDENING}
 
 [Install]
 WantedBy=multi-user.target

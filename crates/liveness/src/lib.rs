@@ -12,5 +12,5 @@ mod guard;
 pub mod notify;
 
 pub use guard::{
-    EventKind, Fault, Guard, LoopEvent, LoopState, LoopStatus, Notifier, Policy, Verdict,
+    Cause, EventKind, Fault, Guard, LoopEvent, LoopState, LoopStatus, Notifier, Policy, Verdict,
 };

@@ -44,6 +44,74 @@ pub fn now_ms() -> u64 {
     .unwrap_or(u64::MAX)
 }
 
+/// The fixed phases of the daemon's start, run and stop that a log line may name.
+fn safe_phase(value: &str) -> bool {
+    matches!(
+        value,
+        "begin"
+            | "process_guard"
+            | "providers"
+            | "database open"
+            | "api token ready"
+            | "desktop backend capabilities read"
+            | "skill index built"
+            | "agent built"
+            | "web tools registered"
+            | "interrupted runs recovered"
+            | "app state built"
+            | "schedule tools registered"
+            | "runtime built"
+            | "peer stack starting"
+            | "peer stack handled"
+            | "screen privileges loaded"
+            | "host links installed"
+            | "computer identity read"
+            | "computer grants reconciled"
+            | "mcp host loading configuration"
+            | "mcp host ready, server connections start in background"
+            | "components and apps wired"
+            | "port bound"
+            | "listening"
+            | "telegram configuration loading"
+            | "telegram configuration loaded"
+            | "leader_starting"
+            | "leader_ready"
+            | "leader_idle"
+            | "spawning"
+            | "ready"
+            | "stopping"
+            | "stopped"
+            | "failed"
+            | "notify_ready"
+            | "watchdog_started"
+            | "watchdog_probe_failed"
+            | "watchdog_probe_recovered"
+    )
+}
+
+/// The fixed reasons a log line may give.
+fn safe_reason(value: &str) -> bool {
+    matches!(
+        value,
+        "retry"
+            | "safe_mode"
+            | "providers_changed"
+            | "owner_request"
+            | "shutdown_signal"
+            | "startup_failed"
+            | "port_in_use"
+            | "data_access_denied"
+            | "file_missing"
+            | "child_exited"
+            | "restart_skipped"
+            | "component_warning"
+            | "no usable provider"
+            | "loop_panicked"
+            | "loop_ended"
+            | "loop_gave_up"
+    )
+}
+
 fn safe_value(name: &str, value: &str) -> bool {
     match name {
         "method" => matches!(
@@ -69,59 +137,17 @@ fn safe_value(name: &str, value: &str) -> bool {
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
         }
         "request_id" => uuid::Uuid::parse_str(value).is_ok(),
-        "phase" => matches!(
-            value,
-            "begin"
-                | "process_guard"
-                | "providers"
-                | "database open"
-                | "api token ready"
-                | "desktop backend capabilities read"
-                | "skill index built"
-                | "agent built"
-                | "web tools registered"
-                | "interrupted runs recovered"
-                | "app state built"
-                | "schedule tools registered"
-                | "runtime built"
-                | "peer stack starting"
-                | "peer stack handled"
-                | "screen privileges loaded"
-                | "host links installed"
-                | "computer identity read"
-                | "computer grants reconciled"
-                | "mcp host loading configuration"
-                | "mcp host ready, server connections start in background"
-                | "components and apps wired"
-                | "port bound"
-                | "listening"
-                | "telegram configuration loading"
-                | "telegram configuration loaded"
-                | "leader_starting"
-                | "leader_ready"
-                | "leader_idle"
-                | "spawning"
-                | "ready"
-                | "stopping"
-                | "stopped"
-                | "failed"
-        ),
-        "reason" => matches!(
-            value,
-            "retry"
-                | "safe_mode"
-                | "providers_changed"
-                | "owner_request"
-                | "shutdown_signal"
-                | "startup_failed"
-                | "port_in_use"
-                | "data_access_denied"
-                | "file_missing"
-                | "child_exited"
-                | "restart_skipped"
-                | "component_warning"
-                | "no usable provider"
-        ),
+        "phase" => safe_phase(value),
+        "reason" => safe_reason(value),
+        // The name of a supervised background loop: a constant of the code, never user data.
+        "loop_name" => {
+            !value.is_empty()
+                && value.len() <= 32
+                && value.as_bytes()[0].is_ascii_lowercase()
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        }
         "site" => {
             (value.starts_with("apps/") || value.starts_with("crates/"))
                 && value.len() < 180
@@ -130,7 +156,9 @@ fn safe_value(name: &str, value: &str) -> bool {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"/_-.:".contains(&b))
         }
-        "elapsed_ms" => value.parse::<u64>().is_ok(),
+        "elapsed_ms" | "interval_ms" | "restart_in_ms" | "crashes" | "failures" => {
+            value.parse::<u64>().is_ok()
+        }
         "exit_code" => value == "unknown" || value.parse::<i32>().is_ok(),
         _ => false,
     }
@@ -436,6 +464,36 @@ mod tests {
         ] {
             assert!(!safe_stderr(canary).contains(canary));
         }
+    }
+
+    #[test]
+    fn supervision_events_keep_only_their_fixed_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let subscriber = tracing_subscriber::registry()
+            .with(sink(dir.path(), "daemon", FILE_BYTES, false).unwrap());
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::error!(target: "praxi_support", reason = "loop_panicked", loop_name = "scheduler", crashes = 2u64, restart_in_ms = 2000u64, "sk-canary-12345678901234567890");
+            tracing::error!(target: "praxi_support", reason = "loop_gave_up", loop_name = "Mission wakes: /home/canary", crashes = 5u64);
+            tracing::info!(target: "praxi_support", phase = "watchdog_started", interval_ms = 45_000u64);
+            tracing::info!(target: "praxi_support", phase = "notify_ready");
+            tracing::warn!(target: "praxi_support", phase = "watchdog_probe_failed", failures = 1u64);
+            tracing::warn!(target: "praxi_support", reason = "loop_panicked", loop_name = "x", interval_ms = "sk-canary-1");
+        });
+        let entries = recent(dir.path(), None, None).unwrap();
+        let text = serde_json::to_string(&entries).unwrap();
+        assert!(!text.contains("canary"), "{text}");
+        assert_eq!(entries.len(), 6);
+        assert_eq!(entries[0].fields["loop_name"], "scheduler");
+        assert_eq!(entries[0].fields["restart_in_ms"], "2000");
+        assert_eq!(entries[1].fields["reason"], "loop_gave_up");
+        assert!(
+            !entries[1].fields.contains_key("loop_name"),
+            "a name that is not a plain identifier is dropped"
+        );
+        assert_eq!(entries[2].fields["interval_ms"], "45000");
+        assert_eq!(entries[3].fields["phase"], "notify_ready");
+        assert_eq!(entries[4].fields["failures"], "1");
+        assert!(!entries[5].fields.contains_key("interval_ms"));
     }
 
     #[test]

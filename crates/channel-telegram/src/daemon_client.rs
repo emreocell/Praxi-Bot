@@ -173,7 +173,8 @@ pub trait DaemonClient: Send + Sync {
 
     /// `GET /v1/owner-notices/stream`: what the daemon pushes to the owner on its own (a
     /// finished, failed or blocked mission or background run). `after` replays what was missed
-    /// since that `seq`. The default never produces an event.
+    /// since that `seq`; without it the daemon replays what it has not handed to this bridge yet.
+    /// The default never produces an event.
     async fn subscribe_notices(
         &self,
         _after: Option<u64>,
@@ -200,7 +201,8 @@ pub trait DaemonClient: Send + Sync {
 /// One event of the daemon's owner-notice stream (`GET /v1/owner-notices/stream`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum NoticeEvent {
-    /// First event of every connection: the newest pushed `seq`.
+    /// First event of every connection: the newest pushed `seq`. Information only, not a cursor:
+    /// the replay that follows it may not have arrived yet.
     Hello {
         /// Newest pushed notice, 0 when there is none.
         latest_seq: u64,
@@ -552,7 +554,13 @@ impl DaemonClient for HttpDaemonClient {
         &self,
         after: Option<u64>,
     ) -> Result<BoxStream<'static, NoticeEvent>> {
-        let query = after.map_or_else(String::new, |a| format!("?after={a}"));
+        // `bridge` names the cursor the daemon keeps of what this bridge was handed (the message
+        // source is a fixed word: `telegram`, `discord`).
+        let mut query = format!("?bridge={}", self.message_source);
+        if let Some(after) = after {
+            query.push_str("&after=");
+            query.push_str(&after.to_string());
+        }
         let mut rb = self
             .http
             .get(format!("{}/v1/owner-notices/stream{query}", self.base_url))

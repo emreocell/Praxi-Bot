@@ -1,8 +1,11 @@
-//! The systemd watchdog of the daemon: a heartbeat that only goes out while the daemon answers.
+//! The daemon's side of a `Type=notify` systemd unit: readiness and a watchdog heartbeat that only
+//! go out while the daemon answers.
 //!
-//! The beat is not "the runtime still ticks": it asks the daemon's own `GET /v1/health` over the
-//! loopback, so a daemon whose HTTP stack, runtime or state lock is stuck stops beating and
-//! systemd (`WatchdogSec=`) restarts it. Outside systemd it does nothing.
+//! Neither is "the process runs" or "the runtime still ticks": both ask the daemon's own
+//! `GET /v1/health` over the loopback. `READY=1` waits for the first answer (so a start is "up"
+//! when the HTTP server serves, however long the migrations before it took), and a daemon whose
+//! HTTP stack, runtime or state lock gets stuck stops beating, so systemd (`WatchdogSec=`)
+//! restarts it. Outside systemd it does nothing.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -11,7 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
-/// How long one probe may take before the beat is skipped.
+/// How long one probe may take before it counts as failed.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Whether the daemon answers `GET /v1/health` on `addr` with a 200 within `limit`.
@@ -34,22 +37,22 @@ pub(crate) async fn probe_health(addr: SocketAddr, limit: Duration) -> bool {
         .unwrap_or(false)
 }
 
-/// Start the heartbeat when systemd asked for one (`WatchdogSec=`) and tell it the daemon is
-/// serving. Returns at once; the beat stops with `cancel`.
+/// Start the systemd side of the daemon: `READY=1` once its own `GET /v1/health` answers and, when
+/// the unit has `WatchdogSec=`, a heartbeat that goes on only while it keeps answering. Returns at
+/// once; the task ends with `cancel`. Without a `NOTIFY_SOCKET` (not started by systemd) nothing
+/// is spawned.
 pub(crate) fn start(addr: SocketAddr, cancel: CancellationToken) {
-    if let Err(e) = liveness::notify::send("READY=1\nSTATUS=serving") {
-        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "systemd notify failed: {e}");
-    }
-    let Some(interval) = liveness::notify::watchdog_interval() else {
+    if !liveness::notify::is_enabled() {
         return;
-    };
+    }
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    support_logs::tracing::info!(target: "praxi_support", phase = "watchdog_started", interval_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX));
-    runtime.spawn(liveness::notify::heartbeat(interval, cancel, move || {
-        probe_health(addr, PROBE_TIMEOUT)
-    }));
+    runtime.spawn(liveness::notify::supervise_service(
+        liveness::notify::watchdog_interval(),
+        cancel,
+        move || probe_health(addr, PROBE_TIMEOUT),
+    ));
 }
 
 #[cfg(test)]
@@ -95,6 +98,30 @@ mod tests {
     async fn a_daemon_that_never_answers_is_not_alive() {
         let addr = canned(b"", false).await;
         assert!(!probe_health(addr, Duration::from_millis(200)).await);
+    }
+
+    #[tokio::test]
+    async fn a_port_that_is_bound_but_not_served_yet_is_not_ready() {
+        // The daemon binds the port first and starts serving later: the kernel completes the
+        // connection, and the request sits unanswered. READY=1 must wait for the answer.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert!(!probe_health(addr, Duration::from_millis(200)).await);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 256];
+                    let _ = s.read(&mut buf).await;
+                    let _ = s
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                        .await;
+                });
+            }
+        });
+        assert!(probe_health(addr, Duration::from_secs(2)).await);
     }
 
     #[tokio::test]

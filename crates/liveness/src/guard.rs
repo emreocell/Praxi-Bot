@@ -1,6 +1,5 @@
 //! The loop guard: restart with backoff, give up to `degraded`, catch one bad pass.
 
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
@@ -86,6 +85,16 @@ pub struct LoopEvent {
 /// Receives the [`LoopEvent`]s. It runs on the crashing task: keep it quick.
 pub type Notifier = Arc<dyn Fn(&LoopEvent) + Send + Sync>;
 
+/// Why a supervised loop stopped. Fixed values on purpose: a panic message may carry a path or a
+/// secret, so it is not kept, logged or shown anywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cause {
+    /// The loop (or one pass of it) panicked.
+    Panicked,
+    /// The loop returned although nobody asked it to stop.
+    Ended,
+}
+
 /// What to do after a crash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -136,14 +145,6 @@ impl std::fmt::Debug for Guard {
             .field("loops", &self.statuses())
             .finish_non_exhaustive()
     }
-}
-
-fn panic_text(payload: &(dyn Any + Send)) -> String {
-    payload
-        .downcast_ref::<&str>()
-        .map(|s| (*s).to_owned())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "panic without a message".to_owned())
 }
 
 fn wall_ms() -> i64 {
@@ -227,8 +228,9 @@ impl Guard {
         });
     }
 
-    /// Note a crash of `name`: log it, tell the notifier and say what to do next.
-    pub fn record_crash(&self, name: &'static str, what: &str) -> Verdict {
+    /// Note a crash of `name`: log it (an allowlisted support-log event: the loop's name and
+    /// counts, never the panic message), tell the notifier and say what to do next.
+    pub fn record_crash(&self, name: &'static str, cause: Cause) -> Verdict {
         self.register(name);
         let (verdict, event) = {
             let mut loops = self.0.loops.lock();
@@ -248,9 +250,12 @@ impl Guard {
             e.last_crash_ms = Some(wall_ms());
             if e.in_row >= policy.max_crashes {
                 e.state = LoopState::Degraded;
-                tracing::error!(
-                    "background loop `{name}` crashed {} times in a row ({what}); giving up, it is degraded until the daemon restarts",
-                    e.in_row
+                support_logs::tracing::error!(
+                    target: "praxi_support",
+                    reason = "loop_gave_up",
+                    loop_name = name,
+                    crashes = u64::from(e.in_row),
+                    "background loop given up on"
                 );
                 (
                     Verdict::GiveUp,
@@ -266,10 +271,16 @@ impl Guard {
                     .backoff_base
                     .saturating_mul(1u32 << shift)
                     .min(policy.backoff_max);
-                tracing::error!(
-                    "background loop `{name}` crashed ({what}); restarting in {wait:?} (crash {} of {})",
-                    e.in_row,
-                    policy.max_crashes
+                support_logs::tracing::error!(
+                    target: "praxi_support",
+                    reason = match cause {
+                        Cause::Panicked => "loop_panicked",
+                        Cause::Ended => "loop_ended",
+                    },
+                    loop_name = name,
+                    crashes = u64::from(e.in_row),
+                    restart_in_ms = u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+                    "background loop crashed, restarting"
                 );
                 (
                     Verdict::Retry(wait),
@@ -309,7 +320,7 @@ impl Guard {
         };
         match AssertUnwindSafe(run).catch_unwind().await {
             Ok(value) => Ok(value),
-            Err(payload) => Err(self.record_crash(name, &panic_text(&*payload))),
+            Err(_payload) => Err(self.record_crash(name, Cause::Panicked)),
         }
     }
 
@@ -343,10 +354,8 @@ impl Guard {
                 }
                 let verdict = match ended {
                     Ok(()) if guard.is_given_up(name) => return,
-                    Ok(()) => guard.record_crash(name, "the loop ended on its own"),
-                    Err(e) if e.is_panic() => {
-                        guard.record_crash(name, &panic_text(&*e.into_panic()))
-                    }
+                    Ok(()) => guard.record_crash(name, Cause::Ended),
+                    Err(e) if e.is_panic() => guard.record_crash(name, Cause::Panicked),
                     // Aborted from outside: nobody wants it back.
                     Err(_) => return,
                 };

@@ -621,7 +621,6 @@ impl Modify for Security {
         dto::GrantDto,
         dto::GrantTargetDto,
         dto::BackgroundHealth,
-        dto::BackgroundLoop,
         dto::Health,
         dto::HostInfo,
         dto::LatestCursor,

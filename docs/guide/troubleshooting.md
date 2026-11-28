@@ -70,7 +70,8 @@ error.
 - **Background loops (`background_loops`)** shows whether the scheduler and the mission loops
   run. A warning means one crashed and was restarted by itself; a failure means one crashed five
   times in a row and stays stopped until the daemon restarts (schedules, mission wake-ups or
-  missions do not run meanwhile). The same state is in `background` of `GET /v1/health`. See
+  missions do not run meanwhile). `GET /v1/health` shows only the overall `background.status`;
+  this check, in the app's Settings > Doctor, names the loops. See
   [host operations](host-operations.md#when-something-inside-the-daemon-breaks).
 - **Browser (`browser`)** reports which Chrome, Chromium or Edge the bot would start, or why none
   can be used (only the snap Chromium exists, `BOT_BROWSER_PATH` points to nothing). On Linux, when

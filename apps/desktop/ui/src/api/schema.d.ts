@@ -4354,9 +4354,15 @@ export interface paths {
         };
         /**
          * The pushed notices as server-sent events (`event: notice`, one JSON `OwnerNotice` per event),
-         *     for the Telegram and Discord bridges. `after` replays the pushed notices missed since that
-         *     `seq`; without it the stream starts with what is new from now on. A `hello` event first says
-         *     the newest pushed `seq`.
+         *     for the Telegram and Discord bridges. A `hello` event first says the newest pushed `seq`.
+         * @description * With `after`, the pushed notices missed since that `seq` are replayed first.
+         *     * Without it (a bridge that just started), the notices this `bridge` was not handed yet are:
+         *       the daemon remembers, per bridge and across restarts, the newest notice its stream handed
+         *       over, and a notice that is more than 12 hours old is not replayed. A bridge the daemon has
+         *       not seen before gets what was pushed since the daemon started.
+         *
+         *     A notice counts as handed over once the connection has taken its event, so a connection that
+         *     breaks first leaves it for the next one.
          */
         get: operations["stream_notices"];
         put?: never;
@@ -6300,6 +6306,18 @@ export interface components {
             scope: components["schemas"]["SkillScope"];
             /** @description Skill version string. */
             version: string;
+        };
+        /**
+         * @description Whether the loops that make the daemon act on its own (schedules, mission wake-ups, mission
+         *     drivers) are running. This is part of the unauthenticated `GET /v1/health`, so it says nothing
+         *     about the loops themselves; `GET /v1/doctor` (owner only) has the detail.
+         */
+        BackgroundHealth: {
+            /**
+             * @description `ok`, or `degraded` when a loop crashed too often and was given up on (it stays down
+             *     until the daemon restarts; the owner got a notice).
+             */
+            status: string;
         };
         /** @description `GET /v1/hosts/setup/bootstrap`: the one command to paste on a server. */
         BootstrapCommand: {
@@ -8722,6 +8740,11 @@ export interface components {
         Health: {
             /** @description HTTP API compatibility version. */
             api_version: string;
+            /**
+             * @description Whether the loops that make the daemon act on its own run. Only the overall status is
+             *     public here: which loop and how often it restarted is in the owner's doctor.
+             */
+            background?: components["schemas"]["BackgroundHealth"];
             build_id?: string | null;
             /**
              * @description `true` only when this daemon is the active leader and its automatic
@@ -24892,6 +24915,8 @@ export interface operations {
             query?: {
                 /** @description Replay pushed notices with a larger seq */
                 after?: number;
+                /** @description The bridge asking (telegram, discord): its own delivery cursor decides what is replayed when there is no `after` */
+                bridge?: string;
             };
             header?: never;
             path?: never;

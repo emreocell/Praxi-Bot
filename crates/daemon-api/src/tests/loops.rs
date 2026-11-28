@@ -40,9 +40,17 @@ fn titles(list: &[Value]) -> Vec<String> {
         .collect()
 }
 
-async fn health_loops(t: &T) -> Value {
+/// `background` of the unauthenticated `GET /v1/health`.
+async fn health_background(t: &T) -> Value {
     let r = send(&t.app, Method::GET, "/v1/health", None, &[]).await;
-    r.json()["background"].clone()
+    assert_eq!(r.status, StatusCode::OK);
+    let body = r.json();
+    // Nothing about the loops themselves (names, crash counts) goes to a caller without a token.
+    let text = body.to_string();
+    for private in ["scheduler", "mission_wakes", "mission_drivers", "restarts"] {
+        assert!(!text.contains(private), "health leaks `{private}`: {text}");
+    }
+    body["background"].clone()
 }
 
 async fn doctor_row(t: &T) -> Value {
@@ -60,12 +68,15 @@ async fn doctor_row(t: &T) -> Value {
 async fn health_and_doctor_list_the_loops_before_anything_crashed() {
     let t = setup();
     t.state.start_scheduler().unwrap();
-    let health = health_loops(&t).await;
-    assert_eq!(health["status"], "ok");
-    assert_eq!(health["loops"][0]["name"], "scheduler");
-    assert_eq!(health["loops"][0]["degraded"], false);
-    assert_eq!(health["loops"][0]["restarts"], 0);
-    assert_eq!(doctor_row(&t).await["status"], "ok");
+    let health = health_background(&t).await;
+    assert_eq!(health, serde_json::json!({"status": "ok"}));
+    let row = doctor_row(&t).await;
+    assert_eq!(row["status"], "ok");
+    // The owner's doctor names the loops.
+    assert!(
+        row["detail"].as_str().unwrap().contains("scheduler"),
+        "{row}"
+    );
     t.state.stop_components().await;
 }
 
@@ -86,10 +97,13 @@ async fn a_scheduler_pass_that_panics_is_caught_and_the_owner_is_told() {
         vec!["Schedules stopped and were restarted".to_owned()]
     );
     assert_eq!(list[0]["kind"], "failed");
-    let health = health_loops(&t).await;
-    assert_eq!(health["status"], "ok");
-    assert_eq!(health["loops"][0]["restarts"], 1);
-    assert_eq!(doctor_row(&t).await["status"], "warn");
+    assert_eq!(health_background(&t).await["status"], "ok");
+    let row = doctor_row(&t).await;
+    assert_eq!(row["status"], "warn");
+    assert!(
+        row["detail"].as_str().unwrap().contains("scheduler (1x)"),
+        "{row}"
+    );
     // The loop goes on: the next tick is answered.
     t.state.scheduler().unwrap().tick().await;
     t.state.stop_components().await;
@@ -169,15 +183,17 @@ async fn a_loop_that_keeps_crashing_is_degraded_everywhere() {
     t.state.start_scheduler().unwrap();
     let guard = t.state.loop_guard();
     for _ in 0..5 {
-        guard.record_crash(scheduler::LOOP_NAME, "test");
+        guard.record_crash(scheduler::LOOP_NAME, liveness::Cause::Panicked);
     }
     assert!(guard.is_degraded());
     assert_eq!(guard.statuses()[0].state, LoopState::Degraded);
-    let health = health_loops(&t).await;
-    assert_eq!(health["status"], "degraded");
-    assert_eq!(health["loops"][0]["degraded"], true);
+    assert_eq!(health_background(&t).await["status"], "degraded");
     let row = doctor_row(&t).await;
     assert_eq!(row["status"], "fail");
+    assert!(
+        row["detail"].as_str().unwrap().contains("scheduler"),
+        "{row}"
+    );
     // One notice for the first crash and one for giving up.
     assert_eq!(
         titles(&notices(&t).await),

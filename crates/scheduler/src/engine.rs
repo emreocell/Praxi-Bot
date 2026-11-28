@@ -228,7 +228,7 @@ impl Scheduler {
 
         // A restart of the loop starts it over from the clock as it is then.
         let loop_inner = Arc::clone(&inner);
-        let handle = guard.supervise(LOOP_NAME, inner.cancel.clone(), move || {
+        let supervised = guard.supervise(LOOP_NAME, inner.cancel.clone(), move || {
             let inner = Arc::clone(&loop_inner);
             async move {
                 let wall = inner.clock.wall_ms();
@@ -236,6 +236,15 @@ impl Scheduler {
                 run_loop(inner, wall, mono).await;
             }
         });
+        // However the supervisor ends (shutdown, or giving up after the loop died before it could
+        // say so itself), nobody may keep waiting in `tick` for a pass that will not come.
+        let handle = {
+            let pass_tx = inner.pass_tx.clone();
+            tokio::spawn(async move {
+                let _ = supervised.await;
+                let _ = pass_tx.send(u64::MAX);
+            })
+        };
 
         Self {
             inner,
