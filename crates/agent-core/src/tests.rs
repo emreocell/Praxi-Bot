@@ -8012,8 +8012,7 @@ async fn pre_058_paused_run_with_unknown_origin_fails_closed_after_migration() {
             ALTER TABLE bots DROP COLUMN version;
             DROP TABLE bot_skill_assignment;
             DROP TABLE bot_skill_assignment_state;
-            DROP TABLE IF EXISTS file_provenance;
-            DROP TABLE IF EXISTS bot_delete_cleanup;
+            DROP TABLE IF EXISTS file_provenance; DROP TABLE IF EXISTS bot_delete_cleanup;
             DROP TABLE trusted_folders;
             DROP TABLE bot_spend_limits;
             DROP TABLE incoming_webhook_seen;
