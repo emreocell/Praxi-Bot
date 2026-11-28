@@ -372,6 +372,12 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         "catalog freshness",
         Box::new(|| doctor::check_catalog_freshness(SystemTime::now())),
     );
+    let d = data_dir.clone();
+    add(
+        "account_health",
+        "account sessions",
+        Box::new(move || doctor::check_account_sessions(&d)),
+    );
     add(
         "browser",
         "browser",

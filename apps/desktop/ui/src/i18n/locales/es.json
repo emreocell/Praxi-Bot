@@ -4463,6 +4463,15 @@
       "tokensPerMinute": "Cantidad de texto por minuto"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Chats largos: los mensajes antiguos se resumen en una nota breve para que el bot no pierda el hilo.",
+    "hint": "Los mensajes antiguos de un chat largo se resumen en una nota breve. Los mensajes siguen guardados y se pueden buscar.",
+    "label": "Resumir los mensajes antiguos de los chats largos",
+    "noBot": "Crea primero un bot.",
+    "note": "Cuando un chat se hace muy largo, el modelo del propio bot (o su modelo auxiliar más barato, salvo que haya datos privados) escribe una nota breve sobre la parte antigua. Después el bot lee esa nota y tus mensajes recientes. La nota se marca como texto no fiable, nunca como palabras tuyas, y el texto de páginas web o correos sigue marcado así. Los mensajes originales no se modifican ni se borran. Desactivado: el bot solo ve los mensajes más recientes, como antes.",
+    "title": "Chats largos"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} se reserva algunas cosas: la política de ejecución, los servidores de herramientas de línea de comandos, las habilidades y las sesiones de los CLI de programación se configuran directamente en {{name}}. Las cuentas de correo, búsqueda y dictado se pueden conectar desde este equipo.",
@@ -4502,7 +4511,6 @@
       "none": "El servidor no encontró herramientas de programación de línea de comandos.",
       "notInstalled": "Sin instalar.",
       "note": "Estas herramientas son del servidor. La instalación y el inicio de sesión se hacen en {{name}}.",
-      "officialPage": "Instalar {{name}} desde la página oficial",
       "ready": "Listo",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstalar en el servidor",
@@ -4513,8 +4521,7 @@
       "signIn": "Para iniciar sesión, ejecuta esto en el servidor:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Al iniciar sesión se muestra una dirección web en el servidor, normalmente con un código. Abre la dirección en este equipo e inicia sesión. Si se te pide, pega el código en la terminal del servidor. Las sesiones de este equipo nunca se copian al servidor.",
-      "signInOnServer": "Iniciar sesión en {{server}}",
-      "title": "Herramientas de programación de línea de comandos en {{name}}"
+      "signInOnServer": "Iniciar sesión en {{server}}"
     },
     "hint": "en {{name}}",
     "menu": {
@@ -5513,7 +5520,6 @@
     "hint": {
       "new": "Nuevo"
     },
-    "howToInstall": "Cómo instalar",
     "install": "Instalar {{name}}",
     "levels": {
       "high": "Alto",
@@ -5526,7 +5532,6 @@
     "listFresh": "Actualizado ahora mismo",
     "noModels": "Escribe un ID de modelo en la búsqueda para usarlo.",
     "none": "Sin modelo",
-    "notOnServer": "{{name}} · aún no está en {{server}}",
     "noteLocalClis": "Las CLI de suscripción de este equipo se usan cuando un bot se ejecuta en «este equipo».",
     "otherId": "Usar «{{id}}» con {{provider}}",
     "recent": "Recientes",
@@ -6715,14 +6720,11 @@
       },
       "detected": {
         "copied": "Comando copiado",
-        "copyCommand": "Copiar comando",
         "copyDetails": "Copiar detalles",
         "description": "Las herramientas encontradas aquí se activan solas cuando has iniciado sesión. Si desactivas una, se queda desactivada.",
         "detailsCopied": "Detalles copiados",
-        "detailsToggle": "Detalles",
         "detectError": "No se pudieron comprobar las herramientas de programación instaladas.",
         "dismissExpired": "Descartar la aprobación caducada",
-        "docs": "Documentación",
         "enabledToast": "{{name}} activado.",
         "experimentalChip": "Experimental",
         "install": "Instalar",
@@ -6737,16 +6739,12 @@
           "powershell_missing": "No se encontró PowerShell. Copia el comando y ejecútalo en tu terminal.",
           "timeout": "La instalación superó los diez minutos y se detuvo. Revisa la salida antes de volver a intentarlo."
         },
-        "installLabel": "Comando de instalación",
         "installRunning": "Instalando… salir de esta sección no revoca una aprobación ya aceptada.",
         "installSummary": "Instalar o actualizar {{engine}}",
-        "loginLabel": "Iniciar sesión con",
-        "moreEngines": "Más motores que puedes instalar ({{count}})",
         "noteNative": "Funciona con sus propias herramientas: elígelo en los ajustes de motor de un bot.",
         "noteUnsupported": "Praxi lo detecta, pero todavía no puede usarlo como motor.",
         "noteUnverified": "Comando sin verificar: consulta la documentación del fabricante y luego cópialo y ejecútalo tú mismo.",
         "offline": "El servicio local no está en marcha, así que no se pueden mostrar las herramientas de programación detectadas.",
-        "onThisComputer": "En este equipo",
         "pathLabel": "Ubicación",
         "problem": "Eso no funcionó.",
         "refresh": "Volver a buscar",
@@ -6759,8 +6757,7 @@
           "unsupported": "Aún no compatible"
         },
         "termsNotice": "Se aplican las condiciones de tu plan con el fabricante; comprueba que se permita el uso automatizado de la CLI antes de activarla.",
-        "title": "Encontrado en este equipo",
-        "toggle": "Usar {{name}}"
+        "title": "Encontrado en este equipo"
       },
       "keys": {
         "add": "Añadir",
@@ -6897,6 +6894,7 @@
       "allGood": "Todo parece estar bien",
       "checkedAt": "Última comprobación a las {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Navegador",
         "capabilities": "Capacidades",
         "catalog_freshness": "Actualidad del catálogo de modelos",
@@ -6921,6 +6919,7 @@
       "description": "Comprueba por qué el bot podría no funcionar y arregla los problemas comunes.",
       "empty": "No se devolvió ninguna comprobación",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Instala Chrome, Edge o Chromium (no el paquete snap).",
         "catalog_freshness": "La lista de modelos seleccionados tiene más de 90 días; actualiza Praxi o ejecuta `bot catalog check` para revisar los modelos actuales.",
         "cli_accounts": "Abre una terminal una vez e inicia sesión en la CLI (por ejemplo `claude` o `codex login`).",
@@ -7144,7 +7143,6 @@
       "ignored": "Correos de remitentes no permitidos que se ignoraron: {{n}}",
       "needsSenders": "Este canal funcionaba sin una lista de remitentes permitidos, así que ahora NO pasa ningún correo al bot. Añade en «Remitentes permitidos», en los ajustes del buzón de arriba, las direcciones que pueden escribir al bot (por ejemplo la tuya). Hasta entonces, todo correo entrante queda sin leer en el buzón.",
       "noAccount": "Primero añade un buzón arriba.",
-      "noSenders": "El buzón elegido no tiene remitentes permitidos, así que ningún correo llegará al bot. Añade tu propia dirección en «Remitentes permitidos» en los ajustes del buzón de arriba.",
       "note": "El correo lo escriben otras personas, así que el bot lo trata como información, nunca como órdenes. Por defecto solo ve el remitente, el asunto y las primeras líneas. Los adjuntos no se abren nunca. No se envía nada a menos que permitas las respuestas y apruebes cada una aquí.",
       "replies": "Permitir que el bot sugiera respuestas (tú apruebas cada una antes de enviarla)",
       "running": "En marcha",
@@ -7467,7 +7465,6 @@
         "searxng": "La dirección de tu propio servidor SearXNG, por ejemplo http://127.0.0.1:8080. La guía de búsqueda web incluye una instalación para servidores con un solo comando.",
         "tavily": "Crea una clave en tu cuenta de Tavily y pégala aquí."
       },
-      "providerHint": "Los bots buscan en la web a través de un proveedor de búsqueda. Los buscadores gratuitos suelen funcionar en un ordenador de casa, pero casi siempre bloquean a los servidores, así que un servidor necesita uno de estos.",
       "providerTitle": "Proveedor de búsqueda",
       "saveAndTest": "Guardar y probar",
       "searxngLabel": "URL de SearXNG",

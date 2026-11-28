@@ -268,6 +268,7 @@ impl AgentLoop {
                 mention_chain: Mutex::new(HashMap::new()),
                 tasks: Mutex::new(HashMap::new()),
                 bg: Mutex::new(Vec::new()),
+                summaries: Mutex::new(HashMap::new()),
                 gseq: AtomicU64::new(first_gseq),
                 emit_gate: Mutex::new(()),
                 send_gate: Mutex::new(()),
@@ -3841,6 +3842,7 @@ impl AgentLoop {
                 let _ = m.store.index_message(&msg);
             }
             self.enqueue_memory(run, &text);
+            self.enqueue_summary(run);
         }
         if let Some(ctx) = &ctx {
             if let Some(message) = &error {
@@ -3988,6 +3990,36 @@ impl AgentLoop {
             bg.retain(|h| !h.is_finished());
             bg.push(handle);
         }
+    }
+
+    /// Fold the older part of a long chat into its rolling summary (background task, see
+    /// `summary`). Cheap when the chat is under the thresholds: one count query. The chat is
+    /// claimed here, before the task exists: a second turn that ends meanwhile spawns nothing.
+    pub(crate) fn enqueue_summary(&self, run: &storage::Run) {
+        let Some(chat) = run.chat_id else {
+            return;
+        };
+        if run.parent_run_id.is_some()
+            || missions::mission_of_kind(&run.kind).is_some()
+            || !crate::summary::due(&self.sh, chat, run.bot_id)
+        {
+            return;
+        }
+        let Some(claim) = crate::summary::claim(&self.sh, chat) else {
+            return;
+        };
+        let Ok(ctx) = self.sh.ctx(run) else {
+            return;
+        };
+        let sh = Arc::clone(&self.sh);
+        let activity = crate::usage::Activity::new(&sh, run.id);
+        let handle = tokio::spawn(async move {
+            let _activity = activity;
+            crate::summary::run(sh, ctx, claim).await;
+        });
+        let mut bg = self.sh.bg.lock();
+        bg.retain(|h| !h.is_finished());
+        bg.push(handle);
     }
 
     fn final_text(&self, run_id: RunId) -> Option<String> {

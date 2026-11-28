@@ -4342,6 +4342,18 @@
       "hint": "Praxi'yi ana bilgisayarın kendisinde kullan ya da yönetici masaüstünden kaldır.",
       "title": "Bunu yalnızca ana bilgisayarın başındaki kişi yapabilir"
     },
+    "mailGuardBlocked": {
+      "hint": "Ayarlar → Güvenli gönderim bölümünde kuralı gözden geçirin veya gönderimi sizin onaylayabilmeniz için botun erişim düzeyini Sor olarak ayarlayın.",
+      "title": "Posta koruması bu gönderimi engelledi"
+    },
+    "mailGuardOptOut": {
+      "hint": "Ayarlar → Güvenli gönderim → Yazmayacağım kişiler listesinden kaldırın ya da kendiniz yazın.",
+      "title": "Bu kişi yazmayacağım listesinde"
+    },
+    "mailGuardUnreadable": {
+      "hint": "Ana bilgisayardaki hasarlı posta koruması dosyalarını düzeltip yeniden deneyin.",
+      "title": "Posta koruması kayıtlı kurallarını okuyamadı"
+    },
     "modelFailed": {
       "hint": "Yeniden dene ya da Ayarlar'dan başka bir model seç.",
       "title": "Model yanıt veremedi"
@@ -4891,6 +4903,15 @@
       "tokensPerMinute": "Dakikadaki metin miktarı"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Uzun sohbetler: eski mesajlar kısa bir nota özetlenir, böylece bot konuyu kaybetmez.",
+    "hint": "Uzun bir sohbetin eski mesajları kısa bir nota özetlenir. Mesajlar kayıtlı ve aranabilir kalır.",
+    "label": "Uzun sohbetlerin eski mesajlarını özetle",
+    "noBot": "Önce bir bot oluştur.",
+    "note": "Bir sohbet çok uzayınca botun kendi modeli (özel veri varsa yalnızca o, yoksa daha ucuz yardımcı modeli) eski kısım için kısa bir not yazar. Bot da bu notu ve son mesajlarını okur. Not, güvenilmeyen metin olarak işaretlenir; asla senin sözün sayılmaz, web sayfası ya da postadan gelen yazı da öyle işaretli kalır. Asıl mesajlar değişmez ve silinmez. Kapalıyken bot, eskisi gibi yalnızca en yeni mesajları görür.",
+    "title": "Uzun sohbetler"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} bazı şeyleri kendine saklar: yürütme politikası, komut satırı araç sunucuları, beceriler ve kodlama CLI girişleri doğrudan {{name}} üzerinde değiştirilir. E-posta, arama ve dikte hesapları bu bilgisayardan bağlanabilir.",
@@ -4930,7 +4951,6 @@
       "none": "Sunucu hiç kodlama CLI'ı bildirmedi.",
       "notInstalled": "Kurulu değil.",
       "note": "Bunlar sunucunun kendi araçları. Kurulum ve giriş {{name}} üzerinde yapılır.",
-      "officialPage": "{{name}} için resmî sayfadan kur",
       "ready": "Hazır",
       "readyAs": "Hazır · {{account}}",
       "reinstall": "Sunucuda yeniden kur",
@@ -4941,8 +4961,7 @@
       "signIn": "Giriş için sunucuda şunu çalıştır:",
       "signInAsUser": "Elle giriş yapmak için, buradaki terminalde ya da SSH ile, “{{user}}” kullanıcısı olarak:",
       "signInNote": "Giriş sunucuda bir web adresi (çoğu zaman bir kodla) gösterir. Adresi bu bilgisayarda aç, orada giriş yap ve istenirse kodu sunucudaki terminale yapıştır. Bu bilgisayardaki oturumlar sunucuya kopyalanmaz.",
-      "signInOnServer": "{{server}} üzerinde giriş yap",
-      "title": "{{name}} üzerindeki kodlama CLI'ları"
+      "signInOnServer": "{{server}} üzerinde giriş yap"
     },
     "hint": "{{name}} üzerinde",
     "menu": {
@@ -5957,7 +5976,6 @@
     "hint": {
       "new": "Yeni"
     },
-    "howToInstall": "Nasıl kurulur",
     "install": "{{name}} kur",
     "levels": {
       "high": "Yüksek",
@@ -5968,9 +5986,9 @@
     "listAge": "{{hours}} sa önce güncellendi",
     "listBundled": "Yerleşik yedek liste: CLI'ya sorulamadı.",
     "listFresh": "Az önce güncellendi",
+    "missingCliShort": "{{name}} · {{server}} üzerinde hazır değil",
     "noModels": "Kullanmak için aramaya model kimliği yaz.",
     "none": "Model yok",
-    "notOnServer": "{{name}} · {{server}} üzerinde henüz yok",
     "noteLocalClis": "Bu bilgisayardaki abonelik CLI'ları, bot “bu bilgisayarda” çalışırken kullanılır.",
     "otherId": "“{{id}}” modelini {{provider}} ile kullan",
     "recent": "Son kullanılanlar",
@@ -5980,6 +5998,7 @@
     "search": "Model ara",
     "sectionApi": "API sağlayıcıları",
     "sectionCli": "Kodlama CLI'ları (aboneliğin)",
+    "setUpCli": "Kurulum",
     "showAll": "Tüm modeller ({{count}})",
     "switched": "{{model}} modeline geçildi",
     "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı",
@@ -6843,6 +6862,7 @@
         "problems": "Sadece bir sorun olursa"
       },
       "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
+      "payloadKeptStanding": "Bu zamanlama bir kalıcı talimat: sana bir şey gerekmedikçe sessiz kalır. Kontrol listesi, etkin saatler ve günlük sınır burada değişmez.",
       "preview": "Önizle",
       "prompt": "İstem",
       "promptHint": "Bottan her seferinde yapması istenen şey.",
@@ -6877,6 +6897,7 @@
     "originBot": "Bot oluşturdu",
     "originBotHint": "Onayınla bir bot oluşturdu. Botlar yalnızca kendi oluşturdukları zamanlamaları değiştirebilir.",
     "payload": {
+      "standingOrder": "Kalıcı talimat: {{text}}",
       "tool": "{{name}} aracını çağırır",
       "unknown": "Özel görev",
       "workflow": "{{name}} iş akışını çalıştırır"
@@ -7258,14 +7279,11 @@
       },
       "detected": {
         "copied": "Komut kopyalandı",
-        "copyCommand": "Komutu kopyala",
         "copyDetails": "Ayrıntıları kopyala",
-        "description": "Bu bilgisayarda oturum açtığın yapay zekâ uygulamaları kendiliğinden açılır. Birini kapatırsan kapalı kalır.",
+        "description": "Tüm kodlama CLI'ları tek listede: bu bilgisayar ve sunucun. İşlemler her satırın menüsünde.",
         "detailsCopied": "Ayrıntılar kopyalandı",
-        "detailsToggle": "Ayrıntılar",
         "detectError": "Kurulu kodlama araçları denetlenemedi.",
         "dismissExpired": "Süresi dolan onayı kapat",
-        "docs": "Belgeler",
         "enabledToast": "{{name}} etkinleştirildi.",
         "experimentalChip": "Deneysel",
         "install": "Kur",
@@ -7280,16 +7298,12 @@
           "powershell_missing": "PowerShell bulunamadı. Komutu kopyalayıp terminalinden çalıştır.",
           "timeout": "Kurulum on dakikayı aştığı için durduruldu. Yeniden denemeden önce çıktıyı kontrol et."
         },
-        "installLabel": "Kurulum komutu",
         "installRunning": "Kuruluyor… bu bölümden ayrılmak verilmiş onayı iptal etmez.",
         "installSummary": "{{engine}} kur veya güncelle",
-        "loginLabel": "Giriş için",
-        "moreEngines": "Kurabileceğin diğer motorlar ({{count}})",
         "noteNative": "Kendi araçlarıyla çalışır: botun Motor ayarlarından seç.",
         "noteUnsupported": "Praxi bunu algılıyor ama henüz motor olarak çalıştıramıyor.",
         "noteUnverified": "Doğrulanmamış komut: satıcı belgelerine bak, sonra kopyalayıp kendin çalıştır.",
         "offline": "Yerel servis çalışmıyor; algılanan kodlama araçları gösterilemiyor.",
-        "onThisComputer": "Bu bilgisayarda",
         "pathLabel": "Konum",
         "problem": "İşlem başarısız oldu.",
         "refresh": "Yeniden tara",
@@ -7302,8 +7316,7 @@
           "unsupported": "Henüz desteklenmiyor"
         },
         "termsNotice": "Sağlayıcının abonelik koşulları geçerlidir; etkinleştirmeden önce otomatik kullanıma izin verildiğini doğrula.",
-        "title": "Bu bilgisayarda bulunanlar",
-        "toggle": "{{name}} kullan"
+        "title": "Kodlama CLI'ları"
       },
       "keys": {
         "add": "Ekle",
@@ -7324,36 +7337,46 @@
     "calendar": {
       "add": "Takvimi ekle",
       "addTitle": "Takvim bağla",
+      "advanced": "Gelişmiş",
+      "advancedHint": "Takvim adresi, bot adı ve davet gönderen adresi.",
       "description": "Botların takvimini okuyup yönetebilsin.",
       "emailHint": "Davetler bu adresten gider. Kullanıcı adın zaten e-posta adresinse boş bırak.",
       "emailLabel": "E-posta adresin (isteğe bağlı)",
+      "emailShort": "Davet e-postaları için. Kullanıcı adın zaten bir adres ise boş bırak.",
       "empty": "Henüz bağlı bir takvim yok.",
       "loadError": "Takvimler yüklenemedi ({{message}}).",
       "nameHint": "Harf, rakam, - ve _ kullanabilirsin. Botlar takvimi bu adla seçer.",
       "nameLabel": "Botlar için ad",
+      "nameShort": "Harf, rakam, - ve _. Botlar bu adı kullanır.",
       "note": "Botların takvimine bakabilir, boş zaman bulabilir, etkinlik ekleyip taşıyabilir ve insanları davet edebilir. Parola güvenli depoda saklanır ve bir daha gösterilmez.",
       "passwordHint": "Normal parolanı değil, bir uygulama parolası kullan. Güvenli şekilde saklanır ve geri okunamaz.",
       "passwordLabel": "Uygulama parolası",
+      "passwordShort": "Normal parola değil, uygulama parolası kullan.",
       "pickHint": "Botların hangi takvimi kullansın, seç:",
       "presets": {
         "fastmail": {
           "hint": "Fastmail adresini ve takvim erişimi olan bir uygulama parolası kullan (Ayarlar, Gizlilik ve Güvenlik, Entegrasyonlar).",
+          "hintShort": "Fastmail adresi + takvim erişimli uygulama parolası.",
           "label": "Fastmail"
         },
         "google": {
           "hint": "Tam Gmail adresini ve bir uygulama parolası kullan (Google Hesabı, Güvenlik, Uygulama parolaları; 2 adımlı doğrulama gerekir). Google bazen takvimler için uygulama parolalarını reddeder. Deneme başarısız olursa muhtemel neden budur.",
+          "hintShort": "Tam Gmail + Google uygulama parolası (2 adımlı doğrulama gerekir).",
           "label": "Google Takvim"
         },
         "icloud": {
           "hint": "Apple Kimliğini ve uygulamaya özel bir parola kullan (account.apple.com, Oturum Açma ve Güvenlik).",
+          "hintShort": "Apple Kimliği + account.apple.com uygulama parolası.",
           "label": "iCloud (Apple)"
         },
         "nextcloud": {
           "hint": "Sunucunun adresini ve kullanıcı adını yaz. Uygulama parolasını Ayarlar, Güvenlik, Cihazlar ve oturumlar bölümünden oluştur.",
+          "hintShort": "Sunucu adı, kullanıcı adı ve Nextcloud uygulama parolası.",
           "label": "Nextcloud"
         },
         "other": {
           "hint": "Takvim hizmetinin verdiği CalDAV adresini yapıştır.",
+          "hintShort": "Sağlayıcının verdiği CalDAV adresini yapıştır.",
           "label": "Diğer (CalDAV)"
         }
       },
@@ -7363,6 +7386,7 @@
       "schedulingOff": "Bu hizmet davetleri kendisi göndermez; botun davetleri e-postayla gönderir (bunun için bir e-posta hesabı gerekir).",
       "schedulingOn": "Bu hizmet davetleri kendisi gönderir.",
       "serverLabel": "Nextcloud sunucun",
+      "serverShort": "Yalnızca sunucu adı, https:// olmadan.",
       "serviceLabel": "Takvim hizmeti",
       "test": "Bağlantıyı dene",
       "testFailed": "Deneme başarısız oldu: {{error}}",
@@ -7376,6 +7400,7 @@
       },
       "urlHint": "Senin için dolduruldu. Listeden doğru takvimi seçmek için bağlantıyı dene.",
       "urlLabel": "Takvim adresi",
+      "urlShort": "Senin için dolduruldu. Listeden seçmek için bağlantıyı dene.",
       "usernameLabel": "Kullanıcı adı"
     },
     "computer": {
@@ -7672,6 +7697,7 @@
       "allGood": "Her şey yolunda görünüyor",
       "checkedAt": "Son kontrol: {{time}}",
       "checks": {
+        "account_health": "Hesap oturumları",
         "browser": "Tarayıcı",
         "capabilities": "Yetenekler",
         "catalog_freshness": "Model kataloğu güncelliği",
@@ -7696,6 +7722,7 @@
       "description": "Botun neden çalışmadığını kontrol eder ve sık görülen sorunları düzeltir.",
       "empty": "Hiç denetim sonucu gelmedi",
       "hints": {
+        "account_health": "Bildirimde listelenen posta, Composio uygulamaları veya site oturumları için Uygulamalar ya da bot tarayıcı profilinden yeniden bağlan.",
         "browser": "Chrome, Edge ya da Chromium kur (snap paketini değil).",
         "catalog_freshness": "Önerilen model listesi 90 günden eski; güncel modelleri görmek için Praxi'yi güncelleyin veya `bot catalog check` çalıştırın.",
         "cli_accounts": "Bir kez terminal açıp CLI'da oturum aç (örneğin `claude` ya da `codex login`).",
@@ -7906,27 +7933,39 @@
     },
     "emailChannel": {
       "account": "İzlenecek posta kutusu",
+      "accountHint": "Yalnızca IMAP posta kutuları izlenebilir.",
       "approve": "Tam olarak bunu gönder",
       "bot": "Postaları alacak bot",
       "choose": "Seçin…",
       "deny": "Gönderme",
       "description": "Bir botun, posta kutunuzun tek bir klasöründeki yeni postaları görmesine izin verin.",
       "enable": "E-posta kanalını aç",
+      "enableHint": "Kapalıyken bota hiç posta iletilmez.",
       "folder": "İzlenecek klasör",
       "folderHint": "Genellikle INBOX. Yalnızca bunu açtıktan sonra gelen postalar iletilir.",
       "fromLine": "Gönderen: {{from}}. Gönderim modu: her gönderim onayınızı gerektirir.",
       "full": "Bota her postanın özetini değil tüm metnini göster",
+      "fullHint": "Açık değilse bot yalnızca kısa bir özet görür.",
       "ignored": "İzin verilmeyen göndericilerden gelen ve yok sayılan e-postalar: {{n}}",
       "needsSenders": "Bu kanal izinli gönderici listesi olmadan çalışıyordu, bu yüzden artık bota HİÇ e-posta iletmiyor. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne bota yazabilecek adresleri (örneğin kendi adresini) ekle. O zamana kadar gelen tüm e-postalar posta kutusunda okunmamış kalır.",
       "noAccount": "Önce yukarıdan bir posta kutusu ekleyin.",
-      "noSenders": "Seçilen posta kutusunda izinli gönderici yok, bu yüzden bota hiç e-posta ulaşmaz. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne kendi adresini ekle.",
       "note": "Postaları başkaları yazar; bu yüzden bot onları emir değil bilgi olarak ele alır. Varsayılan olarak yalnızca göndereni, konuyu ve ilk birkaç satırı görür. Ekler hiçbir zaman açılmaz. Yanıtlara izin verip her birini burada onaylamadıkça hiçbir şey gönderilmez.",
       "replies": "Botun yanıt önermesine izin ver (her yanıt gönderilmeden önce sizin onayınızı bekler)",
+      "repliesHint": "Önerilen her yanıt burada onayınızı bekler.",
       "running": "Çalışıyor",
       "save": "Kaydet",
       "saved": "Kaydedildi.",
       "sent": "E-posta gönderildi.",
       "skipped": "Art arda başarısız olduğu için bırakılan e-postalar (örneğin bot silinmiş): {{n}}",
+      "status": {
+        "needMailbox": "Önce bir posta kutusu seçin.",
+        "noSendersDetail": "Posta kutusu kartında izinli göndericileri ekleyin, sonra burada kaydedin.",
+        "noSendersTitle": "İzinli gönderici yok",
+        "off": "Kanal kapalı.",
+        "openMailbox": "Posta kutusu ayarlarını aç",
+        "stoppedHint": "Kanalı açın, posta kutusu ve bot seçin, sonra kaydedin.",
+        "unsaved": "Kaydedilmemiş değişiklikler — uygulamak için kaydedin."
+      },
       "stopped": "Çalışmıyor",
       "subject": "Konu: {{subject}}",
       "title": "Bota e-posta",
@@ -8015,23 +8054,28 @@
       "colTime": "Zaman",
       "colTo": "Kime",
       "daily": "Posta kutusu başına günde şu sayının üstünde uyar (0 = hiç uyarma)",
+      "dailyHelp": "0 bu uyarıyı kapatır. Gönderimi engellemez.",
       "days": "Birine bu kadar gün içinde zaten yazdıysam uyar (0 = hiç uyarma)",
+      "daysHelp": "0 bu uyarıyı kapatır. Gönderimi engellemez.",
       "description": "Sınırlar, bir çıkış listesi ve botlarınızın gönderdiği her e-postanın günlüğü.",
       "export": "CSV olarak dışa aktar",
       "footer": "Çıkış satırının metni",
       "footerHint": "{sender} gönderen adresle değiştirilir. Satırı bot değil uygulama ekler ve bot onu silemez. Bir e-postayı satırsız göndermek için kartta onaylayabilirsiniz; kartta bir uyarı görünür. Program yanıtları okumaz: biri “DURDUR” diye yanıtlarsa adresini bu listeye kendiniz ekleyin.",
       "footerPlaceholder": "Boş bırakırsanız yerleşik metin kullanılır (Türkçe ve İngilizce)",
-      "intro": "Bir botun göndereceği her e-posta yine önce size sorulur. Bu ayarlar yalnızca sorunun ne zaman uyarıyla geldiğini belirler. Uyarı sizi hiçbir zaman engellemez: her zaman \"Yine de gönder\" diyebilirsiniz ve bu seçim günlüğe yazılır.",
+      "footerShort": "Boş bırakırsanız yerleşik Türkçe ve İngilizce metin kullanılır.",
+      "intro": "Sor düzeyindeki botlarda her gönderim önce size sorulur; günlük sınır ve aynı kişiye tekrar yazma uyarılarını \"Yine de gönder\" ile geçebilirsiniz. Tam erişim düzeyinde bu ikisi yalnızca çalışma adımına not olarak yazılır — engellemez ve sormaz. Aşağıdaki çıkış listesi ise siz listeden çıkarana ya da kendiniz yazana kadar her zaman engeller.",
       "kindAddress": "adres",
       "kindDomain": "tüm alan adı",
+      "limitsTitle": "Gönderim uyarıları",
       "loading": "Yükleniyor…",
       "logEmpty": "Henüz e-posta gönderilmedi.",
       "logHint": "Kime, ne zaman ve hangi bottan e-posta gitti. Yalnızca gerçekten gönderilenler listelenir.",
       "logTitle": "Gönderilen e-posta günlüğü",
       "optOutAdd": "Ekle",
       "optOutEmpty": "Listede henüz kimse yok.",
-      "optOutHint": "Bir adres (ayse@ornek.com) ya da tüm bir alan adı (ornek.com) ekleyin. Onlara yazmaya çalışan bot, onay kartınızda bir uyarı alır.",
+      "optOutHint": "Bir adres (ayse@ornek.com) ya da tüm bir alan adı (ornek.com) ekleyin. Onlara yazmaya çalışan her bot durdurulur — Sor düzeyinde uyarıyı onay kartında görürsünüz; Tam erişimde gönderim kart olmadan reddedilir.",
       "optOutLine": "E-postalara varsayılan olarak çıkış satırı ekle",
+      "optOutLineHint": "Satırı uygulama ekler; bot kaldıramaz.",
       "optOutPlaceholder": "ayse@ornek.com ya da ornek.com",
       "optOutRemove": "{{value}} kaydını kaldır",
       "optOutTitle": "Yazmayacağım kişiler",
@@ -8039,11 +8083,16 @@
       "save": "Kaydet",
       "saved": "Kaydedildi",
       "sentAnyway": "Yine de gönderildi",
-      "softHint": "Bu ikisi engel değil, uyarıdır.",
+      "softHint": "Bunlar Sor düzeyinde uyarıdır (yine de gönderebilirsiniz). Tam erişim düzeyinde yalnızca çalışma adımına yazılır.",
+      "status": {
+        "saved": "Tüm değişiklikler kaydedildi.",
+        "unsaved": "Kaydedilmemiş değişiklikler var."
+      },
       "title": "Güvenli gönderim",
       "verifyDomains": "Doğrulama e-postasının bağlantı verebileceği ek siteler",
       "verifyDomainsHint": "Bir sitede kayıt olan bot, doğrulama e-postasından yalnızca o sitenin bağlantılarını alır. Bir site e-postalarını başka bir hizmet üzerinden gönderiyorsa (örneğin bir izleme alan adı), o alan adını buraya satır başına bir tane ekleyin (example.com). Emin değilseniz boş bırakın: bot o zaman size sorar.",
-      "verifyDomainsPlaceholder": "posta.ornek.com"
+      "verifyDomainsPlaceholder": "posta.ornek.com",
+      "verifyDomainsShort": "Doğrulama bağlantıları başka bir sunucudaysa satır başına bir alan adı."
     },
     "mode": {
       "moreHint": "Nadiren gerekir. Ayarları bir dahaki açışında yine kapalı gelir.",
@@ -8246,7 +8295,6 @@
         "searxng": "Kendi SearXNG sunucunun adresi, örneğin http://127.0.0.1:8080. Web arama rehberinde sunucu için tek komutla kurulum var.",
         "tavily": "Tavily hesabında bir anahtar oluştur ve buraya yapıştır."
       },
-      "providerHint": "Botlar web'de bir arama sağlayıcısı üzerinden arar. Ücretsiz motorlar ev bilgisayarında çoğunlukla çalışır ama sunucuları genelde engeller; bu yüzden sunucuda bunlardan birini bağlaman gerekir.",
       "providerTitle": "Arama sağlayıcısı",
       "saveAndTest": "Kaydet ve dene",
       "searxngLabel": "SearXNG URL",
@@ -8275,6 +8323,41 @@
     }
   },
   "settingsUi": {
+    "codingClis": {
+      "accountOnServer": "{{name}} hesabı: {{account}}",
+      "actions": "{{name}} için işlemler",
+      "copyInstallLocal": "Bu bilgisayar kurulum komutunu kopyala",
+      "copyInstallServer": "Sunucu kurulum komutunu kopyala",
+      "copyLoginLocal": "Bu bilgisayar giriş komutunu kopyala",
+      "copyLoginServer": "Sunucu giriş komutunu kopyala",
+      "howToInstall": "Nasıl kurulur",
+      "local": {
+        "not_installed": "kurulu değil",
+        "off": "kapalı",
+        "on": "açık",
+        "unreachable": "denetlenemiyor"
+      },
+      "myServer": "{{name}}:",
+      "note": "Botlar bu bilgisayarda çalışırken CLI'ları buradan açıp kapat; botlar sunucudaysa girişi sunucuda yap.",
+      "pathOnServer": "{{name}} üzerindeki yol",
+      "quotaAge": "{{hours}} sa önce güncellendi",
+      "quotaFresh": "Az önce güncellendi",
+      "quotaLeft": "Planda %{{pct}} kaldı",
+      "server": {
+        "loading": "denetleniyor…",
+        "logged_in": "giriş yapıldı",
+        "not_installed": "kurulu değil",
+        "not_logged_in": "giriş yapılmadı",
+        "unknown": "giriş bilinmiyor",
+        "unreachable": "ulaşılamıyor"
+      },
+      "serverNotConnected": "Şu an bu bilgisayarda çalışıyorsun, bu yüzden {{name}} bağlı değil. Kodlama CLI'larını yönetmek için ona geri dön.",
+      "serverUnreachable": "{{name}} sunucusuna ulaşılamadı; bu yüzden kodlama CLI'ları kurulu ya da eksik diye gösterilmiyor. Yenile'yi dene.",
+      "thisComputer": "Bu bilgisayar:",
+      "title": "Kodlama CLI'ları",
+      "turnOff": "Bu bilgisayarda kapat",
+      "turnOn": "Bu bilgisayarda aç"
+    },
     "groups": {
       "troubleshooting": "Sorun giderme",
       "updates": "Güncellemeler ve sürüm"
@@ -8301,11 +8384,6 @@
         "description": "Botlarının kullanabileceği girişler ve sırlar; bu bilgisayarda saklanır.",
         "name": "Kasa"
       }
-    },
-    "serverCli": {
-      "repair": "Onar",
-      "signIn": "Giriş yap",
-      "unknown": "Giriş durumu bilinmiyor"
     },
     "updates": {
       "description": "Yeni sürüm var mı bak, nelerin değiştiğini oku ve kur.",

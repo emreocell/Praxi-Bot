@@ -19,6 +19,8 @@ Her not aynı şekilde ele alınmaz:
 
 Bot, sen istediğinde de bir notu kaydedebilir veya unutabilir ("doğum günümün 3 Mart olduğunu hatırla"). Bunun için kendi mesajından alıntı yapması gerekir.
 
+Bellek, sohbetler arasında *senin* hakkında olandır. Botun **tek bir uzun sohbetten** tuttuğu şey (eski mesajların bir nota özetlenmesi) ayrı bir konudur: bkz. [Uzun sohbetler](long-chats.md).
+
 ## Nerede durur
 
 Her şey, bilgisayarında Praxi veri klasöründe (`memory.db` dosyası), sohbetlerinden ayrı saklanır. Aynı dosya, botun "önceki sohbetlerde ara" aracı için geçmiş mesajlarının aranabilir bir kopyasını da tutar; belleği **Kapalı** olan bot buna yeni bir şey eklemez. Hatırlanması için hiçbir şey kimseye gönderilmez. Her bot ortak notlarını ve kendi notlarını görür; başkalarının notları asla görünmez.

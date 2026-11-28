@@ -6,6 +6,7 @@
 //! the API (no update/delete) and via schema triggers.
 
 mod bot_delete;
+mod chat_summary;
 pub mod db;
 pub mod error;
 pub mod event_log;
@@ -16,6 +17,7 @@ pub mod paths;
 pub mod records;
 
 pub use bot_delete::{BotCascade, BotDataCounts, BotDeleteCleanup};
+pub use chat_summary::{ChatSummary, Cursor, sorts_after};
 pub use db::{SearchFilter, SkillAssignmentLookup, Storage, is_valid_skill_name, now_ms};
 pub use error::{Result, StorageError};
 pub use event_log::{EventLogWriter, event_log_path, read_event_log};

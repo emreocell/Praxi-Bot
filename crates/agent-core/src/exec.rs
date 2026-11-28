@@ -1773,7 +1773,10 @@ impl TurnExecutor {
                     .resolve_offered(&ctx, &call.name, &input, &hints, offered.as_deref())
             else {
                 invalid_calls.insert(call_uuid);
-                slots.push(err(format!("unknown tool {:?}", call.name)));
+                slots.push(err(format!(
+                    "unknown tool {:?}; search for available tools with tool_search or find_tool",
+                    call.name
+                )));
                 continue;
             };
             if call.name == agent_router::TOOL_DESCRIBE

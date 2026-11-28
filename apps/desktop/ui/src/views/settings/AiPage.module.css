@@ -83,7 +83,9 @@
 .moreEngines > summary::-webkit-details-marker { display: none; }
 .moreEngines > summary:hover { color: var(--color-text); }
 .moreEngines > summary:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
-.cliPath { overflow-wrap: anywhere; color: var(--color-text-faint); font-family: var(--font-mono); font-size: var(--font-size-xs); }
+.cliPath { overflow-wrap: anywhere; color: var(--color-text-muted); font-family: var(--font-mono); font-size: var(--font-size-xs); }
+/* The status of a row ("This computer: on · server: signed in") is its main line: full text colour. */
+.cliPlaces { color: var(--color-text); }
 .cliCommand { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-1) var(--space-0); font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--color-text); }
 .cliOutput { max-height: var(--size-list-max); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-3); background: var(--color-surface-active); color: var(--color-text); font-size: var(--font-size-xs); border-radius: var(--radius-card); }
 .cliApproval { margin-top: var(--space-3); min-width: var(--space-0); }
@@ -94,3 +96,10 @@
 /* What the server still needs from its owner: shown only while something is missing. */
 .hostAlert { display: flex; align-items: flex-start; gap: var(--space-2); margin-bottom: var(--space-2); padding: var(--space-3); border: var(--size-border) solid color-mix(in srgb, var(--color-warning) 40%, transparent); border-radius: var(--radius-md); color: var(--color-warning); }
 .hostAlert > svg { flex-shrink: 0; margin-top: var(--space-half); }
+.cliMenu { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); max-width: var(--size-menu-width); }
+.cliMenuItem { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); width: 100%; padding: var(--space-2) var(--space-3); border: none; border-radius: var(--radius-md); background: none; color: var(--color-text); font: inherit; font-size: var(--font-size-ui); text-align: start; cursor: pointer; }
+.cliMenuLink { flex-direction: row; align-items: center; gap: var(--space-2); }
+.cliMenuItem:hover { background: var(--color-surface-active); }
+.cliMenuItem:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+.cliMenuItem:disabled { opacity: 0.5; cursor: default; }
+.quotaHint { font-size: var(--font-size-xs); color: var(--color-text-faint); }

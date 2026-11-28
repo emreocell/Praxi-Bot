@@ -8431,7 +8431,7 @@ export interface components {
             opt_out_line: boolean;
             /**
              * Format: int32
-             * @description Warn when a recipient got mail within this many days (`0` = no warning). Default 14.
+             * @description Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).
              */
             same_recipient_days: number;
             /**
@@ -12617,7 +12617,11 @@ export interface components {
             /**
              * @description What it does: `{"kind": "agent_prompt", "text": "..."}`,
              *     `{"kind": "workflow", "name": "...", "params": {}}` or
-             *     `{"kind": "tool", "name": "...", "input": {}}`.
+             *     `{"kind": "tool", "name": "...", "input": {}}`, or a standing order that speaks only
+             *     when something needs you: `{"kind": "standing_order", "checklist": "...",
+             *     "active_hours": {"start": "08:00", "end": "22:00", "timezone": "Europe/Istanbul"},
+             *     "max_runs_per_day": 24}` (`active_hours` optional; each run ends `OK`, which creates
+             *     no notice, or `NEEDS_OWNER(reason)`, which does).
              */
             payload: unknown;
             /** @description Read-only deterministic condition, including full script source. */

@@ -1,0 +1,133 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.fieldMd {
+  max-width: min(100%, var(--size-widget-width));
+}
+
+.fieldSm {
+  max-width: calc(var(--size-control-lg) * 5);
+}
+
+.labelRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.lineHint {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.helpTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--space-6);
+  height: var(--space-6);
+  padding: var(--space-0);
+  border: var(--size-border) solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.helpTrigger:hover {
+  color: var(--color-text);
+  background-color: var(--color-surface-active);
+}
+
+.helpTrigger:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.helpTrigger svg {
+  width: var(--size-icon);
+  height: var(--size-icon);
+}
+
+.helpBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text);
+}
+
+.fieldRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.cardBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: var(--size-border) solid var(--color-border);
+}
+
+.cardBarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-align: end;
+}
+
+.statusOk {
+  color: var(--color-success);
+}
+
+.statusWarn {
+  color: var(--color-warning);
+}
+
+.statusBad {
+  color: var(--color-danger);
+}
+
+.statusAction {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}

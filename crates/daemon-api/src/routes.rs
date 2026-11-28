@@ -2399,8 +2399,11 @@ fn schedule_parts(s: &AppState, input: &ScheduleInput) -> Result<ScheduleParts, 
     let spec: ScheduleSpec = serde_json::from_value(input.spec.clone())
         .map_err(|e| bad_schedule(format!("invalid spec: {e}")))?;
     spec.validate()?;
-    let payload: Payload = serde_json::from_value(input.payload.clone())
+    let payload = Payload::from_input(&input.payload)
         .map_err(|e| bad_schedule(format!("invalid payload: {e}")))?;
+    payload
+        .validate()
+        .map_err(|e| bad_schedule(e.to_string()))?;
     match &payload {
         Payload::AgentPrompt { text } if text.trim().is_empty() => {
             return Err(bad_schedule("prompt text must not be empty"));

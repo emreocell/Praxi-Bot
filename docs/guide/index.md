@@ -108,6 +108,7 @@ Seven short pages in plain words. Read them in this order:
 | See what each model call in a run was for and what it used | [LLM call ledger](llm-call-ledger.md) |
 | Cap what a bot may spend per day, week or month | [Bot spending limits](bot-spending-limits.md) |
 | See, correct, forget and switch off what your bots remember | [Memory](memory.md) |
+| Keep one chat going for weeks: the rolling "earlier in this chat" note, and how to switch it off | [Long chats](long-chats.md) |
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |
 | Talk to your bots from Discord | [Discord](discord.md) |

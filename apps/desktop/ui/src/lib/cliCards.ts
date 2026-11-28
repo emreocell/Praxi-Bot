@@ -1,4 +1,5 @@
 import type { CliEngineDto } from "../api/types.ts";
+import { brandIcon } from "./brandIcons.ts";
 
 /** The one status an engine card shows. */
 export type CliStatus = "ready" | "sign_in" | "outdated" | "not_installed" | "unsupported";
@@ -52,6 +53,16 @@ export function displayPath(path: string): string {
  */
 export function brandOf(id: string): string {
   return id === "agy" ? "antigravity" : id === "claude" ? "claude" : id;
+}
+
+/**
+ * Prefer the real logo; engines with no bundled mark use the neutral terminal glyph. A monogram
+ * (`known` with no path, e.g. Groq) is not a logo, so it falls back too.
+ */
+export function cliBrandKey(id: string): string {
+  const name = brandOf(id);
+  const { known, path } = brandIcon(name);
+  return known && Boolean(path) ? name : "terminal";
 }
 
 /** Version for display: `claude 2.1.325 (Claude Code)` and `v2.3.0` read as the number. */

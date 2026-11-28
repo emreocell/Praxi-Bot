@@ -2272,5 +2272,21 @@ pub fn report_markdown(info: &ReportInfo, checks: &[Check], scrub: &Scrub<'_>) -
     s
 }
 
+/// Site ledger accounts, mail identities and Composio apps from the last daily probe.
+#[must_use]
+pub fn check_account_sessions(data_dir: &Path) -> Check {
+    let row = account_health::check_account_health(data_dir);
+    let status = match row.status {
+        account_health::DoctorStatus::Ok => Status::Ok,
+        account_health::DoctorStatus::Warn => Status::Warn,
+        account_health::DoctorStatus::Skipped => Status::Skipped,
+    };
+    let mut c = Check::new(row.id, row.title, status, row.detail);
+    if !row.hint.is_empty() {
+        c.hint = Some(row.hint);
+    }
+    c
+}
+
 #[cfg(test)]
 mod tests;

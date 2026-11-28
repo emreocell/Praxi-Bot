@@ -1,16 +1,21 @@
 import { Download, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "ui";
+import { Button } from "ui";
 import type { EmailGuardSettings, EmailOptOut, EmailSendLogEntry } from "../../api/types";
-import formStyles from "../../components/Form.module.css";
+import { ConfirmDialog } from "../../components/DialogParts";
+import { CardSaveBar, FormField, formStyles } from "../../components/SettingsForm";
+import { SettingsCard, SwitchField } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { type HumanError, humanError, humanLine } from "../../lib/humanError";
 import { formatDateTime } from "../../lib/messageTime";
 import { saveTextFile } from "../../lib/runReport";
 import { useDaemon } from "../../state/DaemonContext";
+import { useLeaveGuard } from "../../state/LeaveGuard";
+import styles from "./MailGuardCard.module.css";
 
 const LOG_ROWS = 100;
+const K = "settingsModal.mailGuard";
 
 /** "Safe sending": the limits, the opt-out list and the log of every mail the bots sent. */
 export function MailGuardCard() {
@@ -18,14 +23,16 @@ export function MailGuardCard() {
   const toast = useToast();
   const { client } = useDaemon();
   const [settings, setSettings] = useState<EmailGuardSettings | null>(null);
+  const [saved, setSaved] = useState<EmailGuardSettings | null>(null);
   const [optOuts, setOptOuts] = useState<EmailOptOut[]>([]);
   const [log, setLog] = useState<EmailSendLogEntry[]>([]);
   const [entry, setEntry] = useState("");
   const [domains, setDomains] = useState("");
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const pendingLeave = useRef<(() => void) | null>(null);
 
-  // The three parts load on their own: a part that cannot be read (an older host, a refused list)
-  // leaves a small note where it would be, it never blocks the settings or the other parts.
   const [problems, setProblems] = useState<Record<"settings" | "optOuts" | "log", HumanError | null>>({
     settings: null,
     optOuts: null,
@@ -41,6 +48,7 @@ export function MailGuardCard() {
     ]);
     if (s.status === "fulfilled") {
       setSettings(s.value);
+      setSaved(s.value);
       setDomains((s.value.verification_link_domains ?? []).join("\n"));
     }
     if (o.status === "fulfilled") setOptOuts(o.value);
@@ -74,146 +82,286 @@ export function MailGuardCard() {
       <p className={formStyles.hint} role="status" data-testid={testId}>
         {problem.title}
         {problem.hint ? ` ${problem.hint}` : ""}{" "}
-        <Button size="sm" variant="ghost" onClick={() => void load()}>{t("settingsModal.mailGuard.retry")}</Button>
+        <Button size="sm" variant="ghost" onClick={() => void load()}>
+          {t(`${K}.retry`)}
+        </Button>
       </p>
     ) : null;
 
+  const dirty =
+    settings && saved
+      ? settings.daily_limit !== saved.daily_limit ||
+        settings.same_recipient_days !== saved.same_recipient_days ||
+        settings.opt_out_line !== saved.opt_out_line ||
+        settings.footer !== saved.footer ||
+        domains !== (saved.verification_link_domains ?? []).join("\n")
+      : false;
+
+  useLeaveGuard({
+    state: () => ({ dirty: Boolean(dirty), busy }),
+    confirm: (proceed) => {
+      pendingLeave.current = proceed;
+      setConfirmLeave(true);
+    }
+  });
+
   if (!settings) {
     return (
-      <Card>
-        {problems.settings ? note(problems.settings, "mail-guard-load-error") : t("settingsModal.mailGuard.loading")}
-      </Card>
+      <SettingsCard title={t(`${K}.title`)} description={t(`${K}.description`)} testId="mail-guard">
+        {problems.settings ? note(problems.settings, "mail-guard-load-error") : t(`${K}.loading`)}
+      </SettingsCard>
     );
   }
+
+  const persist = async () => {
+    if (!client) {
+      return;
+    }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const next = await client.putMailGuardSettings({
+        ...settings,
+        verification_link_domains: domains.split(/[\s,;]+/).filter(Boolean)
+      });
+      setSettings(next);
+      setSaved(next);
+      setDomains((next.verification_link_domains ?? []).join("\n"));
+      toast.show(t(`${K}.saved`), "success");
+    } catch (e) {
+      const line = humanLine(e);
+      setSaveError(line);
+      toast.show(line, "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Card>
-      <div data-testid="mail-guard">
-        <p className={formStyles.hint}>{t("settingsModal.mailGuard.intro")}</p>
+    <SettingsCard title={t(`${K}.title`)} description={t(`${K}.description`)} testId="mail-guard">
+      <div className={styles.root} data-testid="mail-guard-body">
+        <p className={styles.intro}>{t(`${K}.intro`)}</p>
 
-        <div className={formStyles.row}>
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="mg-daily">{t("settingsModal.mailGuard.daily")}</label>
-            <input id="mg-daily" className={formStyles.input} type="number" min={0}
-              value={settings.daily_limit}
-              onChange={(e) => setSettings({ ...settings, daily_limit: number(e.target.value) })} />
+        <section className={styles.limits} aria-labelledby="mail-guard-limits">
+          <h3 id="mail-guard-limits" className={styles.sectionTitle}>
+            {t(`${K}.limitsTitle`)}
+          </h3>
+          <p className={formStyles.hint}>{t(`${K}.softHint`)}</p>
+          <div className={styles.limitRow}>
+            <FormField
+              id="mg-daily"
+              label={t(`${K}.daily`)}
+              helpTitle={t(`${K}.daily`)}
+              helpBody={t(`${K}.dailyHelp`)}
+              width="sm"
+            >
+              <input
+                id="mg-daily"
+                className={formStyles.input}
+                type="number"
+                min={0}
+                value={settings.daily_limit}
+                onChange={(e) => setSettings({ ...settings, daily_limit: number(e.target.value) })}
+              />
+            </FormField>
+            <FormField
+              id="mg-days"
+              label={t(`${K}.days`)}
+              helpTitle={t(`${K}.days`)}
+              helpBody={t(`${K}.daysHelp`)}
+              width="sm"
+            >
+              <input
+                id="mg-days"
+                className={formStyles.input}
+                type="number"
+                min={0}
+                value={settings.same_recipient_days}
+                onChange={(e) => setSettings({ ...settings, same_recipient_days: number(e.target.value) })}
+              />
+            </FormField>
           </div>
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="mg-days">{t("settingsModal.mailGuard.days")}</label>
-            <input id="mg-days" className={formStyles.input} type="number" min={0}
-              value={settings.same_recipient_days}
-              onChange={(e) => setSettings({ ...settings, same_recipient_days: number(e.target.value) })} />
+          <SwitchField
+            checked={settings.opt_out_line}
+            onChange={(v) => setSettings({ ...settings, opt_out_line: v })}
+            label={t(`${K}.optOutLine`)}
+            hint={t(`${K}.optOutLineHint`)}
+            testId="mail-guard-optout-line"
+          />
+          {settings.opt_out_line ? (
+            <FormField
+              id="mg-footer"
+              label={t(`${K}.footer`)}
+              hint={t(`${K}.footerShort`)}
+              helpTitle={t(`${K}.footer`)}
+              helpBody={t(`${K}.footerHint`)}
+            >
+              <textarea
+                id="mg-footer"
+                className={formStyles.textarea}
+                rows={2}
+                maxLength={1000}
+                placeholder={t(`${K}.footerPlaceholder`)}
+                value={settings.footer}
+                onChange={(e) => setSettings({ ...settings, footer: e.target.value })}
+              />
+            </FormField>
+          ) : null}
+          <FormField
+            id="mg-verify"
+            label={t(`${K}.verifyDomains`)}
+            hint={t(`${K}.verifyDomainsShort`)}
+            helpTitle={t(`${K}.verifyDomains`)}
+            helpBody={t(`${K}.verifyDomainsHint`)}
+          >
+            <textarea
+              id="mg-verify"
+              className={formStyles.textarea}
+              rows={2}
+              maxLength={4000}
+              data-testid="mail-guard-verify-domains"
+              placeholder={t(`${K}.verifyDomainsPlaceholder`)}
+              value={domains}
+              onChange={(e) => setDomains(e.target.value)}
+            />
+          </FormField>
+          <CardSaveBar
+            saveLabel={t(`${K}.save`)}
+            onSave={() => void persist()}
+            saving={busy}
+            disabled={!dirty}
+            statusText={saveError ?? (dirty ? t(`${K}.status.unsaved`) : t(`${K}.status.saved`))}
+            statusTone={saveError ? "bad" : dirty ? "warn" : "ok"}
+            testId="mail-guard-save-bar"
+          />
+        </section>
+
+        <section aria-labelledby="mail-guard-optouts">
+          <h3 id="mail-guard-optouts" className={styles.sectionTitle}>
+            {t(`${K}.optOutTitle`)}
+          </h3>
+          <p className={formStyles.hint}>{t(`${K}.optOutHint`)}</p>
+          <div className={styles.optRow}>
+            <input
+              className={[formStyles.input, styles.grow].join(" ")}
+              aria-label={t(`${K}.optOutAdd`)}
+              placeholder={t(`${K}.optOutPlaceholder`)}
+              value={entry}
+              onChange={(e) => setEntry(e.target.value)}
+              data-testid="mail-guard-optout-input"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || entry.trim() === ""}
+              data-testid="mail-guard-optout-add"
+              onClick={() =>
+                void act(async () => {
+                  await client!.addMailOptOut(entry.trim());
+                  setEntry("");
+                  setOptOuts(await client!.listMailOptOuts());
+                })
+              }
+            >
+              {t(`${K}.optOutAdd`)}
+            </Button>
           </div>
-        </div>
-        <p className={formStyles.hint}>{t("settingsModal.mailGuard.softHint")}</p>
-
-        <label className={formStyles.label}>
-          <input type="checkbox" checked={settings.opt_out_line}
-            onChange={(e) => setSettings({ ...settings, opt_out_line: e.target.checked })} />{" "}
-          {t("settingsModal.mailGuard.optOutLine")}
-        </label>
-        <div className={formStyles.field}>
-          <label className={formStyles.label} htmlFor="mg-footer">{t("settingsModal.mailGuard.footer")}</label>
-          <textarea id="mg-footer" className={formStyles.textarea} rows={3} maxLength={1000}
-            placeholder={t("settingsModal.mailGuard.footerPlaceholder")}
-            value={settings.footer}
-            onChange={(e) => setSettings({ ...settings, footer: e.target.value })} />
-          <p className={formStyles.hint}>{t("settingsModal.mailGuard.footerHint")}</p>
-        </div>
-        <div className={formStyles.field}>
-          <label className={formStyles.label} htmlFor="mg-verify">{t("settingsModal.mailGuard.verifyDomains")}</label>
-          <textarea id="mg-verify" className={formStyles.textarea} rows={3} maxLength={4000}
-            data-testid="mail-guard-verify-domains"
-            placeholder={t("settingsModal.mailGuard.verifyDomainsPlaceholder")}
-            value={domains}
-            onChange={(e) => setDomains(e.target.value)} />
-          <p className={formStyles.hint}>{t("settingsModal.mailGuard.verifyDomainsHint")}</p>
-        </div>
-        <Button size="sm" disabled={busy} data-testid="mail-guard-save"
-          onClick={() => void act(async () => {
-            const saved = await client!.putMailGuardSettings({
-              ...settings,
-              verification_link_domains: domains.split(/[\s,;]+/).filter(Boolean)
-            });
-            setSettings(saved);
-            setDomains((saved.verification_link_domains ?? []).join("\n"));
-            toast.show(t("settingsModal.mailGuard.saved"), "success");
-          })}>
-          {t("settingsModal.mailGuard.save")}
-        </Button>
-
-        <h3>{t("settingsModal.mailGuard.optOutTitle")}</h3>
-        <p className={formStyles.hint}>{t("settingsModal.mailGuard.optOutHint")}</p>
-        <div className={formStyles.row}>
-          <input className={formStyles.input} aria-label={t("settingsModal.mailGuard.optOutAdd")}
-            placeholder={t("settingsModal.mailGuard.optOutPlaceholder")}
-            value={entry} onChange={(e) => setEntry(e.target.value)} data-testid="mail-guard-optout-input" />
-          <Button size="sm" variant="secondary" disabled={busy || entry.trim() === ""}
-            data-testid="mail-guard-optout-add"
-            onClick={() => void act(async () => {
-              await client!.addMailOptOut(entry.trim());
-              setEntry("");
-              setOptOuts(await client!.listMailOptOuts());
-            })}>
-            {t("settingsModal.mailGuard.optOutAdd")}
-          </Button>
-        </div>
-        {note(problems.optOuts, "mail-guard-optouts-error")}
-        {problems.optOuts ? null : optOuts.length === 0 ? <p className={formStyles.hint}>{t("settingsModal.mailGuard.optOutEmpty")}</p> : (
-          <ul data-testid="mail-guard-optouts">
-            {optOuts.map((o) => (
-              <li key={o.value}>
-                {o.value}{" "}
-                <span className={formStyles.hint}>
-                  {t(o.kind === "domain" ? "settingsModal.mailGuard.kindDomain" : "settingsModal.mailGuard.kindAddress")}
-                </span>{" "}
-                <Button size="sm" variant="ghost" disabled={busy}
-                  aria-label={t("settingsModal.mailGuard.optOutRemove", { value: o.value })}
-                  title={t("settingsModal.mailGuard.optOutRemove", { value: o.value })}
-                  onClick={() => void act(async () => {
-                    await client!.removeMailOptOut(o.value);
-                    setOptOuts(await client!.listMailOptOuts());
-                  })}>
-                  <Trash2 size={14} aria-hidden />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <h3>{t("settingsModal.mailGuard.logTitle")}</h3>
-        <p className={formStyles.hint}>{t("settingsModal.mailGuard.logHint")}</p>
-        <Button size="sm" variant="secondary" disabled={busy} data-testid="mail-guard-export"
-          onClick={() => void act(async () => {
-            saveTextFile("send-log.csv", "text/csv", await client!.exportMailSendLog());
-          })}>
-          <Download size={14} aria-hidden /> {t("settingsModal.mailGuard.export")}
-        </Button>
-        {note(problems.log, "mail-guard-log-error")}
-        {problems.log ? null : log.length === 0 ? <p className={formStyles.hint}>{t("settingsModal.mailGuard.logEmpty")}</p> : (
-          <table data-testid="mail-guard-log">
-            <thead>
-              <tr>
-                <th>{t("settingsModal.mailGuard.colTime")}</th>
-                <th>{t("settingsModal.mailGuard.colTo")}</th>
-                <th>{t("settingsModal.mailGuard.colSubject")}</th>
-                <th>{t("settingsModal.mailGuard.colBot")}</th>
-                <th>{t("settingsModal.mailGuard.colNote")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {log.map((e, i) => (
-                <tr key={`${e.at}-${e.message_id}-${i}`}>
-                  <td>{formatDateTime(e.at * 1000, i18n.language)}</td>
-                  <td>{e.recipients.join(", ")}</td>
-                  <td>{e.subject}</td>
-                  <td>{e.bot ?? ""}</td>
-                  <td>{e.send_anyway.length > 0 ? t("settingsModal.mailGuard.sentAnyway") : ""}</td>
-                </tr>
+          {note(problems.optOuts, "mail-guard-optouts-error")}
+          {problems.optOuts ? null : optOuts.length === 0 ? (
+            <p className={formStyles.hint}>{t(`${K}.optOutEmpty`)}</p>
+          ) : (
+            <ul className={styles.list} data-testid="mail-guard-optouts">
+              {optOuts.map((o) => (
+                <li key={o.value}>
+                  {o.value}{" "}
+                  <span className={formStyles.hint}>
+                    {t(o.kind === "domain" ? `${K}.kindDomain` : `${K}.kindAddress`)}
+                  </span>{" "}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    aria-label={t(`${K}.optOutRemove`, { value: o.value })}
+                    title={t(`${K}.optOutRemove`, { value: o.value })}
+                    onClick={() =>
+                      void act(async () => {
+                        await client!.removeMailOptOut(o.value);
+                        setOptOuts(await client!.listMailOptOuts());
+                      })
+                    }
+                  >
+                    <Trash2 size={14} aria-hidden />
+                  </Button>
+                </li>
               ))}
-            </tbody>
-          </table>
-        )}
+            </ul>
+          )}
+        </section>
+
+        <section aria-labelledby="mail-guard-log">
+          <h3 id="mail-guard-log" className={styles.sectionTitle}>
+            {t(`${K}.logTitle`)}
+          </h3>
+          <p className={formStyles.hint}>{t(`${K}.logHint`)}</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            data-testid="mail-guard-export"
+            onClick={() =>
+              void act(async () => {
+                saveTextFile("send-log.csv", "text/csv", await client!.exportMailSendLog());
+              })
+            }
+          >
+            <Download size={14} aria-hidden /> {t(`${K}.export`)}
+          </Button>
+          {note(problems.log, "mail-guard-log-error")}
+          {problems.log ? null : log.length === 0 ? (
+            <p className={formStyles.hint}>{t(`${K}.logEmpty`)}</p>
+          ) : (
+            <div className={styles.logWrap}>
+              <table className={styles.log} data-testid="mail-guard-log">
+                <thead>
+                  <tr>
+                    <th>{t(`${K}.colTime`)}</th>
+                    <th>{t(`${K}.colTo`)}</th>
+                    <th>{t(`${K}.colSubject`)}</th>
+                    <th>{t(`${K}.colBot`)}</th>
+                    <th>{t(`${K}.colNote`)}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {log.map((e, i) => (
+                    <tr key={`${e.at}-${e.message_id}-${i}`}>
+                      <td>{formatDateTime(e.at * 1000, i18n.language)}</td>
+                      <td>{e.recipients.join(", ")}</td>
+                      <td>{e.subject}</td>
+                      <td>{e.bot ?? ""}</td>
+                      <td>{e.send_anyway.length > 0 ? t(`${K}.sentAnyway`) : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
-    </Card>
+      <ConfirmDialog
+        open={confirmLeave}
+        title={t("botEdit.discardTitle")}
+        body={t("botEdit.discardBody")}
+        confirmLabel={t("botEdit.discard")}
+        onConfirm={() => {
+          setConfirmLeave(false);
+          pendingLeave.current?.();
+          pendingLeave.current = null;
+        }}
+        onCancel={() => {
+          setConfirmLeave(false);
+          pendingLeave.current = null;
+        }}
+      />
+    </SettingsCard>
   );
 }

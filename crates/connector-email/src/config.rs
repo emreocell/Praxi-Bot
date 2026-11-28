@@ -357,7 +357,7 @@ impl AccountConfig {
         for s in &self.allowed_senders {
             normalize_sender(s)?;
         }
-        if self.address.parse::<email_address::EmailAddress>().is_err() {
+        if !crate::address::is_valid_address(&self.address) {
             return Err(EmailError::Config(format!(
                 "account {}: invalid sender address",
                 self.name

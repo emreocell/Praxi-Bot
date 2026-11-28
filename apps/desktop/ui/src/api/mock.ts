@@ -3415,7 +3415,7 @@ export class MockApiClient extends ApiClient {
   private mailGuardSettings: EmailGuardSettings = {
     daily_limit: 20,
     verification_link_domains: [],
-    same_recipient_days: 14,
+    same_recipient_days: 0,
     opt_out_line: true,
     footer: ""
   };

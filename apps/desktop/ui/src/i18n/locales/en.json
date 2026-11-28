@@ -4342,6 +4342,18 @@
       "hint": "Do this on the computer that runs the bot, or clear it from the administrator's desktop.",
       "title": "Only someone at that computer can do this"
     },
+    "mailGuardBlocked": {
+      "hint": "Review the rule in Settings → Safe sending, or use Ask access so the owner can review the send.",
+      "title": "The mail guard blocked that send"
+    },
+    "mailGuardOptOut": {
+      "hint": "Remove them under Settings → Safe sending → People I will not write to, or write to them yourself.",
+      "title": "That person is on your do-not-write list"
+    },
+    "mailGuardUnreadable": {
+      "hint": "Fix or replace the damaged mail-guard files on the host, then try again.",
+      "title": "The mail guard could not read its saved rules"
+    },
     "modelFailed": {
       "hint": "Try again, or pick another model in Settings.",
       "title": "The model could not answer"
@@ -4891,6 +4903,15 @@
       "tokensPerMinute": "Amount of text per minute"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Long chats: older messages are condensed into a short note so the bot keeps the thread.",
+    "hint": "Older messages of a long chat are condensed into a short note. The messages stay saved and searchable.",
+    "label": "Summarise older messages of long chats",
+    "noBot": "Create a bot first.",
+    "note": "When a chat gets very long, the bot's own model (or its cheaper helper model, unless private data is involved) writes a short note about the older part. The bot then reads that note plus your recent messages. The note is marked as untrusted text, never as your words, and text from web pages or mail stays marked as such. The original messages are not changed or deleted. Off: the bot only sees the newest messages, as before.",
+    "title": "Long chats"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} keeps some things to itself: the execution policy, command-line tool servers, skills and coding-CLI sign-ins are changed on {{name}} directly. Email, search and dictation accounts can be connected from this computer.",
@@ -4930,7 +4951,6 @@
       "none": "The server reported no coding CLIs.",
       "notInstalled": "Not installed.",
       "note": "These are the server's own tools. Installing and signing in happens on {{name}}.",
-      "officialPage": "Install {{name}} from the official page",
       "ready": "Ready",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstall on server",
@@ -4941,8 +4961,7 @@
       "signIn": "To sign in, run on the server:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Signing in shows a web address on the server (often with a code). Open the address on this computer, sign in there and, if asked, paste the code into the server's terminal. Sign-ins on this computer are never copied to the server.",
-      "signInOnServer": "Sign in on {{server}}",
-      "title": "Coding CLIs on {{name}}"
+      "signInOnServer": "Sign in on {{server}}"
     },
     "hint": "on {{name}}",
     "menu": {
@@ -5957,7 +5976,6 @@
     "hint": {
       "new": "New"
     },
-    "howToInstall": "How to install",
     "install": "Install {{name}}",
     "levels": {
       "high": "High",
@@ -5968,9 +5986,9 @@
     "listAge": "Updated {{hours}} h ago",
     "listBundled": "Built-in fallback list: the CLI could not be asked.",
     "listFresh": "Updated just now",
+    "missingCliShort": "{{name}} · not ready on {{server}}",
     "noModels": "Type a model id in the search to use one.",
     "none": "No model",
-    "notOnServer": "{{name}} · not on {{server}} yet",
     "noteLocalClis": "Subscription CLIs on this computer are used when a bot runs on \"this computer\".",
     "otherId": "Use \"{{id}}\" with {{provider}}",
     "recent": "Recent",
@@ -5980,6 +5998,7 @@
     "search": "Search models",
     "sectionApi": "API providers",
     "sectionCli": "Coding CLIs (your subscription)",
+    "setUpCli": "Set up",
     "showAll": "All models ({{count}})",
     "switched": "Switched to {{model}}",
     "switchedDefault": "Default model set to {{model}}",
@@ -6843,6 +6862,7 @@
         "problems": "Only if something goes wrong"
       },
       "payloadKept": "This schedule runs a workflow or tool; that part stays unchanged.",
+      "payloadKeptStanding": "This schedule is a standing order: it stays quiet unless something needs you. Its checklist, active hours and daily limit stay unchanged here.",
       "preview": "Preview",
       "prompt": "Prompt",
       "promptHint": "What the bot is asked to do each time.",
@@ -6877,6 +6897,7 @@
     "originBot": "Made by bot",
     "originBotHint": "A bot created this after you approved it. Bots can change only schedules they made themselves.",
     "payload": {
+      "standingOrder": "Standing order: {{text}}",
       "tool": "Calls tool {{name}}",
       "unknown": "Custom task",
       "workflow": "Runs workflow {{name}}"
@@ -7258,14 +7279,11 @@
       },
       "detected": {
         "copied": "Command copied",
-        "copyCommand": "Copy command",
         "copyDetails": "Copy details",
-        "description": "AI apps you are signed in to on this computer are switched on automatically. Switch one off and it stays off.",
+        "description": "One list for every coding CLI: this computer and your server. Actions live in each row's menu.",
         "detailsCopied": "Details copied",
-        "detailsToggle": "Details",
         "detectError": "Could not check installed coding tools.",
         "dismissExpired": "Dismiss expired approval",
-        "docs": "Docs",
         "enabledToast": "{{name}} enabled.",
         "experimentalChip": "Experimental",
         "install": "Install",
@@ -7280,16 +7298,12 @@
           "powershell_missing": "PowerShell could not be found. Copy the command and run it in your terminal.",
           "timeout": "Installation exceeded ten minutes and was stopped. Check the output before retrying."
         },
-        "installLabel": "Install command",
         "installRunning": "Installing… leaving this section does not revoke an accepted approval.",
         "installSummary": "Install or update {{engine}}",
-        "loginLabel": "Sign in with",
-        "moreEngines": "More engines you can install ({{count}})",
         "noteNative": "Runs with its own tools: choose it in a bot's Engine settings.",
         "noteUnsupported": "Praxi detects it but cannot run it as an engine yet.",
         "noteUnverified": "Unverified command: check the vendor docs, then copy and run it yourself.",
         "offline": "The local service is not running, so detected coding tools cannot be shown.",
-        "onThisComputer": "On this computer",
         "pathLabel": "Location",
         "problem": "That did not work.",
         "refresh": "Rescan",
@@ -7302,8 +7316,7 @@
           "unsupported": "Not supported yet"
         },
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "title": "Found on this computer",
-        "toggle": "Use {{name}}"
+        "title": "Coding CLIs"
       },
       "keys": {
         "add": "Add",
@@ -7324,36 +7337,46 @@
     "calendar": {
       "add": "Add calendar",
       "addTitle": "Connect a calendar",
+      "advanced": "Advanced",
+      "advancedHint": "Calendar address, bot name and invitation sender.",
       "description": "Let your bots read and manage your calendar.",
       "emailHint": "Invitations come from this address. Leave it empty if your user name is already your email address.",
       "emailLabel": "Your email address (optional)",
+      "emailShort": "For invitation e-mails. Optional when your user name is already an address.",
       "empty": "No calendar is connected yet.",
       "loadError": "Could not load your calendars ({{message}}).",
       "nameHint": "Letters, numbers, - and _. Bots use this name to pick the calendar.",
       "nameLabel": "Name for your bots",
+      "nameShort": "Letters, numbers, - and _. Bots use this name.",
       "note": "Your bots can look at your calendar, find free time, add and move events and invite people. The password is kept in the secure store and is never shown again.",
       "passwordHint": "Use an app password, not your normal password. It is stored securely and cannot be read back.",
       "passwordLabel": "App password",
+      "passwordShort": "Use an app password, not your normal password.",
       "pickHint": "Choose the calendar your bots should use:",
       "presets": {
         "fastmail": {
           "hint": "Use your Fastmail address and an app password with calendar access (Settings, Privacy & Security, Integrations).",
+          "hintShort": "Fastmail address + app password with calendar access.",
           "label": "Fastmail"
         },
         "google": {
           "hint": "Use your full Gmail address and an app password (Google Account, Security, App passwords; needs 2-step verification). Google sometimes refuses app passwords for calendars. If the test fails, that is the likely reason.",
+          "hintShort": "Full Gmail address + Google app password (needs 2-step verification).",
           "label": "Google Calendar"
         },
         "icloud": {
           "hint": "Use your Apple ID and an app-specific password (account.apple.com, Sign-In and Security).",
+          "hintShort": "Apple ID + app-specific password from account.apple.com.",
           "label": "iCloud (Apple)"
         },
         "nextcloud": {
           "hint": "Enter your server's address and your user name. Create an app password in Settings, Security, Devices & sessions.",
+          "hintShort": "Your server host, user name and a Nextcloud app password.",
           "label": "Nextcloud"
         },
         "other": {
           "hint": "Paste the CalDAV address your calendar service gives you.",
+          "hintShort": "Paste the CalDAV URL from your provider.",
           "label": "Other (CalDAV)"
         }
       },
@@ -7363,6 +7386,7 @@
       "schedulingOff": "This service does not send invitations itself, so your bot will send them by email instead (an email account is needed for that).",
       "schedulingOn": "This service sends invitations itself.",
       "serverLabel": "Your Nextcloud server",
+      "serverShort": "Host name only, without https://.",
       "serviceLabel": "Calendar service",
       "test": "Test connection",
       "testFailed": "The test did not work: {{error}}",
@@ -7376,6 +7400,7 @@
       },
       "urlHint": "Filled in for you. Test the connection to pick the right calendar from the list.",
       "urlLabel": "Calendar address",
+      "urlShort": "Filled for you. Test the connection to pick a calendar from the list.",
       "usernameLabel": "User name"
     },
     "computer": {
@@ -7672,6 +7697,7 @@
       "allGood": "Everything looks fine",
       "checkedAt": "Last checked at {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Browser",
         "capabilities": "Capabilities",
         "catalog_freshness": "Model catalog freshness",
@@ -7696,6 +7722,7 @@
       "description": "Checks why the bot might not be working and fixes common problems.",
       "empty": "No checks were returned",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Install Chrome, Edge or Chromium (not the snap package).",
         "catalog_freshness": "The curated model list is over 90 days old; update Praxi or run `bot catalog check` to review current models.",
         "cli_accounts": "Open a terminal once and sign in to the CLI (for example `claude` or `codex login`).",
@@ -7906,27 +7933,39 @@
     },
     "emailChannel": {
       "account": "Mailbox to watch",
+      "accountHint": "Only IMAP mailboxes can be watched.",
       "approve": "Send exactly this",
       "bot": "Bot that gets the mail",
       "choose": "Choose…",
       "deny": "Don't send",
       "description": "Let one bot see new mail from one folder of your mailbox.",
       "enable": "Switch on the e-mail channel",
+      "enableHint": "When off, no mail is passed to a bot.",
       "folder": "Folder to watch",
       "folderHint": "Usually INBOX. Only mail that arrives after you switch this on is passed on.",
       "fromLine": "From: {{from}}. Send mode: every send needs your approval.",
       "full": "Show the bot the whole text of each mail, not just a summary",
+      "fullHint": "Otherwise the bot sees a short summary only.",
       "ignored": "Mails from senders who are not allowed were ignored: {{n}}",
       "needsSenders": "This channel was running without a list of allowed senders, so it now passes NO mail to the bot. Add the addresses that may write to the bot (for example your own) under \"Allowed senders\" in the mailbox settings above. Until then every incoming mail stays unread in the mailbox.",
       "noAccount": "Add a mailbox above first.",
-      "noSenders": "The selected mailbox has no allowed senders, so no mail will reach the bot. Add your own address under \"Allowed senders\" in the mailbox settings above.",
       "note": "Mail is written by other people, so the bot treats it as information, never as orders. By default it only sees the sender, the subject and the first few lines. Attachments are never opened. Nothing is sent unless you allow replies and then approve each one here.",
       "replies": "Let the bot suggest replies (you approve every one before it is sent)",
+      "repliesHint": "Each suggested reply waits for your OK here.",
       "running": "Running",
       "save": "Save",
       "saved": "Saved.",
       "sent": "E-mail sent.",
       "skipped": "Mails given up after repeated failures (for example the bot was deleted): {{n}}",
+      "status": {
+        "needMailbox": "Pick a mailbox first.",
+        "noSendersDetail": "Add allowed senders on the mailbox card, then save here.",
+        "noSendersTitle": "No allowed senders",
+        "off": "Channel is off.",
+        "openMailbox": "Open mailbox settings",
+        "stoppedHint": "Turn the channel on, pick a mailbox and a bot, then save.",
+        "unsaved": "Unsaved changes — save to apply."
+      },
       "stopped": "Not running",
       "subject": "Subject: {{subject}}",
       "title": "E-mail to a bot",
@@ -8015,23 +8054,28 @@
       "colTime": "When",
       "colTo": "To",
       "daily": "Warn above this many e-mails per day, per mailbox (0 = never)",
+      "dailyHelp": "0 turns this warning off. It does not block sending.",
       "days": "Warn when I already wrote to someone within this many days (0 = never)",
+      "daysHelp": "0 turns this warning off. It does not block sending.",
       "description": "Limits, an opt-out list and a log of every e-mail your bots send.",
       "export": "Export as CSV",
       "footer": "Text of the opt-out line",
       "footerHint": "{sender} is replaced by the sending address. The line is added by the app, not by the bot, and the bot cannot remove it. You can send one e-mail without it by approving it on the card, which shows a warning. The program does not read replies: when someone answers “STOP”, add their address to the opt-out list here yourself.",
       "footerPlaceholder": "Leave empty to use the built-in text (Turkish and English)",
-      "intro": "Every e-mail a bot sends still asks you first. These settings only decide when the question carries a warning. A warning never blocks you: you can always choose \"Send anyway\", and that choice is written to the log.",
+      "footerShort": "Leave empty for the built-in Turkish and English text.",
+      "intro": "On Ask-level bots, every send asks you first; daily limits and repeat-recipient reminders show up as warnings you can override with \"Send anyway\". On Full-level bots those two only add a note in the run step — they never block or ask. The opt-out list below always blocks until you remove someone or send the mail yourself.",
       "kindAddress": "address",
       "kindDomain": "whole domain",
+      "limitsTitle": "Sending warnings",
       "loading": "Loading…",
       "logEmpty": "No e-mail has been sent yet.",
       "logHint": "Who got an e-mail, when, and from which bot. Only e-mails that were really sent are listed.",
       "logTitle": "Sent e-mail log",
       "optOutAdd": "Add",
       "optOutEmpty": "Nobody is on the list yet.",
-      "optOutHint": "Add an address (ann@example.com) or a whole domain (example.com). A bot that tries to write to them gets a warning on your approval card.",
+      "optOutHint": "Add an address (ann@example.com) or a whole domain (example.com). Any bot that tries to write to them is stopped — on Ask-level bots you see it on the approval card; on Full-level bots the send is refused with no card.",
       "optOutLine": "Add an opt-out line to e-mails by default",
+      "optOutLineHint": "The app adds the line; the bot cannot remove it.",
       "optOutPlaceholder": "ann@example.com or example.com",
       "optOutRemove": "Remove {{value}}",
       "optOutTitle": "People I will not write to",
@@ -8039,11 +8083,16 @@
       "save": "Save",
       "saved": "Saved",
       "sentAnyway": "Sent anyway",
-      "softHint": "These two are warnings, not blocks.",
+      "softHint": "These two are warnings on Ask-level bots (you can send anyway). On Full-level bots they are only logged in the run step.",
+      "status": {
+        "saved": "All changes saved.",
+        "unsaved": "You have unsaved changes."
+      },
       "title": "Safe sending",
       "verifyDomains": "Extra sites a verification e-mail may link to",
       "verifyDomainsHint": "A bot that signs up on a site gets back only the links of that site from its verification e-mail. If a site sends its mails through another service (for example a tracking domain), add that domain here, one per line (example.com). Leave it empty if you are unsure: the bot then asks you.",
-      "verifyDomainsPlaceholder": "mail.example.com"
+      "verifyDomainsPlaceholder": "mail.example.com",
+      "verifyDomainsShort": "One domain per line when verification links use another host."
     },
     "mode": {
       "moreHint": "Rarely needed. Closed again the next time you open Settings.",
@@ -8246,7 +8295,6 @@
         "searxng": "The address of your own SearXNG server, for example http://127.0.0.1:8080. The web search guide has a one-command install for a server.",
         "tavily": "Create a key in your Tavily account and paste it here."
       },
-      "providerHint": "Bots search the web through a search provider. The free engines often work on a home computer, but they usually block servers, so a server needs one of these.",
       "providerTitle": "Search provider",
       "saveAndTest": "Save and test",
       "searxngLabel": "SearXNG URL",
@@ -8275,6 +8323,41 @@
     }
   },
   "settingsUi": {
+    "codingClis": {
+      "accountOnServer": "Account on {{name}}: {{account}}",
+      "actions": "Actions for {{name}}",
+      "copyInstallLocal": "Copy install command for this computer",
+      "copyInstallServer": "Copy install command for server",
+      "copyLoginLocal": "Copy sign-in command for this computer",
+      "copyLoginServer": "Copy sign-in command for server",
+      "howToInstall": "How to install",
+      "local": {
+        "not_installed": "not installed",
+        "off": "off",
+        "on": "on",
+        "unreachable": "can't check"
+      },
+      "myServer": "{{name}}:",
+      "note": "Switch a coding CLI on here when bots run on this computer; sign in on your server when bots live there.",
+      "pathOnServer": "Path on {{name}}",
+      "quotaAge": "Updated {{hours}} h ago",
+      "quotaFresh": "Updated just now",
+      "quotaLeft": "{{pct}}% left on plan",
+      "server": {
+        "loading": "checking…",
+        "logged_in": "signed in",
+        "not_installed": "not installed",
+        "not_logged_in": "not signed in",
+        "unknown": "sign-in unknown",
+        "unreachable": "not reachable"
+      },
+      "serverNotConnected": "You are working on this computer, so {{name}} is not connected. Switch back to it to manage its coding CLIs.",
+      "serverUnreachable": "Could not reach {{name}}, so its coding CLIs are not shown as installed or missing. Try Refresh.",
+      "thisComputer": "This computer:",
+      "title": "Coding CLIs",
+      "turnOff": "Turn off on this computer",
+      "turnOn": "Turn on on this computer"
+    },
     "groups": {
       "troubleshooting": "Troubleshooting",
       "updates": "Updates and version"
@@ -8301,11 +8384,6 @@
         "description": "Logins and secrets your bots may use, kept on this computer.",
         "name": "Vault"
       }
-    },
-    "serverCli": {
-      "repair": "Repair",
-      "signIn": "Sign in",
-      "unknown": "Sign-in unknown"
     },
     "updates": {
       "description": "Check for a new version, read what changed and install it.",

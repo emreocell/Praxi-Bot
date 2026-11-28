@@ -1224,6 +1224,8 @@ pub(crate) struct Shared {
     pub tasks: Mutex<HashMap<RunId, JoinHandle<()>>>,
     /// Background work (memory extraction).
     pub bg: Mutex<Vec<JoinHandle<()>>>,
+    /// Chats whose history is being summarised, or failed lately (and when they may retry).
+    pub summaries: Mutex<HashMap<ChatId, crate::summary::Attempt>>,
     pub surface: ToolSurface,
     /// Last `gseq` handed out (see [`StreamItem::gseq`]).
     pub gseq: AtomicU64,
@@ -2198,6 +2200,7 @@ impl Shared {
             let prior = crate::history::chat_provenance(
                 &self.storage,
                 chat_id,
+                run.bot_id,
                 Some(run.id),
                 schedule_id_of(&run.kind),
             );

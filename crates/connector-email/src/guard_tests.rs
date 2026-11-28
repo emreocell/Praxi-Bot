@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use secret_store::{MemoryStore, SecretRef, SecretStore};
 use serde_json::{Value, json};
-use tool_registry::{Tool, ToolContext, ToolError};
+use tool_registry::{ContentPart, Tool, ToolContext, ToolError};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -73,6 +73,15 @@ fn ctx() -> ToolContext {
     ToolContext {
         bot_id: Some(BOT.into()),
         run_id: "run-1".into(),
+        ..ToolContext::default()
+    }
+}
+
+fn full_ctx() -> ToolContext {
+    ToolContext {
+        bot_id: Some(BOT.into()),
+        run_id: "run-1".into(),
+        unattended_mail: true,
         ..ToolContext::default()
     }
 }
@@ -252,6 +261,9 @@ async fn the_same_recipient_wait_and_opt_out_by_unicode_entry_match_the_other_sp
         ["opt_out_listed"]
     );
     let (_s2, conn2) = setup().await;
+    let mut settings = conn2.guard().settings();
+    settings.same_recipient_days = 14;
+    conn2.guard().set_settings(settings).unwrap();
     let t2 = send_tool(&conn2);
     t2.call(&ctx(), mail("tom@example.com")).await.unwrap();
     // `tom+2@` is the same mailbox: the same-recipient wait applies.
@@ -305,6 +317,73 @@ async fn the_guard_runs_again_for_the_identity_chosen_on_the_card() {
     t.call(&ctx(), work).await.unwrap();
     assert_eq!(conn.guard().log(10)[0].account, "work");
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn full_level_sends_past_repeat_recipient_and_daily_warnings() {
+    let (server, conn) = setup().await;
+    let mut s = conn.guard().settings();
+    s.daily_limit = 1;
+    s.same_recipient_days = 7;
+    conn.guard().set_settings(s).unwrap();
+    let t = send_tool(&conn);
+    let who = "tom@example.com";
+    t.call(&full_ctx(), mail(who)).await.unwrap();
+    let second = mail(who);
+    let out = t.call(&full_ctx(), second).await.unwrap();
+    let ContentPart::Json { data: body } = &out.content[0] else {
+        panic!("json output");
+    };
+    let warned = body
+        .get("mail_guard_warnings")
+        .and_then(Value::as_array)
+        .map_or(0, std::vec::Vec::len);
+    assert_eq!(warned, 2, "{body:?}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(conn.guard().log(10).len(), 2);
+}
+
+#[tokio::test]
+async fn full_level_still_blocks_the_opt_out_list() {
+    let (server, conn) = setup().await;
+    conn.guard().add_opt_out("ann@example.com", "").unwrap();
+    let t = send_tool(&conn);
+    let err = t
+        .call(&full_ctx(), mail("ann@example.com"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::PermissionDenied(ref m) if m.contains("(opt-out list)")),
+        "{err}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn full_level_cannot_remove_the_owner_enabled_footer() {
+    let (server, conn) = setup().await;
+    let mut input = mail("bob@example.com");
+    input["opt_out_line"] = json!(false);
+    let err = send_tool(&conn).call(&full_ctx(), input).await.unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn full_level_blocks_unreadable_guard_with_repair_instructions() {
+    let (server, conn) = setup().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("guard-settings.json"), "{bad json").unwrap();
+    conn.set_guard_dir(dir.path().to_path_buf());
+    let err = send_tool(&conn)
+        .call(&full_ctx(), mail("bob@example.com"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::PermissionDenied(ref m) if m.contains("Repair") && !m.contains("Remove the recipient")),
+        "{err}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

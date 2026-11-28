@@ -389,7 +389,7 @@ pub struct EmailSendTestResponse {
 pub struct EmailGuardSettingsDto {
     /// Warn above this many sends per account in 24 hours (`0` = no warning). Default 20.
     pub daily_limit: u32,
-    /// Warn when a recipient got mail within this many days (`0` = no warning). Default 14.
+    /// Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).
     pub same_recipient_days: u32,
     /// Add the opt-out line to outgoing mail by default.
     pub opt_out_line: bool,

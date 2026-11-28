@@ -5,9 +5,10 @@
 //! * an **opt-out line** appended in code to the body (the model never writes or removes it);
 //! * a **daily count** per account and a **same-recipient wait**.
 //!
-//! The count, the wait and the opt-out list are *soft* guards: [`MailGuard::check`] returns
-//! [`Warning`]s, never a refusal. Only the owner can send past a warning, by approving the card
-//! that shows it ("Send anyway"). The tool freezes the card it showed, warnings or not
+//! The count, the wait and the opt-out line are *soft* guards on Ask-level bots: [`MailGuard::check`]
+//! returns [`Warning`]s. Only the owner can send past one, by approving the card that shows it
+//! ("Send anyway"). On Full-level bots only the count and wait warnings are logged without blocking;
+//! all other warnings, including a dropped opt-out line, block. The tool freezes the card it showed, warnings or not
 //! ([`MailGuard::freeze`]) and a later call goes through past a warning only when it matches a
 //! frozen entry exactly ([`MailGuard::take_card`]). The model has no argument that can do this.
 //!
@@ -25,7 +26,7 @@ use serde::{Deserialize, Serialize};
 /// Default: at most this many mails per account in a rolling 24 hours before a warning.
 pub const DEFAULT_DAILY_LIMIT: u32 = 20;
 /// Default: warn when the same recipient got a mail from the account in the last N days.
-pub const DEFAULT_SAME_RECIPIENT_DAYS: u32 = 14;
+pub const DEFAULT_SAME_RECIPIENT_DAYS: u32 = 0;
 /// How long a frozen warning set stays valid after the card was shown.
 const FREEZE_TTL: Duration = Duration::from_secs(30 * 60);
 /// Longest subject kept in the log.
@@ -333,7 +334,7 @@ pub struct AddressKeys {
 #[must_use]
 pub fn canonical_domain(d: &str) -> Option<String> {
     let d = d.trim().trim_end_matches('.');
-    if d.is_empty() || d.contains(['@', '/', '\\']) || d.contains(char::is_whitespace) {
+    if d.is_empty() || d.contains(['@', '/', '\\']) || crate::address::has_hidden_char(d) {
         return None;
     }
     idna::domain_to_ascii(d).ok().filter(|x| !x.is_empty())
@@ -350,7 +351,7 @@ pub fn canonical_address(s: &str) -> Option<AddressKeys> {
         _ => t,
     };
     let inner = inner.trim();
-    if inner.contains(char::is_whitespace) {
+    if crate::address::has_hidden_char(inner) {
         return None;
     }
     let (local, domain) = inner.rsplit_once('@')?;
@@ -1118,10 +1119,33 @@ mod tests {
     }
 
     #[test]
+    fn new_default_disables_repeat_wait_and_saved_setting_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            MailGuard::open(dir.path().to_path_buf())
+                .settings()
+                .same_recipient_days,
+            0
+        );
+        std::fs::write(
+            dir.path().join("guard-settings.json"),
+            r#"{"same_recipient_days":14}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            MailGuard::open(dir.path().to_path_buf())
+                .settings()
+                .same_recipient_days,
+            14
+        );
+    }
+
+    #[test]
     fn daily_limit_and_same_recipient_are_warnings_not_blocks() {
         let g = MailGuard::in_memory();
         let s = GuardSettings {
             daily_limit: 2,
+            same_recipient_days: 14,
             ..GuardSettings::default()
         };
         g.set_settings(s).unwrap();
@@ -1229,6 +1253,11 @@ mod tests {
             g.check(&facts(&["u@notblocked.org".into()], true)).codes(),
             Vec::<String>::new()
         );
+        g.set_settings(GuardSettings {
+            same_recipient_days: 14,
+            ..GuardSettings::default()
+        })
+        .unwrap();
         // same-recipient wait: a +tag variant of a logged mailbox is the same recipient
         g.record(entry(&["c@y.io"], now_secs()));
         let rep = g.check(&facts(&["C+news@y.io".into()], true));
@@ -1341,7 +1370,11 @@ mod tests {
             g.check_invite("work", &one("a@x.io")).codes(),
             vec!["daily_limit"]
         );
-        g.set_settings(GuardSettings::default()).unwrap();
+        g.set_settings(GuardSettings {
+            same_recipient_days: 14,
+            ..GuardSettings::default()
+        })
+        .unwrap();
         assert_eq!(g.check_invite("work", &one("a@x.io")).warnings, vec![]);
         assert_eq!(
             g.check(&facts(&one("a@x.io"), true)).codes(),

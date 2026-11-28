@@ -4463,6 +4463,15 @@
       "tokensPerMinute": "Textmenge pro Minute"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Lange Chats: ältere Nachrichten werden zu einer kurzen Notiz zusammengefasst, damit der Bot den Faden behält.",
+    "hint": "Ältere Nachrichten eines langen Chats werden zu einer kurzen Notiz zusammengefasst. Die Nachrichten bleiben gespeichert und durchsuchbar.",
+    "label": "Ältere Nachrichten langer Chats zusammenfassen",
+    "noBot": "Lege zuerst einen Bot an.",
+    "note": "Wird ein Chat sehr lang, schreibt das eigene Modell des Bots (oder sein günstigeres Hilfsmodell, außer wenn private Daten im Spiel sind) eine kurze Notiz über den älteren Teil. Der Bot liest dann diese Notiz und deine letzten Nachrichten. Die Notiz ist als nicht vertrauenswürdiger Text markiert, nie als deine Worte, und Text von Webseiten oder aus E-Mails bleibt so markiert. Die ursprünglichen Nachrichten werden nicht verändert oder gelöscht. Aus: Der Bot sieht wie bisher nur die neuesten Nachrichten.",
+    "title": "Lange Chats"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} behält einiges für sich: Die Ausführungsrichtlinie, Kommandozeilen-Werkzeugserver, Skills und Coding-CLI-Anmeldungen werden direkt auf {{name}} geändert. E-Mail-, Such- und Diktierkonten lassen sich von diesem Computer aus verbinden.",
@@ -4502,7 +4511,6 @@
       "none": "Der Server hat keine Coding-CLIs gemeldet.",
       "notInstalled": "Nicht installiert.",
       "note": "Das sind die eigenen Werkzeuge des Servers. Installation und Anmeldung erfolgen auf {{name}}.",
-      "officialPage": "{{name}} von der offiziellen Seite installieren",
       "ready": "Bereit",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Auf Server neu installieren",
@@ -4513,8 +4521,7 @@
       "signIn": "Zum Anmelden führe auf dem Server aus:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Beim Anmelden wird auf dem Server eine Webadresse angezeigt (oft mit einem Code). Öffne die Adresse auf diesem Computer, melde dich dort an und füge den Code bei Aufforderung in das Terminal des Servers ein. Anmeldungen auf diesem Computer werden nie auf den Server kopiert.",
-      "signInOnServer": "Auf {{server}} anmelden",
-      "title": "Coding-CLIs auf {{name}}"
+      "signInOnServer": "Auf {{server}} anmelden"
     },
     "hint": "auf {{name}}",
     "menu": {
@@ -5513,7 +5520,6 @@
     "hint": {
       "new": "Neu"
     },
-    "howToInstall": "So wird installiert",
     "install": "{{name}} installieren",
     "levels": {
       "high": "Hoch",
@@ -5526,7 +5532,6 @@
     "listFresh": "Gerade aktualisiert",
     "noModels": "Gib in der Suche eine Modell-ID ein, um eines zu verwenden.",
     "none": "Kein Modell",
-    "notOnServer": "{{name}} · noch nicht auf {{server}}",
     "noteLocalClis": "Abonnement-CLIs auf diesem Computer werden verwendet, wenn ein Bot auf „diesem Computer“ läuft.",
     "otherId": "„{{id}}“ mit {{provider}} verwenden",
     "recent": "Zuletzt verwendet",
@@ -6715,14 +6720,11 @@
       },
       "detected": {
         "copied": "Befehl kopiert",
-        "copyCommand": "Befehl kopieren",
         "copyDetails": "Details kopieren",
         "description": "Hier gefundene Werkzeuge werden automatisch eingeschaltet, wenn du angemeldet bist. Schalte eines aus, und es bleibt aus.",
         "detailsCopied": "Details kopiert",
-        "detailsToggle": "Details",
         "detectError": "Installierte Coding-Werkzeuge konnten nicht geprüft werden.",
         "dismissExpired": "Abgelaufene Genehmigung verwerfen",
-        "docs": "Doku",
         "enabledToast": "{{name}} aktiviert.",
         "experimentalChip": "Experimentell",
         "install": "Installieren",
@@ -6737,16 +6739,12 @@
           "powershell_missing": "PowerShell wurde nicht gefunden. Kopiere den Befehl und führe ihn in deinem Terminal aus.",
           "timeout": "Die Installation hat zehn Minuten überschritten und wurde gestoppt. Prüfe die Ausgabe, bevor du es erneut versuchst."
         },
-        "installLabel": "Installationsbefehl",
         "installRunning": "Wird installiert … das Verlassen dieses Bereichs widerruft eine erteilte Genehmigung nicht.",
         "installSummary": "{{engine}} installieren oder aktualisieren",
-        "loginLabel": "Anmelden mit",
-        "moreEngines": "Weitere installierbare Engines ({{count}})",
         "noteNative": "Läuft mit eigenen Werkzeugen: Wähle sie in den Engine-Einstellungen eines Bots.",
         "noteUnsupported": "Praxi erkennt sie, kann sie aber noch nicht als Engine ausführen.",
         "noteUnverified": "Ungeprüfter Befehl: Lies die Dokumentation des Anbieters, kopiere ihn dann und führe ihn selbst aus.",
         "offline": "Der lokale Dienst läuft nicht, daher können erkannte Coding-Werkzeuge nicht angezeigt werden.",
-        "onThisComputer": "Auf diesem Computer",
         "pathLabel": "Speicherort",
         "problem": "Das hat nicht funktioniert.",
         "refresh": "Neu scannen",
@@ -6759,8 +6757,7 @@
           "unsupported": "Noch nicht unterstützt"
         },
         "termsNotice": "Es gelten die Bedingungen deines Anbieter-Tarifs; prüfe vor dem Aktivieren, ob die automatisierte Nutzung der CLI erlaubt ist.",
-        "title": "Auf diesem Computer gefunden",
-        "toggle": "{{name}} verwenden"
+        "title": "Auf diesem Computer gefunden"
       },
       "keys": {
         "add": "Hinzufügen",
@@ -6897,6 +6894,7 @@
       "allGood": "Alles sieht gut aus",
       "checkedAt": "Zuletzt geprüft um {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Browser",
         "capabilities": "Fähigkeiten",
         "catalog_freshness": "Aktualität des Modellkatalogs",
@@ -6921,6 +6919,7 @@
       "description": "Prüft, warum der Bot möglicherweise nicht funktioniert, und behebt häufige Probleme.",
       "empty": "Es wurden keine Prüfungen zurückgegeben",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Installiere Chrome, Edge oder Chromium (nicht das Snap-Paket).",
         "catalog_freshness": "Die kuratierte Modellliste ist älter als 90 Tage; aktualisiere Praxi oder führe `bot catalog check` aus, um aktuelle Modelle zu prüfen.",
         "cli_accounts": "Öffne einmal ein Terminal und melde dich bei der CLI an (zum Beispiel `claude` oder `codex login`).",
@@ -7144,7 +7143,6 @@
       "ignored": "E-Mails von nicht erlaubten Absendern wurden ignoriert: {{n}}",
       "needsSenders": "Dieser Kanal lief ohne Liste erlaubter Absender und gibt deshalb jetzt KEINE E-Mail mehr an den Bot weiter. Trage in den Postfach-Einstellungen oben unter „Erlaubte Absender“ die Adressen ein, die dem Bot schreiben dürfen (zum Beispiel deine eigene). Bis dahin bleibt jede eingehende E-Mail ungelesen im Postfach.",
       "noAccount": "Fügen Sie zuerst oben ein Postfach hinzu.",
-      "noSenders": "Das gewählte Postfach hat keine erlaubten Absender, daher erreicht keine E-Mail den Bot. Trage deine eigene Adresse in den Postfach-Einstellungen oben unter „Erlaubte Absender“ ein.",
       "note": "Mails stammen von anderen Personen, deshalb behandelt der Bot sie als Information, nie als Anweisung. Standardmäßig sieht er nur Absender, Betreff und die ersten Zeilen. Anhänge werden nie geöffnet. Es wird nichts gesendet, außer Sie erlauben Antworten und bestätigen jede einzelne hier.",
       "replies": "Dem Bot erlauben, Antworten vorzuschlagen (Sie bestätigen jede, bevor sie gesendet wird)",
       "running": "Läuft",
@@ -7467,7 +7465,6 @@
         "searxng": "Die Adresse deines eigenen SearXNG-Servers, zum Beispiel http://127.0.0.1:8080. Die Anleitung zur Websuche enthält eine Installation für Server mit einem einzigen Befehl.",
         "tavily": "Erstelle in deinem Tavily-Konto einen Schlüssel und füge ihn hier ein."
       },
-      "providerHint": "Bots suchen im Web über einen Suchanbieter. Die kostenlosen Suchmaschinen funktionieren auf einem Heimcomputer oft, sperren Server aber meist aus; ein Server braucht daher einen dieser Anbieter.",
       "providerTitle": "Suchanbieter",
       "saveAndTest": "Speichern und testen",
       "searxngLabel": "SearXNG-URL",

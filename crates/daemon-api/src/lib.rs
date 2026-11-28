@@ -14,6 +14,7 @@
 //! other exception is `GET /v1/events`, which also accepts `?token=<token>` for
 //! browser `EventSource` clients (Host / Origin still apply).
 
+pub mod account_health;
 mod assistant_import_routes;
 mod attachment_routes;
 mod audit_routes;

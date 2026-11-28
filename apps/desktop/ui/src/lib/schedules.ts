@@ -20,6 +20,7 @@ export type SchedulePayload =
   | { kind: "agent_prompt"; text: string }
   | { kind: "workflow"; name: string; params?: unknown }
   | { kind: "tool"; name: string; input?: unknown }
+  | { kind: "standing_order"; checklist: string }
   | { kind: "unknown" };
 
 export type MisfirePolicy = "skip" | "run_once" | "run_all";
@@ -66,6 +67,9 @@ export function parsePayload(raw: unknown): SchedulePayload {
   }
   if (raw.kind === "tool" && typeof raw.name === "string") {
     return { kind: "tool", name: raw.name, input: raw.input };
+  }
+  if (raw.kind === "standing_order" && typeof raw.checklist === "string") {
+    return { kind: "standing_order", checklist: raw.checklist };
   }
   return { kind: "unknown" };
 }
@@ -311,7 +315,7 @@ export function draftFromSchedule(s: Schedule): ScheduleDraft {
 
 export type DraftError = "name" | "bot" | "text" | "cron" | "prompt";
 
-/** Whether an edit keeps the stored payload (a workflow / tool payload is not editable here). */
+/** Whether an edit keeps the stored payload (a workflow, tool or standing-order payload is not editable here). */
 function keepsPayload(editing?: Schedule): boolean {
   return (
     editing !== undefined && parsePayload(editing.payload).kind !== "agent_prompt"

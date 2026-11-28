@@ -27,6 +27,7 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
 tempfile.workspace = true
 live-view = { workspace = true, features = ["openapi"] }
+account-health = { path = "../account-health", version = "0.1.0" }
 agent-core = { path = "../agent-core", version = "0.1.0" }
 channel-api = { path = "../channel-api", version = "0.1.0", features = ["openapi"] }
 embedding-hub = { path = "../embedding-hub", version = "0.1.0" }

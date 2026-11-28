@@ -103,18 +103,18 @@ jobs:
       # rust-toolchain.toml pins channel = "stable" (+ rustfmt, clippy); rustup
       # honours it automatically once this installs stable.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Install pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -171,7 +171,8 @@ jobs:
       # secrets below, set `if: true`, and make sure the thumbprint is applied
       # (e.g. via bundle.windows.certificateThumbprint or a signCommand).
       - name: Import signing certificate (disabled, no certificate yet)
-        if: ${{ false }}
+        # Turns on when the owner sets the repo variable WINDOWS_CODE_SIGNING to 'true'.
+        if: ${{ vars.WINDOWS_CODE_SIGNING == 'true' }}
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
