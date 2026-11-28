@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { isMockMode } from "../api/mockMode";
 import type { AccountQuota } from "../lib/quota";
 
@@ -15,7 +15,7 @@ function quotaForEngine(id: string, list: readonly AccountQuota[]): AccountQuota
  * Results are cached with a timestamp; nothing is invented in production (mock fills samples).
  */
 export function useCodingCliQuota(engineId: string): { quota: AccountQuota | null; fetchedAtMs: number | null } {
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   const key = engineId;
 
   useEffect(() => {
@@ -40,14 +40,7 @@ export function useCodingCliQuota(engineId: string): { quota: AccountQuota | nul
     };
   }, [engineId, key]);
 
-  return useMemo(() => {
-    const cached = mem.get(key);
-    if (!cached) {
-      return { quota: null, fetchedAtMs: null };
-    }
-    if (Date.now() - cached.at >= CACHE_MS) {
-      return { quota: cached.quota, fetchedAtMs: cached.at };
-    }
-    return { quota: cached.quota, fetchedAtMs: cached.at };
-  }, [key, tick]);
+  // `setTick` re-renders once the mock quotas are cached.
+  const cached = mem.get(key);
+  return { quota: cached?.quota ?? null, fetchedAtMs: cached?.at ?? null };
 }

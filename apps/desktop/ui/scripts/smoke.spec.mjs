@@ -454,7 +454,7 @@ export async function flows(ctx) {
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByTestId('settings-nav-models').click();
     await page.getByTestId('api-key-paste').waitFor(T);
-    await page.getByTestId('detected-accounts-block').waitFor(T);
+    await page.getByTestId('coding-clis-block').waitFor(T);
     await page.getByText('stub', { exact: false }).first().waitFor(T);
     await page.keyboard.press('Escape');
   });

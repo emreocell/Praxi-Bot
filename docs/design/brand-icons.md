@@ -12,7 +12,7 @@ and `BrandIcon` (bare or tiled). The audit covered these lookup boundaries:
 | Surface | Call sites / lookup |
 | --- | --- |
 | Engine selection and onboarding | `firstrun/BrainStep`: `brandOf` → `BrandIcon` |
-| Settings → Bots and models | `settings/DetectedAccountsBlock`: `brandOf` → `BrandIcon` |
+| Settings → Bots and models | `settings/CodingClisBlock`: `cliBrandKey` → `BrandIcon` |
 | Model picker: selected value, groups, rows, custom model | `ModelPicker`: `providerBrand` / `productBrandKey` → `BrandMark` |
 | Onboarding provider presets and selected model | `BrainStep`: provider id / `productBrandKey` → `BrandIcon` / `BrandMark` |
 | Provider key presets and connection rows | `settings/ApiKeyPaste`: raw provider id → `BrandIcon` |
@@ -196,6 +196,7 @@ the test reads it). **Result** is `logo` (artwork bundled) or `initial` / `glyph
 | Composio | `composio` | logo | `composio.svg` | [brand.composio.dev/logo](https://brand.composio.dev/logo) | Vendor brand hub: "Use the provided SVGs and scale freely"; no recolouring or distortion (black and white variants); no licence text | 2026-11-27 |
 | Slack | `slack` | logo | inline in `BrandIcon.tsx` / `BrandMark.tsx` | [Slack media kit](https://slack.com/media-kit) | Identification of the integration, see `THIRD_PARTY_NOTICES.md` | 2026-11-23 |
 | Goose | `goose` | glyph | none | [LF Projects trademark policy](https://lfprojects.org/policies/trademark-policy/) | Logos need written permission; the glyph is original project artwork | 2026-11-27 |
+| Terminal (neutral fallback) | `terminal` | glyph | none | [Praxi-Bot repository](https://github.com/emreocell/Praxi-Bot) | The same original terminal-prompt glyph as Goose, for coding CLIs with no bundled mark in Settings | 2026-11-28 |
 | Groq | `groq` | initial | none | [groq.com/trademark-policy](https://groq.com/trademark-policy) | Logos in a UI need a licence from Groq | 2026-11-27 |
 | Together AI | `together` | initial | none | [together.ai/terms-of-service](https://www.together.ai/terms-of-service) | Logo use needs prior written consent | 2026-11-27 |
 | Meta Model API | `meta` | initial | none | [developers.meta.com](https://developers.meta.com/) | No redistribution grant for Meta marks verified | 2026-11-27 |

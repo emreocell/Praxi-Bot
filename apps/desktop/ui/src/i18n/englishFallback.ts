@@ -9,6 +9,9 @@ export function usesEnglishFallback(locale: string, key: string): boolean {
     key.startsWith("chat.step.desktop_window.") ||
     // The newer pasted-secret kinds (labelled values, card numbers), #421.
     key.startsWith("pastedSecret.kind.labelled_") ||
-    key === "pastedSecret.kind.payment_card"
+    key === "pastedSecret.kind.payment_card" ||
+    // The model picker's short "set up" row for a coding CLI that is not ready on the server.
+    key === "modelPicker.missingCliShort" ||
+    key === "modelPicker.setUpCli"
   );
 }

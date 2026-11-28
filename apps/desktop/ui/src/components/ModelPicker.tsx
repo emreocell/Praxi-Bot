@@ -38,7 +38,7 @@ export interface ModelPickerAutoOption {
 }
 
 /** CLIs enabled but not ready on the server: one short line and a link to Settings. */
-function MissingEngineRows({ ids, server, testId }: { ids: string[]; server: string; testId: string }) {
+function MissingEngineRows({ ids, server, testId, onSetUp }: { ids: string[]; server: string; testId: string; onSetUp: () => void }) {
   const { t } = useTranslation();
   return (
     <>
@@ -53,9 +53,10 @@ function MissingEngineRows({ ids, server, testId }: { ids: string[]; server: str
               type="button"
               data-picker-row
               className={styles.setupLink}
-              onClick={() =>
-                openSettingsTarget({ page: "models", card: "detectedAccounts", field: `cli-${engineId}` })
-              }
+              onClick={() => {
+                onSetUp();
+                openSettingsTarget({ page: "models", card: "detectedAccounts", field: `cli-${engineId}` });
+              }}
             >
               {t("modelPicker.setUpCli")}
             </button>
@@ -70,14 +71,14 @@ function MissingEngineRows({ ids, server, testId }: { ids: string[]; server: str
  * Only while the bots' home is a server: its missing CLIs as muted rows, and the note that the
  * subscription CLIs of this computer are used when a bot runs on "this computer". Nothing otherwise.
  */
-function HostCliExtras({ ids, testId, label }: { ids: string[]; testId: string; label?: ReactNode }) {
+function HostCliExtras({ ids, testId, label, onSetUp }: { ids: string[]; testId: string; label?: ReactNode; onSetUp: () => void }) {
   const { t } = useTranslation();
   const { home, workLocalNow } = useDaemon();
   if (home.kind !== "host" || workLocalNow) return null;
   return (
     <>
       {label}
-      {ids.length > 0 ? <MissingEngineRows ids={ids} server={home.name} testId={testId} /> : null}
+      {ids.length > 0 ? <MissingEngineRows ids={ids} server={home.name} testId={testId} onSetUp={onSetUp} /> : null}
       <p className={styles.noModels}>{t("modelPicker.noteLocalClis")}</p>
     </>
   );
@@ -633,10 +634,10 @@ export function ModelPicker({
                       <>
                         {sectionLabel("modelPicker.sectionCli")}
                         {sections.cli.map(groupRow)}
-                        <HostCliExtras ids={sections.emptyCli} testId={testId} />
+                        <HostCliExtras ids={sections.emptyCli} testId={testId} onSetUp={close} />
                       </>
                     ) : sections.emptyCli.length > 0 ? (
-                      <HostCliExtras ids={sections.emptyCli} testId={testId} label={sectionLabel("modelPicker.sectionCli")} />
+                      <HostCliExtras ids={sections.emptyCli} testId={testId} label={sectionLabel("modelPicker.sectionCli")} onSetUp={close} />
                     ) : null}
                     {sections.api.length > 0 ? (
                       <>

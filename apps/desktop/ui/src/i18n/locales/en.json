@@ -4850,7 +4850,6 @@
       "none": "The server reported no coding CLIs.",
       "notInstalled": "Not installed.",
       "note": "These are the server's own tools. Installing and signing in happens on {{name}}.",
-      "officialPage": "Install {{name}} from the official page",
       "ready": "Ready",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstall on server",
@@ -4861,8 +4860,7 @@
       "signIn": "To sign in, run on the server:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Signing in shows a web address on the server (often with a code). Open the address on this computer, sign in there and, if asked, paste the code into the server's terminal. Sign-ins on this computer are never copied to the server.",
-      "signInOnServer": "Sign in on {{server}}",
-      "title": "Coding CLIs on {{name}}"
+      "signInOnServer": "Sign in on {{server}}"
     },
     "hint": "on {{name}}",
     "menu": {
@@ -5877,7 +5875,6 @@
     "hint": {
       "new": "New"
     },
-    "howToInstall": "How to install",
     "install": "Install {{name}}",
     "levels": {
       "high": "High",
@@ -5891,7 +5888,6 @@
     "missingCliShort": "{{name}} · not ready on {{server}}",
     "noModels": "Type a model id in the search to use one.",
     "none": "No model",
-    "notOnServer": "{{name}} · not on {{server}} yet",
     "noteLocalClis": "Subscription CLIs on this computer are used when a bot runs on \"this computer\".",
     "otherId": "Use \"{{id}}\" with {{provider}}",
     "recent": "Recent",
@@ -7180,14 +7176,11 @@
       },
       "detected": {
         "copied": "Command copied",
-        "copyCommand": "Copy command",
         "copyDetails": "Copy details",
         "description": "One list for every coding CLI: this computer and your server. Actions live in each row's menu.",
         "detailsCopied": "Details copied",
-        "detailsToggle": "Details",
         "detectError": "Could not check installed coding tools.",
         "dismissExpired": "Dismiss expired approval",
-        "docs": "Docs",
         "enabledToast": "{{name}} enabled.",
         "experimentalChip": "Experimental",
         "install": "Install",
@@ -7202,16 +7195,12 @@
           "powershell_missing": "PowerShell could not be found. Copy the command and run it in your terminal.",
           "timeout": "Installation exceeded ten minutes and was stopped. Check the output before retrying."
         },
-        "installLabel": "Install command",
         "installRunning": "Installing… leaving this section does not revoke an accepted approval.",
         "installSummary": "Install or update {{engine}}",
-        "loginLabel": "Sign in with",
-        "moreEngines": "More engines you can install ({{count}})",
         "noteNative": "Runs with its own tools: choose it in a bot's Engine settings.",
         "noteUnsupported": "Praxi detects it but cannot run it as an engine yet.",
         "noteUnverified": "Unverified command: check the vendor docs, then copy and run it yourself.",
         "offline": "The local service is not running, so detected coding tools cannot be shown.",
-        "onThisComputer": "On this computer",
         "pathLabel": "Location",
         "problem": "That did not work.",
         "refresh": "Rescan",
@@ -7224,8 +7213,7 @@
           "unsupported": "Not supported yet"
         },
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "title": "Coding CLIs",
-        "toggle": "Use {{name}}"
+        "title": "Coding CLIs"
       },
       "keys": {
         "add": "Add",
@@ -8198,7 +8186,9 @@
   },
   "settingsUi": {
     "codingClis": {
+      "accountOnServer": "Account on {{name}}: {{account}}",
       "actions": "Actions for {{name}}",
+      "copyInstallLocal": "Copy install command for this computer",
       "copyInstallServer": "Copy install command for server",
       "copyLoginLocal": "Copy sign-in command for this computer",
       "copyLoginServer": "Copy sign-in command for server",
@@ -8206,19 +8196,25 @@
       "local": {
         "not_installed": "not installed",
         "off": "off",
-        "on": "on"
+        "on": "on",
+        "unreachable": "can't check"
       },
       "myServer": "{{name}}:",
       "note": "Switch a coding CLI on here when bots run on this computer; sign in on your server when bots live there.",
+      "pathOnServer": "Path on {{name}}",
       "quotaAge": "Updated {{hours}} h ago",
       "quotaFresh": "Updated just now",
       "quotaLeft": "{{pct}}% left on plan",
       "server": {
+        "loading": "checking…",
         "logged_in": "signed in",
         "not_installed": "not installed",
         "not_logged_in": "not signed in",
-        "unknown": "sign-in unknown"
+        "unknown": "sign-in unknown",
+        "unreachable": "not reachable"
       },
+      "serverNotConnected": "You are working on this computer, so {{name}} is not connected. Switch back to it to manage its coding CLIs.",
+      "serverUnreachable": "Could not reach {{name}}, so its coding CLIs are not shown as installed or missing. Try Refresh.",
       "thisComputer": "This computer:",
       "title": "Coding CLIs",
       "turnOff": "Turn off on this computer",
@@ -8250,11 +8246,6 @@
         "description": "Logins and secrets your bots may use, kept on this computer.",
         "name": "Vault"
       }
-    },
-    "serverCli": {
-      "repair": "Repair",
-      "signIn": "Sign in",
-      "unknown": "Sign-in unknown"
     },
     "updates": {
       "description": "Check for a new version, read what changed and install it.",

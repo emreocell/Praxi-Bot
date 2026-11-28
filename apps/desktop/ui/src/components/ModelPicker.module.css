@@ -388,7 +388,7 @@
   font-size: var(--font-size-xs);
   cursor: pointer;
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: var(--space-1);
 }
 
 .setupLink:hover {

@@ -5,14 +5,20 @@ import { cliStatus, canRunEngine, type CliStatus } from "./cliCards.ts";
 export type LocalCliPlace =
   | "not_installed"
   | "on"
-  | "off";
+  | "off"
+  | "unreachable";
 
 /** My server: logged in / not logged in / not installed. */
 export type ServerCliPlace =
   | "not_installed"
   | "logged_in"
   | "not_logged_in"
-  | "unknown";
+  | "unknown"
+  | "loading"
+  | "unreachable";
+
+/** Where the server's list stands: not asked yet, answered, or the server did not answer. */
+export type ServerListStatus = "loading" | "ready" | "unreachable";
 
 export interface UnifiedCliRow {
   id: string;
@@ -51,11 +57,21 @@ export function serverCliPlace(engine: AdminCliEngine | null): ServerCliPlace {
   return "unknown";
 }
 
+export interface MergeOptions {
+  /** The server list is a failed or pending read: rows say so instead of "not installed". */
+  serverStatus?: ServerListStatus;
+  /** This computer's daemon could not be asked: server-only rows say so instead of "not installed". */
+  localDown?: boolean;
+}
+
 /** Union of engine ids from the local detector and the host admin list. */
 export function mergeCodingClis(
   local: readonly CliEngineDto[],
-  server: readonly AdminCliEngine[] | null
+  server: readonly AdminCliEngine[] | null,
+  { serverStatus = "ready", localDown = false }: MergeOptions = {}
 ): UnifiedCliRow[] {
+  const serverKnown = serverStatus === "ready";
+  const placeOf = (e: AdminCliEngine | null): ServerCliPlace => (serverKnown ? serverCliPlace(e) : serverStatus);
   const byId = new Map<string, UnifiedCliRow>();
   for (const e of local) {
     const id = e.detected.id;
@@ -67,12 +83,12 @@ export function mergeCodingClis(
       server: null,
       localPlace: place,
       localDetail: detail,
-      serverPlace: "not_installed"
+      serverPlace: placeOf(null)
     });
   }
-  for (const e of server ?? []) {
+  for (const e of serverKnown ? (server ?? []) : []) {
     const row = byId.get(e.id);
-    const serverPlace = serverCliPlace(e);
+    const serverPlace = placeOf(e);
     if (row) {
       row.server = e;
       row.serverPlace = serverPlace;
@@ -86,8 +102,8 @@ export function mergeCodingClis(
         name: e.name,
         local: null,
         server: e,
-        localPlace: place,
-        localDetail: detail,
+        localPlace: localDown ? "unreachable" : place,
+        localDetail: localDown ? "na" : detail,
         serverPlace
       });
     }
@@ -100,4 +116,31 @@ export function mergeCodingClis(
 /** Row can switch the local engine on only when it is ready to run. */
 export function localCanToggle(row: UnifiedCliRow): boolean {
   return row.local !== null && canRunEngine(row.local) && cliStatus(row.local) === "ready";
+}
+
+const STATUS_I18N: Record<CliStatus, string> = {
+  ready: "ready",
+  sign_in: "signIn",
+  outdated: "outdated",
+  not_installed: "notInstalled",
+  unsupported: "unsupported"
+};
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * "This computer: on · Praxi host: signed in": one line per row, the places in the same order.
+ * The reason a local CLI is off (needs sign-in, outdated) follows in brackets; "not installed"
+ * already says it all.
+ */
+export function placeLabel(t: Translate, row: UnifiedCliRow, serverName: string, showServer: boolean): string {
+  const reason =
+    row.localPlace === "off" && row.localDetail !== "ready" && row.localDetail !== "na"
+      ? ` (${t(`settingsModal.ai.detected.status.${STATUS_I18N[row.localDetail]}`)})`
+      : "";
+  const parts = [`${t("settingsUi.codingClis.thisComputer")} ${t(`settingsUi.codingClis.local.${row.localPlace}`)}${reason}`];
+  if (showServer) {
+    parts.push(`${t("settingsUi.codingClis.myServer", { name: serverName })} ${t(`settingsUi.codingClis.server.${row.serverPlace}`)}`);
+  }
+  return parts.join(" · ");
 }

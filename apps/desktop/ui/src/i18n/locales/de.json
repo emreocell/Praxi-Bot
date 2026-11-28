@@ -4509,7 +4509,6 @@
       "none": "Der Server hat keine Coding-CLIs gemeldet.",
       "notInstalled": "Nicht installiert.",
       "note": "Das sind die eigenen Werkzeuge des Servers. Installation und Anmeldung erfolgen auf {{name}}.",
-      "officialPage": "{{name}} von der offiziellen Seite installieren",
       "ready": "Bereit",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Auf Server neu installieren",
@@ -4520,8 +4519,7 @@
       "signIn": "Zum Anmelden führe auf dem Server aus:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Beim Anmelden wird auf dem Server eine Webadresse angezeigt (oft mit einem Code). Öffne die Adresse auf diesem Computer, melde dich dort an und füge den Code bei Aufforderung in das Terminal des Servers ein. Anmeldungen auf diesem Computer werden nie auf den Server kopiert.",
-      "signInOnServer": "Auf {{server}} anmelden",
-      "title": "Coding-CLIs auf {{name}}"
+      "signInOnServer": "Auf {{server}} anmelden"
     },
     "hint": "auf {{name}}",
     "menu": {
@@ -5520,7 +5518,6 @@
     "hint": {
       "new": "Neu"
     },
-    "howToInstall": "So wird installiert",
     "install": "{{name}} installieren",
     "levels": {
       "high": "Hoch",
@@ -5531,10 +5528,8 @@
     "listAge": "Vor {{hours}} Std. aktualisiert",
     "listBundled": "Eingebaute Ersatzliste: Die CLI konnte nicht gefragt werden.",
     "listFresh": "Gerade aktualisiert",
-    "missingCliShort": "{{name}} · not ready on {{server}}",
     "noModels": "Gib in der Suche eine Modell-ID ein, um eines zu verwenden.",
     "none": "Kein Modell",
-    "notOnServer": "{{name}} · noch nicht auf {{server}}",
     "noteLocalClis": "Abonnement-CLIs auf diesem Computer werden verwendet, wenn ein Bot auf „diesem Computer“ läuft.",
     "otherId": "„{{id}}“ mit {{provider}} verwenden",
     "recent": "Zuletzt verwendet",
@@ -5544,7 +5539,6 @@
     "search": "Modelle suchen",
     "sectionApi": "API-Anbieter",
     "sectionCli": "Coding-CLIs (dein Abonnement)",
-    "setUpCli": "Set up",
     "showAll": "Alle Modelle ({{count}})",
     "switched": "Zu {{model}} gewechselt",
     "switchedDefault": "Standardmodell auf {{model}} gesetzt",
@@ -6724,14 +6718,11 @@
       },
       "detected": {
         "copied": "Befehl kopiert",
-        "copyCommand": "Befehl kopieren",
         "copyDetails": "Details kopieren",
         "description": "Hier gefundene Werkzeuge werden automatisch eingeschaltet, wenn du angemeldet bist. Schalte eines aus, und es bleibt aus.",
         "detailsCopied": "Details kopiert",
-        "detailsToggle": "Details",
         "detectError": "Installierte Coding-Werkzeuge konnten nicht geprüft werden.",
         "dismissExpired": "Abgelaufene Genehmigung verwerfen",
-        "docs": "Doku",
         "enabledToast": "{{name}} aktiviert.",
         "experimentalChip": "Experimentell",
         "install": "Installieren",
@@ -6746,16 +6737,12 @@
           "powershell_missing": "PowerShell wurde nicht gefunden. Kopiere den Befehl und führe ihn in deinem Terminal aus.",
           "timeout": "Die Installation hat zehn Minuten überschritten und wurde gestoppt. Prüfe die Ausgabe, bevor du es erneut versuchst."
         },
-        "installLabel": "Installationsbefehl",
         "installRunning": "Wird installiert … das Verlassen dieses Bereichs widerruft eine erteilte Genehmigung nicht.",
         "installSummary": "{{engine}} installieren oder aktualisieren",
-        "loginLabel": "Anmelden mit",
-        "moreEngines": "Weitere installierbare Engines ({{count}})",
         "noteNative": "Läuft mit eigenen Werkzeugen: Wähle sie in den Engine-Einstellungen eines Bots.",
         "noteUnsupported": "Praxi erkennt sie, kann sie aber noch nicht als Engine ausführen.",
         "noteUnverified": "Ungeprüfter Befehl: Lies die Dokumentation des Anbieters, kopiere ihn dann und führe ihn selbst aus.",
         "offline": "Der lokale Dienst läuft nicht, daher können erkannte Coding-Werkzeuge nicht angezeigt werden.",
-        "onThisComputer": "Auf diesem Computer",
         "pathLabel": "Speicherort",
         "problem": "Das hat nicht funktioniert.",
         "refresh": "Neu scannen",
@@ -6768,8 +6755,7 @@
           "unsupported": "Noch nicht unterstützt"
         },
         "termsNotice": "Es gelten die Bedingungen deines Anbieter-Tarifs; prüfe vor dem Aktivieren, ob die automatisierte Nutzung der CLI erlaubt ist.",
-        "title": "Auf diesem Computer gefunden",
-        "toggle": "{{name}} verwenden"
+        "title": "Auf diesem Computer gefunden"
       },
       "keys": {
         "add": "Hinzufügen",

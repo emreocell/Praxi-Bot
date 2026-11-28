@@ -4850,7 +4850,6 @@
       "none": "Sunucu hiç kodlama CLI'ı bildirmedi.",
       "notInstalled": "Kurulu değil.",
       "note": "Bunlar sunucunun kendi araçları. Kurulum ve giriş {{name}} üzerinde yapılır.",
-      "officialPage": "{{name}} için resmî sayfadan kur",
       "ready": "Hazır",
       "readyAs": "Hazır · {{account}}",
       "reinstall": "Sunucuda yeniden kur",
@@ -4861,8 +4860,7 @@
       "signIn": "Giriş için sunucuda şunu çalıştır:",
       "signInAsUser": "Elle giriş yapmak için, buradaki terminalde ya da SSH ile, “{{user}}” kullanıcısı olarak:",
       "signInNote": "Giriş sunucuda bir web adresi (çoğu zaman bir kodla) gösterir. Adresi bu bilgisayarda aç, orada giriş yap ve istenirse kodu sunucudaki terminale yapıştır. Bu bilgisayardaki oturumlar sunucuya kopyalanmaz.",
-      "signInOnServer": "{{server}} üzerinde giriş yap",
-      "title": "{{name}} üzerindeki kodlama CLI'ları"
+      "signInOnServer": "{{server}} üzerinde giriş yap"
     },
     "hint": "{{name}} üzerinde",
     "menu": {
@@ -5877,7 +5875,6 @@
     "hint": {
       "new": "Yeni"
     },
-    "howToInstall": "Nasıl kurulur",
     "install": "{{name}} kur",
     "levels": {
       "high": "Yüksek",
@@ -5891,7 +5888,6 @@
     "missingCliShort": "{{name}} · {{server}} üzerinde hazır değil",
     "noModels": "Kullanmak için aramaya model kimliği yaz.",
     "none": "Model yok",
-    "notOnServer": "{{name}} · {{server}} üzerinde henüz yok",
     "noteLocalClis": "Bu bilgisayardaki abonelik CLI'ları, bot “bu bilgisayarda” çalışırken kullanılır.",
     "otherId": "“{{id}}” modelini {{provider}} ile kullan",
     "recent": "Son kullanılanlar",
@@ -7180,14 +7176,11 @@
       },
       "detected": {
         "copied": "Komut kopyalandı",
-        "copyCommand": "Komutu kopyala",
         "copyDetails": "Ayrıntıları kopyala",
         "description": "Tüm kodlama CLI'ları tek listede: bu bilgisayar ve sunucun. İşlemler her satırın menüsünde.",
         "detailsCopied": "Ayrıntılar kopyalandı",
-        "detailsToggle": "Ayrıntılar",
         "detectError": "Kurulu kodlama araçları denetlenemedi.",
         "dismissExpired": "Süresi dolan onayı kapat",
-        "docs": "Belgeler",
         "enabledToast": "{{name}} etkinleştirildi.",
         "experimentalChip": "Deneysel",
         "install": "Kur",
@@ -7202,16 +7195,12 @@
           "powershell_missing": "PowerShell bulunamadı. Komutu kopyalayıp terminalinden çalıştır.",
           "timeout": "Kurulum on dakikayı aştığı için durduruldu. Yeniden denemeden önce çıktıyı kontrol et."
         },
-        "installLabel": "Kurulum komutu",
         "installRunning": "Kuruluyor… bu bölümden ayrılmak verilmiş onayı iptal etmez.",
         "installSummary": "{{engine}} kur veya güncelle",
-        "loginLabel": "Giriş için",
-        "moreEngines": "Kurabileceğin diğer motorlar ({{count}})",
         "noteNative": "Kendi araçlarıyla çalışır: botun Motor ayarlarından seç.",
         "noteUnsupported": "Praxi bunu algılıyor ama henüz motor olarak çalıştıramıyor.",
         "noteUnverified": "Doğrulanmamış komut: satıcı belgelerine bak, sonra kopyalayıp kendin çalıştır.",
         "offline": "Yerel servis çalışmıyor; algılanan kodlama araçları gösterilemiyor.",
-        "onThisComputer": "Bu bilgisayarda",
         "pathLabel": "Konum",
         "problem": "İşlem başarısız oldu.",
         "refresh": "Yeniden tara",
@@ -7224,8 +7213,7 @@
           "unsupported": "Henüz desteklenmiyor"
         },
         "termsNotice": "Sağlayıcının abonelik koşulları geçerlidir; etkinleştirmeden önce otomatik kullanıma izin verildiğini doğrula.",
-        "title": "Kodlama CLI'ları",
-        "toggle": "{{name}} kullan"
+        "title": "Kodlama CLI'ları"
       },
       "keys": {
         "add": "Ekle",
@@ -8198,7 +8186,9 @@
   },
   "settingsUi": {
     "codingClis": {
+      "accountOnServer": "{{name}} hesabı: {{account}}",
       "actions": "{{name}} için işlemler",
+      "copyInstallLocal": "Bu bilgisayar kurulum komutunu kopyala",
       "copyInstallServer": "Sunucu kurulum komutunu kopyala",
       "copyLoginLocal": "Bu bilgisayar giriş komutunu kopyala",
       "copyLoginServer": "Sunucu giriş komutunu kopyala",
@@ -8206,19 +8196,25 @@
       "local": {
         "not_installed": "kurulu değil",
         "off": "kapalı",
-        "on": "açık"
+        "on": "açık",
+        "unreachable": "denetlenemiyor"
       },
       "myServer": "{{name}}:",
       "note": "Botlar bu bilgisayarda çalışırken CLI'ları buradan açıp kapat; botlar sunucudaysa girişi sunucuda yap.",
+      "pathOnServer": "{{name}} üzerindeki yol",
       "quotaAge": "{{hours}} sa önce güncellendi",
       "quotaFresh": "Az önce güncellendi",
       "quotaLeft": "Planda %{{pct}} kaldı",
       "server": {
+        "loading": "denetleniyor…",
         "logged_in": "giriş yapıldı",
         "not_installed": "kurulu değil",
         "not_logged_in": "giriş yapılmadı",
-        "unknown": "giriş bilinmiyor"
+        "unknown": "giriş bilinmiyor",
+        "unreachable": "ulaşılamıyor"
       },
+      "serverNotConnected": "Şu an bu bilgisayarda çalışıyorsun, bu yüzden {{name}} bağlı değil. Kodlama CLI'larını yönetmek için ona geri dön.",
+      "serverUnreachable": "{{name}} sunucusuna ulaşılamadı; bu yüzden kodlama CLI'ları kurulu ya da eksik diye gösterilmiyor. Yenile'yi dene.",
       "thisComputer": "Bu bilgisayar:",
       "title": "Kodlama CLI'ları",
       "turnOff": "Bu bilgisayarda kapat",
@@ -8250,11 +8246,6 @@
         "description": "Botlarının kullanabileceği girişler ve sırlar; bu bilgisayarda saklanır.",
         "name": "Kasa"
       }
-    },
-    "serverCli": {
-      "repair": "Onar",
-      "signIn": "Giriş yap",
-      "unknown": "Giriş durumu bilinmiyor"
     },
     "updates": {
       "description": "Yeni sürüm var mı bak, nelerin değiştiğini oku ve kur.",

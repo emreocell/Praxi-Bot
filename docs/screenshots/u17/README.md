@@ -1,12 +1,14 @@
 # u17: unified Coding CLIs (Settings)
 
-Reference shots for the owner feedback work (unified list, row menu, model picker “Set up” link).
+App captures from mock mode, before and after the unified list. No other material is kept here.
 
 | File | What it shows |
 | --- | --- |
-| `settings-coding-clis-en.png` | Settings → AI: one Coding CLIs list with per-place status |
-| `settings-coding-clis-tr.png` | Turkish UI |
-| `model-picker-setup-link.png` | Model picker: short missing-CLI row with Set up link |
+| `before-this-computer.png` | Before: the separate "Found on this computer" list |
+| `before-server.png` | Before: the separate "Coding CLIs on <server>" list |
+| `after-coding-clis-en.png` | After: one Coding CLIs list, each row says what it is on this computer and on the server |
+| `after-coding-clis-tr.png` | After, Turkish UI |
+| `after-row-menu-en.png` | After: a row's actions menu (turn on/off, install, copy commands, sign in on the server) |
 
-Capture with mock mode (`VITE_MOCK=1`) and `?host=bots&admin=ok` for server rows.
-Owner reference: `/srv/webioo/praxi-work/owner-shots/fb3-38.png`, `fb3-39.png`.
+Capture with mock mode (`VITE_MOCK=1`) and `?screen=settings&section=models&host=bots&admin=needs`
+(add `&lang=tr` for Turkish).

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { MockApiClient } from "../api/mock.ts";
 import {
+  cliBrandKey,
   cliStatus,
   displayPath,
   hasSwitch,
@@ -41,4 +42,13 @@ test("an engine the daemon switched on by itself triggers one provider reload", 
   const on = engines.map((e) => ({ ...e, enabled: e.detected.id === "claude" }));
   assert.equal(needsProviderReload(on, new Set()), true);
   assert.equal(needsProviderReload(on, new Set(["cli:claude"])), false);
+});
+
+test("cliBrandKey uses a real logo, never a monogram or the generated initials", () => {
+  assert.equal(cliBrandKey("claude"), "claude");
+  assert.equal(cliBrandKey("agy"), "antigravity");
+  // Bundled as a letter monogram (no path): not a logo.
+  assert.equal(cliBrandKey("groq"), "terminal");
+  // Unknown to the icon set: generated initials, not a logo.
+  assert.equal(cliBrandKey("some-new-cli"), "terminal");
 });

@@ -4509,7 +4509,6 @@
       "none": "El servidor no encontró herramientas de programación de línea de comandos.",
       "notInstalled": "Sin instalar.",
       "note": "Estas herramientas son del servidor. La instalación y el inicio de sesión se hacen en {{name}}.",
-      "officialPage": "Instalar {{name}} desde la página oficial",
       "ready": "Listo",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstalar en el servidor",
@@ -4520,8 +4519,7 @@
       "signIn": "Para iniciar sesión, ejecuta esto en el servidor:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Al iniciar sesión se muestra una dirección web en el servidor, normalmente con un código. Abre la dirección en este equipo e inicia sesión. Si se te pide, pega el código en la terminal del servidor. Las sesiones de este equipo nunca se copian al servidor.",
-      "signInOnServer": "Iniciar sesión en {{server}}",
-      "title": "Herramientas de programación de línea de comandos en {{name}}"
+      "signInOnServer": "Iniciar sesión en {{server}}"
     },
     "hint": "en {{name}}",
     "menu": {
@@ -5520,7 +5518,6 @@
     "hint": {
       "new": "Nuevo"
     },
-    "howToInstall": "Cómo instalar",
     "install": "Instalar {{name}}",
     "levels": {
       "high": "Alto",
@@ -5533,9 +5530,6 @@
     "listFresh": "Actualizado ahora mismo",
     "noModels": "Escribe un ID de modelo en la búsqueda para usarlo.",
     "none": "Sin modelo",
-    "notOnServer": "{{name}} · aún no está en {{server}}",
-    "missingCliShort": "{{name}} · not ready on {{server}}",
-    "setUpCli": "Set up",
     "noteLocalClis": "Las CLI de suscripción de este equipo se usan cuando un bot se ejecuta en «este equipo».",
     "otherId": "Usar «{{id}}» con {{provider}}",
     "recent": "Recientes",
@@ -6724,14 +6718,11 @@
       },
       "detected": {
         "copied": "Comando copiado",
-        "copyCommand": "Copiar comando",
         "copyDetails": "Copiar detalles",
         "description": "Las herramientas encontradas aquí se activan solas cuando has iniciado sesión. Si desactivas una, se queda desactivada.",
         "detailsCopied": "Detalles copiados",
-        "detailsToggle": "Detalles",
         "detectError": "No se pudieron comprobar las herramientas de programación instaladas.",
         "dismissExpired": "Descartar la aprobación caducada",
-        "docs": "Documentación",
         "enabledToast": "{{name}} activado.",
         "experimentalChip": "Experimental",
         "install": "Instalar",
@@ -6746,16 +6737,12 @@
           "powershell_missing": "No se encontró PowerShell. Copia el comando y ejecútalo en tu terminal.",
           "timeout": "La instalación superó los diez minutos y se detuvo. Revisa la salida antes de volver a intentarlo."
         },
-        "installLabel": "Comando de instalación",
         "installRunning": "Instalando… salir de esta sección no revoca una aprobación ya aceptada.",
         "installSummary": "Instalar o actualizar {{engine}}",
-        "loginLabel": "Iniciar sesión con",
-        "moreEngines": "Más motores que puedes instalar ({{count}})",
         "noteNative": "Funciona con sus propias herramientas: elígelo en los ajustes de motor de un bot.",
         "noteUnsupported": "Praxi lo detecta, pero todavía no puede usarlo como motor.",
         "noteUnverified": "Comando sin verificar: consulta la documentación del fabricante y luego cópialo y ejecútalo tú mismo.",
         "offline": "El servicio local no está en marcha, así que no se pueden mostrar las herramientas de programación detectadas.",
-        "onThisComputer": "En este equipo",
         "pathLabel": "Ubicación",
         "problem": "Eso no funcionó.",
         "refresh": "Volver a buscar",
@@ -6768,8 +6755,7 @@
           "unsupported": "Aún no compatible"
         },
         "termsNotice": "Se aplican las condiciones de tu plan con el fabricante; comprueba que se permita el uso automatizado de la CLI antes de activarla.",
-        "title": "Encontrado en este equipo",
-        "toggle": "Usar {{name}}"
+        "title": "Encontrado en este equipo"
       },
       "keys": {
         "add": "Añadir",

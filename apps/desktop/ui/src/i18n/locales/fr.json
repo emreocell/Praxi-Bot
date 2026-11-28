@@ -3909,14 +3909,12 @@
       "none": "Le serveur n'a signalé aucune CLI de programmation.",
       "notInstalled": "Non installé.",
       "note": "Ce sont les outils propres au serveur. L'installation et la connexion se font sur {{name}}.",
-      "officialPage": "Installer {{name}} depuis la page officielle",
       "ready": "Prêt",
       "reinstall": "Réinstaller sur le serveur",
       "runOnServer": "Sur le serveur, exécutez :",
       "signIn": "Pour vous connecter, exécutez sur le serveur :",
       "signInNote": "La connexion affiche une adresse web sur le serveur (souvent avec un code). Ouvrez l'adresse sur cet ordinateur, connectez-vous et, si on vous le demande, collez le code dans le terminal du serveur. Les connexions de cet ordinateur ne sont jamais copiées vers le serveur.",
-      "signInOnServer": "Se connecter sur {{server}}",
-      "title": "CLI de programmation sur {{name}}"
+      "signInOnServer": "Se connecter sur {{server}}"
     },
     "hint": "sur {{name}}",
     "menu": {
@@ -4569,7 +4567,6 @@
     "hint": {
       "new": "nouveau"
     },
-    "howToInstall": "Comment l'installer",
     "install": "Installer {{name}}",
     "levels": {
       "high": "Élevé",
@@ -4582,7 +4579,6 @@
     "listFresh": "Mis à jour à l'instant",
     "noModels": "Saisissez un identifiant de modèle dans la recherche pour en utiliser un.",
     "none": "Aucun modèle",
-    "notOnServer": "{{name}} · pas encore sur {{server}}",
     "noteLocalClis": "Les CLI sous abonnement installés sur cet ordinateur sont utilisées quand un bot s'exécute sur « cet ordinateur ».",
     "otherId": "Utiliser « {{id}} » avec {{provider}}",
     "recommended": "Recommandé",
@@ -5609,14 +5605,11 @@
       },
       "detected": {
         "copied": "Commande copiée",
-        "copyCommand": "Copier la commande",
         "copyDetails": "Copier les détails",
         "description": "Les outils trouvés ici sont activés automatiquement quand vous êtes connecté. Si vous en désactivez un, il reste désactivé.",
         "detailsCopied": "Détails copiés",
-        "detailsToggle": "Détails",
         "detectError": "Impossible de vérifier les outils de programmation installés.",
         "dismissExpired": "Écarter l'approbation expirée",
-        "docs": "Documentation",
         "enabledToast": "{{name}} activé.",
         "experimentalChip": "Expérimental",
         "install": "Installer",
@@ -5631,16 +5624,12 @@
           "powershell_missing": "PowerShell est introuvable. Copiez la commande et exécutez-la dans votre terminal.",
           "timeout": "L'installation a dépassé dix minutes et a été arrêtée. Vérifiez la sortie avant de réessayer."
         },
-        "installLabel": "Commande d'installation",
         "installRunning": "Installation en cours… quitter cette section ne révoque pas une approbation déjà acceptée.",
         "installSummary": "Installer ou mettre à jour {{engine}}",
-        "loginLabel": "Se connecter avec",
-        "moreEngines": "Autres moteurs installables ({{count}})",
         "noteNative": "Fonctionne avec ses propres outils : choisissez-le dans les réglages « Moteur » d'un bot.",
         "noteUnsupported": "Praxi le détecte mais ne peut pas encore l'exécuter comme moteur.",
         "noteUnverified": "Commande non vérifiée : consultez la documentation du fournisseur, puis copiez-la et exécutez-la vous-même.",
         "offline": "Le service local n'est pas en cours d'exécution ; les outils de programmation détectés ne peuvent donc pas être affichés.",
-        "onThisComputer": "Sur cet ordinateur",
         "pathLabel": "Emplacement",
         "problem": "Cela n'a pas fonctionné.",
         "refresh": "Analyser à nouveau",
@@ -5653,8 +5642,7 @@
           "unsupported": "Pas encore pris en charge"
         },
         "termsNotice": "Les conditions de votre abonnement auprès du fournisseur s'appliquent ; vérifiez que l'utilisation automatisée du CLI est autorisée avant de l'activer.",
-        "title": "Trouvé sur cet ordinateur",
-        "toggle": "Utiliser {{name}}"
+        "title": "Trouvé sur cet ordinateur"
       },
       "keys": {
         "add": "Ajouter",

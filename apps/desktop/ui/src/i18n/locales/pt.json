@@ -3798,14 +3798,12 @@
       "none": "The server reported no coding CLIs.",
       "notInstalled": "Not installed.",
       "note": "These are the server's own tools. Installing and signing in happens on {{name}}.",
-      "officialPage": "Install {{name}} from the official page",
       "ready": "Ready",
       "reinstall": "Reinstall on server",
       "runOnServer": "On the server run:",
       "signIn": "To sign in, run on the server:",
       "signInNote": "Signing in shows a web address on the server (often with a code). Open the address on this computer, sign in there and, if asked, paste the code into the server's terminal. Sign-ins on this computer are never copied to the server.",
-      "signInOnServer": "Sign in on {{server}}",
-      "title": "Coding CLIs on {{name}}"
+      "signInOnServer": "Sign in on {{server}}"
     },
     "hint": "on {{name}}",
     "menu": {
@@ -4458,7 +4456,6 @@
     "hint": {
       "new": "new"
     },
-    "howToInstall": "How to install",
     "install": "Install {{name}}",
     "levels": {
       "high": "High",
@@ -4471,7 +4468,6 @@
     "listFresh": "Updated just now",
     "noModels": "Type a model id in the search to use one.",
     "none": "No model",
-    "notOnServer": "{{name}} · not on {{server}} yet",
     "noteLocalClis": "Subscription CLIs on this computer are used when a bot runs on \"this computer\".",
     "otherId": "Use \"{{id}}\" with {{provider}}",
     "recommended": "Recommended",
@@ -5497,14 +5493,11 @@
       },
       "detected": {
         "copied": "Command copied",
-        "copyCommand": "Copy command",
         "copyDetails": "Copy details",
         "description": "Tools found here are switched on automatically when you are signed in. Switch one off and it stays off.",
         "detailsCopied": "Details copied",
-        "detailsToggle": "Details",
         "detectError": "Could not check installed coding tools.",
         "dismissExpired": "Dismiss expired approval",
-        "docs": "Docs",
         "enabledToast": "{{name}} enabled.",
         "experimentalChip": "Experimental",
         "install": "Install",
@@ -5519,16 +5512,12 @@
           "powershell_missing": "PowerShell could not be found. Copy the command and run it in your terminal.",
           "timeout": "Installation exceeded ten minutes and was stopped. Check the output before retrying."
         },
-        "installLabel": "Install command",
         "installRunning": "Installing… leaving this section does not revoke an accepted approval.",
         "installSummary": "Install or update {{engine}}",
-        "loginLabel": "Sign in with",
-        "moreEngines": "More engines you can install ({{count}})",
         "noteNative": "Runs with its own tools: choose it in a bot's Engine settings.",
         "noteUnsupported": "Praxi detects it but cannot run it as an engine yet.",
         "noteUnverified": "Unverified command: check the vendor docs, then copy and run it yourself.",
         "offline": "The local service is not running, so detected coding tools cannot be shown.",
-        "onThisComputer": "On this computer",
         "pathLabel": "Location",
         "problem": "That did not work.",
         "refresh": "Rescan",
@@ -5541,8 +5530,7 @@
           "unsupported": "Not supported yet"
         },
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "title": "Found on this computer",
-        "toggle": "Use {{name}}"
+        "title": "Found on this computer"
       },
       "keys": {
         "add": "Add",
