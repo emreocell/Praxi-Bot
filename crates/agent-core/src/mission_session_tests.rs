@@ -1232,7 +1232,7 @@ async fn an_ordinary_chat_of_the_same_bot_does_not_get_the_mission_tools() {
 }
 
 #[tokio::test]
-async fn a_captcha_gives_up_only_that_item_and_the_session_carries_on() {
+async fn a_captcha_parks_only_that_item_and_the_session_carries_on() {
     let w = world(&["a.example", "b.example"]);
     // The model starts on a.example, hits a CAPTCHA, then finishes b.example.
     let fake = Fake::new(vec![
@@ -1259,32 +1259,30 @@ async fn a_captcha_gives_up_only_that_item_and_the_session_carries_on() {
         t0.elapsed() < std::time::Duration::from_secs(5),
         "nobody waited for the owner"
     );
-    // Nobody can solve a CAPTCHA from the ledger: the item is given up with the reason (the
-    // report lists it), not parked for an owner who could only skip it.
-    assert_eq!(
-        w.store
-            .items(&w.mission, Some(ItemStatus::Blocked))
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].key, "a.example");
+    assert!(blocked[0].live_only);
+    assert!(
+        blocked[0]
+            .blocked_reason
+            .as_deref()
             .unwrap()
-            .len(),
-        0
+            .contains("CAPTCHA")
     );
-    let a = w.store.items(&w.mission, Some(ItemStatus::Failed)).unwrap();
-    assert_eq!(a.len(), 1);
-    assert_eq!(a[0].key, "a.example");
-    assert!(a[0].last_error.as_deref().unwrap().contains("CAPTCHA"));
     assert_eq!(w.store.progress(&w.mission).unwrap().done, 1);
-    // The model was told in plain words to move on.
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(2)));
     assert!(
         tools
             .iter()
-            .any(|t| t.contains("is given up") && t.contains("Take the next open item")),
+            .any(|t| t.contains("parked") && t.contains("Take the next open item")),
         "{tools:?}"
     );
-    // No handover card was ever shown.
     let audit = w.env.storage.list_audit(w.env.user).unwrap();
-    assert!(audit.iter().any(|a| a.action == "handover.given_up"));
-    assert!(!audit.iter().any(|a| a.action == "handover.requested"));
+    assert!(audit.iter().any(|a| a.action == "handover.parked"));
 }
 
 #[tokio::test]
@@ -1312,14 +1310,12 @@ async fn captcha_give_ups_never_use_up_the_per_run_handover_limit() {
         .run_mission_session(w.env.chat, &w.mission, "brief")
         .unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    // All four items are given up with the CAPTCHA reason; none was refused as "too often".
-    let failed = w.store.items(&w.mission, Some(ItemStatus::Failed)).unwrap();
-    assert_eq!(failed.len(), 4, "{failed:?}");
-    assert!(
-        failed
-            .iter()
-            .all(|i| i.last_error.as_deref().unwrap().contains("CAPTCHA"))
-    );
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
+    assert_eq!(blocked.len(), 4, "{blocked:?}");
+    assert!(blocked.iter().all(|i| i.live_only));
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(8)));
     assert!(
         !tools.iter().any(|t| t.contains("asked for help too often")),
@@ -1348,9 +1344,9 @@ async fn without_a_single_doing_item_the_model_is_told_to_park_it_itself() {
     );
     let tools = crate::tests::tool_messages(&without_ledger(fake.request(1)));
     assert!(
-        tools
-            .iter()
-            .any(|t| t.contains("Mark the item you are working on as failed")),
+        tools.iter().any(|t| {
+            t.contains("Mark the item you are working on as blocked") && t.contains("mission_item")
+        }),
         "{tools:?}"
     );
 }

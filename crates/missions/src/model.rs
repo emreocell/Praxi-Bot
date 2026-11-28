@@ -479,15 +479,37 @@ pub fn mentions_code(reason: &str) -> bool {
     .any(|w| r.contains(w))
 }
 
-/// The text of a blocked reason is about a CAPTCHA. Nobody can pass one by typing an answer into
-/// the ledger, and a mission has no live hand-over, so such an item is given up with the reason
-/// rather than parked for the owner.
+/// The text of a blocked reason is about a CAPTCHA. The owner must finish it on the live page.
 #[must_use]
 pub fn mentions_captcha(reason: &str) -> bool {
     let r = reason.to_lowercase();
     ["captcha", "turnstile", "i am not a robot"]
         .iter()
         .any(|w| r.contains(w))
+}
+
+/// The text of a blocked reason needs the owner on the sign-up page (phone or SMS the bot cannot read).
+#[must_use]
+pub fn mentions_phone_verification(reason: &str) -> bool {
+    let r = reason.to_lowercase();
+    [
+        "phone number",
+        "phone verification",
+        "sms verification",
+        "verify your phone",
+        "mobile number",
+        "telefon",
+        "sms kod",
+        "telefon numar",
+    ]
+    .iter()
+    .any(|w| r.contains(w))
+}
+
+/// A blocked reason needs the owner live on the page, not a typed ledger answer.
+#[must_use]
+pub fn needs_owner_on_page(reason: &str) -> bool {
+    mentions_captcha(reason) || mentions_phone_verification(reason)
 }
 
 /// The text is (or is mostly) a one-time code: a short answer that holds a run of 4 to 10

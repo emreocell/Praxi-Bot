@@ -280,6 +280,11 @@ pub struct HandoverRequested {
     pub untrusted_content: bool,
     /// Seconds until the request expires on its own.
     pub expires_in_secs: u64,
+    /// A mission asked: no run waits for the answer. The item that needs it is parked as
+    /// blocked and the session moved on; the owner's answer releases that item. The card
+    /// stays open after the tool call has returned.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parked: bool,
 }
 
 // ── MCP elicitation ───────────────────────────────────────────────────────────

@@ -697,7 +697,31 @@ pub struct HandoverInfo {
     pub run_id: RunId,
     /// CAPTCHA or one-time code.
     pub kind: protocol::event::HandoverKind,
+    /// The bot that asked (missions release through the ledger).
+    pub bot_id: String,
+    /// When a mission asked: no run waits, the answer releases this item instead.
+    pub mission: Option<MissionTarget>,
+    /// Claims after this instant are refused even if the timer has not run yet.
+    pub deadline: tokio::time::Instant,
 }
+
+/// What the daemon hears when a mission parks a step for the owner on the live page.
+#[derive(Debug, Clone)]
+pub struct MissionHandoverNotice {
+    /// Mission id.
+    pub mission_id: String,
+    /// Item key parked as blocked.
+    pub item: String,
+    /// Bot id text.
+    pub bot_id: String,
+    /// Tool call the hand-over card answers.
+    pub call_id: ToolCallId,
+    /// Origin the browser reported.
+    pub site: String,
+}
+
+/// Daemon hook when a mission parks a CAPTCHA or phone step for the owner on the live page.
+pub type MissionHandoverNotifyHook = Arc<dyn Fn(MissionHandoverNotice) + Send + Sync>;
 
 /// What a parked `secret_request` asks for: names and flags only, never a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1191,6 +1215,8 @@ pub(crate) struct Shared {
     /// The mission ledger, set by the daemon. Mission sessions park a CAPTCHA / 2FA
     /// item in it instead of waiting for the owner, and ask the owner once.
     pub mission_store: RwLock<Option<Arc<missions::MissionStore>>>,
+    /// When a mission parks a CAPTCHA or phone step for the owner on the live page.
+    pub mission_handover_notify: Mutex<Option<MissionHandoverNotifyHook>>,
     /// Paired servers a bot may use as ITS computer while it runs here.
     pub server_links: RwLock<Option<Arc<dyn builtin_tools::pc::ServerLinks>>>,
     /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when

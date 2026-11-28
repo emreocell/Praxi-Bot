@@ -650,27 +650,23 @@ async fn a_captcha_gives_up_one_item_the_rest_continue_and_the_mission_finishes(
     };
     let w = world(dir.path(), &behaviour, 40, None);
     let id = start(&w, GOAL, Budgets::default());
-    // Nobody can solve a CAPTCHA from the ledger, so the owner is not asked: the item is given
-    // up with the reason and the mission does not end up waiting for a person.
+    // The CAPTCHA site is parked for the owner on the live page; the mission still finishes.
     let end = w.supervisor.drive(&id).await.unwrap();
     assert_eq!(end, MissionState::Done);
     let p = w.store.progress(&id).unwrap();
     assert_eq!(
         (p.done, p.blocked, p.failed),
-        (4, 0, 1),
-        "four sites registered, one given up"
+        (4, 1, 0),
+        "four sites registered, one parked for live hand-over"
     );
-    let failed = w.store.items(&id, Some(ItemStatus::Failed)).unwrap();
-    assert_eq!(failed[0].key, "site-3.example");
-    assert!(failed[0].last_error.as_deref().unwrap().contains("CAPTCHA"));
+    let blocked = w.store.items(&id, Some(ItemStatus::Blocked)).unwrap();
+    assert_eq!(blocked[0].key, "site-3.example");
+    assert!(blocked[0].live_only);
     let m = w.store.get(&id).unwrap().unwrap();
     let digest = m.digest.as_ref().unwrap();
-    assert!(digest.blocked.is_empty(), "nothing the owner must answer");
-    assert_eq!(digest.failed.len(), 1, "the report lists the given-up site");
-    // No handover card was shown: nobody waited.
+    assert_eq!(digest.blocked.len(), 1, "the report lists the parked site");
     let audit = w.storage.list_audit(w.user).unwrap();
-    assert!(!audit.iter().any(|a| a.action == "handover.requested"));
-    assert!(audit.iter().any(|a| a.action == "handover.given_up"));
+    assert!(audit.iter().any(|a| a.action == "handover.parked"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

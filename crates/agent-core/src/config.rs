@@ -28,6 +28,10 @@ pub const DEFAULT_SECRET_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60)
 /// hold a run, and the owner may be away from the desktop.
 pub const DEFAULT_MISSION_SECRET_REQUEST_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// Default [`LoopConfig::mission_handover_timeout`]: 8 hours. The browser tab stays open while
+/// the owner may solve a CAPTCHA or finish phone verification on the page.
+pub const DEFAULT_MISSION_HANDOVER_TIMEOUT: Duration = Duration::from_secs(8 * 60 * 60);
+
 /// Default [`LoopConfig::handover_timeout`]: 5 minutes (a code is valid for about that long).
 pub const DEFAULT_HANDOVER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -467,6 +471,9 @@ pub struct LoopConfig {
     /// How long the form of a mission's `secret_request` stays open (default
     /// [`DEFAULT_MISSION_SECRET_REQUEST_TIMEOUT`]). Nothing waits on it: the item is parked.
     pub mission_secret_request_timeout: Duration,
+    /// How long a mission's CAPTCHA or phone-verification hand-over stays open (default
+    /// [`DEFAULT_MISSION_HANDOVER_TIMEOUT`]). The browser tab is kept; nothing waits on it.
+    pub mission_handover_timeout: Duration,
     /// Handovers (a CAPTCHA, a one-time code) one run may ask the owner for
     /// (default [`DEFAULT_MAX_HANDOVERS_PER_RUN`]). A refused or cancelled one counts.
     pub max_handovers_per_run: u32,
@@ -583,6 +590,7 @@ impl Default for LoopConfig {
             max_secret_requests_per_run: DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
             secret_request_timeout: DEFAULT_SECRET_REQUEST_TIMEOUT,
             mission_secret_request_timeout: DEFAULT_MISSION_SECRET_REQUEST_TIMEOUT,
+            mission_handover_timeout: DEFAULT_MISSION_HANDOVER_TIMEOUT,
             max_handovers_per_run: DEFAULT_MAX_HANDOVERS_PER_RUN,
             handover_timeout: DEFAULT_HANDOVER_TIMEOUT,
             wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,

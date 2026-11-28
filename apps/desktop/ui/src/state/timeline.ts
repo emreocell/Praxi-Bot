@@ -167,6 +167,8 @@ export interface HandoverItem {
   /** Origin the browser reported for the page (never page text). */
   site: string;
   untrustedContent: boolean;
+  /** A mission asked: its item is parked and no run waits, so the card outlives the tool call. */
+  parked?: boolean;
   requestedMs: number;
   expiresMs: number;
   /** How the owner answered here; `closed` when the run moved on or the request expired. */
@@ -396,7 +398,9 @@ function closeOpenItems(items: TimelineItem[]): TimelineItem[] {
   return items.map((i) =>
     i.kind === "question" && i.answer === undefined
       ? { ...i, closed: true }
-      : (i.kind === "secret" && !i.parked) || i.kind === "handover" || i.kind === "elicitation"
+      : (i.kind === "secret" && !i.parked) ||
+          (i.kind === "handover" && !i.parked) ||
+          i.kind === "elicitation"
         ? { ...i, closed: true }
         : i.kind === "tool" &&
           (i.status === "awaiting_approval" ||
@@ -721,6 +725,7 @@ function reduce(
           handover: e.kind,
           site: e.site,
           untrustedContent: e.untrusted_content,
+          ...(e.parked ? { parked: true } : {}),
           requestedMs: ts,
           expiresMs: ts + Math.max(0, e.expires_in_secs) * 1000
         };
@@ -1005,7 +1010,9 @@ export function reconcile(
       }
       // A mission's form outlives its session run: it closes on its own expiry or answer.
       if (
-        ((i.kind === "secret" && !i.parked) || i.kind === "handover" || i.kind === "elicitation") &&
+        ((i.kind === "secret" && !i.parked) ||
+          (i.kind === "handover" && !i.parked) ||
+          i.kind === "elicitation") &&
         !i.closed &&
         i.outcome === undefined &&
         i.requestedMs < asOfMs &&

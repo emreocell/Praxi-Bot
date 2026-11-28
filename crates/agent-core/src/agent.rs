@@ -246,6 +246,7 @@ impl AgentLoop {
                 control: RwLock::new(None),
                 computer_provider: RwLock::new(None),
                 mission_store: RwLock::new(None),
+                mission_handover_notify: Mutex::new(None),
                 mail: Arc::new(builtin_tools::connector_email::MailHandle::new()),
                 server_links: RwLock::new(None),
                 static_desktop: RwLock::new(None),
@@ -561,6 +562,11 @@ impl AgentLoop {
     /// Install the mission ledger (`serve` wires the daemon's `missions.db` here).
     pub fn set_mission_store(&self, store: Arc<missions::MissionStore>) {
         *self.sh.mission_store.write() = Some(store);
+    }
+
+    /// Called when a mission parks a CAPTCHA or phone step for the owner on the live page.
+    pub fn set_mission_handover_notify(&self, hook: crate::shared::MissionHandoverNotifyHook) {
+        *self.sh.mission_handover_notify.lock() = Some(hook);
     }
 
     /// Install the paired servers a bot may use as its own computer
@@ -2228,11 +2234,39 @@ impl AgentLoop {
     /// field, a CAPTCHA that is still there) so the owner can try again.
     #[must_use]
     pub fn claim_handover(&self, call_id: ToolCallId) -> Option<crate::HandoverInfo> {
-        self.sh.handovers.lock().remove(&call_id)
+        let mut handovers = self.sh.handovers.lock();
+        let info = handovers.get(&call_id)?;
+        if tokio::time::Instant::now() >= info.deadline {
+            return None;
+        }
+        if let Some(target) = &info.mission {
+            if !self.mission_open(&target.mission_id) {
+                handovers.remove(&call_id);
+                return None;
+            }
+            return handovers.remove(&call_id);
+        }
+        drop(handovers);
+        self.refuse_if_stopped(call_id).ok()?;
+        let pending = self.sh.pending.lock();
+        if pending.get(&call_id)?.kind != PendingKind::Handover {
+            return None;
+        }
+        let mut handovers = self.sh.handovers.lock();
+        if tokio::time::Instant::now() >= handovers.get(&call_id)?.deadline {
+            return None;
+        }
+        handovers.remove(&call_id)
     }
 
     /// Undo [`Self::claim_handover`] after a failed answer.
     pub fn restore_handover(&self, call_id: ToolCallId, info: crate::HandoverInfo) {
+        if info.mission.is_some() {
+            if tokio::time::Instant::now() < info.deadline {
+                self.sh.handovers.lock().insert(call_id, info);
+            }
+            return;
+        }
         if self.sh.pending.lock().contains_key(&call_id) {
             self.sh.handovers.lock().insert(call_id, info);
         }
@@ -2244,7 +2278,14 @@ impl AgentLoop {
     /// # Errors
     /// [`LoopError::NoPendingApproval`] if the request already ended.
     pub fn finish_handover(&self, call_id: ToolCallId, done: bool, by: UserId) -> Result<()> {
-        self.sh.handovers.lock().remove(&call_id);
+        let info = self.sh.handovers.lock().remove(&call_id);
+        if let Some(info) = info.as_ref().filter(|i| i.mission.is_some()) {
+            builtin_tools::handover_hub().clear_browser_hold(&info.bot_id);
+            if !done {
+                builtin_tools::handover_hub().disarm(&info.run_id.to_string());
+            }
+            return Ok(());
+        }
         let verdict = if done {
             Verdict::HandoverDone
         } else {
