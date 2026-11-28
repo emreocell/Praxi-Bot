@@ -300,6 +300,15 @@ async fn copilot_row(temp: &Path, home: Option<PathBuf>) -> cli_provider::Detect
     row
 }
 
+// Windows cannot verify Unix ownership and permissions, so file evidence remains unverified.
+fn credential_detail() -> &'static str {
+    if cfg!(unix) {
+        "auth_metadata_only"
+    } else {
+        "auth_unverified"
+    }
+}
+
 #[tokio::test]
 async fn copilot_sign_in_is_seen_but_never_claimed_or_read() {
     let temp = fixture_dir();
@@ -325,14 +334,14 @@ async fn copilot_sign_in_is_seen_but_never_claimed_or_read() {
     );
     let row = copilot_row(temp.path(), Some(home.clone())).await;
     assert_eq!(row.auth, AuthState::Unknown);
-    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    assert_eq!(row.detail.as_deref(), Some(credential_detail()));
     assert!(row.account_label.is_none());
 
     // Stale history is not a sign-in either way: an empty user list still only "seen".
     write_private(&config, r#"{"lastLoggedInUser":{"login":"old"}}"#);
     let row = copilot_row(temp.path(), Some(home)).await;
     assert_eq!(row.auth, AuthState::Unknown);
-    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    assert_eq!(row.detail.as_deref(), Some(credential_detail()));
 }
 
 #[cfg(unix)]
@@ -360,7 +369,7 @@ async fn a_copilot_config_that_is_a_link_or_open_to_others_is_not_even_seen() {
     }
     chmod(&config, 0o600);
     let row = copilot_row(temp.path(), Some(home)).await;
-    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    assert_eq!(row.detail.as_deref(), Some(credential_detail()));
 }
 
 #[tokio::test]
@@ -407,14 +416,14 @@ async fn antigravity_credentials_are_seen_but_never_claimed_or_read() {
         write_private(&path, "SENTINEL_TOKEN");
         let row = detect(Some(home.clone())).await;
         assert_eq!(row.auth, AuthState::Unknown, "{file}");
-        assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"), "{file}");
+        assert_eq!(row.detail.as_deref(), Some(credential_detail()), "{file}");
         std::fs::remove_file(&path).unwrap();
     }
 
     // Even an empty regular file is only unverified local evidence.
     std::fs::write(dir.join("authstore.enc"), "").unwrap();
     let row = detect(Some(home.clone())).await;
-    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    assert_eq!(row.detail.as_deref(), Some(credential_detail()));
     let row = detect(Some(home.join("missing"))).await;
     assert_eq!(row.auth, AuthState::Unknown);
     assert_eq!(row.detail.as_deref(), Some("auth_unverified"));
@@ -455,7 +464,7 @@ async fn an_antigravity_credential_that_is_a_link_or_open_to_others_is_not_even_
         );
     }
     chmod(&token, 0o600);
-    assert_eq!(detect().await.detail.as_deref(), Some("auth_metadata_only"));
+    assert_eq!(detect().await.detail.as_deref(), Some(credential_detail()));
 }
 
 #[tokio::test]
@@ -485,7 +494,7 @@ async fn headless_cli_detection_uses_the_service_home_for_install_and_sign_in() 
     let after = detector.detect(true).await;
     let row = after.iter().find(|row| row.id == "agy").unwrap();
     assert_eq!(row.auth, AuthState::Unknown);
-    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    assert_eq!(row.detail.as_deref(), Some(credential_detail()));
 }
 
 #[tokio::test]
