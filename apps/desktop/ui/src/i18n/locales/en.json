@@ -4262,6 +4262,18 @@
       "hint": "Do this on the computer that runs the bot, or clear it from the administrator's desktop.",
       "title": "Only someone at that computer can do this"
     },
+    "mailGuardBlocked": {
+      "hint": "Review the rule in Settings → Safe sending, or use Ask access so the owner can review the send.",
+      "title": "The mail guard blocked that send"
+    },
+    "mailGuardOptOut": {
+      "hint": "Remove them under Settings → Safe sending → People I will not write to, or write to them yourself.",
+      "title": "That person is on your do-not-write list"
+    },
+    "mailGuardUnreadable": {
+      "hint": "Fix or replace the damaged mail-guard files on the host, then try again.",
+      "title": "The mail guard could not read its saved rules"
+    },
     "modelFailed": {
       "hint": "Try again, or pick another model in Settings.",
       "title": "The model could not answer"
@@ -4420,18 +4432,6 @@
     "timeout": {
       "hint": "Check your connection and try again.",
       "title": "That took too long"
-    },
-    "mailGuardBlocked": {
-      "hint": "Open Settings → Safe sending to change daily limits or the repeat-recipient window, or lower this bot's access level to Ask.",
-      "title": "The mail guard blocked that send"
-    },
-    "mailGuardOptOut": {
-      "hint": "Remove them under Settings → Safe sending → People I will not write to, or write to them yourself.",
-      "title": "That person is on your do-not-write list"
-    },
-    "mailGuardUnreadable": {
-      "hint": "Fix or replace the damaged mail-guard files on the host, then try again.",
-      "title": "The mail guard could not read its saved rules"
     },
     "toolDenied": {
       "hint": "Ask again and choose Allow when the card appears.",

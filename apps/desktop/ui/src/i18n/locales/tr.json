@@ -4262,6 +4262,18 @@
       "hint": "Praxi'yi ana bilgisayarın kendisinde kullan ya da yönetici masaüstünden kaldır.",
       "title": "Bunu yalnızca ana bilgisayarın başındaki kişi yapabilir"
     },
+    "mailGuardBlocked": {
+      "hint": "Ayarlar → Güvenli gönderim bölümünde kuralı gözden geçirin veya gönderimi sizin onaylayabilmeniz için botun erişim düzeyini Sor olarak ayarlayın.",
+      "title": "Posta koruması bu gönderimi engelledi"
+    },
+    "mailGuardOptOut": {
+      "hint": "Ayarlar → Güvenli gönderim → Yazmayacağım kişiler listesinden kaldırın ya da kendiniz yazın.",
+      "title": "Bu kişi yazmayacağım listesinde"
+    },
+    "mailGuardUnreadable": {
+      "hint": "Ana bilgisayardaki hasarlı posta koruması dosyalarını düzeltip yeniden deneyin.",
+      "title": "Posta koruması kayıtlı kurallarını okuyamadı"
+    },
     "modelFailed": {
       "hint": "Yeniden dene ya da Ayarlar'dan başka bir model seç.",
       "title": "Model yanıt veremedi"
@@ -4420,18 +4432,6 @@
     "timeout": {
       "hint": "Bağlantını kontrol edip yeniden dene.",
       "title": "Bu çok uzun sürdü"
-    },
-    "mailGuardBlocked": {
-      "hint": "Ayarlar → Güvenli gönderim bölümünden günlük sınırı veya aynı kişiye tekrar yazma süresini değiştirin ya da botun erişim düzeyini Sor’a indirin.",
-      "title": "Posta koruması bu gönderimi engelledi"
-    },
-    "mailGuardOptOut": {
-      "hint": "Ayarlar → Güvenli gönderim → Yazmayacağım kişiler listesinden kaldırın ya da kendiniz yazın.",
-      "title": "Bu kişi yazmayacağım listesinde"
-    },
-    "mailGuardUnreadable": {
-      "hint": "Ana bilgisayardaki hasarlı posta koruması dosyalarını düzeltip yeniden deneyin.",
-      "title": "Posta koruması kayıtlı kurallarını okuyamadı"
     },
     "toolDenied": {
       "hint": "Yeniden iste ve kart çıkınca İzin ver'i seç.",
@@ -7981,7 +7981,7 @@
       "footerHint": "{sender} gönderen adresle değiştirilir. Satırı bot değil uygulama ekler ve bot onu silemez. Bir e-postayı satırsız göndermek için kartta onaylayabilirsiniz; kartta bir uyarı görünür. Program yanıtları okumaz: biri “DURDUR” diye yanıtlarsa adresini bu listeye kendiniz ekleyin.",
       "footerPlaceholder": "Boş bırakırsanız yerleşik metin kullanılır (Türkçe ve İngilizce)",
       "footerShort": "Boş bırakırsanız yerleşik Türkçe ve İngilizce metin kullanılır.",
-      "intro": "Sor düzeyindeki botlarda her gönderim önce size sorulur; günlük sınır ve aynı kişiye tekrar yazma uyarıları \"Yine de gönder\" ile geçebilirsiniz. Tam erişim düzeyinde bu ikisi yalnızca çalışma adımına not olarak yazılır — engellemez ve sormaz. Aşağıdaki çıkış listesi ise siz listeden çıkarana ya da kendiniz yazana kadar her zaman engeller.",
+      "intro": "Sor düzeyindeki botlarda her gönderim önce size sorulur; günlük sınır ve aynı kişiye tekrar yazma uyarılarını \"Yine de gönder\" ile geçebilirsiniz. Tam erişim düzeyinde bu ikisi yalnızca çalışma adımına not olarak yazılır — engellemez ve sormaz. Aşağıdaki çıkış listesi ise siz listeden çıkarana ya da kendiniz yazana kadar her zaman engeller.",
       "kindAddress": "adres",
       "kindDomain": "tüm alan adı",
       "limitsTitle": "Gönderim uyarıları",

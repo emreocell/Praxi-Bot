@@ -261,6 +261,9 @@ async fn the_same_recipient_wait_and_opt_out_by_unicode_entry_match_the_other_sp
         ["opt_out_listed"]
     );
     let (_s2, conn2) = setup().await;
+    let mut settings = conn2.guard().settings();
+    settings.same_recipient_days = 14;
+    conn2.guard().set_settings(settings).unwrap();
     let t2 = send_tool(&conn2);
     t2.call(&ctx(), mail("tom@example.com")).await.unwrap();
     // `tom+2@` is the same mailbox: the same-recipient wait applies.
@@ -354,6 +357,33 @@ async fn full_level_still_blocks_the_opt_out_list() {
         "{err}"
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn full_level_cannot_remove_the_owner_enabled_footer() {
+    let (server, conn) = setup().await;
+    let mut input = mail("bob@example.com");
+    input["opt_out_line"] = json!(false);
+    let err = send_tool(&conn).call(&full_ctx(), input).await.unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn full_level_blocks_unreadable_guard_with_repair_instructions() {
+    let (server, conn) = setup().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("guard-settings.json"), "{bad json").unwrap();
+    conn.set_guard_dir(dir.path().to_path_buf());
+    let err = send_tool(&conn)
+        .call(&full_ctx(), mail("bob@example.com"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::PermissionDenied(ref m) if m.contains("Repair") && !m.contains("Remove the recipient")),
+        "{err}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

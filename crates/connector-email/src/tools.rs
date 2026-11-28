@@ -821,7 +821,33 @@ fn stops_owner_thread(report: &GuardReport) -> Vec<&guard::Warning> {
 
 /// Warnings that still block a Full-level unattended send.
 fn unattended_blocks(w: &guard::Warning) -> bool {
-    matches!(w.code.as_str(), "opt_out_listed" | "guard_unreadable")
+    !matches!(w.code.as_str(), "daily_limit" | "same_recipient")
+}
+
+#[cfg(test)]
+mod unattended_warning_tests {
+    use super::*;
+
+    #[test]
+    fn only_explicitly_allowed_warnings_are_nonblocking() {
+        for (code, blocks) in [
+            ("daily_limit", false),
+            ("same_recipient", false),
+            ("no_opt_out_line", true),
+            ("opt_out_listed", true),
+            ("guard_unreadable", true),
+            ("future_warning", true),
+        ] {
+            let warning = guard::Warning {
+                code: code.into(),
+                text: String::new(),
+                addresses: vec![],
+                count: 0,
+                limit: 0,
+            };
+            assert_eq!(unattended_blocks(&warning), blocks, "{code}");
+        }
+    }
 }
 
 fn unattended_block_tag(code: &str) -> &'static str {
@@ -851,8 +877,19 @@ fn resolve_pre_send_warnings(
             .collect();
         if !blocking.is_empty() {
             let tag = unattended_block_tag(&blocking[0].code);
+            let hint = match blocking[0].code.as_str() {
+                "opt_out_listed" => {
+                    "Remove the recipient in Settings (Safe sending), or write to them yourself."
+                }
+                "guard_unreadable" => {
+                    "Repair or replace the damaged mail-guard files on the host, then try again."
+                }
+                _ => {
+                    "Review the rule in Settings (Safe sending), or use Ask level to request owner approval."
+                }
+            };
             return Err(ToolError::PermissionDenied(format!(
-                "Mail guard stopped this send ({tag}). Nobody was asked on this Full-level bot. {} Remove the recipient in Settings (Safe sending), or write to them yourself.",
+                "Mail guard stopped this send ({tag}). Nobody was asked on this Full-level bot. {} {hint}",
                 blocking
                     .iter()
                     .map(|w| w.text.as_str())

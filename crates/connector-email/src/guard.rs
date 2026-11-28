@@ -7,8 +7,8 @@
 //!
 //! The count, the wait and the opt-out line are *soft* guards on Ask-level bots: [`MailGuard::check`]
 //! returns [`Warning`]s. Only the owner can send past one, by approving the card that shows it
-//! ("Send anyway"). On Full-level bots those warnings are logged and the send goes through;
-//! opt-out list and unreadable-guard hits still block. The tool freezes the card it showed, warnings or not
+//! ("Send anyway"). On Full-level bots only the count and wait warnings are logged without blocking;
+//! all other warnings, including a dropped opt-out line, block. The tool freezes the card it showed, warnings or not
 //! ([`MailGuard::freeze`]) and a later call goes through past a warning only when it matches a
 //! frozen entry exactly ([`MailGuard::take_card`]). The model has no argument that can do this.
 //!
@@ -1119,10 +1119,33 @@ mod tests {
     }
 
     #[test]
+    fn new_default_disables_repeat_wait_and_saved_setting_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            MailGuard::open(dir.path().to_path_buf())
+                .settings()
+                .same_recipient_days,
+            0
+        );
+        std::fs::write(
+            dir.path().join("guard-settings.json"),
+            r#"{"same_recipient_days":14}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            MailGuard::open(dir.path().to_path_buf())
+                .settings()
+                .same_recipient_days,
+            14
+        );
+    }
+
+    #[test]
     fn daily_limit_and_same_recipient_are_warnings_not_blocks() {
         let g = MailGuard::in_memory();
         let s = GuardSettings {
             daily_limit: 2,
+            same_recipient_days: 14,
             ..GuardSettings::default()
         };
         g.set_settings(s).unwrap();
@@ -1230,6 +1253,11 @@ mod tests {
             g.check(&facts(&["u@notblocked.org".into()], true)).codes(),
             Vec::<String>::new()
         );
+        g.set_settings(GuardSettings {
+            same_recipient_days: 14,
+            ..GuardSettings::default()
+        })
+        .unwrap();
         // same-recipient wait: a +tag variant of a logged mailbox is the same recipient
         g.record(entry(&["c@y.io"], now_secs()));
         let rep = g.check(&facts(&["C+news@y.io".into()], true));
@@ -1342,7 +1370,11 @@ mod tests {
             g.check_invite("work", &one("a@x.io")).codes(),
             vec!["daily_limit"]
         );
-        g.set_settings(GuardSettings::default()).unwrap();
+        g.set_settings(GuardSettings {
+            same_recipient_days: 14,
+            ..GuardSettings::default()
+        })
+        .unwrap();
         assert_eq!(g.check_invite("work", &one("a@x.io")).warnings, vec![]);
         assert_eq!(
             g.check(&facts(&one("a@x.io"), true)).codes(),
