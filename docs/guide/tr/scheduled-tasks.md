@@ -63,12 +63,18 @@ mı? bir müşteriden yanıtsız e-posta var mı?"). Her çalışma listeyi sır
   bildirimi oluşur ve iletilir (Telegram, Discord ve diğer kanallara; sahip bildirim ayarlarına ve
   sessiz saatlere göre).
 
-Yalnızca son satır sayılır; raporun ortasındaki bir "OK" hiçbir şeyi değiştirmez. Açık bir `OK`
-ya da `NEEDS_OWNER(...)` satırı olmadan biten çalışma da bildirilir ("Kontrol açık bir OK ya da
-NEEDS_OWNER yanıtı olmadan bitti"): sessizliğin hak edilmesi gerekir. Neden, botun özel olarak
-okuduğu bir şeyden (e-posta, dosya, hesap) geldiyse bildirim, onu bir sohbet servisinde
-tekrarlamak yerine uygulamada açmanı söyler. Aynı neden bir saat içinde yeniden iletilmez.
-Başarısız olan bir çalışma her zamanki gibi bildirilir.
+Yalnızca son satır sayılır; raporun ortasındaki bir "OK" hiçbir şeyi değiştirmez ve `OK` tam
+olarak o satır olmalıdır, çevresinde biçimlendirme olmadan. Sessizliğin hak edilmesi gerekir:
+açık bir `OK` ya da `NEEDS_OWNER(...)` satırı olmadan biten, bir `OK`'tan önce herhangi bir yerde
+`NEEDS_OWNER` yazan (alıntılanmış ya da enjekte edilmiş metin, ya da çelişki) ya da bir adım veya
+bütçe sınırının yarıda kestiği çalışma da bildirilir ("Kontrol açık bir OK ya da NEEDS_OWNER
+yanıtı olmadan bitti", "Kontrol bir sınır yüzünden yarıda kaldı"). Çalışmaya, okuduğu şeylerin
+(sayfalar, e-posta, dosyalar) veri olduğu ve yanıtını yönlendiremeyeceği söylenir. Neden gizli ve
+kontrol karakterlerinden arındırılır ve kısa tutulur. Neden, botun özel olarak okuduğu bir şeyden
+(e-posta, dosya, hesap) geldiyse bildirim, onu bir sohbet servisinde tekrarlamak yerine
+uygulamada açmanı söyler. Aynı neden bir saat içinde yeniden iletilmez; bot özel ya da
+güvenilmeyen içerik okuduysa ifadesi sorunları birbirinden ayıramaz, bu yüzden bir saat her kalıcı
+talimat için sayılır. Başarısız olan bir çalışma her zamanki gibi bildirilir.
 
 ```json
 {
@@ -83,13 +89,17 @@ Bunu herhangi bir `spec` ile (örneğin `{"every": {"seconds": 1800}}`) `POST /v
 çağrısının `payload` alanı olarak gönder.
 
 - `checklist` (zorunlu, en fazla 4.000 karakter, gizli karakter yok).
-- `active_hours` (isteğe bağlı): bu günlük aralığın (`HH:MM` ile `HH:MM` arası, gece yarısını
-  geçebilir, bitiş dahil değil, verilen IANA saat diliminde) dışındaki tetiklemeler çalışma
-  başlatılmadan atlanır. Verilmezse talimat gün boyu çalışabilir.
+- `active_hours` (isteğe bağlı): bu günlük aralığın (`HH:MM` ile `HH:MM` arası, her biri tam beş
+  karakter, gece yarısını geçebilir, bitiş dahil değil, verilen IANA saat diliminde) dışındaki
+  tetiklemeler çalışma başlatılmadan ve başka hiçbir şeye dokunulmadan atlanır: değişiklik
+  denetimi ilerlemez, sıradaki e-posta ve dosya olayları sırada kalır (aralık kapalıyken kaynak
+  yoklanmaz) ve hiçbir çalışma sayılmaz. Verilmezse talimat gün boyu çalışabilir. Yükteki bilinmeyen
+  alanlar reddedilir.
 - `max_runs_per_day` (varsayılan 24, 1 ile 288): **günlük maliyet sınırı**. Talimat bir günde
   (etkin saatlerin saat diliminde, yoksa UTC) bu kadar çalışma başlattıysa, o günün sonraki
   tetiklemeleri ertesi güne kadar atlanır. Atlanan tetiklemeler çalışma başlatmaz ve model
-  çağırmaz, yani hiçbir maliyeti yoktur. Botun kendi harcama sınırları ayrıca geçerlidir.
+  çağırmaz, yani hiçbir maliyeti yoktur. Botun kendi harcama sınırları ayrıca geçerlidir. Başlayamayan bir çalışma (örneğin model
+  servisine ulaşılamadı) hakkını geri verir.
 
 Her çalışma kendi sohbetini alır (uzun bir geçmiş bir sonraki kontrolü pahalılaştırmasın diye) ve
 kalıcı talimata soru sormaması söylenir: başında kimse yok. Onaylar, başında kimse olmayan her

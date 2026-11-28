@@ -850,10 +850,10 @@ pub(crate) enum Dispatch {
     Skipped,
 }
 
-/// A standing order fires only inside its active hours and within its daily cap; nothing is
-/// started (and no model is called) otherwise. Takes the cap slot, so call it right before
-/// dispatching. Other payloads always may run.
-fn standing_order_may_run(store: &ScheduleStore, schedule: &Schedule, now: i64) -> Result<bool> {
+/// Whether a standing order may fire now: inside its active hours and under today's cap.
+/// Read-only, so a gated firing leaves the check state, queued events and the count alone;
+/// ask it before any of those is touched. Other payloads always may run.
+fn standing_order_open(store: &ScheduleStore, schedule: &Schedule, now: i64) -> Result<bool> {
     let Payload::StandingOrder {
         active_hours,
         max_runs_per_day,
@@ -867,11 +867,62 @@ fn standing_order_may_run(store: &ScheduleStore, schedule: &Schedule, now: i64) 
     {
         return Ok(false);
     }
-    store.claim_standing_order_run(
-        schedule.id,
-        &schedule.payload.day_key(now),
-        *max_runs_per_day,
-    )
+    let today = schedule.payload.day_key(now)?;
+    Ok(store.standing_order_runs(schedule.id, &today)? < *max_runs_per_day)
+}
+
+/// [`standing_order_open`] for the poll loop, where one broken row must not stop the rest.
+fn gate_open(inner: &Inner, schedule: &Schedule, now: i64) -> bool {
+    standing_order_open(&inner.store, schedule, now).unwrap_or_else(|error| {
+        tracing::error!(schedule_id = %schedule.id, %error, "standing order gate unreadable");
+        false
+    })
+}
+
+/// A firing a standing order's hours or cap turned away: nothing ran, and history says why
+/// instead of reading as a success.
+fn note_gated(store: &ScheduleStore, schedule: &Schedule, occurrence: Option<(i64, u32)>) {
+    if let Some((due, _)) = occurrence
+        && let Err(error) = store.note_standing_gated(schedule.id, due)
+    {
+        tracing::error!(schedule_id = %schedule.id, due, %error, "failed to note a gated firing");
+    }
+}
+
+/// Start the executor for `fired`. A standing order takes its daily slot here, in the same
+/// transaction that checks its revision, right before the executor is called; a start that
+/// fails before anything began ([`SchedulerError::NotStarted`], e.g. no connection to the
+/// model) gives the slot back.
+async fn launch(
+    store: &ScheduleStore,
+    executor: &dyn ScheduleExecutor,
+    fired: &Schedule,
+    occurrence: Option<(i64, u32)>,
+    now: i64,
+) -> Result<Dispatch> {
+    let slot = if let Payload::StandingOrder {
+        max_runs_per_day, ..
+    } = &fired.payload
+    {
+        let day = fired.payload.day_key(now)?;
+        if !store.claim_standing_order_run(fired.id, fired.revision, &day, *max_runs_per_day)? {
+            note_gated(store, fired, occurrence);
+            return Ok(Dispatch::Skipped);
+        }
+        Some(day)
+    } else {
+        None
+    };
+    let outcome = match occurrence {
+        Some((due, attempt)) => executor.execute_attempt(fired, due, attempt).await,
+        None => executor.execute(fired).await,
+    };
+    if let (Err(SchedulerError::NotStarted(_)), Some(day)) = (&outcome, &slot)
+        && let Err(error) = store.release_standing_order_run(fired.id, day)
+    {
+        tracing::error!(schedule_id = %fired.id, %error, "failed to give back a standing order slot");
+    }
+    outcome.map(|()| Dispatch::Ran)
 }
 
 /// Every ingress shares this no-run-before-precheck boundary. A stale definition
@@ -885,6 +936,12 @@ pub(crate) async fn execute_checked(
 ) -> Result<Dispatch> {
     // A schedule that moved to a server never fires here, whichever ingress asked.
     if store.frozen_for(schedule.id)?.is_some() {
+        return Ok(Dispatch::Skipped);
+    }
+    // Before the precheck (which advances its change hash) and the registry (which empties its
+    // queue): a gated firing must lose nothing.
+    if !standing_order_open(store, schedule, now)? {
+        note_gated(store, schedule, occurrence);
         return Ok(Dispatch::Skipped);
     }
     let mut fired = schedule.clone();
@@ -936,15 +993,8 @@ pub(crate) async fn execute_checked(
         };
         fired.external_input = Some(input);
     }
-    if !standing_order_may_run(store, &current, now)? {
-        return Ok(Dispatch::Skipped);
-    }
     // The tenth failed check still fails open; the next firing is paused.
-    let outcome = match occurrence {
-        Some((due, attempt)) => executor.execute_attempt(&fired, due, attempt).await,
-        None => executor.execute(&fired).await,
-    }
-    .map(|()| Dispatch::Ran);
+    let outcome = launch(store, executor, &fired, occurrence, now).await;
     if outcome.is_err() {
         store.registry_failed(schedule)?;
     }
@@ -959,6 +1009,10 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
         if let Some((_, state)) = inner.store.registry(schedule.id)?
             && !state.pending.is_empty()
         {
+            // Queued events wait for the hours and the cap; nothing is taken from the queue.
+            if !gate_open(inner, &schedule, now) {
+                continue;
+            }
             let Some(guard) = try_acquire_in_flight(inner, &schedule) else {
                 continue;
             };
@@ -974,9 +1028,9 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
                         .ok()
                         .flatten()
                         .is_some_and(|s| s.revision == fired.revision)
-                        && standing_order_may_run(&inner.store, &fired, inner.clock.wall_ms())
-                            .unwrap_or(false)
-                        && inner.executor.execute(&fired).await.is_err()
+                        && launch(&inner.store, inner.executor.as_ref(), &fired, None, now)
+                            .await
+                            .is_err()
                     {
                         let _ = inner.store.registry_failed(&fired);
                     }
@@ -989,6 +1043,10 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
             continue;
         };
         if matches!(trigger, crate::Trigger::Webhook { .. }) {
+            continue;
+        }
+        // Not polled while gated: what happens meanwhile is still there to see afterwards.
+        if !gate_open(inner, &schedule, now) {
             continue;
         }
         let state = inner.store.check_state(&schedule)?;

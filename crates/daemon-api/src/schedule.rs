@@ -41,6 +41,12 @@ fn exec_err(e: impl std::fmt::Display) -> SchedulerError {
     SchedulerError::Execution(e.to_string())
 }
 
+/// A failure before the run existed: nothing started and nothing was spent, which lets a
+/// standing order give its daily slot back.
+fn not_started(e: impl std::fmt::Display) -> SchedulerError {
+    SchedulerError::NotStarted(e.to_string())
+}
+
 /// Workflow parameters as the replayer wants them: string to string.
 fn string_params(v: &Value) -> Result<BTreeMap<String, String>, SchedulerError> {
     match v {
@@ -274,7 +280,7 @@ impl DaemonExecutor {
                 if let Some((due, _)) = occurrence {
                     self.store.note_offline(schedule.id, due, skip)?;
                 }
-                return Err(exec_err(
+                return Err(not_started(
                     "The model service cannot be reached. Nothing was started. Retry when the connection returns.",
                 ));
             }
@@ -290,7 +296,7 @@ impl DaemonExecutor {
                             && s.next_run_at.is_none()))
             }) || self.store.frozen_for(schedule.id)?.is_some()
             {
-                return Err(exec_err(
+                return Err(not_started(
                     "This schedule was changed or stopped while waiting for the connection. Nothing was started.",
                 ));
             }
@@ -307,9 +313,12 @@ impl DaemonExecutor {
             .get_bot(schedule.bot_id)
             .map_err(exec_err)?
             .filter(|b| b.user_id == self.user_id)
-            .ok_or_else(|| exec_err(format!("bot {} of schedule is gone", schedule.bot_id)))?;
+            .ok_or_else(|| not_started(format!("bot {} of schedule is gone", schedule.bot_id)))?;
         self.wait_for_connection(schedule, occurrence).await?;
-        let chat = self.chat_for(schedule)?;
+        let chat = self.chat_for(schedule).map_err(|e| match e {
+            SchedulerError::Execution(m) => SchedulerError::NotStarted(m),
+            other => other,
+        })?;
         let external = schedule.external_input.is_some() || schedule.precheck.is_some();
         let mut payload = schedule.payload.clone();
         if let Some(input) = &schedule.external_input {
@@ -360,10 +369,10 @@ impl DaemonExecutor {
                     (false, None) => self.agent.run_scheduled(chat, schedule.id, work),
                 }
             })
-            .map_err(exec_err)?
+            .map_err(not_started)?
             .map_err(|e| match e {
-                LoopError::Busy(c) => exec_err(format!("chat {c} is busy with another turn")),
-                other => exec_err(other),
+                LoopError::Busy(c) => not_started(format!("chat {c} is busy with another turn")),
+                other => not_started(other),
             })?;
         // Display link only: the idempotency key in the run record, not this
         // row, is what keeps a retry from starting a second run.
