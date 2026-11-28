@@ -115,7 +115,10 @@ fn status_in_words_says_what_to_run_for_each_cli() {
     assert!(out.status.success(), "{out:?}");
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("looked up as"), "{text}");
-    assert!(text.contains("sign-in file found (not checked)"), "{text}");
+    assert!(
+        text.contains("signed in (seen locally, not verified)"),
+        "{text}"
+    );
     assert!(text.contains("login agy"), "{text}");
     assert!(text.contains("install codex"), "{text}");
 }
