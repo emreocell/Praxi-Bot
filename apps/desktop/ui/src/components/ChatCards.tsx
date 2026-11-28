@@ -61,6 +61,7 @@ import formStyles from "./Form.module.css";
 import styles from "./ChatCards.module.css";
 import { humanLine, humanToolError } from "../lib/humanError";
 import { isAlreadyDecidedError } from "../lib/popout";
+import { checkoutFacts } from "../lib/phoneApproval";
 import {
   COMMAND_LIMIT,
   INPUT_LIMIT,
@@ -678,6 +679,7 @@ export function ApprovalCard({
     | null
     | undefined;
   const why = typeof facts?.why === "string" ? facts.why : null;
+  const checkout = checkoutFacts(tool.details);
   // "Allow for this task": the same MCP tool for the rest of this run, only when the daemon offers it.
   const runGrant = facts?.run_grant === true;
   // What "this chat" / "always" would remember: one site, folder or command, never the whole tool.
@@ -975,6 +977,18 @@ export function ApprovalCard({
           {why ? (
             <p className={styles.bodyLabel} data-testid="approval-why">
               {t(`chat.approval.why.${why}`, { defaultValue: "" })}
+            </p>
+          ) : null}
+          {checkout ? (
+            <p className={styles.bodyLabel} data-testid="approval-checkout">
+              {[
+                checkout.domain ? t("phoneApproval.checkout.site", { value: checkout.domain }) : null,
+                checkout.merchant ? t("phoneApproval.checkout.merchant", { value: checkout.merchant }) : null,
+                checkout.amount ? t("phoneApproval.checkout.amount", { value: checkout.amount }) : null
+              ]
+                .filter(Boolean)
+                .join(" · ")}{" "}
+              {t("phoneApproval.checkout.claims")}
             </p>
           ) : null}
           {computer && (egress || schedule) ? (

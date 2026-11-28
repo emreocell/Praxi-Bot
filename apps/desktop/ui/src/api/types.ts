@@ -50,6 +50,9 @@ export type OwnerNotice = S["OwnerNotice"];
 /** What is pushed to the owner's channels, and the quiet hours. */
 export type BotCursorSettings = S["BotCursorSettings"];
 export type OwnerNotifySettings = S["OwnerNotifySettings"];
+/** Approving payments from the phone: on/off, the tunnel address, a lock after wrong PINs. */
+export type PhoneApprovalStatus = S["PhoneApprovalStatus"];
+export type PhoneApprovalSetup = S["PhoneApprovalSetup"];
 export type MemoryEmbedding = S["MemoryEmbeddingDto"];
 export type MemoryEmbeddingInput = S["MemoryEmbeddingInput"];
 

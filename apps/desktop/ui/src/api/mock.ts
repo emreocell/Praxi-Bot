@@ -19,6 +19,8 @@ import type {
   CreateMission,
   BotCursorSettings,
   OwnerNotifySettings,
+  PhoneApprovalSetup,
+  PhoneApprovalStatus,
   MissionAnswer,
   BrowserProfileStatus,
   IncomingWebhook,
@@ -939,6 +941,7 @@ export class MockApiClient extends ApiClient {
     progress: false,
     quiet_hours: null
   };
+  private phoneApprovalState: PhoneApprovalStatus = { enabled: false };
   private readonly browserProfiles = new Map<string, BrowserProfileStatus>([
     [
       ATLAS,
@@ -1759,6 +1762,14 @@ export class MockApiClient extends ApiClient {
     if (path === "/bot-cursor") {
       if (method === "PUT") this.botCursor = opts.body as BotCursorSettings;
       return ok(this.botCursor);
+    }
+    if (path === "/phone-approval") {
+      if (method === "PUT") {
+        const setup = opts.body as PhoneApprovalSetup;
+        this.phoneApprovalState = { enabled: true, address: setup.address.replace(/\/$/, "") };
+      }
+      if (method === "DELETE") this.phoneApprovalState = { enabled: false };
+      return ok(this.phoneApprovalState);
     }
     if (seg[0] === "owner-notices") {
       if (seg[1] === "settings") {

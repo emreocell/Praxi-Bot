@@ -6394,6 +6394,32 @@
     "relay": "Röle · {{rtt}} ms",
     "relayHint": "Aktarmalı: bağlantı bir yardımcı sunucudan geçiyor, bu yüzden biraz yavaş olabilir. Sayı gecikmedir."
   },
+  "phoneApproval": {
+    "address": "Tünelinin herkese açık adresi",
+    "addressHint": "Bu bilgisayardaki Praxi'ye yönlendiren bir https adresi, örneğin bir Cloudflare Tunnel. Yalnızca adres, yol yok. Tünel Host: 127.0.0.1 göndermeli.",
+    "badAddress": "Yolu olmayan bir https adresi gir, örneğin https://pay.example.org.",
+    "badPin": "PIN 6 ile 12 rakam olmalı.",
+    "checkout": {
+      "amount": "Tutar: {{value}}",
+      "claims": "(satıcı ve tutar, ödeme sayfasının gösterdiği gibi)",
+      "merchant": "Satıcı: {{value}}",
+      "site": "Site: {{value}}"
+    },
+    "description": "Para hiçbir zaman Telegram ya da Discord'dan onaylanmaz. Bu açıkken sohbetteki ödeme kartında, kendi tünelin üzerinden bu bilgisayardaki bir sayfaya giden tek kullanımlık bir bağlantı (10 dakika) olur. Sayfa, ödeme ekranını ve Onayla düğmesini göstermeden önce bu PIN'i sorar.",
+    "locked": "Çok fazla yanlış PIN girildi. Telefon bağlantıları {{time}} saatine kadar çalışmaz.",
+    "newPin": "Yeni PIN (şu ankini korumak için boş bırak)",
+    "off": "Kapalı: ödemeler yalnızca bu uygulamada onaylanır.",
+    "on": "Açık: sohbetteki ödeme kartlarında telefon bağlantısı var.",
+    "pin": "PIN",
+    "pinHint": "6 ile 12 rakam. Yalnızca özeti saklanır, sohbete asla gönderilmez. Telefonunun kilit kodunu kullanma.",
+    "pinMismatch": "İki PIN aynı değil.",
+    "repeatPin": "PIN tekrar",
+    "save": "Kaydet",
+    "saved": "Kaydedildi. Bu değişiklikten önce gönderilen bağlantılar artık çalışmaz.",
+    "title": "Ödemeleri telefondan onayla",
+    "turnOff": "Kapat",
+    "turnOn": "Aç"
+  },
   "popout": {
     "chatFallbackTitle": "Sohbet penceresi",
     "connecting": "Bağlanıyor...",

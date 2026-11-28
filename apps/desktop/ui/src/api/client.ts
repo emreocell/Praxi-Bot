@@ -39,6 +39,8 @@ import type {
   OwnerNotice,
   BotCursorSettings,
   OwnerNotifySettings,
+  PhoneApprovalSetup,
+  PhoneApprovalStatus,
   PageReader,
   MemoryEmbedding,
   MemoryEmbeddingInput,
@@ -1488,6 +1490,18 @@ export class ApiClient {
   /** Change that (owner only). */
   putOwnerNotifySettings(settings: OwnerNotifySettings): Promise<OwnerNotifySettings> {
     return this.request("PUT", "/owner-notices/settings", { body: settings });
+  }
+  /** Whether payments can be approved from the phone (owner only). */
+  phoneApproval(): Promise<PhoneApprovalStatus> {
+    return this.request("GET", "/phone-approval");
+  }
+  /** Turn phone approval on or change it; any change drops every open phone link (owner only). */
+  putPhoneApproval(setup: PhoneApprovalSetup): Promise<PhoneApprovalStatus> {
+    return this.request("PUT", "/phone-approval", { body: setup });
+  }
+  /** Turn phone approval off: the PIN is deleted (owner only). */
+  deletePhoneApproval(): Promise<PhoneApprovalStatus> {
+    return this.request("DELETE", "/phone-approval");
   }
   /** Answer the blocked items in one request (owner only); each needs an answer or `skip`. */
   answerMission(id: string, answers: MissionAnswer[]): Promise<MissionAnswersResult> {

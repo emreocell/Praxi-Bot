@@ -4449,6 +4449,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/phone-approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Phone approval settings. */
+        get: operations["get_phone_approval"];
+        /** Turn phone approval on, or change the address or the PIN. Any change drops every open link. */
+        put: operations["put_phone_approval"];
+        post?: never;
+        /** Turn phone approval off: the PIN is deleted and every open link stops working. */
+        delete: operations["delete_phone_approval"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/phone-approval/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a one-time phone approval link for a pending money ask (owner key only). A new link
+         *     for the same ask replaces the old one.
+         */
+        post: operations["create_phone_link"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/policy": {
         parameters: {
             query?: never;
@@ -11875,6 +11914,43 @@ export interface components {
              * @description Money counted in the period (USD). Models without a known price add nothing here.
              */
             usd: number;
+        };
+        /** @description Turn phone approval on or change it. */
+        PhoneApprovalSetup: {
+            /** @description Public https address of the owner's tunnel to this daemon (origin only, no path). */
+            address: string;
+            /** @description 6 to 12 digits. Required the first time; omitted keeps the current PIN. */
+            pin?: string | null;
+        };
+        /** @description Whether phone approval is on. */
+        PhoneApprovalStatus: {
+            /** @description The public address links point to (`https://host[:port]`). */
+            address?: string | null;
+            /** @description A PIN and an address are set. */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Too many wrong PINs: no link works until then (Unix ms).
+             */
+            locked_until_ms?: number | null;
+        };
+        /** @description A one-time phone link. */
+        PhoneLink: {
+            /**
+             * Format: int64
+             * @description When the link stops working (Unix ms).
+             */
+            expires_at_ms: number;
+            /** @description Open on the phone; it works once, until `expires_at_ms`, and needs the PIN. */
+            url: string;
+        };
+        /** @description Which ask a phone link is for. */
+        PhoneLinkRequest: {
+            /**
+             * Format: uuid
+             * @description The pending money ask (`call_id` of its `approval_needed` event).
+             */
+            call_id: string;
         };
         /** @enum {string} */
         PointerPhase: "move" | "down" | "up";
@@ -25279,6 +25355,122 @@ export interface operations {
                 };
                 content: {
                     "application/json": null | components["schemas"]["PeerLink"];
+                };
+            };
+        };
+    };
+    get_phone_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneApprovalStatus"];
+                };
+            };
+        };
+    };
+    put_phone_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneApprovalSetup"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneApprovalStatus"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_phone_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneApprovalStatus"];
+                };
+            };
+        };
+    };
+    create_phone_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneLinkRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneLink"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };
