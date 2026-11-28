@@ -23,7 +23,7 @@ toml_edit = "0.20"
 fs4 = "1"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 httpdate = "1"
-minisign-verify = "0.2"
+minisign-verify = "0.3"
 reqwest.workspace = true
 tokio = { workspace = true }
 sha2 = "0.10"

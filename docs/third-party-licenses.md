@@ -16,8 +16,8 @@ Regenerate with `python scripts/license_report.py` and verify in CI with
 
 | Licence expression | Packages |
 | --- | ---: |
-| `MIT OR Apache-2.0` | 445 |
-| `MIT` | 226 |
+| `MIT OR Apache-2.0` | 444 |
+| `MIT` | 227 |
 | `Apache-2.0 OR MIT` | 98 |
 | `MIT/Apache-2.0` | 43 |
 | `Zlib OR Apache-2.0 OR MIT` | 21 |
@@ -496,6 +496,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `mime` | `0.3.18` | `MIT OR Apache-2.0` | [https://github.com/hyperium/mime](https://github.com/hyperium/mime) |
 | `minimal-lexical` | `0.2.1` | `MIT/Apache-2.0` | [https://github.com/Alexhuszagh/minimal-lexical](https://github.com/Alexhuszagh/minimal-lexical) |
 | `minisign-verify` | `0.2.5` | `MIT` | [https://github.com/jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) |
+| `minisign-verify` | `0.3.0` | `MIT` | [https://github.com/jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) |
 | `miniz_oxide` | `0.8.9` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | `miniz_oxide` | `0.9.1` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | `mio` | `1.2.5` | `MIT` | [https://github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |
@@ -811,7 +812,6 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `tauri-runtime-wry` | `2.11.4` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 | `tauri-utils` | `2.9.3` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 | `tauri-winres` | `0.3.7` | `MIT` | [https://github.com/tauri-apps/winres](https://github.com/tauri-apps/winres) |
-| `tauri-winrt-notification` | `0.7.3` | `MIT OR Apache-2.0` | [https://github.com/tauri-apps/winrt-notification](https://github.com/tauri-apps/winrt-notification) |
 | `tauri-winrt-notification` | `0.8.1` | `MIT OR Apache-2.0` | [https://github.com/tauri-apps/winrt-notification](https://github.com/tauri-apps/winrt-notification) |
 | `tempfile` | `3.27.0` | `MIT OR Apache-2.0` | [https://github.com/Stebalien/tempfile](https://github.com/Stebalien/tempfile) |
 | `tendril` | `0.5.1` | `MIT OR Apache-2.0` | [https://github.com/servo/html5ever](https://github.com/servo/html5ever) |

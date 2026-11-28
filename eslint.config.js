@@ -37,7 +37,9 @@ export default tseslint.config(
       "react-hooks": reactHooks
     },
     rules: {
-      ...reactHooks.configs.recommended.rules
+      // v7 "recommended" adds React Compiler rules; keep the classic hooks checks only until we opt in.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn"
     }
   },
   {
