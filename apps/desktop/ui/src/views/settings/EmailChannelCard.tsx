@@ -126,16 +126,25 @@ export function EmailChannelCard() {
         )
       };
     }
+    const mailboxSenderFix = (
+      <Button size="sm" variant="ghost" onClick={() => openSettingsTarget({ page: "connections", card: "email", field: "" })}>
+        {t(`${K}.status.openMailbox`)}
+      </Button>
+    );
+    if (form.enabled && channel?.needs_senders) {
+      return {
+        tone: "bad" as const,
+        text: t(`${K}.status.noSendersTitle`),
+        detail: t(`${K}.needsSenders`),
+        action: mailboxSenderFix
+      };
+    }
     if (selected && selected.allowed_senders.length === 0) {
       return {
         tone: "bad" as const,
         text: t(`${K}.status.noSendersTitle`),
         detail: t(`${K}.status.noSendersDetail`),
-        action: (
-          <Button size="sm" variant="ghost" onClick={() => openSettingsTarget({ page: "connections", card: "email", field: "" })}>
-            {t(`${K}.status.openMailbox`)}
-          </Button>
-        )
+        action: mailboxSenderFix
       };
     }
     if (!form.enabled) {
@@ -152,7 +161,7 @@ export function EmailChannelCard() {
       text: t(`${K}.stopped`),
       detail: t(`${K}.status.stoppedHint`)
     };
-  }, [channel?.running, dirty, form, selected, t]);
+  }, [channel?.needs_senders, channel?.running, dirty, form, selected, t]);
 
   return (
     <SettingsCard
@@ -262,11 +271,6 @@ export function EmailChannelCard() {
               testId="email-channel-save-bar"
             />
           </>
-        ) : null}
-        {channel?.needs_senders ? (
-          <p className={formStyles.error} role="alert" data-testid="email-channel-needs-senders">
-            {t(`${K}.needsSenders`)}
-          </p>
         ) : null}
         {channel && channel.ignored_mails > 0 ? (
           <p className={formStyles.hint} data-testid="email-channel-ignored">

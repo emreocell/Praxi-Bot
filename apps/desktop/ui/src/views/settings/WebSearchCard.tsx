@@ -3,7 +3,6 @@ import {
   ArrowUp,
   CircleAlert,
   CircleCheck,
-  KeyRound,
   PlugZap,
   Trash2,
   TriangleAlert
@@ -16,9 +15,9 @@ import type {
   WebSearchConfigInput,
   WebSearchTestReport
 } from "../../api/types";
-import formStyles from "../../components/Form.module.css";
 import { MoreInfo } from "../../components/ChoiceList";
-import { SettingGroup, Switch } from "../../components/SettingsUi";
+import { FormField, formStyles } from "../../components/SettingsForm";
+import { SettingGroup, SwitchField } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { applyWebSearchUpdate } from "../../lib/webSearchDraft";
 import {
@@ -255,10 +254,13 @@ export function WebSearchCard() {
     setValue: (v: string) => void,
     cfg: WebSearchConfig
   ) => (
-    <div className={formStyles.field}>
-      <label className={formStyles.label} htmlFor={`web-${id}-key`}>
-        {t(`settingsModal.webSearch.${id}KeyLabel`)}
-      </label>
+    <FormField
+      id={`web-${id}-key`}
+      label={t(`settingsModal.webSearch.${id}KeyLabel`)}
+      helpTitle={t(`settingsModal.webSearch.${id}KeyLabel`)}
+      helpBody={t("settingsModal.webSearch.keyWriteOnlyHint")}
+      width="md"
+    >
       <input
         id={`web-${id}-key`}
         type="password"
@@ -272,10 +274,7 @@ export function WebSearchCard() {
         }
         onChange={(e) => setValue(e.target.value)}
       />
-      <p className={formStyles.hint}>
-        <KeyRound aria-hidden="true" /> {t("settingsModal.webSearch.keyWriteOnlyHint")}
-      </p>
-    </div>
+    </FormField>
   );
 
   return (
@@ -307,7 +306,6 @@ export function WebSearchCard() {
           <Card asChild padding="md" elevated>
             <form className={styles.card} onSubmit={(e) => void saveProvider(e)}>
               <h4 className={styles.subheading}>{t("settingsModal.webSearch.providerTitle")}</h4>
-              <p className={styles.subhint}>{t("settingsModal.webSearch.providerHint")}</p>
 
               <div
                 className={styles.actions}
@@ -345,10 +343,12 @@ export function WebSearchCard() {
                 ? keyField("tavily", tavilyKey, setTavilyKey, config)
                 : null}
               {provider === "searxng" ? (
-                <div className={formStyles.field}>
-                  <label className={formStyles.label} htmlFor="web-searxng-url">
-                    {t("settingsModal.webSearch.searxngLabel")}
-                  </label>
+                <FormField
+                  id="web-searxng-url"
+                  label={t("settingsModal.webSearch.searxngLabel")}
+                  hint={t("settingsModal.webSearch.providerHelp.searxng")}
+                  width="md"
+                >
                   <input
                     id="web-searxng-url"
                     type="url"
@@ -358,7 +358,7 @@ export function WebSearchCard() {
                     autoComplete="off"
                     onChange={(e) => setSearxngUrl(e.target.value)}
                   />
-                </div>
+                </FormField>
               ) : null}
 
               <div className={styles.actions}>
@@ -398,14 +398,16 @@ export function WebSearchCard() {
           <Card padding="md" elevated className={styles.card}>
             <h4 className={styles.subheading}>{t("settingsModal.webSearch.testTitle")}</h4>
             <div className={styles.keyRow}>
-              <input
-                type="text"
-                className={[formStyles.input, styles.keyInput].join(" ")}
-                value={testQuery}
-                placeholder="rust programming"
-                aria-label={t("settingsModal.webSearch.testQueryLabel")}
-                onChange={(e) => setTestQuery(e.target.value)}
-              />
+              <FormField id="web-search-test-query" label={t("settingsModal.webSearch.testQueryLabel")} width="md">
+                <input
+                  id="web-search-test-query"
+                  type="text"
+                  className={formStyles.input}
+                  value={testQuery}
+                  placeholder="rust programming"
+                  onChange={(e) => setTestQuery(e.target.value)}
+                />
+              </FormField>
               <Button
                 size="sm"
                 variant="secondary"
@@ -450,11 +452,13 @@ export function WebSearchCard() {
                         </div>
                         <div className={styles.rowControls}>
                           {isKeylessBackend(id) ? (
-                            <Switch
+                            <SwitchField
                               checked={config[id]}
                               onChange={(checked) => toggleKeyless(id, checked)}
                               disabled={saving}
-                              label={t("settingsModal.webSearch.toggleBackend", { name: label })}
+                              label={label}
+                              hint={t("settingsModal.webSearch.toggleBackend", { name: label })}
+                              testId={`web-toggle-${id}`}
                             />
                           ) : null}
                           <Button
