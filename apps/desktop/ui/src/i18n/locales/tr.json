@@ -4421,6 +4421,18 @@
       "hint": "Bağlantını kontrol edip yeniden dene.",
       "title": "Bu çok uzun sürdü"
     },
+    "mailGuardBlocked": {
+      "hint": "Ayarlar → Güvenli gönderim bölümünden günlük sınırı veya aynı kişiye tekrar yazma süresini değiştirin ya da botun erişim düzeyini Sor’a indirin.",
+      "title": "Posta koruması bu gönderimi engelledi"
+    },
+    "mailGuardOptOut": {
+      "hint": "Ayarlar → Güvenli gönderim → Yazmayacağım kişiler listesinden kaldırın ya da kendiniz yazın.",
+      "title": "Bu kişi yazmayacağım listesinde"
+    },
+    "mailGuardUnreadable": {
+      "hint": "Ana bilgisayardaki hasarlı posta koruması dosyalarını düzeltip yeniden deneyin.",
+      "title": "Posta koruması kayıtlı kurallarını okuyamadı"
+    },
     "toolDenied": {
       "hint": "Yeniden iste ve kart çıkınca İzin ver'i seç.",
       "title": "Bu adıma izin vermedin"
@@ -7969,7 +7981,7 @@
       "footerHint": "{sender} gönderen adresle değiştirilir. Satırı bot değil uygulama ekler ve bot onu silemez. Bir e-postayı satırsız göndermek için kartta onaylayabilirsiniz; kartta bir uyarı görünür. Program yanıtları okumaz: biri “DURDUR” diye yanıtlarsa adresini bu listeye kendiniz ekleyin.",
       "footerPlaceholder": "Boş bırakırsanız yerleşik metin kullanılır (Türkçe ve İngilizce)",
       "footerShort": "Boş bırakırsanız yerleşik Türkçe ve İngilizce metin kullanılır.",
-      "intro": "Bir botun göndereceği her e-posta yine önce size sorulur. Bu ayarlar yalnızca sorunun ne zaman uyarıyla geldiğini belirler. Uyarı sizi hiçbir zaman engellemez: her zaman \"Yine de gönder\" diyebilirsiniz ve bu seçim günlüğe yazılır.",
+      "intro": "Sor düzeyindeki botlarda her gönderim önce size sorulur; günlük sınır ve aynı kişiye tekrar yazma uyarıları \"Yine de gönder\" ile geçebilirsiniz. Tam erişim düzeyinde bu ikisi yalnızca çalışma adımına not olarak yazılır — engellemez ve sormaz. Aşağıdaki çıkış listesi ise siz listeden çıkarana ya da kendiniz yazana kadar her zaman engeller.",
       "kindAddress": "adres",
       "kindDomain": "tüm alan adı",
       "limitsTitle": "Gönderim uyarıları",
@@ -7979,7 +7991,7 @@
       "logTitle": "Gönderilen e-posta günlüğü",
       "optOutAdd": "Ekle",
       "optOutEmpty": "Listede henüz kimse yok.",
-      "optOutHint": "Bir adres (ayse@ornek.com) ya da tüm bir alan adı (ornek.com) ekleyin. Onlara yazmaya çalışan bot, onay kartınızda bir uyarı alır.",
+      "optOutHint": "Bir adres (ayse@ornek.com) ya da tüm bir alan adı (ornek.com) ekleyin. Onlara yazmaya çalışan her bot durdurulur — Sor düzeyinde uyarıyı onay kartında görürsünüz; Tam erişimde gönderim kart olmadan reddedilir.",
       "optOutLine": "E-postalara varsayılan olarak çıkış satırı ekle",
       "optOutLineHint": "Satırı uygulama ekler; bot kaldıramaz.",
       "optOutPlaceholder": "ayse@ornek.com ya da ornek.com",
@@ -7989,7 +8001,7 @@
       "save": "Kaydet",
       "saved": "Kaydedildi",
       "sentAnyway": "Yine de gönderildi",
-      "softHint": "Bu ikisi engel değil, uyarıdır.",
+      "softHint": "Bunlar Sor düzeyinde uyarıdır (yine de gönderebilirsiniz). Tam erişim düzeyinde yalnızca çalışma adımına yazılır.",
       "status": {
         "saved": "Tüm değişiklikler kaydedildi.",
         "unsaved": "Kaydedilmemiş değişiklikler var."

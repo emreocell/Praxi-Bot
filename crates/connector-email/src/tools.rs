@@ -819,6 +819,74 @@ fn stops_owner_thread(report: &GuardReport) -> Vec<&guard::Warning> {
         .collect()
 }
 
+/// Warnings that still block a Full-level unattended send.
+fn unattended_blocks(w: &guard::Warning) -> bool {
+    matches!(w.code.as_str(), "opt_out_listed" | "guard_unreadable")
+}
+
+fn unattended_block_tag(code: &str) -> &'static str {
+    match code {
+        "opt_out_listed" => "opt-out list",
+        "guard_unreadable" => "unreadable guard file",
+        _ => "mail rule",
+    }
+}
+
+/// Whether the send may go ahead; on Full, soft warnings are returned for logging.
+fn resolve_pre_send_warnings(
+    ctx: &ToolContext,
+    report: &GuardReport,
+    overridden: bool,
+    owner_thread: bool,
+) -> Result<Vec<String>, ToolError> {
+    if report.warnings.is_empty() || overridden || owner_thread {
+        return Ok(Vec::new());
+    }
+    let why: Vec<&str> = report.warnings.iter().map(|w| w.text.as_str()).collect();
+    if ctx.unattended_mail {
+        let blocking: Vec<&guard::Warning> = report
+            .warnings
+            .iter()
+            .filter(|w| unattended_blocks(w))
+            .collect();
+        if !blocking.is_empty() {
+            let tag = unattended_block_tag(&blocking[0].code);
+            return Err(ToolError::PermissionDenied(format!(
+                "Mail guard stopped this send ({tag}). Nobody was asked on this Full-level bot. {} Remove the recipient in Settings (Safe sending), or write to them yourself.",
+                blocking
+                    .iter()
+                    .map(|w| w.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )));
+        }
+        return Ok(report.codes());
+    }
+    Err(ToolError::Execution(format!(
+        "Not sent. {} Only the owner can send past these warnings, by approving the \
+             e-mail card that shows them (\"Send anyway\"). You cannot override this: \
+             tell the owner in plain words and do not retry on your own.",
+        why.join(" ")
+    )))
+}
+
+fn note_unattended_warnings(sent: &mut Value, codes: &[String]) {
+    if codes.is_empty() {
+        return;
+    }
+    let Value::Object(map) = sent else {
+        return;
+    };
+    map.insert("mail_guard_warnings".into(), json!(codes));
+    map.insert(
+        "mail_guard_note".into(),
+        Value::String(format!(
+            "Full-level send: logged mail-guard warnings ({}) in this step; they did not block the send.",
+            codes.join(", ")
+        )),
+    );
+}
+
 /// A reply the model wrote no recipient for: the only kind that can go without a card.
 fn names_no_recipient(i: &SendInput) -> bool {
     (i.reply_to_uid.is_some() || i.reply_to_message_id.is_some())
@@ -1087,26 +1155,8 @@ impl EmailTool {
         // `owner_thread` already means "no warning but the repeat-recipient one": that one is
         // for strangers, every other (the opt-out list, the daily limit, a dropped opt-out
         // line) kept the reply from being an owner-thread reply at all.
-        if !plan.report.warnings.is_empty() && !overridden && !owner_thread {
-            let why: Vec<&str> = plan
-                .report
-                .warnings
-                .iter()
-                .map(|w| w.text.as_str())
-                .collect();
-            if ctx.unattended_mail {
-                return Err(ToolError::PermissionDenied(format!(
-                    "Mail guard stopped this send and nobody was asked. {} Skip this recipient or change the mail.",
-                    why.join(" ")
-                )));
-            }
-            return Err(ToolError::Execution(format!(
-                "Not sent. {} Only the owner can send past these warnings, by approving the \
-                     e-mail card that shows them (\"Send anyway\"). You cannot override this: \
-                     tell the owner in plain words and do not retry on your own.",
-                why.join(" ")
-            )));
-        }
+        let unattended_logged =
+            resolve_pre_send_warnings(ctx, &plan.report, overridden, owner_thread)?;
         let mut mail = i.mail.clone();
         if let Some(f) = &plan.report.footer {
             mail.body = guard::with_footer(&mail.body, f);
@@ -1136,14 +1186,16 @@ impl EmailTool {
                 Vec::new()
             },
         });
-        Ok(json_out(json!({
+        let mut sent = json!({
             "sent": true,
             "recipients": i.mail.to.len() + i.mail.cc.len() + i.mail.bcc.len(),
             "in_reply_to": reply.as_ref().map(|r| r.id.clone()),
             "opt_out_line_added": plan.line_on,
             "owner_sent_anyway": overridden,
             "server_response": receipt.id,
-        })))
+        });
+        note_unattended_warnings(&mut sent, &unattended_logged);
+        Ok(json_out(sent))
     }
 }
 
@@ -1154,8 +1206,8 @@ impl Tool for EmailTool {
     }
 
     /// A send is confirmed on a card unless the bot is on the Full level and the daemon let the
-    /// call through ([`ToolContext::unattended_mail`]). Only the owner, on a card, can send past
-    /// the opt-out and volume warnings: an unattended send that has any is refused.
+    /// call through ([`ToolContext::unattended_mail`]). An unattended send still refuses opt-out and
+    /// unreadable-guard hits; other warnings are logged and the mail goes out.
     fn always_ask(&self) -> bool {
         matches!(self.kind, Kind::Send)
     }

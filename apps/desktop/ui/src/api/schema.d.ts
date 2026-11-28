@@ -8242,7 +8242,7 @@ export interface components {
             opt_out_line: boolean;
             /**
              * Format: int32
-             * @description Warn when a recipient got mail within this many days (`0` = no warning). Default 14.
+             * @description Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).
              */
             same_recipient_days: number;
             /**

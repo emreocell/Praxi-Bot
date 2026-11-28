@@ -27918,7 +27918,7 @@
           "same_recipient_days": {
             "type": "integer",
             "format": "int32",
-            "description": "Warn when a recipient got mail within this many days (`0` = no warning). Default 14.",
+            "description": "Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).",
             "minimum": 0
           },
           "verification_link_domains": {

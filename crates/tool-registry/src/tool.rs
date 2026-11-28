@@ -173,8 +173,9 @@ pub struct ToolContext {
     /// page action. The browser tool refuses to act if the page is on another origin by then
     /// (a navigation or redirect in between), so an allowance never follows the page elsewhere.
     pub expected_origin: Option<String>,
-    /// The Full level admitted this call without a card. A mail send then refuses
-    /// every mail-guard warning: only a card the owner saw can send past one.
+    /// The Full level admitted this call without a card. A mail send still refuses
+    /// opt-out and unreadable-guard hits; other mail-guard warnings are logged and
+    /// the send goes through without a card.
     pub unattended_mail: bool,
     /// The loop let this bot-management call through without a card because it is the owner's
     /// own Full-level chat turn (nothing asked but money), so no card froze the preview the host

@@ -248,6 +248,10 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, string, ((m: RegExpExecArray) =>
   [/spend_limit_reached[\s\S]*saved limit could not be read/, "codes.spend_limit_unreadable"],
   [/spend_limit_reached/, "codes.spend_limit_reached"],
   [/providers_require_app_daemon|_outside_tauri|daemon_unavailable/i, "desktop_only"],
+  // Mail guard refusals on Full-level bots (before the generic OS permission mapping).
+  [/Mail guard stopped this send \(opt-out list\)/i, "mailGuardOptOut"],
+  [/Mail guard stopped this send \(unreadable guard file\)/i, "mailGuardUnreadable"],
+  [/Mail guard stopped this send/i, "mailGuardBlocked"],
   // Before the generic "denied": an operating-system refusal is not the owner saying no.
   [/permission denied|access is denied|os error 5(?![0-9])|\beacces\b|operation not permitted/i, "toolNoPermission"],
   // The web search tool: every backend blocked it or none is set up (the raw text is written for the model).

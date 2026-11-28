@@ -5,9 +5,10 @@
 //! * an **opt-out line** appended in code to the body (the model never writes or removes it);
 //! * a **daily count** per account and a **same-recipient wait**.
 //!
-//! The count, the wait and the opt-out list are *soft* guards: [`MailGuard::check`] returns
-//! [`Warning`]s, never a refusal. Only the owner can send past a warning, by approving the card
-//! that shows it ("Send anyway"). The tool freezes the card it showed, warnings or not
+//! The count, the wait and the opt-out line are *soft* guards on Ask-level bots: [`MailGuard::check`]
+//! returns [`Warning`]s. Only the owner can send past one, by approving the card that shows it
+//! ("Send anyway"). On Full-level bots those warnings are logged and the send goes through;
+//! opt-out list and unreadable-guard hits still block. The tool freezes the card it showed, warnings or not
 //! ([`MailGuard::freeze`]) and a later call goes through past a warning only when it matches a
 //! frozen entry exactly ([`MailGuard::take_card`]). The model has no argument that can do this.
 //!
@@ -25,7 +26,7 @@ use serde::{Deserialize, Serialize};
 /// Default: at most this many mails per account in a rolling 24 hours before a warning.
 pub const DEFAULT_DAILY_LIMIT: u32 = 20;
 /// Default: warn when the same recipient got a mail from the account in the last N days.
-pub const DEFAULT_SAME_RECIPIENT_DAYS: u32 = 14;
+pub const DEFAULT_SAME_RECIPIENT_DAYS: u32 = 0;
 /// How long a frozen warning set stays valid after the card was shown.
 const FREEZE_TTL: Duration = Duration::from_secs(30 * 60);
 /// Longest subject kept in the log.
