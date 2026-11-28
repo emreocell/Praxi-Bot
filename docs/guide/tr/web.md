@@ -46,9 +46,10 @@ döndüren ilki kazanır (varsayılan sıra):
 1. Kendi çalıştırdığın bir [SearXNG](https://docs.searxng.org/) örneği (`searxng_url`),
 2. Brave Search API (`brave_key`),
 3. Tavily Search API (`tavily_key`),
-4. DuckDuckGo HTML (`duckduckgo`, varsayılan `true`),
-5. DuckDuckGo Lite (`duckduckgo_lite`, varsayılan `true`),
-6. Bing HTML (`bing`, varsayılan `true`).
+4. Firecrawl (`firecrawl_url`, `firecrawl_key`),
+5. DuckDuckGo HTML (`duckduckgo`, varsayılan `true`),
+6. DuckDuckGo Lite (`duckduckgo_lite`, varsayılan `true`),
+7. Bing HTML (`bing`, varsayılan `true`).
 
 ```toml
 [search]
@@ -58,7 +59,7 @@ tavily_key = "web/tavily"               # NAME of a secret, never the key itself
 duckduckgo = true                       # keyless fallback (default true)
 duckduckgo_lite = true                  # keyless fallback (default true)
 bing = true                             # keyless fallback (default true)
-order = ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"]
+order = ["searxng", "brave", "tavily", "firecrawl", "duckduckgo", "duckduckgo_lite", "bing"]
 
 [http]
 timeout_secs = 20            # whole request (search backends are capped at 8s each)
@@ -75,6 +76,28 @@ Her anahtar isteğe bağlıdır. Brave ya da Tavily anahtarlarını gizli bilgi 
 bot secrets set web/brave
 bot secrets set web/tavily
 ```
+
+### Firecrawl ile arama ve sayfa okuma
+
+**Ayarlar > Web** bölümünde Firecrawl'ı seç, bulutu veya kendi sunucunu seçip
+API anahtarını ya da sunucu adresini gir. **Bu sağlayıcıyı dene** ile aramayı
+sınayabilirsin. Anahtarlar gizli bilgi deposunda saklanır. Sayfaları okumak için
+de Firecrawl'ı seçebilirsin; varsayılan olarak yerleşik getirici kullanılır.
+Arama ve sayfa içerikleri güvenilmeyen içerik olarak değerlendirilir.
+
+Kendi sunucunda sayfa okumak için **Kendi Firecrawl sunucum üzerinden sayfa
+okumaya izin ver** anahtarını ayrıca açman gerekir. Yönlendirmeler sunucunun
+kendi ağındaki adreslere erişmesine neden olabilir. Arama için bu izin gerekmez.
+Praxi, istenen ve son adresi URL politikası ve botun site kurallarıyla kontrol
+eder; son adres yoksa veya engelliyse içeriği atar. Yönlendirmeleri Firecrawl
+izlediği için ara adresler kontrol edilemez.
+
+`<data_dir>/web.toml` içindeki `[search]` bölümünde de `firecrawl_key` ile
+gizli bilgi adını, gerekiyorsa `firecrawl_url` ile kendi HTTP(S) sunucunun
+adresini belirtebilirsin. Sayfa okumak için `firecrawl_scrape = true`, kendi
+sunucundaki yönlendirme riskini kabul etmek için ayrıca
+`firecrawl_allow_self_hosted_scrape = true` yaz. Dosyayı değiştirdikten sonra
+Praxi'yi yeniden başlat. Adreste kullanıcı adı veya parola bulunmamalıdır.
 
 Bozuk bir `web.toml` (bir yazım hatası, geçersiz bir değer) daemonu asla durdurmaz. Bir uyarı
 günlüğe yazılır ve varsayılanlar kullanılır. Bilinmeyen anahtarlar yazım hatası sayılır, böylece

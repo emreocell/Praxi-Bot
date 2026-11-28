@@ -26,9 +26,9 @@ use tool_registry::{
 
 use crate::error::WebError;
 use crate::extract::{ExtractOptions, html_to_markdown};
-use crate::http::{GetOptions, HTML_TYPES, HttpConfig, HttpFetcher, XML_TYPES};
+use crate::http::{GetOptions, HTML_TYPES, HttpConfig, HttpFetcher, JSON_TYPES, XML_TYPES};
 use crate::metadata::extract_metadata;
-use crate::policy::{DefaultUrlPolicy, UrlPolicy};
+use crate::policy::{DefaultUrlPolicy, TrustedHostPolicy, UrlPolicy};
 use crate::search::{MultiSearch, SearchConfig, SearchQuery};
 use crate::xmlfeed::{parse_feed, parse_sitemap};
 
@@ -102,6 +102,16 @@ struct Shared {
     fetcher: HttpFetcher,
     search: MultiSearch,
     spill_dir: Option<PathBuf>,
+    firecrawl: Option<FirecrawlScrape>,
+}
+
+struct FirecrawlScrape {
+    endpoint: url::Url,
+    fetcher: HttpFetcher,
+    public: Arc<dyn UrlPolicy>,
+    secrets: Option<Arc<dyn SecretStore>>,
+    key: Option<secret_store::SecretRef>,
+    allowed: bool,
 }
 
 struct WebTool {
@@ -127,8 +137,57 @@ pub fn tools(cfg: WebToolsConfig) -> Result<Vec<Arc<dyn Tool>>, WebError> {
         )?),
         None => None,
     };
+    let firecrawl = if cfg.search.firecrawl_scrape.enabled {
+        let raw = cfg
+            .search
+            .firecrawl_url
+            .as_deref()
+            .unwrap_or("https://api.firecrawl.dev");
+        let mut base =
+            url::Url::parse(raw).map_err(|_| WebError::Config("invalid firecrawl URL".into()))?;
+        if !matches!(base.scheme(), "http" | "https")
+            || !base.username().is_empty()
+            || base.password().is_some()
+            || base.query().is_some()
+            || base.fragment().is_some()
+        {
+            return Err(WebError::Config("invalid firecrawl URL".into()));
+        }
+        let host = base
+            .host_str()
+            .ok_or_else(|| WebError::Config("invalid firecrawl URL".into()))?
+            .to_owned();
+        let port = base
+            .port_or_known_default()
+            .ok_or_else(|| WebError::Config("invalid firecrawl URL".into()))?;
+        if !base.path().ends_with('/') {
+            base.set_path(&format!("{}/", base.path()));
+        }
+        let endpoint = base
+            .join("v2/scrape")
+            .map_err(|_| WebError::Config("invalid firecrawl URL".into()))?;
+        let policy: Arc<dyn UrlPolicy> = if cfg.search.firecrawl_url.is_some() {
+            Arc::new(TrustedHostPolicy::new(Arc::clone(&cfg.policy), &host, port))
+        } else {
+            Arc::clone(&cfg.policy)
+        };
+        let service = HttpFetcher::new(policy, cfg.http.clone())?;
+        service.check(endpoint.as_str())?;
+        Some(FirecrawlScrape {
+            endpoint,
+            fetcher: service,
+            public: Arc::clone(&cfg.policy),
+            secrets: cfg.secrets.clone(),
+            key: cfg.search.firecrawl_key.clone(),
+            allowed: cfg.search.firecrawl_url.is_none()
+                || cfg.search.firecrawl_scrape.allow_self_hosted,
+        })
+    } else {
+        None
+    };
     let shared = Arc::new(Shared {
         fetcher,
+        firecrawl,
         search,
         spill_dir: cfg.spill_dir,
     });
@@ -450,6 +509,142 @@ struct UrlLimitIn {
     limit: Option<usize>,
 }
 
+impl FirecrawlScrape {
+    async fn extract(
+        &self,
+        ctx: &ToolContext,
+        input: &ExtractIn,
+        spill: Option<&Path>,
+    ) -> Result<ToolOutput, ToolError> {
+        if !self.allowed {
+            return Err(ToolError::Execution("Scraping through a self-hosted Firecrawl server is disabled; the owner must enable it in Settings > Web.".into()));
+        }
+        let wanted = url::Url::parse(input.url.trim())
+            .map_err(|_| ToolError::InvalidInput("invalid URL".into()))?;
+        self.public
+            .check_url(&wanted)
+            .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+        if tool_registry::url_blocked(wanted.as_str(), false) {
+            return Err(ToolError::Execution(
+                "blocked by URL policy: this site is blocked by an owner rule".into(),
+            ));
+        }
+        let mut options = GetOptions::accepting(JSON_TYPES);
+        if let Some(key) = &self.key {
+            let store = self.secrets.as_ref().ok_or_else(|| {
+                ToolError::Execution("Firecrawl secret store is unavailable".into())
+            })?;
+            let token = secret_store::resolve(store.as_ref(), key)
+                .map_err(|_| ToolError::Execution("Firecrawl key is unavailable".into()))?;
+            options
+                .headers
+                .push(("Authorization".into(), format!("Bearer {}", token.expose())));
+        }
+        let format = if input.include_links.unwrap_or(true) {
+            "markdown"
+        } else {
+            "html"
+        };
+        let formats = if input.list_links.unwrap_or(false) {
+            vec![format, "links"]
+        } else {
+            vec![format]
+        };
+        let request = json!({"url": wanted.as_str(), "formats": formats, "onlyMainContent": !input.full_page.unwrap_or(false)});
+        let page = self
+            .fetcher
+            .post_json(
+                self.endpoint.as_str(),
+                request.to_string().as_bytes(),
+                &options,
+            )
+            .await
+            .map_err(tool_err)?;
+        if page.truncated {
+            return Err(ToolError::Execution("Firecrawl response too large".into()));
+        }
+        let reply: Value = serde_json::from_slice(&page.body)
+            .map_err(|_| ToolError::Execution("Firecrawl returned invalid JSON".into()))?;
+        if reply.get("success").and_then(Value::as_bool) != Some(true) {
+            return Err(ToolError::Execution(
+                "Firecrawl could not read the page".into(),
+            ));
+        }
+        let data = &reply["data"];
+        // Firecrawl versions can report both the requested source and the final URL.
+        // Validate every reported address, preferring `url` when both are present.
+        let bad_url = || {
+            ToolError::Execution(
+                "Firecrawl returned a missing or disallowed final URL; its content was discarded"
+                    .into(),
+            )
+        };
+        let mut final_url = None;
+        for value in [
+            data.pointer("/metadata/url"),
+            data.get("url"),
+            data.pointer("/metadata/sourceURL"),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|v| !v.is_null())
+        {
+            let url = value
+                .as_str()
+                .and_then(|v| url::Url::parse(v).ok())
+                .ok_or_else(bad_url)?;
+            if self.public.check_url(&url).is_err()
+                || tool_registry::url_blocked(url.as_str(), true)
+            {
+                return Err(bad_url());
+            }
+            final_url.get_or_insert(url);
+        }
+        let final_url = final_url.ok_or_else(bad_url)?;
+        let content = data
+            .get(format)
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError::Execution("Firecrawl returned no page content".into()))?;
+        let mut body = if format == "html" {
+            html_to_markdown(
+                content,
+                Some(&final_url),
+                &ExtractOptions {
+                    include_links: false,
+                    full_page: true,
+                    ..ExtractOptions::default()
+                },
+            )
+            .markdown
+        } else {
+            content.to_owned()
+        };
+        let max_chars = input.max_chars.unwrap_or(60_000).max(200);
+        let cut = if let Some((idx, _)) = body.char_indices().nth(max_chars) {
+            body.truncate(idx);
+            true
+        } else {
+            false
+        };
+        let mut text = format!("{}\nURL: {final_url}\n", notice(final_url.as_str()));
+        if cut {
+            text.push_str("Note: content truncated by size limits.\n");
+        }
+        text.push('\n');
+        text.push_str(&body);
+        if input.list_links.unwrap_or(false)
+            && let Some(links) = data.get("links").and_then(Value::as_array)
+            && !links.is_empty()
+        {
+            text.push_str("\n\n## Links\n");
+            for link in links.iter().take(200).filter_map(Value::as_str) {
+                let _ = writeln!(text, "- {link}");
+            }
+        }
+        Ok(finish_text(ctx, spill, text))
+    }
+}
+
 impl WebTool {
     async fn search(&self, input: Value) -> Result<ToolOutput, ToolError> {
         let i: SearchIn = parse(input)?;
@@ -496,6 +691,11 @@ impl WebTool {
     async fn extract(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let i: ExtractIn = parse(input)?;
         check_len("url", &i.url, MAX_URL_CHARS)?;
+        if let Some(service) = &self.shared.firecrawl {
+            return service
+                .extract(ctx, &i, self.shared.spill_dir.as_deref())
+                .await;
+        }
         let page = self
             .shared
             .fetcher

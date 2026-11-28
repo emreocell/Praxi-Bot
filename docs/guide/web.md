@@ -35,9 +35,10 @@ You can configure backends, priority order, API keys, and run a live probe eithe
 1. a [SearXNG](https://docs.searxng.org/) instance you run (`searxng_url`),
 2. Brave Search API (`brave_key`),
 3. Tavily Search API (`tavily_key`),
-4. DuckDuckGo HTML (`duckduckgo`, default `true`),
-5. DuckDuckGo Lite (`duckduckgo_lite`, default `true`),
-6. Bing HTML (`bing`, default `true`).
+4. Firecrawl (`firecrawl_url`, `firecrawl_key`),
+5. DuckDuckGo HTML (`duckduckgo`, default `true`),
+6. DuckDuckGo Lite (`duckduckgo_lite`, default `true`),
+7. Bing HTML (`bing`, default `true`).
 
 ```toml
 [search]
@@ -47,7 +48,7 @@ tavily_key = "web/tavily"               # NAME of a secret, never the key itself
 duckduckgo = true                       # keyless fallback (default true)
 duckduckgo_lite = true                  # keyless fallback (default true)
 bing = true                             # keyless fallback (default true)
-order = ["searxng", "brave", "tavily", "duckduckgo", "duckduckgo_lite", "bing"]
+order = ["searxng", "brave", "tavily", "firecrawl", "duckduckgo", "duckduckgo_lite", "bing"]
 
 [http]
 timeout_secs = 20            # whole request (search backends are capped at 8s each)
@@ -62,6 +63,26 @@ Every key is optional. Store Brave or Tavily keys in the secret store (or enter 
 bot secrets set web/brave
 bot secrets set web/tavily
 ```
+
+### Firecrawl search and page reading
+
+In **Settings > Web**, choose Firecrawl, select cloud or your own server, enter
+its API key or server URL, and use **Try this provider** to test search. Keys
+are stored in the secret store. You can choose Firecrawl to read pages too;
+the built-in fetcher remains the default. Search and page content are untrusted.
+
+For your own server, page reading requires the separate **Allow scraping through
+my own Firecrawl server** switch. A redirect may make that server fetch an
+address inside your network. Search works without this switch. Praxi checks the
+requested and reported final addresses against its URL policy and your bot's
+site rules; it discards page content when the final address is missing or blocked.
+Firecrawl follows redirects itself, so intermediate addresses cannot be checked.
+
+You can also configure `[search]` in `<data_dir>/web.toml`: set
+`firecrawl_key` to a secret name, `firecrawl_url` to the self-hosted HTTP(S)
+URL if applicable, `firecrawl_scrape = true` to select page reading, and
+`firecrawl_allow_self_hosted_scrape = true` to accept the self-hosted redirect
+risk. Restart after editing the file. The URL must not contain credentials.
 
 A broken `web.toml` (a typo, a bad value) never stops the daemon: it logs a
 warning and uses the defaults. Unknown keys count as a typo, so mistakes are

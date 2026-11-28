@@ -8176,6 +8176,7 @@
         "brave": "Brave Search API",
         "duckduckgo": "DuckDuckGo (HTML)",
         "duckduckgo_lite": "DuckDuckGo Lite",
+        "firecrawl": "Firecrawl",
         "searxng": "SearXNG",
         "tavily": "Tavily Search API"
       },
@@ -8185,6 +8186,17 @@
       "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
       "description": "Lets your bots search the internet. A server needs a search provider.",
       "fallbackNotes": "Earlier fallback errors before success: {{details}}",
+      "firecrawl": {
+        "allow": "Allow scraping through my own Firecrawl server",
+        "cloud": "Cloud",
+        "key": "Firecrawl API key",
+        "mode": "Firecrawl mode",
+        "remove": "Remove Firecrawl",
+        "risk": "Redirects can cause your server to fetch addresses inside your network.",
+        "selfHosted": "My own server",
+        "url": "Server URL",
+        "useScrape": "Use Firecrawl to read pages"
+      },
       "keyEmptyPlaceholder": "Enter API key…",
       "keyStoredPlaceholder": "Key stored (enter a new key to replace)",
       "keyWriteOnlyHint": "Write-only: stored in the OS secret store and never read back.",
@@ -8198,6 +8210,7 @@
       "providerChoice": "Choose a search provider",
       "providerHelp": {
         "brave": "Create a key in your Brave Search API account and paste it here.",
+        "firecrawl": "Connect Firecrawl for search and, optionally, reading pages.",
         "searxng": "The address of your own SearXNG server, for example http://127.0.0.1:8080. The web search guide has a one-command install for a server.",
         "tavily": "Create a key in your Tavily account and paste it here."
       },

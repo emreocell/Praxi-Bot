@@ -55,6 +55,7 @@ pub const KNOWN_BACKENDS: &[&str] = &[
     "searxng",
     "brave",
     "tavily",
+    "firecrawl",
     "duckduckgo",
     "duckduckgo_lite",
     "bing",
@@ -581,6 +582,89 @@ impl SearchBackend for BraveBackend {
             .unwrap_or_default()
             .iter()
             .filter_map(|h| make("brave", &h.title, &h.url, &h.description))
+            .collect();
+        Ok(finalize(hits, limit))
+    }
+}
+
+// --------------------------------------------------------------- Firecrawl
+
+/// Firecrawl search API, with an optional secret for cloud deployments.
+pub struct FirecrawlBackend {
+    endpoint: Url,
+    fetcher: HttpFetcher,
+    secrets: Option<Arc<dyn SecretStore>>,
+    key: Option<SecretRef>,
+}
+
+#[derive(Deserialize)]
+struct FirecrawlResponse {
+    success: bool,
+    data: Option<FirecrawlData>,
+}
+
+#[derive(Deserialize)]
+struct FirecrawlData {
+    #[serde(default)]
+    web: Vec<FirecrawlHit>,
+}
+
+#[derive(Deserialize)]
+struct FirecrawlHit {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    description: String,
+}
+
+#[async_trait]
+impl SearchBackend for FirecrawlBackend {
+    fn name(&self) -> &'static str {
+        "firecrawl"
+    }
+
+    async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, WebError> {
+        let (q, limit) = query.validated()?;
+        let payload = serde_json::to_vec(&serde_json::json!({"query": q, "limit": limit}))
+            .map_err(|_| WebError::Search("firecrawl: invalid request".into()))?;
+        let mut opts = json_search_options(&self.fetcher);
+        if let Some(key) = &self.key {
+            let store = self
+                .secrets
+                .as_ref()
+                .ok_or_else(|| WebError::Config("firecrawl key requires a secret store".into()))?;
+            let token = secret_store::resolve(store.as_ref(), key)
+                .map_err(|_| WebError::Config("firecrawl secret is not available".into()))?;
+            opts.headers
+                .push(("Authorization".into(), format!("Bearer {}", token.expose())));
+        }
+        let page = self
+            .fetcher
+            .post_json(self.endpoint.as_str(), &payload, &opts)
+            .await
+            .map_err(|e| match e {
+                WebError::Status(401 | 403) => {
+                    WebError::Search("firecrawl rejected the API key".into())
+                }
+                WebError::Status(429) => WebError::Search("firecrawl rate limit reached".into()),
+                other => other,
+            })?;
+        if page.truncated {
+            return Err(WebError::Search("firecrawl response too large".into()));
+        }
+        let parsed: FirecrawlResponse = serde_json::from_slice(&page.body)
+            .map_err(|_| WebError::Search("firecrawl: bad JSON".into()))?;
+        if !parsed.success {
+            return Err(WebError::Search("firecrawl search failed".into()));
+        }
+        let hits = parsed
+            .data
+            .map(|d| d.web)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|h| make("firecrawl", &h.title, &h.url, &h.description))
             .collect();
         Ok(finalize(hits, limit))
     }
@@ -1216,6 +1300,15 @@ impl MultiSearch {
 
 // ------------------------------------------------------------------ config
 
+/// Explicit Firecrawl extraction choices.
+#[derive(Debug, Clone, Default)]
+pub struct FirecrawlScrapeConfig {
+    /// Use Firecrawl instead of the built-in page fetcher.
+    pub enabled: bool,
+    /// Permit scraping through a self-hosted server despite redirect risks.
+    pub allow_self_hosted: bool,
+}
+
 /// Which backends to enable and their priority order.
 #[derive(Debug, Clone)]
 pub struct SearchConfig {
@@ -1230,6 +1323,12 @@ pub struct SearchConfig {
     pub tavily_key: Option<SecretRef>,
     /// Override of the Tavily endpoint (tests, proxies).
     pub tavily_endpoint: Option<String>,
+    /// Owner-configured Firecrawl service root; absent with a key uses the cloud service.
+    pub firecrawl_url: Option<String>,
+    /// Secret holding the Firecrawl API key.
+    pub firecrawl_key: Option<SecretRef>,
+    /// Firecrawl extraction settings.
+    pub firecrawl_scrape: FirecrawlScrapeConfig,
     /// Enable the `DuckDuckGo` HTML fallback (default `true`).
     pub duckduckgo: bool,
     /// Override of the `DuckDuckGo` endpoint (tests).
@@ -1259,6 +1358,9 @@ impl Default for SearchConfig {
             brave_endpoint: None,
             tavily_key: None,
             tavily_endpoint: None,
+            firecrawl_url: None,
+            firecrawl_key: None,
+            firecrawl_scrape: FirecrawlScrapeConfig::default(),
             duckduckgo: true,
             duckduckgo_endpoint: None,
             duckduckgo_lite: true,
@@ -1277,7 +1379,11 @@ impl SearchConfig {
     /// those block servers and cloud machines as robots.
     #[must_use]
     pub fn has_provider(&self) -> bool {
-        self.searxng_url.is_some() || self.brave_key.is_some() || self.tavily_key.is_some()
+        self.searxng_url.is_some()
+            || self.brave_key.is_some()
+            || self.tavily_key.is_some()
+            || self.firecrawl_url.is_some()
+            || self.firecrawl_key.is_some()
     }
 
     /// Build the ordered backend chain.
@@ -1351,6 +1457,67 @@ impl SearchConfig {
                     store,
                     key.clone(),
                 )?),
+            );
+        }
+        if self.firecrawl_url.is_some() || self.firecrawl_key.is_some() {
+            if self.firecrawl_key.is_some() && secrets.is_none() {
+                return Err(WebError::Config(
+                    "firecrawl_key set but no secret store provided".into(),
+                ));
+            }
+            let raw = self
+                .firecrawl_url
+                .as_deref()
+                .unwrap_or("https://api.firecrawl.dev");
+            let mut base =
+                Url::parse(raw).map_err(|_| WebError::Config("invalid firecrawl URL".into()))?;
+            if !matches!(base.scheme(), "http" | "https")
+                || !base.username().is_empty()
+                || base.password().is_some()
+                || base.query().is_some()
+                || base.fragment().is_some()
+            {
+                return Err(WebError::Config("invalid firecrawl URL".into()));
+            }
+            let host = base
+                .host_str()
+                .ok_or_else(|| WebError::Config("firecrawl URL has no host".into()))?
+                .to_string();
+            let port = base
+                .port_or_known_default()
+                .ok_or_else(|| WebError::Config("firecrawl URL has no port".into()))?;
+            if !base.path().ends_with('/') {
+                base.set_path(&format!("{}/", base.path()));
+            }
+            let endpoint = base
+                .join("v2/search")
+                .map_err(|_| WebError::Config("invalid firecrawl URL".into()))?;
+            let policy: Arc<dyn UrlPolicy> = if self.firecrawl_url.is_some() {
+                Arc::new(TrustedHostPolicy::new(
+                    Arc::clone(public.policy()),
+                    &host,
+                    port,
+                ))
+            } else {
+                Arc::clone(public.policy())
+            };
+            let fetcher = HttpFetcher::new(Arc::clone(&policy), http.clone())?;
+            fetcher.check(endpoint.as_str())?;
+            if matches!(base.host(), Some(url::Host::Domain(_)))
+                && let Ok(addrs) = (host.as_str(), port).to_socket_addrs()
+            {
+                for sock in addrs {
+                    policy.check_socket(&host, sock)?;
+                }
+            }
+            available.insert(
+                "firecrawl",
+                Arc::new(FirecrawlBackend {
+                    endpoint,
+                    fetcher,
+                    secrets: secrets.clone(),
+                    key: self.firecrawl_key.clone(),
+                }),
             );
         }
         if self.duckduckgo {

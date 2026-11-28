@@ -8176,6 +8176,7 @@
         "brave": "Brave Search API",
         "duckduckgo": "DuckDuckGo (HTML)",
         "duckduckgo_lite": "DuckDuckGo Lite",
+        "firecrawl": "Firecrawl",
         "searxng": "SearXNG",
         "tavily": "Tavily Search API"
       },
@@ -8185,6 +8186,17 @@
       "configError": "web.toml yüklenemedi ({{message}}). Varsayılanlar gösteriliyor — aşağıda değişiklikleri kaydetmek dosyayı yenileyecektir.",
       "description": "Botların internette arama yapmasını sağlar. Sunucuda bir arama sağlayıcısı gerekir.",
       "fallbackNotes": "Başarılı olmadan önceki denemelerde alınan hatalar: {{details}}",
+      "firecrawl": {
+        "allow": "Kendi Firecrawl sunucum üzerinden sayfa okumaya izin ver",
+        "cloud": "Bulut",
+        "key": "Firecrawl API anahtarı",
+        "mode": "Firecrawl modu",
+        "remove": "Firecrawl bağlantısını kaldır",
+        "risk": "Yönlendirmeler sunucunun ağındaki adreslere erişmesine neden olabilir.",
+        "selfHosted": "Kendi sunucum",
+        "url": "Sunucu adresi",
+        "useScrape": "Sayfaları okumak için Firecrawl kullan"
+      },
       "keyEmptyPlaceholder": "API anahtarı gir…",
       "keyStoredPlaceholder": "Anahtar kayıtlı (değiştirmek için yeni anahtar gir)",
       "keyWriteOnlyHint": "Yalnızca kaydedilir: sistemin gizli bilgi deposunda saklanır, bir daha görüntülenmez.",
@@ -8198,6 +8210,7 @@
       "providerChoice": "Bir arama sağlayıcısı seç",
       "providerHelp": {
         "brave": "Brave Search API hesabında bir anahtar oluştur ve buraya yapıştır.",
+        "firecrawl": "Arama ve isteğe bağlı sayfa okuma için Firecrawl bağla.",
         "searxng": "Kendi SearXNG sunucunun adresi, örneğin http://127.0.0.1:8080. Web arama rehberinde sunucu için tek komutla kurulum var.",
         "tavily": "Tavily hesabında bir anahtar oluştur ve buraya yapıştır."
       },

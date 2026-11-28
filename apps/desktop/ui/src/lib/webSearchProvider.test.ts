@@ -18,6 +18,10 @@ function config(over: Partial<WebSearchConfig> = {}): WebSearchConfig {
     searxng_url: null,
     brave_key_set: false,
     tavily_key_set: false,
+    firecrawl_key_set: false,
+    firecrawl_url: null,
+    firecrawl_scrape: false,
+    firecrawl_allow_self_hosted_scrape: false,
     duckduckgo: true,
     duckduckgo_lite: true,
     bing: true,
@@ -28,10 +32,12 @@ function config(over: Partial<WebSearchConfig> = {}): WebSearchConfig {
 test("a provider counts as set up when its key or address is stored", () => {
   assert.deepEqual(
     PROVIDERS.map((id) => providerConfigured(id, config())),
-    [false, false, false]
+    [false, false, false, false]
   );
   assert.equal(providerConfigured("brave", config({ brave_key_set: true })), true);
   assert.equal(providerConfigured("tavily", config({ tavily_key_set: true })), true);
+  assert.equal(providerConfigured("firecrawl", config({ firecrawl_key_set: true })), true);
+  assert.equal(providerConfigured("firecrawl", config({ firecrawl_url: "http://127.0.0.1:3002" })), true);
   assert.equal(
     providerConfigured("searxng", config({ searxng_url: "http://127.0.0.1:8080" })),
     true
@@ -82,4 +88,20 @@ test("the mock follows the same flow: save a provider, test it, remove it", asyn
   assert.equal(probe.blocked ?? false, false);
   const cleared = await mock.updateWebSearch(clearInput("tavily"));
   assert.equal(providerConfigured("tavily", cleared), false);
+});
+
+test("Firecrawl settings keep self-hosted scraping consent explicit", async () => {
+  const mock = new MockApiClient();
+  const saved = await mock.updateWebSearch({
+    firecrawl_url: "http://127.0.0.1:3002",
+    firecrawl_scrape: true,
+    firecrawl_allow_self_hosted_scrape: true
+  });
+  assert.equal(providerConfigured("firecrawl", saved), true);
+  assert.equal(saved.firecrawl_allow_self_hosted_scrape, true);
+  const changed = await mock.updateWebSearch({ firecrawl_url: "http://127.0.0.1:3003" });
+  assert.equal(changed.firecrawl_allow_self_hosted_scrape, false);
+  const cleared = await mock.updateWebSearch(clearInput("firecrawl"));
+  assert.equal(providerConfigured("firecrawl", cleared), false);
+  assert.equal(cleared.firecrawl_scrape, false);
 });

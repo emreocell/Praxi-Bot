@@ -9,6 +9,10 @@ const baseConfig: WebSearchConfig = {
   searxng_url: null,
   brave_key_set: false,
   tavily_key_set: false,
+  firecrawl_url: null,
+  firecrawl_key_set: false,
+  firecrawl_scrape: false,
+  firecrawl_allow_self_hosted_scrape: false,
   duckduckgo: true,
   duckduckgo_lite: true,
   bing: true

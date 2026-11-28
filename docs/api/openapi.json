@@ -41860,6 +41860,9 @@
           "active_backends",
           "brave_key_set",
           "tavily_key_set",
+          "firecrawl_key_set",
+          "firecrawl_scrape",
+          "firecrawl_allow_self_hosted_scrape",
           "duckduckgo",
           "duckduckgo_lite",
           "bing"
@@ -41895,6 +41898,25 @@
             "type": "boolean",
             "description": "Whether the `DuckDuckGo` Lite fallback is enabled."
           },
+          "firecrawl_allow_self_hosted_scrape": {
+            "type": "boolean",
+            "description": "Whether self-hosted extraction has been explicitly enabled."
+          },
+          "firecrawl_key_set": {
+            "type": "boolean",
+            "description": "Whether a Firecrawl key is stored."
+          },
+          "firecrawl_scrape": {
+            "type": "boolean",
+            "description": "Whether Firecrawl is selected for extraction."
+          },
+          "firecrawl_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Firecrawl self-hosted server URL, if configured."
+          },
           "needs_provider": {
             "type": "boolean",
             "description": "`true` on a computer with no screen (a server or host) that has no search provider\n(Brave, Tavily or `SearXNG`): the free engines usually refuse such machines as robots, so\nthe Settings page asks the owner to add a provider."
@@ -41904,7 +41926,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Priority order of backend ids (`searxng`, `brave`, `tavily`,\n`duckduckgo`, `duckduckgo_lite`, `bing`)."
+            "description": "Priority order of backend ids (`searxng`, `brave`, `tavily`,\n`firecrawl`, `duckduckgo`, `duckduckgo_lite`, `bing`)."
           },
           "searxng_url": {
             "type": [
@@ -41944,6 +41966,13 @@
             ],
             "description": "Remove the stored Brave Search API key."
           },
+          "clear_firecrawl_key": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Remove the stored Firecrawl key."
+          },
           "clear_tavily_key": {
             "type": [
               "boolean",
@@ -41964,6 +41993,34 @@
               "null"
             ],
             "description": "Enable or disable the `DuckDuckGo` Lite fallback."
+          },
+          "firecrawl_allow_self_hosted_scrape": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Allow extraction through the self-hosted server."
+          },
+          "firecrawl_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Firecrawl API key, write-only."
+          },
+          "firecrawl_scrape": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Select Firecrawl for extraction."
+          },
+          "firecrawl_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Self-hosted Firecrawl URL; empty clears it."
           },
           "order": {
             "type": [

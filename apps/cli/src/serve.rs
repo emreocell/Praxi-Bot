@@ -752,6 +752,18 @@ pub struct WebSearchSection {
     /// Name of the secret holding the Tavily Search API key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tavily_key: Option<String>,
+    /// Firecrawl service root for a self-hosted deployment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firecrawl_url: Option<String>,
+    /// Name of the secret holding the Firecrawl API key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firecrawl_key: Option<String>,
+    /// Select Firecrawl for page extraction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firecrawl_scrape: Option<bool>,
+    /// Explicitly accept redirect risks on a self-hosted Firecrawl server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firecrawl_allow_self_hosted_scrape: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duckduckgo: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -796,6 +808,47 @@ pub fn load_web_file(data_dir: &Path) -> (WebConfigFile, Vec<String>) {
             vec![format!("{e}; using the default web tools settings")],
         ),
     }
+}
+
+fn resolve_web_key(
+    field: &str,
+    raw: Option<&str>,
+    has_store: bool,
+    warnings: &mut Vec<String>,
+) -> Option<secret_store::SecretRef> {
+    let name = raw.filter(|n| !n.trim().is_empty())?;
+    match secret_store::SecretRef::new(name) {
+        Ok(r) if has_store => Some(r),
+        Ok(_) => {
+            warnings.push(format!(
+                "web.toml: {field} {name:?} ignored, the secret store is not available"
+            ));
+            None
+        }
+        Err(e) => {
+            warnings.push(format!("web.toml: {field} ignored: {e}"));
+            None
+        }
+    }
+}
+
+fn configure_web_credentials(
+    cfg: &mut web_tools::SearchConfig,
+    s: &WebSearchSection,
+    has_store: bool,
+    warnings: &mut Vec<String>,
+) {
+    cfg.brave_key = resolve_web_key("brave_key", s.brave_key.as_deref(), has_store, warnings);
+    cfg.tavily_key = resolve_web_key("tavily_key", s.tavily_key.as_deref(), has_store, warnings);
+    cfg.firecrawl_url = s.firecrawl_url.clone().filter(|u| !u.trim().is_empty());
+    cfg.firecrawl_key = resolve_web_key(
+        "firecrawl_key",
+        s.firecrawl_key.as_deref(),
+        has_store,
+        warnings,
+    );
+    cfg.firecrawl_scrape.enabled = s.firecrawl_scrape.unwrap_or(false);
+    cfg.firecrawl_scrape.allow_self_hosted = s.firecrawl_allow_self_hosted_scrape.unwrap_or(false);
 }
 
 /// Build the [`web_tools::WebToolsConfig`] for `file`. Invalid single values are
@@ -847,27 +900,7 @@ pub fn web_tools_config(
             }
         }
     }
-    let resolve_key = |field: &str,
-                       raw: Option<&str>,
-                       warnings: &mut Vec<String>|
-     -> Option<secret_store::SecretRef> {
-        let name = raw.filter(|n| !n.trim().is_empty())?;
-        match secret_store::SecretRef::new(name) {
-            Ok(r) if store.is_some() => Some(r),
-            Ok(_) => {
-                warnings.push(format!(
-                    "web.toml: {field} {name:?} ignored, the secret store is not available"
-                ));
-                None
-            }
-            Err(e) => {
-                warnings.push(format!("web.toml: {field} ignored: {e}"));
-                None
-            }
-        }
-    };
-    cfg.search.brave_key = resolve_key("brave_key", s.brave_key.as_deref(), warnings);
-    cfg.search.tavily_key = resolve_key("tavily_key", s.tavily_key.as_deref(), warnings);
+    configure_web_credentials(&mut cfg.search, s, store.is_some(), warnings);
     let h = &file.http;
     let positive = |what: &str, v: Option<u64>, warnings: &mut Vec<String>| {
         v.filter(|n| {

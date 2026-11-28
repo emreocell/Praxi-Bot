@@ -4,6 +4,8 @@ export function usesEnglishFallback(locale: string, key: string): boolean {
   return (
     key.startsWith("apps.composioHub.") ||
     key.startsWith("apps.restApis.") ||
+    key === "settingsModal.webSearch.backends.firecrawl" ||
+    key === "settingsModal.webSearch.providerHelp.firecrawl" ||
     key.startsWith("chat.step.desktop_clipboard.") ||
     key.startsWith("chat.step.desktop_element.") ||
     key.startsWith("chat.step.desktop_window.") ||
