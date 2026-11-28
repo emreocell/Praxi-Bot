@@ -91,3 +91,31 @@ test("placeLabel reads as one line with a space after each colon", () => {
   const [signedOut] = mergeCodingClis([det("b", true, "signed_out", false)], null);
   assert.equal(placeLabel(t, signedOut, "", false), "This computer: off (Needs sign-in)");
 });
+
+test("placeLabel says when a sign-in was only seen as a file, locally or on the server", () => {
+  const t = (key: string, o?: Record<string, unknown>) =>
+    ({
+      "settingsUi.codingClis.thisComputer": "This computer:",
+      "settingsUi.codingClis.myServer": `${o?.name}:`,
+      "settingsUi.codingClis.local.on": "on",
+      "settingsUi.codingClis.server.unknown": "unknown",
+      "serverConnectionStatus.credentialFound": "sign-in file found, unverified"
+    })[key] ?? key;
+  const seen = det("copilot", true, "signed_in", true);
+  (seen.detected as unknown as Record<string, unknown>).auth = "unknown";
+  (seen.detected as unknown as Record<string, unknown>).detail = "auth_metadata_only";
+  const other = det("claude", true, "signed_in", true);
+  (other.detected as unknown as Record<string, unknown>).auth = "unknown";
+  (other.detected as unknown as Record<string, unknown>).detail = "auth_metadata_only";
+  const [copilot] = mergeCodingClis([seen], null);
+  assert.equal(placeLabel(t, copilot, "", false), "This computer: on (sign-in file found, unverified)");
+  // Only Copilot and Antigravity read their sign-in from a file; for the others "unknown" says nothing.
+  const [claude] = mergeCodingClis([other], null);
+  assert.equal(placeLabel(t, claude, "", false), "This computer: on");
+  const withFile = { ...host("claude", true, null), credential_file_present: true } as AdminCliEngine;
+  const [onServer] = mergeCodingClis([det("claude", false)], [withFile]);
+  assert.match(placeLabel(t, onServer, "Praxi host", true), /Praxi host: sign-in file found, unverified$/);
+  const noFile = { ...host("claude", true, null), credential_file_present: false } as AdminCliEngine;
+  const [plain] = mergeCodingClis([det("claude", false)], [noFile]);
+  assert.match(placeLabel(t, plain, "Praxi host", true), /Praxi host: unknown$/);
+});
