@@ -12,6 +12,7 @@ use crate::error::{MissionError, Result};
 use crate::model::{
     ItemStatus, MAX_ACTIVE_WAITS, MAX_TEXT_CHARS, MAX_WAITS_PER_ITEM, MissionState, clip,
 };
+use crate::recur;
 use crate::wake::{
     MAX_PENDING_WAKES, MAX_REASON_CHARS, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason,
     clean_external,
@@ -255,7 +256,7 @@ impl MissionStore {
     /// SQLite failure.
     pub fn due_timers(&self, now: i64) -> Result<Vec<Wait>> {
         self.waits_where(
-            "w.kind = 'after' AND w.due_at_ms <= ?1",
+            "w.kind IN ('after', 'every') AND w.due_at_ms <= ?1",
             now,
             "w.due_at_ms, w.id",
             i64::MAX,
@@ -268,7 +269,7 @@ impl MissionStore {
     /// SQLite failure.
     pub fn expired_waits(&self, now: i64) -> Result<Vec<Wait>> {
         self.waits_where(
-            "w.kind IN ('mail', 'webhook') AND w.due_at_ms <= ?1",
+            "w.kind IN ('mail', 'webhook', 'child') AND w.due_at_ms <= ?1",
             now,
             "w.due_at_ms, w.id",
             i64::MAX,
@@ -411,6 +412,102 @@ impl MissionStore {
             &json!({"wait": wait_id, "reason": reason.as_str()}),
         )?;
         bump(&tx, &w.mission_id, now)?;
+        let wake = tx.query_row(
+            &format!("SELECT {WAKE_COLS} FROM mission_wakes w WHERE w.id = ?1"),
+            [wake_id],
+            wake_of,
+        )?;
+        tx.commit()?;
+        Ok(Some(wake))
+    }
+
+    /// A recurrence rule fired: wake the item, then schedule the next occurrence or end the
+    /// wait when the series is finished.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn fire_recurring_wait(&self, wait_id: i64, now: i64) -> Result<Option<Wake>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let w = wait_in(&tx, wait_id)?;
+        if w.state != WaitState::Waiting {
+            return Ok(None);
+        }
+        let WaitSpec::Every {
+            rrule,
+            timezone,
+            dtstart_ms,
+        } = &w.spec
+        else {
+            return Ok(None);
+        };
+        let fired_at = w.due_at_ms;
+        let next_due = recur::next_due(rrule, *dtstart_ms, timezone.as_deref(), fired_at)
+            .map_err(MissionError::Invalid)?;
+        let item = item_in(&tx, &w.mission_id, &w.item_key)?;
+        if item.status == ItemStatus::Waiting {
+            tx.execute(
+                "UPDATE mission_items SET status = 'todo', updated_at_ms = ?3 WHERE mission_id = ?1 AND key = ?2",
+                params![w.mission_id, w.item_key, now],
+            )?;
+            tx.execute(
+                "UPDATE mission_waits SET state = 'cancelled', ended_at_ms = ?3 \
+                 WHERE mission_id = ?1 AND item_key = ?2 AND state = 'waiting' AND id != ?4",
+                params![w.mission_id, w.item_key, now, wait_id],
+            )?;
+            event(
+                &tx,
+                &w.mission_id,
+                now,
+                "item",
+                Some(&w.item_key),
+                &json!({"from": "waiting", "to": "todo", "by": "wake"}),
+            )?;
+        }
+        consume_item_wakes(&tx, &w.mission_id, &w.item_key, now)?;
+        tx.execute(
+            "UPDATE mission_wakes SET consumed_at_ms = ?2 WHERE mission_id = ?1 AND consumed_at_ms IS NULL \
+            AND id NOT IN (SELECT id FROM mission_wakes WHERE mission_id = ?1 AND consumed_at_ms IS NULL \
+            ORDER BY id DESC LIMIT ?3)",
+            params![
+                w.mission_id,
+                now,
+                i64::try_from(MAX_PENDING_WAKES.saturating_sub(1)).unwrap_or(i64::MAX)
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO mission_wakes (mission_id, wait_id, item_key, reason, payload_json, dedupe_key, created_at_ms) \
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+            params![
+                w.mission_id,
+                wait_id,
+                w.item_key,
+                WakeReason::Schedule.as_str(),
+                format!("wait:{wait_id}:{}", w.due_at_ms),
+                now
+            ],
+        )?;
+        let wake_id = tx.last_insert_rowid();
+        event(
+            &tx,
+            &w.mission_id,
+            now,
+            "wake",
+            Some(&w.item_key),
+            &json!({"wait": wait_id, "reason": WakeReason::Schedule.as_str()}),
+        )?;
+        bump(&tx, &w.mission_id, now)?;
+        if let Some(next) = next_due {
+            tx.execute(
+                "UPDATE mission_waits SET due_at_ms = ?2 WHERE id = ?1 AND state = 'waiting'",
+                params![wait_id, next],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE mission_waits SET state = 'fired', ended_at_ms = ?2 WHERE id = ?1",
+                params![wait_id, now],
+            )?;
+        }
         let wake = tx.query_row(
             &format!("SELECT {WAKE_COLS} FROM mission_wakes w WHERE w.id = ?1"),
             [wake_id],
@@ -581,6 +678,40 @@ impl MissionStore {
             });
             if self
                 .fire_wait(w.id, WakeReason::Webhook, Some(&payload), now)?
+                .is_some()
+                && !woken.contains(&w.mission_id)
+            {
+                woken.push(w.mission_id.clone());
+            }
+        }
+        Ok(woken)
+    }
+
+    /// A child run a mission was waiting for finished. Returns the missions that were woken.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn deliver_child_finished(
+        &self,
+        child_run_id: &str,
+        summary: &str,
+        now: i64,
+    ) -> Result<Vec<String>> {
+        let wants: Vec<Wait> = self.waits_where("w.kind = 'child'", now, "w.id", i64::MAX)?;
+        let child = child_run_id.trim();
+        let mut woken: Vec<String> = Vec::new();
+        for w in wants {
+            let WaitSpec::Child { run_id } = &w.spec else {
+                continue;
+            };
+            if run_id != child {
+                continue;
+            }
+            let payload = json!({
+                "summary": clean_external(summary, crate::model::MAX_WAKE_PAYLOAD_CHARS),
+            });
+            if self
+                .fire_wait(w.id, WakeReason::Child, Some(&payload), now)?
                 .is_some()
                 && !woken.contains(&w.mission_id)
             {

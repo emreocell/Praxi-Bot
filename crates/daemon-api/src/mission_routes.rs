@@ -356,6 +356,9 @@ fn wait_dto(w: &missions::Wait) -> MissionWaitDto {
             None,
         ),
         missions::WaitSpec::Webhook { name, .. } => (None, None, None, Some(name.clone())),
+        missions::WaitSpec::Every { .. } | missions::WaitSpec::Child { .. } => {
+            (None, None, None, None)
+        }
     };
     MissionWaitDto {
         kind: w.spec.kind().to_owned(),

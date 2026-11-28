@@ -1191,6 +1191,8 @@ pub(crate) struct Shared {
     /// The mission ledger, set by the daemon. Mission sessions park a CAPTCHA / 2FA
     /// item in it instead of waiting for the owner, and ask the owner once.
     pub mission_store: RwLock<Option<Arc<missions::MissionStore>>>,
+    /// When a child run of a mission session finishes, wakes any matching wait.
+    pub mission_child_wake: RwLock<Option<Arc<dyn missions::ChildWakeSink>>>,
     /// Paired servers a bot may use as ITS computer while it runs here.
     pub server_links: RwLock<Option<Arc<dyn builtin_tools::pc::ServerLinks>>>,
     /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when

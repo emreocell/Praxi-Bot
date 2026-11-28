@@ -24,6 +24,14 @@ use uuid::Uuid;
 use crate::mission_wakes::{DaemonWakeChecks, OwnInboxProbe};
 use crate::{AppState, error::ApiError};
 
+struct SupChildWake(Arc<Supervisor>);
+
+impl missions::ChildWakeSink for SupChildWake {
+    fn deliver(&self, child_run_id: &str, summary: &str) {
+        missions::ChildWakeSink::deliver(self.0.as_ref(), child_run_id, summary);
+    }
+}
+
 /// How long a session waits for the mission chat to be free (the owner may be typing in it).
 const CHAT_BUSY_PATIENCE: Duration = Duration::from_secs(10 * 60);
 
@@ -284,6 +292,9 @@ impl AppState {
             |t| (Arc::clone(&t.clock), t.pacing.clone()),
         );
         let supervisor = Arc::new(Supervisor::new(store, runner, clock, pacing, token.clone()));
+        self.0
+            .agent
+            .set_mission_child_wake(Arc::new(SupChildWake(Arc::clone(&supervisor))));
         supervisor.set_mail_probe(Arc::new(OwnInboxProbe {
             mail: self.0.agent.mail_handle(),
         }));

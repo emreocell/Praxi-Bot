@@ -77,11 +77,12 @@ impl Supervisor {
         self.prune_old(now);
 
         for w in self.store.due_timers(now)? {
-            if self
-                .store
-                .fire_wait(w.id, WakeReason::Timer, None, now)?
-                .is_some()
-            {
+            let fired = match &w.spec {
+                WaitSpec::Every { .. } => self.store.fire_recurring_wait(w.id, now)?,
+                WaitSpec::After => self.store.fire_wait(w.id, WakeReason::Timer, None, now)?,
+                _ => continue,
+            };
+            if fired.is_some() {
                 pass.fired += 1;
                 touched.insert(w.mission_id);
             }
@@ -182,6 +183,32 @@ impl Supervisor {
     pub fn deliver_webhook(&self, bot_id: &str, trigger_id: &str, body: &str) -> Result<u32> {
         let now = self.clock.now_ms();
         let woken = self.store.deliver_webhook(bot_id, trigger_id, body, now)?;
+        let mut released = 0;
+        for id in &woken {
+            if self
+                .store
+                .release_waiting(id, WAKE_RELEASES_PER_HOUR, now)?
+            {
+                released += 1;
+            }
+            self.changed(id);
+        }
+        if released > 0 {
+            self.wake();
+        }
+        Ok(u32::try_from(woken.len()).unwrap_or(u32::MAX))
+    }
+
+    /// A child run a mission was waiting for finished (subagent or helper). Returns how many
+    /// missions were woken.
+    ///
+    /// # Errors
+    /// Storage failures.
+    pub fn deliver_child_finished(&self, child_run_id: &str, summary: &str) -> Result<u32> {
+        let now = self.clock.now_ms();
+        let woken = self
+            .store
+            .deliver_child_finished(child_run_id, summary, now)?;
         let mut released = 0;
         for id in &woken {
             if self

@@ -9,7 +9,10 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc, Weekday};
+use chrono::{
+    DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc, Weekday,
+};
+use chrono_tz::Tz;
 
 use crate::ical::{Budget, Moment, Vevent, parse_duration};
 
@@ -493,6 +496,52 @@ pub(crate) fn occurrences(
     Some(out)
 }
 
+/// The first series instant strictly after `after_ms` (Unix epoch ms).
+///
+/// `dtstart_ms` is the anchor (`DTSTART`) of the series. When `timezone` is set
+/// it names the IANA zone for local wall time; otherwise UTC is used.
+///
+/// # Errors
+/// An invalid rule, zone, or timestamp.
+pub fn next_after_ms(
+    rule_str: &str,
+    dtstart_ms: i64,
+    timezone: Option<&str>,
+    after_ms: i64,
+) -> Result<Option<i64>, String> {
+    let rule = parse(rule_str)?;
+    if !rule.expandable {
+        return Err("this recurrence rule cannot be expanded here".into());
+    }
+    let zone: Tz = timezone
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse::<Tz>()
+                .map_err(|_| "the time zone name is invalid".to_string())
+        })
+        .transpose()?
+        .unwrap_or(chrono_tz::UTC);
+    let Some(dtstart) = DateTime::<Utc>::from_timestamp_millis(dtstart_ms) else {
+        return Err("dtstart is out of range".into());
+    };
+    let start = dtstart.with_timezone(&zone).naive_local();
+    let mut found = None;
+    let mut budget = crate::ical::Budget::new(100_000, 10_000_000);
+    rule.walk(start, &mut budget, |naive| {
+        let Some(local) = zone.from_local_datetime(&naive).single() else {
+            return true;
+        };
+        let utc_ms = local.with_timezone(&Utc).timestamp_millis();
+        if utc_ms > after_ms {
+            found = Some(utc_ms);
+            return false;
+        }
+        true
+    });
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,6 +570,18 @@ mod tests {
         .into_iter()
         .map(|(s, _)| s.display())
         .collect()
+    }
+
+    #[test]
+    fn next_after_ms_finds_the_first_future_instant() {
+        let anchor = utc("2026-01-01T09:00:00Z").timestamp_millis();
+        let next = next_after_ms("FREQ=WEEKLY;BYDAY=MO", anchor, None, anchor - 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            DateTime::<Utc>::from_timestamp_millis(next).unwrap(),
+            utc("2026-01-05T09:00:00Z")
+        );
     }
 
     #[test]

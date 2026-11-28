@@ -246,6 +246,7 @@ impl AgentLoop {
                 control: RwLock::new(None),
                 computer_provider: RwLock::new(None),
                 mission_store: RwLock::new(None),
+                mission_child_wake: RwLock::new(None),
                 mail: Arc::new(builtin_tools::connector_email::MailHandle::new()),
                 server_links: RwLock::new(None),
                 static_desktop: RwLock::new(None),
@@ -561,6 +562,11 @@ impl AgentLoop {
     /// Install the mission ledger (`serve` wires the daemon's `missions.db` here).
     pub fn set_mission_store(&self, store: Arc<missions::MissionStore>) {
         *self.sh.mission_store.write() = Some(store);
+    }
+
+    /// Deliver child-run finishes to the mission supervisor's wake loop.
+    pub fn set_mission_child_wake(&self, sink: Arc<dyn missions::ChildWakeSink>) {
+        *self.sh.mission_child_wake.write() = Some(sink);
     }
 
     /// Install the paired servers a bot may use as its own computer
