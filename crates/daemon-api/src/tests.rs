@@ -35,6 +35,7 @@ mod composio;
 mod connection_test;
 mod connectivity;
 mod doctor;
+mod elicitations;
 mod email;
 mod email_channel;
 mod embeddings;
@@ -54,6 +55,7 @@ mod mission_long_run;
 mod missions;
 mod model_catalog;
 mod offline_schedule;
+mod openapi_apps;
 mod owner_notices;
 mod peer_knowledge;
 mod peer_owner;
@@ -2642,7 +2644,7 @@ async fn providers_detected_reports_five_rows_without_the_retired_gemini_cli() {
     assert_eq!(r.status, StatusCode::OK);
     let list = r.json();
     let items = list.as_array().unwrap();
-    assert_eq!(items.len(), 14);
+    assert_eq!(items.len(), 18);
     let ids: Vec<&str> = items
         .iter()
         .map(|item| item["id"].as_str().unwrap())
@@ -2650,8 +2652,24 @@ async fn providers_detected_reports_five_rows_without_the_retired_gemini_cli() {
     assert_eq!(
         ids,
         vec![
-            "claude", "codex", "cursor", "opencode", "agy", "qwen", "copilot", "kiro", "kimi",
-            "qoder", "vibe", "goose", "auggie", "cline"
+            "claude",
+            "codex",
+            "cursor",
+            "opencode",
+            "agy",
+            "qwen",
+            "copilot",
+            "kiro",
+            "kimi",
+            "qoder",
+            "vibe",
+            "goose",
+            "auggie",
+            "cline",
+            "droid",
+            "grok",
+            "junie",
+            "openhands"
         ]
     );
     for row in items {

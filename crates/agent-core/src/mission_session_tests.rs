@@ -953,6 +953,56 @@ async fn a_mission_form_expires_by_itself_and_leaves_the_item_parked() {
     );
 }
 
+#[tokio::test]
+async fn an_mcp_form_in_a_mission_session_parks_the_item_without_opening_a_form() {
+    use crate::tests::elicitation::{form_call, register_form};
+
+    let w = world(&["a.example", "b.example"]);
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
+        form_call("c1"),
+        text("I continued with the other item."),
+    ]);
+    let lp = lp_with(&w, &fake, |_| {});
+    let seen = register_form(&lp);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // The server got `cancel` (not a silent decline) and the model was told why.
+    assert!(matches!(
+        seen.lock().as_slice(),
+        [tool_registry::ElicitationAnswer::Parked(_)]
+    ));
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].key, "a.example");
+    assert!(
+        blocked[0]
+            .blocked_reason
+            .as_deref()
+            .unwrap()
+            .contains("acme")
+    );
+    let told = crate::tests::tool_messages(&without_ledger(fake.request(2))).join("\n");
+    assert!(told.contains("parked as blocked"), "{told}");
+    let journal = storage::read_event_log(w.env.storage.data_dir(), run).unwrap();
+    assert!(
+        journal
+            .iter()
+            .all(|item| !matches!(item.event, protocol::Event::ElicitationRequested(_)))
+    );
+    let audit = format!("{:?}", w.env.storage.list_audit(w.env.user).unwrap());
+    assert!(audit.contains("elicitation.parked"));
+}
+
 /// A `browser_handover` whose card asks the owner for a 2FA code.
 struct CodeTool(ToolSpec);
 
@@ -1404,4 +1454,51 @@ async fn mission_tools_refuse_to_work_for_a_run_that_is_not_a_session() {
     let run = lp.run_turn(w.env.chat, "mark it done").unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert_eq!(w.store.progress(&w.mission).unwrap().done, 0);
+}
+
+/// An unattended session of the owner's mission gets the Full level's browsing waiver and says
+/// so: the journal names the mission, not the owner at the keyboard.
+#[tokio::test]
+async fn a_missions_waived_call_says_it_was_the_mission() {
+    let w = world(&["a.example"]);
+    owner_says(&w, "register me on https://good.example/");
+    let (mail, open) = (private_mail(), browser_open());
+    let fake = Fake::new(vec![
+        calls(&[("m", "mail_read", json!({"path": "inbox"}))]),
+        calls(&[(
+            "o",
+            "browser_open",
+            json!({"url": "https://good.example/signup?d=tail4242"}),
+        )]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &w.env.storage,
+        w.env.bot,
+        &fake,
+        &[t(&mail), t(&open)],
+        profile(FULL),
+        cfg(Policy::full()),
+    );
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    lp.enable_missions(&w.store, &clock, None);
+    let mut rx = lp.subscribe();
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let mut granted = Vec::new();
+    while let Ok(item) = rx.try_recv() {
+        if let Event::ToolCallApproved(a) = item.envelope.event {
+            granted.push((a.granted_by, a.level, a.rule_id));
+        }
+    }
+    assert_eq!(
+        granted,
+        vec![(
+            Some(protocol::event::GrantedBy::OwnerMission),
+            Some(protocol::event::AutonomyLevel::Full),
+            None
+        )]
+    );
 }

@@ -66,6 +66,19 @@ uuid_newtype!(
     ToolCallId,
 );
 
+impl UserId {
+    /// The marker for "no user did this": the nil UUID. Journal events that record an
+    /// automatic decision (a grant no one answered) carry it where a user id is required, so a
+    /// reader that only looks at the user never mistakes the decision for a person's.
+    pub const SYSTEM: Self = Self(Uuid::nil());
+
+    /// Whether this is [`UserId::SYSTEM`].
+    #[must_use]
+    pub fn is_system(self) -> bool {
+        self.0.is_nil()
+    }
+}
+
 /// A reference to an external messaging channel (e.g. a Telegram chat or e-mail address).
 ///
 /// The string is `"<kind>:<address>"`, e.g. `"telegram:12345678"`.

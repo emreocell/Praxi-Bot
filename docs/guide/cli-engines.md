@@ -1,6 +1,6 @@
 # Coding CLI engines
 
-Settings → Providers lists CLI engines on the **daemon's computer**. Refresh
+**Settings → AI and memory** lists CLI engines on the **daemon's computer** (open **More options** for the full list). Refresh
 re-runs bounded version and authentication probes. Detection also warms at
 daemon startup. Terminal PATH entries are supplemented with user-local, npm,
 Node version-manager and native Windows installation directories. Relative
@@ -23,6 +23,10 @@ An unrelated `agent` on PATH cannot hide Cursor's vendor-directory alias.
 | Goose | `goose` (the database migration tool of the same name, which prints `goose version: ...`, is reported as another program) | None: no status command; keys are in the OS keyring or `secrets.yaml` (set up with `goose configure`), and none of them is evidence | Unix: `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| CONFIGURE=false bash` (**unverified**, copy only) | Runs with its own tools (`goose acp`, experimental); minimum unverified. Without a configured provider the run ends as signed out |
 | Cline | `cline` | None: no status command is documented (sign-in is `cline auth`; keys are in `~/.cline`, which Praxi's file tools never open) | `npm install -g cline@3.0.76` (**unverified**, copy only) | Runs with its own tools (`cline --acp`, experimental, data entry `providers/cli/cline.toml`); minimum unverified. Runs the CLI's own model |
 | Augment Code | `auggie` | None: `auggie auth status` has no documented output, so sign-in is never claimed (sign-in is `auggie auth login`) | Unix: `npm install -g @augmentcode/auggie@1.2.3` (**unverified**, copy only). The install page lists macOS, Linux and WSL, not native Windows | Runs with its own tools (`auggie --acp`, experimental, data entry `providers/cli/auggie.toml`); only at Full access, see below. Runs the CLI's own model |
+| Factory Droid | `droid` | None: no status command is documented (sign-in is `/login` inside the CLI or `FACTORY_API_KEY`; settings are in `~/.factory`, which Praxi's file tools never open) | `npm install -g droid@1.21.1` (**unverified**, copy only) | Runs with its own tools (`droid exec --output-format acp`, experimental, data entry `providers/cli/droid.toml`); only at Full access, see below. Runs the CLI's own model |
+| Grok Build | `grok` | None: no status command is documented (sign-in is `grok login`; tokens are in `~/.grok`, which Praxi's file tools never open) | `npm install -g @xai-official/grok@1.0.92` (**unverified**, copy only) | Runs with its own tools (`grok agent stdio`, experimental, data entry `providers/cli/grok.toml`); only at Full access, see below. Runs the CLI's own model |
+| Junie | `junie` | None: no status command is documented (sign-in is a JetBrains account in the CLI, or `JUNIE_API_KEY`; settings are in `~/.junie`, which Praxi's file tools never open) | None known to Praxi: install it yourself from JetBrains' page (Praxi shows no command) | Runs with its own tools (`junie --acp true`, experimental, data entry `providers/cli/junie.toml`); only at Full access, see below. Runs the CLI's own model |
+| OpenHands | `openhands` | None: no status command is documented (settings and the model key are in `~/.openhands`, which Praxi's file tools never open) | None known to Praxi: install it yourself (`uv tool install openhands` in the vendor's README, not an npm package) | Runs with its own tools (`openhands acp`, experimental, data entry `providers/cli/openhands.toml`); the project says it is no longer actively maintained. Runs the CLI's own model |
 | OpenCode | `opencode` | Credential-file metadata only; contents never opened | `npm install -g opencode-ai` (verified local reference) | Detect/install only: inspected CLI has no switch to disable native tools |
 | Cursor | `cursor-agent`; `agent` only inside a `cursor-agent` directory | `status --format json`, then `status` | Windows: `irm 'https://cursor.com/install?win32=true' \| iex`; Unix: `curl https://cursor.com/install -fsS \| bash` (verified local reference) | Detection only; minimum unverified |
 | ChatGPT plan | Same Codex executable | Unknown; no Praxi PKCE flow | Use the Codex row | Detection only |
@@ -35,7 +39,7 @@ Ambient API keys are withheld and are not evidence of a usable CLI login.
 
 ## Install and sign in on a server
 
-On a headless server (a paired host) the engine list under Settings → Home shows each coding CLI **as it is installed there**: the daemon on the server answers, as its own service user, so the list always matches what the bots on that server can run. **Install on server** runs the engine's fixed installer as that user (an npm package into a user-level prefix, or the vendor's installer script into the user's `~/.local/bin`); nothing is written outside that user's own folders. The row then reads *Ready · account* (when the CLI names its account), *Installed · sign-in needed* or *Installed · sign-in state unknown*.
+On a headless server (a paired host), switch the computer picker to that server, then open **Settings → Connections**; the engine list shows each coding CLI **as it is installed there**: the daemon on the server answers, as its own service user, so the list always matches what the bots on that server can run. **Install on server** runs the engine's fixed installer as that user (an npm package into a user-level prefix, or the vendor's installer script into the user's `~/.local/bin`); nothing is written outside that user's own folders. The row then reads *Ready · account* (when the CLI names its account), *Installed · sign-in needed* or *Installed · sign-in state unknown*.
 
 **Sign in on server** runs the vendor's own login command on the server and shows what it asks of you in the app: a link with an **Open the page** and a **Copy link** button, the one-time code to type there (device flows), or a box to paste the code the page shows (paste flows). When it finishes, the server confirms the sign-in and the app shows the account. The login runs on a terminal (a PTY), because these CLIs only print their link when they think a person is typing. Only the link, the code and the account name leave the server; the rest of the output stays private and a pasted code goes straight to the CLI and is never kept. The link is the first one the CLI prints, and only when its host is exactly one of the vendor's sign-in hosts (no subdomains: not `*.amazonaws.com`, not `google.com`) and its path is the one expected; the window shows that host above the buttons. A sign-in is confirmed by the CLI's own status, by a success line ("not logged in" is not one), or by a credential file that appeared or changed after the link was shown (never a symlink, never a folder). If the desktop loses host administration while a sign-in waits, the sign-in stops and its process tree is killed.
 
@@ -199,6 +203,10 @@ or another model, and nothing is switched on for an engine that cannot start.
 | Goose (`goose acp`, experimental) | mode `approve` | runs as Ask | mode `smart_approve` | mode `auto` |
 | Cline (`--acp`, experimental) | `--auto-approve false` | runs as Ask | runs as Ask | `--auto-approve true` |
 | Augment Code (`--acp`, experimental) | not offered | not offered | not offered | requests approved automatically |
+| Factory Droid (`exec --output-format acp`, experimental) | not offered | not offered | not offered | requests approved automatically |
+| Grok Build (`agent stdio`, experimental) | not offered | not offered | not offered | requests approved automatically |
+| Junie (`--acp true`, experimental) | not offered | not offered | not offered | requests approved automatically |
+| OpenHands (`acp`, experimental) | session mode `always-ask` | runs as Ask | runs as Ask | `--always-approve` |
 
 A level a CLI has no mode for runs as Ask, never as something wider. When an ACP CLI
 lists its modes in `session/new` and the level's mode is not among them, the turn is
@@ -227,8 +235,9 @@ on that session and does not save as the user's default.
 
 ### Engines defined by a data file
 
-Cline and Augment Code are not Rust code: each is one file in `providers/cli/` (`cline.toml`,
-`auggie.toml`), read and validated by `cli_provider::acp_data` and run by the same launcher,
+Cline, Augment Code, Factory Droid, Grok Build, Junie and OpenHands are not Rust code: each is one
+file in `providers/cli/` (`cline.toml`, `auggie.toml`, `droid.toml`, `grok.toml`, `junie.toml`,
+`openhands.toml`), read and validated by `cli_provider::acp_data` and run by the same launcher,
 approval cards, consent steps and checks as the built-in engines. A file states the command,
 the fixed ACP arguments, the install package, the sign-in text to copy, which approval level
 maps to which flag or mode, how a model is chosen, the folders that hold the CLI's
@@ -239,7 +248,9 @@ arguments, with no placeholder for a prompt, a model or any user text), install 
 `npm install -g <package>`, widen a level (a level maps to the same or a narrower one, and
 one the CLI cannot be made to keep is refused before anything starts), put a permissive flag
 (`--yolo`, `--auto-approve`, `--force`, ...) below Full access (a flag may only pin the safe
-value, as in `--auto-approve false`), be anything but experimental, or reuse the id or the
+value, as in `--auto-approve false`), start the ACP server with anything but a command line
+the build lists as a whole (`agent stdio`, `exec --output-format acp`, `--acp true`: a
+subcommand is never safe on its own), be anything but experimental, or reuse the id or the
 command of another engine. A file that breaks a rule is dropped, and the build's tests fail.
 The engine folder rule, the consent steps for native tools and Full access, and the money gate
 apply exactly as for the built-in engines, because they belong to the engine mode, not to one
@@ -253,13 +264,31 @@ engine.
   are forwarded or tools run without asking, and the permissions page only says the CLI
   follows its implicit runtime behavior when no rule matches. Praxi cannot make it ask, so
   only Full access is offered (the rule OpenCode follows).
-- Neither engine is sent a model: the docs name no stable ACP way to choose one, so a model
-  other than `default` is refused.
+- **Factory Droid** (`droid exec --output-format acp`): the IDE page documents this command.
+  The ACP registry lists `acp-daemon` instead and no page explains the difference, so Praxi
+  uses the documented `acp`. The docs say nothing about permission requests in ACP, and
+  `droid exec` is read-only by default, so only Full access is offered. `--auto` and
+  `--skip-permissions-unsafe` are documented for `droid exec`, not for ACP, and are not used.
+- **Grok Build** (`grok agent stdio`): the docs say the default mode asks and forwards
+  permission requests, but a setting in `~/.grok/config.toml` can switch the CLI to
+  always-approve, and the flag that pins a mode has to come before `stdio`, which the data
+  schema cannot express. Praxi cannot make it ask, so only Full access is offered. The npm
+  version is the `latest` release; the registry lists a newer alpha.
+- **Junie** (`junie --acp true`): the ACP page documents the space form (the registry writes
+  `--acp=true`, which a data file cannot hold). The docs say nothing about approvals in ACP,
+  and `--brave` is for interactive mode only, so only Full access is offered. No install is
+  recorded: the npm package is older than the releases the ACP registry lists.
+- **OpenHands** (`openhands acp`): the docs give the default confirmation as "Always Ask" and
+  the flags `--always-approve` and `--llm-approve`. The session mode ids (`always-ask`,
+  `llm-approve`, `always-approve`) come from the project's source, not its docs. Praxi selects
+  `always-ask` itself at Ask and passes `--always-approve` at Full access; `llm-approve`
+  (the model's own risk guess) is mapped to no level. The README says the CLI is no longer
+  actively maintained, and it is installed with `uv`, so no install is recorded.
+- No engine is sent a model: the docs name no stable ACP way to choose one, so a model other
+  than `default` is refused.
 
-Looked at and **not added**: Factory Droid (the docs give `droid exec --output-format acp`,
-the ACP registry `acp-daemon`, and nothing explains the difference), Junie (the public docs
-index was empty; the launch flag exists only in a staging registry file), Amp (no official
-ACP mode; the registry lists a third-party wrapper, `amp-acp`, and Amp's own headless mode
-speaks a different protocol), Grok Build (no reachable official docs) and Crush (no confirmed
-ACP mode). Each can become a data file once its launch command and permission behaviour are
-verified against the vendor's docs or a real install.
+Looked at and **not added**: Amp (no official ACP mode; the registry lists a third-party
+wrapper, `amp-acp`, and Amp's own headless mode speaks a different protocol) and Crush (no
+`crush acp` in a released version; it exists only in an unmerged pull request). Each can
+become a data file once its launch command and permission behaviour are verified against the
+vendor's docs or a real install.

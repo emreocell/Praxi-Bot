@@ -107,7 +107,10 @@ fn log(bin: &tempfile::TempDir, name: &str) -> String {
 #[test]
 fn the_issue_lists_are_data_entries() {
     let ids: Vec<&str> = data_drivers().into_iter().map(Driver::id).collect();
-    assert_eq!(ids, ["auggie", "cline"]);
+    assert_eq!(
+        ids,
+        ["auggie", "cline", "droid", "grok", "junie", "openhands"]
+    );
     for driver in data_drivers() {
         // Registered like any engine, never runnable under Praxi's own tools, experimental.
         let spec = cli_provider::engine_spec(driver.id()).unwrap();
@@ -174,6 +177,59 @@ async fn cline_pins_the_auto_approve_flag_at_every_level() {
     assert!(!cline.level_plan(ApprovalLevel::AcceptEdits).offered);
     assert!(!cline.level_plan(ApprovalLevel::Auto).offered);
     assert!(cline.level_plan(ApprovalLevel::Full).acp_allow_all);
+}
+
+#[tokio::test]
+async fn full_only_engines_start_nothing_below_full_and_use_their_documented_launch() {
+    for (id, argv) in [
+        ("auggie", "--acp"),
+        ("droid", "exec\n--output-format\nacp"),
+        ("grok", "agent\nstdio"),
+        ("junie", "--acp\ntrue"),
+    ] {
+        let driver = Driver::from_id(id).unwrap();
+        for level in [
+            ApprovalLevel::Ask,
+            ApprovalLevel::AcceptEdits,
+            ApprovalLevel::Auto,
+        ] {
+            let plan = driver.level_plan(level);
+            assert!(!plan.enforced && !plan.offered, "{id} {level:?}");
+            let (bin, _host, result) = run(driver, level, None, "", true).await;
+            assert_eq!(
+                result.unwrap_err(),
+                CliError::NativeToolsOpen,
+                "{id} {level:?}"
+            );
+            assert!(!bin.path().join("argv").exists(), "{id} {level:?}: started");
+        }
+        let (bin, host, result) = run(driver, ApprovalLevel::Full, None, "", false).await;
+        result.unwrap();
+        assert_eq!(log(&bin, "argv"), argv, "{id}");
+        assert!(host.permissions.lock().is_empty(), "{id}");
+        assert!(log(&bin, "permission_answer").contains("\"optionId\":\"yes\""));
+    }
+}
+
+#[tokio::test]
+async fn openhands_pins_its_confirmation_mode_and_never_widens_the_rest() {
+    let openhands = Driver::from_id("openhands").unwrap();
+    // Ask selects the documented default mode itself, instead of trusting a saved setting.
+    let (bin, _host, result) = run(openhands, ApprovalLevel::Ask, None, "", false).await;
+    result.unwrap();
+    assert_eq!(log(&bin, "argv"), "acp");
+    assert_eq!(log(&bin, "set_mode"), "\"always-ask\"");
+    // `llm-approve` lets the agent's own risk guess skip approval: not mapped to any level.
+    for level in [ApprovalLevel::AcceptEdits, ApprovalLevel::Auto] {
+        let plan = openhands.level_plan(level);
+        assert_eq!(plan.applied, ApprovalLevel::Ask, "{level:?}");
+        assert!(!plan.offered, "{level:?}");
+        assert_eq!(plan.acp_mode, Some("always-ask"));
+    }
+    let (bin, _host, result) = run(openhands, ApprovalLevel::Full, None, "", false).await;
+    result.unwrap();
+    assert_eq!(log(&bin, "argv"), "acp\n--always-approve");
+    assert!(openhands.level_plan(ApprovalLevel::Full).acp_allow_all);
 }
 
 #[tokio::test]

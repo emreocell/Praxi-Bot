@@ -40,7 +40,7 @@ Eller serbest konuşmak için masaüstü yazı alanındaki telefon düğmesine (
 
 Yönlendirici açıkken `/stop` (geçerli çalışmayı durdur), `/new` (yeni sohbet başlat) ve `/workflow <name> key=value ...` (kayıtlı bir iş akışını doğrudan çalıştır, bkz. [İş akışları](workflows.md)) modele ulaşmadan doğrudan işlenir.
 
-Masaüstü yazı alanında bir mesajın başına `/` yazmak, uygulamanın kendi işlediği (bota hiç gönderilmeyen) yerel komutları da içeren bir komut menüsü açar: `/export` (açık sohbeti Markdown olarak indir) ve uygulama kısayolları `/help`, `/settings`, `/models`, `/apps` ile `/schedules`. Telegram'da ek komutlar var, bkz. [Telegram](telegram.md).
+Masaüstü yazı alanında bir mesajın başına `/` yazmak, uygulamanın kendi işlediği (bota hiç gönderilmeyen) yerel komutları da içeren bir komut menüsü açar: `/export` (açık sohbeti Markdown olarak indir) ve uygulama kısayolları `/help`, `/settings`, `/vault`, `/models`, `/apps` ile `/schedules`. Telegram'da ek komutlar var, bkz. [Telegram](telegram.md).
 
 ![Mesaj kutusuna / yazınca komut menüsü açılır](../images/tr/composer-commands.webp)
 
@@ -83,7 +83,7 @@ Daemon okunma durumunu saklamaz. Masaüstü uygulaması sunucu başına ve sohbe
 
 ### Klavye kısayolları ve “Yenilikler”
 
-- **Klavye kısayolları penceresi**: hiçbir metin alanı odakta değilken herhangi bir yerde **`?`** tuşuna bas (ya da `Ctrl/Cmd+K` ile açtığın komut paletinden **Klavye kısayolları**'nı seç, hesap menüsünden aç ya da yazı alanına `/help` yaz). Pencere şunları listeler: genel kısayollar (`Ctrl/Cmd+K` komut paleti, `?` kısayollar, `Ctrl/Cmd+,` ayarlar, `Ctrl/Cmd+F` sohbette ara, `Esc` yan paneli kapat, `Shift+Esc` canlı görünümün klavye odağından çık ve senin belirlediğin durdurma kısayolu), yazı alanı kısayolları (belirlediğin gönderme ve yeni satır tuşları, `Up`/`Down` ile mesaj geçmişini geri çağırma, eğik çizgi/bahsetme menüsünde gezinme), yazı alanı eğik çizgi komutları ve pencere gezinme tuşları.
+- **Klavye kısayolları penceresi**: hiçbir metin alanı odakta değilken herhangi bir yerde **`?`** tuşuna bas (ya da `Ctrl/Cmd+K` ile açtığın komut paletinden **Klavye kısayolları**'nı seç, profil menüsünden aç ya da yazı alanına `/help` yaz). Pencere şunları listeler: genel kısayollar (`Ctrl/Cmd+K` komut paleti, `?` kısayollar, `Ctrl/Cmd+,` ayarlar, `Ctrl/Cmd+F` sohbette ara, `Esc` yan paneli kapat, `Shift+Esc` canlı görünümün klavye odağından çık ve senin belirlediğin durdurma kısayolu), yazı alanı kısayolları (belirlediğin gönderme ve yeni satır tuşları, `Up`/`Down` ile mesaj geçmişini geri çağırma, eğik çizgi/bahsetme menüsünde gezinme), yazı alanı eğik çizgi komutları ve pencere gezinme tuşları.
 - **“Yenilikler” kartı**: bir uygulama güncellemesinden sonra masaüstü uygulaması, kurulu her sürüm için bir kez bir **Yenilikler** penceresi gösterir. Notlar uygulamanın içinde gelir (İngilizce, Türkçe ve Almanca), ağdan hiçbir şey indirilmez. İlk karşılamayı henüz tamamlamamış yepyeni bir kurulum, kartı göstermek yerine sürümü sessizce kaydeder.
 
 ### Sunucu çevrimdışıyken göndermek
@@ -193,6 +193,8 @@ Durduramadığı şeyler: harf harf hecelemeyi (`h-a-n-n-e-l-o-r-e`) ve punycode
 
 Tam seviyenin, senin başlattığın bir çalışma ya da görevin için kartsız yaptığı bir şey daha var: botun **kendi kayıtları** ([e-posta kılavuzundaki “Kayıtlar” bölümüne](email.md) bak). `account_register`, botun kendi açtığı bir hesabın parolasını `browser_fill` `secret` ile yazmak ve `browser_capture_secret`, çalışma sayfaları ya da postanı okumuş olsa bile sormadan çalışır; çünkü parolayı uygulama üretir, bot onu asla görmez ve yalnızca kaydedildiği tam siteye yazılır. Kendi sakladığın gizli bilgiler ve para yine sorar. Bu çağrılar denetim günlüğüne `mode.full.own_signup` olarak yazılır.
 
+**Bot oluşturmak ve yaptığını açmak.** Tam seviyedeki bir botla kendi sohbet turunda “Kralinho adında sohbet için bir bot oluştur” dediğinde bot, bunun için bir web sayfası yazmak yerine `bot_create` ile gerçek bir bot (ad, kişilik, renk, şekil, model) oluşturur ve kart sormaz. Yeni bot, onu yapan bottan asla daha geniş olmaz (asla Tam değil, en çok “yıkıcı olanı onayla”); onu yalnızca yapan bot değiştirebilir ya da silebilir. Yeni bot, yapanın gizli bilgilerinden, hesaplarından, e-posta adresinden ve uygulamalarından hiçbirini taşımaz; “Tam” seviyeyi de bir bot asla vermez: botu Tam’a uygulamadan sen çıkarırsın. Bu araçlar yalnızca bütün iletilerin senin olduğu bir turda sunulur (uygulamada yazdığın ya da eşleşmiş kendi Telegram sohbetinden gelen): çalışma bir sayfa, bir posta ya da başka bir botun yanıtını okuduktan sonra o çalışma için kalkar (yeni bir iletiyle yeniden başla); zamanlanmış görev, görev (mission), kanal ya da webhook iletisi, alt ajan ve yardımcı bota hiç sunulmaz. “Bot oluşturabilir” anahtarı açık bir bot bunları her çalışmada tutar, her değişiklik için kartla. `desktop_open` botun yaptığını sana gösterir: botun çalışma alanındaki ya da senin izin verdiğin bir klasördeki dosyayı bilgisayarın varsayılan uygulamasında ya da Chrome, Firefox veya Edge’de açar. Yalnızca belge, sayfa, resim, ses ve video açılır; program ya da betik asla açılmaz. Bu yolla açılan bir web adresi, oturumunun açık olduğu kendi tarayıcına düşer; bu yüzden o adresi sohbette sen yazmadıysan sorar. Bot sayfalara kendi tarayıcısında `browser_open` ile bakar.
+
 **Bota ne söylenir.** Tam seviyede botun temel talimatları şunu der: görevi, “başlayayım mı?” diye ya da onay istemeden sonuna kadar götür. Mantıklı varsayılanları (hangi siteler, adlar, ifadeler) kendin seç ve neyi seçtiğini söyle. Yalnızca senin bildiğin bir şeyi (bir parola, kişisel bir tercih) ya da kesin bir durma noktasında (para harcamak, çalışma alanının dışında silmek, gizli bilgiler, üçüncü kişilere mesaj göndermek, bir CAPTCHA ya da 2FA devri) sor. Sonunda “Tamam:” yaz ve geriye ne kaldığını söyle. Küçük bir model yine de durup sorabilir. **Ajan işleri, “lite” bir katmandan daha güçlü bir model ister** (örneğin Flash-Lite, mini, nano ya da Haiku modelleri): onlar uzun, çok adımlı talimatları daha az güvenilir izler. Tam seviyedeki bir bot böyle bir modelle çalışıyorsa bot paneli bir ipucu gösterir.
 
 **Tam seviyede hâlâ soranlar.** Çalışma bir web sayfası okuduktan sonra bir program ya da kabuk komutu başlatmak (bir sayfa komutu seçmemelidir) her zaman sorar, yukarıdaki kesin durma noktaları da öyle. **Telegram** (ya da herhangi bir kanal, yerel API ya da yönetici masaüstün olmayan eşleşmiş bir cihaz) üzerinden gelen çalışma bu kurala göre sahibin başlattığı sayılmaz: onun web ve tarayıcı adımları tek seferlik kartlarını korur. Bu, şu anki durumdur, gelecek için bir söz değildir.
@@ -289,15 +291,32 @@ Sınırlar: düğmeler yalnızca masaüstü uygulaması çalışırken işler (u
 
 Bir çalışmanın araç çağrıları, sohbet sakin kalsın diye katlanır: aynı uygulamanın yinelenen çağrıları tek satır olur (“Playwright ×9”), biten bir çalışma tüm zaman çizelgesini açan tek bir özet satırı gösterir (“16 adım · Playwright · 2 dakika”) ve başarısız ya da reddedilen adımlar ile şu anda çalışan adım her zaman görünür. Bir satırı açınca tek tek adımlar zamanlarıyla görünür.
 
+### Bir adıma kim izin verdi
+
+Bir karar gerektiren adım, açılan satırın adım çizgisinde kararı kimin ya da neyin verdiğini söyler:
+
+| Satır | Anlamı |
+| --- | --- |
+| Sen onayladın · çalışma başladıktan 3 sn sonra | Tam bu çağrının onay kartını sen yanıtladın. |
+| Tam erişim — soru gerekmedi | Bot Tam erişimde ve çalışmayı sen başlattın, bu yüzden çağrı kartsız çalıştı. |
+| Tam erişim, zamanlanmış çalışman — soru gerekmedi | Aynısı, senin kurduğun bir zamanlama, kural, webhook ya da postanın başlattığı çalışmada. |
+| Tam erişim, görevin — soru gerekmedi | Aynısı, görevinin gözetimsiz bir oturumunda. |
+| Dengeli düzey — soru gerekmedi | Dengeli düzey bu tür çağrıya izin verir. |
+| Kalıcı iznin | Senin oluşturduğun bir kalıcı izin tam bu çağrıyı kapsadı. |
+| Hatırlanan: … için her zaman izin ver | Daha önce bir kartta yaptığın seçim (her zaman, bu sohbet, bu görev) çağrıyı kapsadı. Satır aracı ya da kategoriyi söyler. |
+| Site kuralın izin verdi | Site ya da uygulama başına kurallarından biri izin verdi. |
+
+Satırı yalnızca aksi halde soracak çağrılar taşır: düzeyin zaten izin verdiği bir okuma hiçbir şey göstermez. Satır, daemon'un karara dair kendi kaydından gelir, bir sayfanın, postanın ya da aracın söylediği hiçbir şeyden gelmez. Bu kayıt var olmadan önce onaylanan bir adım düz “Onaylandı” gösterir. Daemon'un olay günlüğünde otomatik bir iznin onaylayanı hepsi sıfır olan sistem kullanıcı kimliğidir (`00000000-0000-0000-0000-000000000000`), asla senin kimliğin değildir; böylece `granted_by` alanını bilmeden günlüğü okuyan bir araç bunu senin tıklaman sanamaz. Bir kodlama motorunun kendi adımlarındaki çağrılar ile bir betikten gelen çağrıların satır iliştirilecek bir adımı yoktur.
+
 ### Tanılama zaman çizelgesini kaydetmek
 
 Biten bir çalışmanın zaman çizelgesi metin (Markdown), web sayfası (HTML) ya da JSON dosyası olarak kaydedilebilir. Bir rapor kaydetmek yerel bir dosya indirir, çalışmayı hiçbir yere göndermez.
 
-#### JSON biçimi, sürüm 3
+#### JSON biçimi, sürüm 4
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "outcome": "done",
   "duration_ms": 1400,
   "steps": [
@@ -321,7 +340,10 @@ Biten bir çalışmanın zaman çizelgesi metin (Markdown), web sayfası (HTML) 
       "step_id": "step-1",
       "kind": "approval_recorded",
       "offset_ms": 150,
-      "outcome": "approved"
+      "outcome": "approved",
+      "granted_by": "owner_card",
+      "level": "balanced",
+      "rule": null
     },
     {
       "step_id": "step-1",
@@ -338,7 +360,10 @@ Biten bir çalışmanın zaman çizelgesi metin (Markdown), web sayfası (HTML) 
 - Adım türleri `tool`, `question` ve `secret`'tır. Araç sonuçları `requested`, `awaiting_approval`, `running`, `denied`, `done`, `error` ya da `expired` olur. Sorular `answered` ya da `unanswered` kullanır, kimlik bilgisi istekleri `stored`, `cancelled` ya da `unanswered` kullanır. Tanınmayan bir araç sonucu `null` olur.
 - `offset_ms`, çalışmanın başlangıcından itibaren ölçülür. İki adım süresi de milisaniye cinsindendir, yoksa ya da geçersizse `null`.
 - `depends_on`, bir bağımlılık biliniyorsa dışa aktarmaya özgü adım kimliklerinin listesi için ayrılmıştır, bilinmiyorsa `null` olur. Şu anki zaman çizelgesi nedensel bağları tutmaz, bu yüzden alan `null`'dır. Bu, hiç bağımlılık olmadığı iddiası değildir.
-- `approval_events`, dışa aktarmaya özgü `step_id` ile gruplanır. Gözlenen bir bekleyen kart, `null` sonuçlu `waiting_for_approval` verir. Sürüm 3, kaydedilen bir kararı araç bittikten sonra bile `approval_recorded` (`approved` ya da `denied`) olarak tutar. Tamamlanan, kapıdan geçmiş bir çağrı ayrıca `tool_outcome` (`done` ya da `error`) verir. Karar zamanları, birinin tıkladığı anı değil, daemon olayının çalışmanın başlangıcına göre zamanını kullanır. Yoksa ya da geçersizse `null` olur.
-- Bir ret, yalnızca ilgili kapı gözlendiyse karar olarak bildirilir. Süre dolması ve politika vetosu sahibin reddi sayılmaz. Daemon nedeni metin olarak gönderir, bu yüzden sahibi süre dolmasına benzeyen ya da ayrılmış politika vetosu nedenine uyan bir neden yazarsa dışa aktarma ikisini ayırt edemez ve kararı atlar. Eksik bir olay, tutulmuş kanıt olmadığı anlamına gelir, olmadığının kanıtı değildir. Sürüm 2'de onay olayları vardı ama tamamlandıktan sonra bir onay tutulmuyordu. Sürüm 1'de `approval_events` yoktu.
+- `approval_events`, dışa aktarmaya özgü `step_id` ile gruplanır. Gözlenen bir bekleyen kart, `null` sonuçlu `waiting_for_approval` verir. Sürüm 3 ve sonrası, kaydedilen bir kararı araç bittikten sonra bile `approval_recorded` (`approved` ya da `denied`) olarak tutar. Tamamlanan, kapıdan geçmiş bir çağrı ayrıca `tool_outcome` (`done` ya da `error`) verir. Karar zamanları, birinin tıkladığı anı değil, daemon olayının çalışmanın başlangıcına göre zamanını kullanır. Yoksa ya da geçersizse `null` olur.
+- Sürüm 4 üç alan ekler. Daemon söylemediyse her biri `null` olur: `granted_by` (`owner_card`, `full_access`, `owner_schedule`, `owner_mission`, `balanced_level`, `standing_grant`, `remembered_choice` ya da `site_rule`), `level` (`ask`, `balanced` ya da `full`, çağrıya karar verildiği andaki botun düzeyi) ve `rule` (çağrıyı kapsayan hatırlanmış kural, `<kapsam>:<ad>`; kapsam `chat`, `always`, `category`, `task` ya da `standing`, ad `A-Z a-z 0-9 _ . -` karakterlerinden oluşan en çok 64 karakterlik bir araç ya da kategori adıdır, asla bir yol, adres ya da komut değildir; dışa aktarma bu biçimi yeniden denetler, uymayan her şey `null` olur). Alanlar `approval_recorded` olayındadır; o olay sürüm 3'teki anlamını korur: **bir kartı sen yanıtladın** (`granted_by` değeri `owner_card`'dır, ya da sürüm 4'ten önce kaydedilen bir onayda `null`: bir onaydı ama kaynağı iddia edilmez).
+- Sürüm 4 ayrıca, kartın yerine otomatik bir kuralın izin verdiği çağrı için (Tam erişim, Dengeli düzey, kalıcı izin, hatırlanmış seçim, site kuralı) `automatic_grant` olay türünü ekler. `outcome` değeri `null`'dır, aynı üç alanı taşır (`granted_by` asla `owner_card` olmaz) ve öncesinde `waiting_for_approval` yoktur, çünkü kart yoktu. Bilerek ayrı bir türdür: sürüm 3 için yazılmış bir okuyucu `approval_recorded` olaylarını senin yanıtların sayar ve bunu doğru yapmaya devam eder. Böyle bir okuyucu tanımadığı olay türlerini yok saymalıdır; o zaman otomatik izinleri yalnızca görmez. Sürüm 3'ün hiç onay olayı vermediği bir adım (kart gösterilmemişti), daemon kaydettiyse artık bir `automatic_grant` da verir.
+- Tanımadığı tür ve alanları yok sayan bir okuyucu için yalnızca `schema_version` değişti, yani bir sürüm 3 okuyucusu sürüm 4 dosyasında çalışmaya devam eder. Sürüm 3 dosyaları geçerli sürüm 3 dosyaları olarak kalır: yeni alanlar ve tür hiçbir zaman zorunlu değildir.
+- Bir ret, yalnızca ilgili kapı gözlendiyse karar olarak bildirilir. Süre dolması ve politika vetosu sahibin reddi sayılmaz. Daemon nedeni metin olarak gönderir, bu yüzden sahibi süre dolmasına benzeyen ya da ayrılmış politika vetosu nedenine uyan bir neden yazarsa dışa aktarma ikisini ayırt edemez ve kararı atlar. Eksik bir olay, tutulmuş kanıt olmadığı anlamına gelir, olmadığının kanıtı değildir. Sürüm 3'te `approval_recorded` vardı ama üç kaynak alanı yoktu. Sürüm 2'de onay olayları vardı ama tamamlandıktan sonra bir onay tutulmuyordu. Sürüm 1'de `approval_events` yoktu.
 
 JSON, bot adları, istemler, araç argümanları ve sonuçları, ek URL'leri ve hata iletileri dahil serbest metni ve iç kimlikleri içermez. Okunabilir adımlara ve temizlenmiş hata özetlerine ihtiyacın olduğunda metin ya da web sayfası raporunu kullan.

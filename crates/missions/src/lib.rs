@@ -19,6 +19,7 @@ pub mod brief;
 pub mod digest;
 pub mod error;
 pub mod model;
+pub mod recur;
 pub mod store;
 pub mod supervisor;
 pub mod tools;
@@ -32,7 +33,7 @@ pub use model::{
 pub use store::{
     Event, ItemUpdate, Leftover, MissionStore, NewItem, NewMission, SessionEndRecord, UpsertReport,
 };
-pub use wake::{MailFilter, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason};
+pub use wake::{ChildWakeSink, MailFilter, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason};
 
 /// File name of the mission database inside the data directory.
 pub const DB_FILE: &str = "missions.db";

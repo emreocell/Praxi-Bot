@@ -20,12 +20,13 @@
   max-width: 100%;
   min-height: var(--size-control-sm);
   padding: var(--space-0) var(--space-3) var(--space-0) var(--space-1);
-  font-size: var(--font-size-xs);
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--color-text-muted);
   font: inherit;
+  /* After `font: inherit` (which would reset it to the list's size): the line stays small and quiet. */
+  font-size: var(--font-size-ui);
   cursor: pointer;
   transition:
     color var(--motion-duration-fast) var(--motion-easing-standard),

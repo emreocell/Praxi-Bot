@@ -277,12 +277,33 @@ impl Tool for McpToolAdapter {
                 )));
             }
         };
-        let result = self
+        // While the call runs, the server may ask this run's owner for input.
+        let in_flight = self.server.begin_call(&ctx.run_id);
+        let outcome = self
             .server
             .call(&self.remote_name, arguments)
             .await
-            .map_err(|e| ToolError::Execution(e.to_string()))?;
-        into_output(result)
+            .map_err(|e| ToolError::Execution(e.to_string()))
+            .and_then(into_output);
+        // The host parked the work item instead of showing a form: the model
+        // is told next to the server's own result.
+        with_note(outcome, in_flight.take_note())
+    }
+}
+
+/// `outcome` with the host's `note` for the model added to it.
+fn with_note(
+    outcome: Result<ToolOutput, ToolError>,
+    note: Option<String>,
+) -> Result<ToolOutput, ToolError> {
+    let Some(note) = note else { return outcome };
+    match outcome {
+        Ok(mut out) => {
+            out.content.push(ContentPart::Text { text: note });
+            Ok(out)
+        }
+        Err(ToolError::Execution(msg)) => Err(ToolError::Execution(format!("{msg}\n{note}"))),
+        Err(other) => Err(other),
     }
 }
 
@@ -911,5 +932,18 @@ mod tests {
 
         let err = CallToolResult::error(vec![ContentBlock::text("boom")]);
         assert!(matches!(into_output(err), Err(ToolError::Execution(m)) if m == "boom"));
+    }
+
+    #[test]
+    fn the_hosts_note_is_added_to_a_result_and_to_an_error_and_only_when_there_is_one() {
+        let ok = with_note(Ok(ToolOutput::text("hi")), Some("parked".into())).unwrap();
+        assert!(matches!(&ok.content[1], ContentPart::Text { text } if text == "parked"));
+        let err = with_note(
+            Err(ToolError::Execution("boom".into())),
+            Some("parked".into()),
+        );
+        assert!(matches!(err, Err(ToolError::Execution(m)) if m == "boom\nparked"));
+        let plain = with_note(Ok(ToolOutput::text("hi")), None).unwrap();
+        assert_eq!(plain.content.len(), 1);
     }
 }

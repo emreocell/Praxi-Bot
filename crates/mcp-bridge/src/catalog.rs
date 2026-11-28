@@ -312,30 +312,107 @@ fn is_exact_version(version: &str) -> bool {
         && pre.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
 }
 
-fn npm_pinned(spec: &str) -> bool {
-    let version = if let Some(rest) = spec.strip_prefix('@') {
-        let Some((_, version)) = rest.split_once('@') else {
-            return false;
-        };
-        version
-    } else {
-        let Some((_, version)) = spec.split_once('@') else {
-            return false;
-        };
-        version
+/// An exact npm version: strict semver (`1.2.3`, `1.2.3-rc.1`), nothing else.
+/// No build metadata, range, tag or `v` prefix, so the version string cannot
+/// carry anything but a version into `pkg@<version>`.
+pub(crate) fn exact_npm_version(version: &str) -> bool {
+    version.len() <= 128 && semver::Version::parse(version).is_ok_and(|v| v.build.is_empty())
+}
+
+/// An exact `PyPI` version in the public PEP 440 form `N.N.N` with optional
+/// `aN`/`bN`/`rcN`, `.postN` and `.devN` parts. No epoch, local version,
+/// wildcard, specifier operator or normalization-dependent spelling.
+pub(crate) fn exact_pypi_version(version: &str) -> bool {
+    fn number(s: &str) -> bool {
+        !s.is_empty() && s.len() <= 9 && s.bytes().all(|b| b.is_ascii_digit())
+    }
+    if version.len() > 128 {
+        return false;
+    }
+    let rest = match version.rsplit_once(".dev") {
+        Some((rest, n)) if number(n) => rest,
+        Some(_) => return false,
+        None => version,
     };
-    is_exact_version(version)
+    let rest = match rest.rsplit_once(".post") {
+        Some((rest, n)) if number(n) => rest,
+        Some(_) => return false,
+        None => rest,
+    };
+    let release = match rest.find(|c: char| c.is_ascii_alphabetic()) {
+        Some(at) => {
+            let (release, pre) = rest.split_at(at);
+            let n = pre
+                .strip_prefix("rc")
+                .or_else(|| pre.strip_prefix('a'))
+                .or_else(|| pre.strip_prefix('b'));
+            if !n.is_some_and(number) {
+                return false;
+            }
+            release
+        }
+        None => rest,
+    };
+    let parts: Vec<&str> = release.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|p| number(p))
+}
+
+/// Whether a stdio command is one of the two package runners registry sources
+/// may use.
+pub(crate) fn is_allowed_registry_runner(command: &str) -> bool {
+    matches!(command, "npx" | "uvx")
+}
+
+/// A plain registry package name: no URL, path, git or file spec can pass as a
+/// "pinned" package because of an `@1.2.3` hidden in its tail.
+pub(crate) fn plain_package_name(name: &str, scoped_ok: bool) -> bool {
+    let (scope, rest) = match name.strip_prefix('@') {
+        Some(tail) if scoped_ok => match tail.split_once('/') {
+            Some((scope, rest)) => (Some(scope), rest),
+            None => return false,
+        },
+        _ => (None, name),
+    };
+    let part = |p: &str| {
+        !p.is_empty()
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~'))
+    };
+    scope.is_none_or(part) && part(rest)
+}
+
+fn npm_pinned(spec: &str) -> bool {
+    let (name, version) = if let Some(rest) = spec.strip_prefix('@') {
+        let Some((name, version)) = rest.split_once('@') else {
+            return false;
+        };
+        (&spec[..=name.len()], version)
+    } else {
+        let Some((name, version)) = spec.split_once('@') else {
+            return false;
+        };
+        (name, version)
+    };
+    plain_package_name(name, true) && is_exact_version(version)
 }
 
 fn python_pinned(spec: &str) -> bool {
-    let version = if let Some((_, version)) = spec.split_once("==") {
-        version.split('[').next().unwrap_or(version)
-    } else if let Some((_, version)) = spec.rsplit_once('@') {
-        version
+    let (name, version) = if let Some((name, version)) = spec.split_once("==") {
+        (name, version.split('[').next().unwrap_or(version))
+    } else if let Some((name, version)) = spec.split_once('@') {
+        (name, version)
     } else {
         return false;
     };
-    !spec.starts_with("==") && is_exact_version(version)
+    // Extras (`pkg[extra]`) are part of the name, not a location.
+    let name = name.split('[').next().unwrap_or(name);
+    plain_package_name(name, false) && is_exact_version(version)
+}
+
+/// Whether the command is a package runner (`npx`, `uvx`, `pipx run`, ...),
+/// which fetches and runs code from a package index.
+pub(crate) fn is_package_runner(command: &str, args: &[String]) -> bool {
+    !matches!(runner_of(&command_base(command), args), Ok(None))
 }
 
 /// How a package runner names what it installs.
@@ -431,6 +508,19 @@ fn runner_options(
 /// # Errors
 /// [`McpError::Config`] naming the unpinned spec or the refused form.
 pub fn check_stdio_package_pin(id: &str, command: &str, args: &[String]) -> Result<()> {
+    runner_packages(id, command, args).map(|_| ())
+}
+
+/// The package specs a runner command line would download, each already
+/// checked to be pinned. `None` when the command is not a package runner.
+///
+/// # Errors
+/// [`McpError::Config`] naming the unpinned spec or the refused form.
+pub(crate) fn runner_packages(
+    id: &str,
+    command: &str,
+    args: &[String],
+) -> Result<Option<Vec<String>>> {
     let refuse = |why: String| Err(McpError::Config(format!("server `{id}`: {why}")));
     if args.iter().any(|a| mentions_latest(a)) {
         return refuse("stdio package must be pinned to an exact version, not @latest".into());
@@ -438,7 +528,7 @@ pub fn check_stdio_package_pin(id: &str, command: &str, args: &[String]) -> Resu
     let base = command_base(command);
     let (runner, rest) = match runner_of(&base, args) {
         Ok(Some(found)) => found,
-        Ok(None) => return Ok(()),
+        Ok(None) => return Ok(None),
         Err(why) => return refuse(why),
     };
     let (package_flags, refused_flags, value_flags) = runner_options(runner);
@@ -501,7 +591,7 @@ pub fn check_stdio_package_pin(id: &str, command: &str, args: &[String]) -> Resu
             }
         }
     }
-    for spec in packages {
+    for spec in &packages {
         let pinned = match runner {
             Runner::Npm => npm_pinned(spec),
             Runner::Uv | Runner::Pipx => python_pinned(spec),
@@ -512,7 +602,7 @@ pub fn check_stdio_package_pin(id: &str, command: &str, args: &[String]) -> Resu
             ));
         }
     }
-    Ok(())
+    Ok(Some(packages.into_iter().map(str::to_owned).collect()))
 }
 
 #[cfg(test)]
@@ -521,6 +611,96 @@ mod tests {
     use crate::McpServerConfig;
     use crate::transport::secret_header_names;
     use std::collections::HashSet;
+
+    #[test]
+    fn exact_versions_are_strict() {
+        // `1.0.0--registry` is a valid semver pre-release; it stays one argument
+        // (`pkg@1.0.0--registry`) that npm reads as a version, never as a flag.
+        for good in [
+            "1.2.3",
+            "0.0.1",
+            "1.2.3-rc.1",
+            "10.20.30-beta.2",
+            "1.0.0--registry",
+        ] {
+            assert!(exact_npm_version(good), "{good}");
+        }
+        for bad in [
+            "",
+            "1",
+            "1.2",
+            "1evil",
+            "1+evil",
+            "1.0.0+build",
+            "v1.2.3",
+            "^1.2.3",
+            "~1.2.3",
+            "1.2.x",
+            "*",
+            "latest",
+            "1.2.3 ",
+            " 1.2.3",
+            "01.2.3",
+            "1.2.3-",
+            "file:../x",
+            "1.2.3/../x",
+            "https://x.example/p.tgz",
+        ] {
+            assert!(!exact_npm_version(bad), "{bad:?}");
+        }
+        for good in [
+            "1.2.3",
+            "1.2.3a1",
+            "1.2.3b2",
+            "1.2.3rc1",
+            "1.2.3.post1",
+            "1.2.3.dev4",
+            "1.2.3rc1.post2.dev3",
+        ] {
+            assert!(exact_pypi_version(good), "{good}");
+        }
+        for bad in [
+            "",
+            "1",
+            "1.2",
+            "1.2.3.4",
+            "1evil",
+            "1.0.0--registry",
+            "1.0.0+local",
+            "1!1.2.3",
+            "==1.2.3",
+            ">=1.2.3",
+            "1.2.*",
+            "1.2.3 ",
+            "1.2.3rc",
+            "1.2.3.post",
+            "1.2.3.dev",
+            "1.2.3-1",
+            "1.2.3c1",
+            "latest",
+            "1.2.3@https://x.example/p.whl",
+        ] {
+            assert!(!exact_pypi_version(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn only_npx_and_uvx_are_registry_runners() {
+        assert!(is_allowed_registry_runner("npx") && is_allowed_registry_runner("uvx"));
+        for other in [
+            "bunx",
+            "pnpm",
+            "uv",
+            "pipx",
+            "npx.cmd",
+            "/usr/bin/npx",
+            "NPX",
+            "node",
+            "sh",
+        ] {
+            assert!(!is_allowed_registry_runner(other), "{other}");
+        }
+    }
 
     #[test]
     fn google_entries_are_read_only_and_bring_your_own_client() {
@@ -756,6 +936,35 @@ mod tests {
 
     /// Review finding 7: every package-bearing runner option is held to the
     /// exact-version rule, and forms the rule cannot reason about are refused.
+    #[test]
+    fn a_location_cannot_pass_as_a_pinned_package() {
+        for ok in ["pkg@1.2.3", "@scope/pkg@1.2.3", "a.b-c_d@1.0.0-rc.1"] {
+            assert!(npm_pinned(ok), "{ok}");
+        }
+        for bad in [
+            "https://evil.example/x.tgz?@1.2.3",
+            "file:../x@1.2.3",
+            "git+https://evil/r@1.2.3",
+            "@scope@1.2.3",
+            "@/pkg@1.2.3",
+            "pkg@latest",
+        ] {
+            assert!(!npm_pinned(bad), "{bad}");
+        }
+        for ok in ["pkg==1.2.3", "pkg[extra]==1.2.3", "pkg@1.2.3"] {
+            assert!(python_pinned(ok), "{ok}");
+        }
+        for bad in [
+            "git+https://evil/r@1.2.3",
+            "https://evil/x.whl#==1.2.3",
+            "==1.2.3",
+            "pkg",
+            "../x==1.2.3",
+        ] {
+            assert!(!python_pinned(bad), "{bad}");
+        }
+    }
+
     #[test]
     fn every_package_bearing_runner_option_is_pinned() {
         let check = |cmd: &str, args: &[&str]| {

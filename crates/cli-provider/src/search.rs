@@ -90,11 +90,67 @@ fn outside_working_dir_as(
     cwd: &Path,
     home: Option<&Path>,
 ) -> bool {
+    outside_working_dir_with(
+        euid,
+        path,
+        real,
+        cwd,
+        home,
+        crate::node_runtime::registered_data_dir(),
+    )
+}
+
+#[cfg(unix)]
+fn outside_working_dir_with(
+    euid: u32,
+    path: &Path,
+    real: &Path,
+    cwd: &Path,
+    home: Option<&Path>,
+    data: Option<&Path>,
+) -> bool {
     let private = || home.is_some_and(|h| private_home_program(euid, path, real, h));
+    let data_program = || data.is_some_and(|d| private_data_program(euid, path, real, d));
     if cwd.parent().is_none() {
-        return SYSTEM_DIRS.iter().any(|d| real.starts_with(d)) || private();
+        return SYSTEM_DIRS.iter().any(|d| real.starts_with(d)) || private() || data_program();
     }
-    !real.starts_with(cwd) || (home == Some(cwd) && private())
+    // The Praxi data folder counts only as the working directory itself (or from `/`): a program
+    // in some other folder that merely sits below it is a planted file like any other.
+    let cwd_is_data = || {
+        data.and_then(|d| std::fs::canonicalize(d).ok())
+            .is_some_and(|d| d == cwd)
+    };
+    !real.starts_with(cwd) || (home == Some(cwd) && private()) || (cwd_is_data() && data_program())
+}
+
+/// Programs Praxi installs under its data directory (`runtimes/npm-global/bin`, the bootstrap
+/// Node.js `bin`, …) when the working directory is that data folder or `/`.
+#[cfg(unix)]
+fn private_data_program(euid: u32, path: &Path, real: &Path, data: &Path) -> bool {
+    let Ok(data) = std::fs::canonicalize(data) else {
+        return false;
+    };
+    if real == data || !real.starts_with(&data) {
+        return false;
+    }
+    let named = match (path.parent(), path.file_name()) {
+        (Some(dir), Some(name)) => std::fs::canonicalize(dir).map(|d| d.join(name)),
+        _ => return false,
+    };
+    let Ok(named) = named else {
+        return false;
+    };
+    let in_bin_dir = [crate::node_runtime::npm_global_bin_dir(&data)]
+        .into_iter()
+        .chain(crate::node_runtime::node_bin_dir(&data))
+        .any(|rel| {
+            std::fs::canonicalize(&rel).is_ok_and(|bin| {
+                bin.starts_with(&data)
+                    && named.starts_with(&bin)
+                    && owned_private_chain(euid, &data, &bin)
+            })
+        });
+    in_bin_dir && owned_private_chain(euid, &data, real)
 }
 
 /// A program in the service user's own home that is safe to run although the working directory
@@ -481,6 +537,131 @@ mod tests {
             &h.home,
             Some(&h.home)
         ));
+    }
+
+    /// A Praxi data folder with a bootstrap npm CLI in `runtimes/npm-global/bin` and the package
+    /// it links to under `runtimes/npm-global/lib`, all private to the current user.
+    #[cfg(unix)]
+    struct DataTree {
+        _tmp: tempfile::TempDir,
+        data: PathBuf,
+        bin: PathBuf,
+        /// `bin/opencode`, a link to `lib/opencode.js` the way npm lays it out.
+        cli: PathBuf,
+        real: PathBuf,
+        euid: u32,
+    }
+
+    #[cfg(unix)]
+    fn data_tree() -> DataTree {
+        let tmp = tempfile::tempdir().unwrap();
+        let outer = std::fs::canonicalize(tmp.path()).unwrap();
+        let data = outer.join("data");
+        let global = data.join("runtimes/npm-global");
+        let (bin, lib) = (global.join("bin"), global.join("lib"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        let real = lib.join("opencode.js");
+        std::fs::write(&real, b"fixture").unwrap();
+        let cli = bin.join("opencode");
+        std::os::unix::fs::symlink("../lib/opencode.js", &cli).unwrap();
+        for dir in [&outer, &data, &data.join("runtimes"), &global, &bin, &lib] {
+            chmod(dir, 0o750);
+        }
+        chmod(&real, 0o755);
+        DataTree {
+            _tmp: tmp,
+            data,
+            bin,
+            cli,
+            real,
+            euid: rustix::process::geteuid().as_raw(),
+        }
+    }
+
+    #[cfg(unix)]
+    impl DataTree {
+        fn trusted(&self, path: &Path, real: &Path, cwd: &Path) -> bool {
+            outside_working_dir_with(
+                self.euid,
+                path,
+                real,
+                cwd,
+                Some(&self.data),
+                Some(&self.data),
+            )
+        }
+    }
+
+    /// CLIs under `<data>/runtimes/npm-global/bin` count when the service home is the data folder.
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_npm_bins_under_the_data_folder_are_trusted() {
+        let t = data_tree();
+        assert!(t.trusted(&t.cli, &t.real, &t.data));
+        assert!(t.trusted(&t.cli, &t.real, Path::new("/")));
+        // Not another user's tree.
+        assert!(!outside_working_dir_with(
+            t.euid.wrapping_add(1),
+            &t.cli,
+            &t.real,
+            &t.data,
+            None,
+            Some(&t.data)
+        ));
+    }
+
+    /// The data folder is trusted as the working directory, not as a folder somewhere above it:
+    /// a working directory that is merely inside it still refuses the programs it contains.
+    #[cfg(unix)]
+    #[test]
+    fn the_data_folder_exception_needs_the_data_folder_as_the_working_directory() {
+        let t = data_tree();
+        assert!(t.trusted(&t.cli, &t.real, &t.data));
+        let inside = t.data.join("runtimes");
+        assert!(
+            !t.trusted(&t.cli, &t.real, &inside),
+            "cwd below the data folder"
+        );
+        assert!(!t.trusted(&t.cli, &t.real, &t.data.join("runtimes/npm-global")));
+        // No registered data folder: nothing to vouch for.
+        assert!(!outside_working_dir_with(
+            t.euid, &t.cli, &t.real, &t.data, None, None
+        ));
+    }
+
+    /// A link planted outside the bin folder that points into it is not "named in bin".
+    #[cfg(unix)]
+    #[test]
+    fn a_link_outside_the_npm_bin_folder_is_not_accepted_for_pointing_into_it() {
+        let t = data_tree();
+        let planted = t.data.join("planted");
+        std::os::unix::fs::symlink(&t.real, &planted).unwrap();
+        let in_bin_real = t.bin.join("native");
+        std::fs::write(&in_bin_real, b"fixture").unwrap();
+        chmod(&in_bin_real, 0o755);
+        assert!(t.trusted(&in_bin_real, &in_bin_real, &t.data), "control");
+        assert!(!t.trusted(&planted, &in_bin_real, &t.data));
+        assert!(!t.trusted(&planted, &in_bin_real, Path::new("/")));
+    }
+
+    /// `bin/<cli> -> ../lib/...`: whoever can write the bin folder can repoint the link, so the
+    /// folder is held to the same ownership rules as the file it leads to.
+    #[cfg(unix)]
+    #[test]
+    fn a_shared_writable_npm_bin_folder_does_not_vouch_for_its_links() {
+        let t = data_tree();
+        assert!(t.trusted(&t.cli, &t.real, &t.data));
+        for mode in [0o770, 0o707, 0o777] {
+            chmod(&t.bin, mode);
+            assert!(!t.trusted(&t.cli, &t.real, &t.data), "bin at {mode:o}");
+            assert!(
+                !t.trusted(&t.cli, &t.real, Path::new("/")),
+                "bin at {mode:o}"
+            );
+        }
+        chmod(&t.bin, 0o750);
+        assert!(t.trusted(&t.cli, &t.real, &t.data));
     }
 
     /// systemd starts a service in `/` when no `WorkingDirectory` is set. `/` contains every

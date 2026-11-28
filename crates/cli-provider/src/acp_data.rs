@@ -35,6 +35,22 @@ const EMBEDDED: &[(&str, &str)] = &[
         "cline.toml",
         include_str!("../../../providers/cli/cline.toml"),
     ),
+    (
+        "droid.toml",
+        include_str!("../../../providers/cli/droid.toml"),
+    ),
+    (
+        "grok.toml",
+        include_str!("../../../providers/cli/grok.toml"),
+    ),
+    (
+        "junie.toml",
+        include_str!("../../../providers/cli/junie.toml"),
+    ),
+    (
+        "openhands.toml",
+        include_str!("../../../providers/cli/openhands.toml"),
+    ),
 ];
 
 /// Index of a data-driven engine in [`engines`].
@@ -290,6 +306,15 @@ const SAFE_PAIRS: &[(&str, &str)] = &[
     ("--auto-approve", "false"),
     ("--allow-tool", "write"),
     ("--agent-engine", "v3"),
+];
+
+/// The whole argv that starts an ACP server, for CLIs whose vendor docs give more than one
+/// token. Matched as a whole, not token by token: a subcommand such as `exec` or `agent` is
+/// not safe on its own, only as the documented way to start the ACP server.
+const ACP_STARTS: &[&[&str]] = &[
+    &["agent", "stdio"],
+    &["exec", "--output-format", "acp"],
+    &["--acp", "true"],
 ];
 
 fn is_permissive(token: &str) -> bool {
@@ -561,7 +586,15 @@ pub fn parse(text: &str) -> Result<AcpEngine, String> {
     if file.acp.args.is_empty() {
         return Err("acp.args must start the ACP server".into());
     }
-    check_tokens(&file.acp.args, false, "acp.args")?;
+    let documented_start = ACP_STARTS.iter().any(|start| {
+        start
+            .iter()
+            .copied()
+            .eq(file.acp.args.iter().map(String::as_str))
+    });
+    if !documented_start {
+        check_tokens(&file.acp.args, false, "acp.args")?;
+    }
 
     let Levels {
         ask,
@@ -790,6 +823,34 @@ allow_all = true
                 .err()
                 .unwrap_or_else(|| panic!("accepted: {text}"));
             assert!(error.contains(needle), "{needle}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_multi_token_start_must_be_a_documented_one_as_a_whole() {
+        for args in [
+            r#"["agent", "stdio"]"#,
+            r#"["exec", "--output-format", "acp"]"#,
+            r#"["--acp", "true"]"#,
+        ] {
+            parse(&broken("args = [\"--acp\"]", &format!("args = {args}"))).unwrap();
+        }
+        // A subcommand is not safe by itself, and a documented start takes nothing extra.
+        for args in [
+            r#"["exec"]"#,
+            r#"["agent"]"#,
+            r#"["stdio"]"#,
+            r#"["exec", "--output-format", "json"]"#,
+            r#"["exec", "--output-format", "acp", "--skip-permissions-unsafe"]"#,
+            r#"["agent", "stdio", "--yolo"]"#,
+            r#"["agent", "--always-approve", "stdio"]"#,
+            r#"["--acp", "true", "--yolo"]"#,
+            r#"["--acp=true"]"#,
+        ] {
+            assert!(
+                parse(&broken("args = [\"--acp\"]", &format!("args = {args}"))).is_err(),
+                "{args}"
+            );
         }
     }
 

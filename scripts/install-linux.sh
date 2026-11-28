@@ -93,7 +93,7 @@ readonly NODE_SHA256_X64="c54118104acc524633b5abe106bbf44a53126ec8b4e5fa105cb92b
 readonly NODE_SHA256_ARM64="8bd3dc69eee8f3f226315a80d7d1d4faccf217a4c8fae500168ac2e38f3bdba3"
 # Root-owned directories first, the ones the service user can write last: a program the user (or a model
 # running as it) installs never shadows a system one. Mirrors identity::path_with_install_dirs (append only).
-SERVICE_PATH="/usr/local/bin:/usr/bin:/bin:${NODE_DIR}/bin:${DATA_DIR}/.local/bin:${NPM_PREFIX}/bin"
+SERVICE_PATH="/usr/local/bin:/usr/bin:/bin:${NODE_DIR}/bin:${DATA_DIR}/.local/bin:${NPM_PREFIX}/bin:${DATA_DIR}/runtimes/npm-global/bin"
 
 VERSION="latest"
 LOCAL_FILE=""
@@ -416,7 +416,9 @@ if [[ "${UNINSTALL}" -eq 1 ]]; then
   log "stopping and removing services"
   systemctl disable --now praxi-update.socket praxi-update-check.timer >/dev/null 2>&1 || true
   for u in "${UPDATE_UNITS[@]}"; do rm -f "${UNIT_DIR:?}/${u:?}"; done
-  for u in praxi.service praxi-node.service praxi-desktop.service praxi-xvfb.service "${SLICE_NAME}"; do
+  # The display goes before the daemon: praxi-xvfb.service has Upholds=praxi.service, so a daemon
+  # stopped first is started again at once and then runs on with its unit file deleted.
+  for u in praxi-node.service praxi-desktop.service praxi-xvfb.service praxi.service "${SLICE_NAME}"; do
     systemctl disable --now "${u}" >/dev/null 2>&1 || true
     rm -f "${UNIT_DIR:?}/${u:?}"
   done

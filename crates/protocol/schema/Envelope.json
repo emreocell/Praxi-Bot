@@ -46,6 +46,15 @@
     }
   },
   "definitions": {
+    "AutonomyLevel": {
+      "description": "The permission level the bot was on when the call was decided.",
+      "type": "string",
+      "enum": [
+        "ask",
+        "balanced",
+        "full"
+      ]
+    },
     "ControlRect": {
       "description": "A rectangle in global physical screen pixels.",
       "type": "object",
@@ -71,6 +80,118 @@
         "y": {
           "type": "number",
           "format": "double"
+        }
+      }
+    },
+    "ElicitationField": {
+      "description": "One input of an MCP elicitation form. Every text here comes from the MCP server: untrusted, shown as plain text, never as markup.",
+      "type": "object",
+      "required": [
+        "name",
+        "required",
+        "type"
+      ],
+      "properties": {
+        "blocked": {
+          "description": "A suspected credential field (password, token, one-time code, card or API key, by name, title or description): shown as blocked and never submitted, whatever the server asks. Set by the daemon, never by the server.",
+          "type": "boolean"
+        },
+        "default": {
+          "description": "The server's default value: the only value a form may prefill."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "description": "`email`, `uri`, `date` or `date-time` for a `string` field.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "maximum": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "min_length": {
+          "description": "Length bounds of a `string` field, in characters.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "minimum": {
+          "description": "Bounds of a `number` / `integer` field.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "name": {
+          "description": "Property name, the key of the answer.",
+          "type": "string"
+        },
+        "options": {
+          "description": "Allowed values of a choice field (empty: free input).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ElicitationOption"
+          }
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "$ref": "#/definitions/ElicitationFieldType"
+        }
+      }
+    },
+    "ElicitationFieldType": {
+      "description": "The value type of one [`ElicitationField`]. A choice list is a `string` field with [`ElicitationField::options`].",
+      "type": "string",
+      "enum": [
+        "string",
+        "number",
+        "integer",
+        "boolean"
+      ]
+    },
+    "ElicitationOption": {
+      "description": "One choice of an enum field: the value sent back and the label shown.",
+      "type": "object",
+      "required": [
+        "label",
+        "value"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
         }
       }
     },
@@ -238,7 +359,7 @@
           }
         },
         {
-          "description": "The user approved a pending tool call.",
+          "description": "A pending tool call was allowed to run: the owner approved its card, or an automatic rule did the owner's part (see [`GrantedBy`]).\n\nThe three provenance fields are additive. An event recorded before they existed has none of them and always meant an answered card, but it does not say so: readers show it as an approval of unknown provenance.",
           "type": "object",
           "required": [
             "approved_by",
@@ -248,12 +369,42 @@
           ],
           "properties": {
             "approved_by": {
+              "description": "The owner who answered the card. For an automatic grant nobody answered, so it is [`UserId::SYSTEM`] (the nil UUID): a reader that predates `granted_by` and only looks at this field still cannot take the grant for the owner's own click.",
               "type": "string",
               "format": "uuid"
             },
             "call_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "granted_by": {
+              "description": "What granted the call.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/GrantedBy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "level": {
+              "description": "The bot's permission level when the call was decided.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AutonomyLevel"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rule_id": {
+              "description": "The remembered rule that covered the call, as `<scope>:<name>` with scope `chat`, `always`, `category` or `task` and `name` a tool or category name. Never a path, address, command or other text of the call.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "run_id": {
               "type": "string",
@@ -528,6 +679,56 @@
             "untrusted_content": {
               "description": "The run has already read untrusted content (a page): the card warns that a fake prompt on a page can ask for a code.",
               "type": "boolean"
+            }
+          }
+        },
+        {
+          "description": "An MCP server asked the owner for input during one of its tool calls (elicitation); the run waits until the owner submits, declines or cancels the form on the local desktop, or the request expires. The event carries the form and NEVER an answer: the owner's app posts it straight to the daemon (`POST /v1/elicitations/{call_id}`), which hands it to the server only. The model, the journal and the logs never see it.",
+          "type": "object",
+          "required": [
+            "call_id",
+            "expires_in_secs",
+            "fields",
+            "message",
+            "run_id",
+            "server",
+            "type"
+          ],
+          "properties": {
+            "call_id": {
+              "description": "Id to answer or cancel with (its own id, not a model tool call).",
+              "type": "string",
+              "format": "uuid"
+            },
+            "expires_in_secs": {
+              "description": "Seconds until the request expires on its own (0: no limit).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ElicitationField"
+              }
+            },
+            "message": {
+              "description": "The server's message. Untrusted plain text, never markup.",
+              "type": "string"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "server": {
+              "description": "The MCP server that asks (its configured id).",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "elicitation_requested"
+              ]
             }
           }
         },
@@ -949,6 +1150,67 @@
               ]
             }
           }
+        }
+      ]
+    },
+    "GrantedBy": {
+      "description": "What let a tool call run: who or which rule answered the question that would otherwise have been a card. A closed set of daemon facts; nothing a page, a mail or a tool result says can reach it.",
+      "oneOf": [
+        {
+          "description": "The owner answered an approval card for this very call.",
+          "type": "string",
+          "enum": [
+            "owner_card"
+          ]
+        },
+        {
+          "description": "The Full level let the call through without a card, in a run the owner started.",
+          "type": "string",
+          "enum": [
+            "full_access"
+          ]
+        },
+        {
+          "description": "The Full level let the call through in a run started by a schedule, rule, webhook or mail the owner set up.",
+          "type": "string",
+          "enum": [
+            "owner_schedule"
+          ]
+        },
+        {
+          "description": "The Full level let the call through in an unattended session of the owner's mission.",
+          "type": "string",
+          "enum": [
+            "owner_mission"
+          ]
+        },
+        {
+          "description": "The Balanced level's lane let the call through.",
+          "type": "string",
+          "enum": [
+            "balanced_level"
+          ]
+        },
+        {
+          "description": "An owner-created standing grant covered exactly this call.",
+          "type": "string",
+          "enum": [
+            "standing_grant"
+          ]
+        },
+        {
+          "description": "A choice the owner made earlier on a card (\"this chat\", \"always\", \"for this task\") covered the call; `rule_id` names it.",
+          "type": "string",
+          "enum": [
+            "remembered_choice"
+          ]
+        },
+        {
+          "description": "The owner's own per-site or per-app allow rule covered the call.",
+          "type": "string",
+          "enum": [
+            "site_rule"
+          ]
         }
       ]
     },

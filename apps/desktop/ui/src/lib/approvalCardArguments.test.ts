@@ -45,7 +45,7 @@ const render = (name: string, input: unknown, details?: unknown): string =>
 
 test("approval cards for fs_delete, email_send and an MCP send show every argument", () => {
   const del = render("fs_delete", { path: "C:/Users/me/Documents/taxes-2025.xlsx" });
-  assert.ok(del.includes("fs_delete"), "tool name");
+  assert.ok(!del.includes("fs_delete"), "no raw tool id on a compact delete card");
   assert.ok(del.includes("C:/Users/me/Documents/taxes-2025.xlsx"), "path");
 
   const mail = render("email_send", { to: "boss@example.test", subject: "Resignation", body: "I quit." });
@@ -55,7 +55,7 @@ test("approval cards for fs_delete, email_send and an MCP send show every argume
     name: "mcp:gmail/send_message",
     input: { to: "ceo@example.test", text: "wire the money" }
   });
-  assert.ok(mcp.includes("gmail.send_message"), "unwrapped tool name");
+  assert.ok(!mcp.includes("mcp:gmail"), "no raw MCP tool id on the card");
   assert.ok(mcp.includes("ceo@example.test") && mcp.includes("wire the money"));
 });
 
@@ -98,10 +98,8 @@ test("a browser card says what happens once and offers once, this task and deny"
   );
   assert.ok(html.includes("Allow for this task"), "task scope offered inside details");
   assert.ok(!html.includes('data-testid="approval-always"'), "no standing grant next to private data");
-  // The tool name is not repeated in front of the sentence that already names it.
-  const label = /Exactly what (\S+) will receive/.exec(html);
-  assert.ok(label, "input label");
-  assert.equal(html.split(`${label[1]} Exactly what`).length, 1, "no duplicated tool name");
+  assert.ok(html.includes("Full input"), "input label is plain, without a raw tool id");
+  assert.ok(!html.includes("mcp:crm/update Full input"), "tool name is not repeated in the label");
 
   const clean = render(
     "use_tool",

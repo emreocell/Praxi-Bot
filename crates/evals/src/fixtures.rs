@@ -76,8 +76,14 @@ pub(crate) fn register(
         let bytes = zip.finish()?.into_inner();
         let card = mcp_bridge::mcpb::inspect(&bytes)?;
         let store = secret_store::MemoryStore::new();
-        let config =
-            mcp_bridge::mcpb::install(&bytes, &card.sha256, &bundle.values, data_dir, &store)?;
+        let config = mcp_bridge::mcpb::install(
+            &bytes,
+            &card.sha256,
+            &card.launch_sha256,
+            &bundle.values,
+            data_dir,
+            &store,
+        )?;
         let spec: FakeToolSpec = serde_json::from_value(serde_json::json!({
             "name": "bundle_config", "effect": "read",
             "output": serde_json::to_string(&config)?,

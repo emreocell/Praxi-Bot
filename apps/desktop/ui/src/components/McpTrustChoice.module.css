@@ -3,3 +3,4 @@
 .option input { margin-top: var(--space-1); accent-color: var(--color-accent); }
 .link { padding: var(--space-0); border: none; background: none; color: var(--color-accent-text); font: inherit; font-size: var(--font-size-xs); cursor: pointer; }
 .link:hover { text-decoration: underline; }
+.legend { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-0); }

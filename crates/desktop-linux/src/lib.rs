@@ -29,6 +29,8 @@ mod backend;
 #[cfg(target_os = "linux")]
 mod cursor_x11;
 #[cfg(target_os = "linux")]
+mod identity;
+#[cfg(target_os = "linux")]
 mod x11;
 
 #[cfg(target_os = "linux")]

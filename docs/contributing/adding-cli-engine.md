@@ -10,7 +10,8 @@ A coding CLI that speaks the Agent Client Protocol over stdio and needs no speci
 is **a data file, not Rust**: add `providers/cli/<id>.toml` and list it in `EMBEDDED` in
 `crates/cli-provider/src/acp_data.rs`. Start from `cline.toml` (a level the CLI can hold)
 or `auggie.toml` (a CLI whose permission behaviour is unknown, so only Full access is
-offered). The schema is strict, and `cargo test -p cli-provider` rejects a file that:
+offered; `droid.toml`, `grok.toml` and `junie.toml` are the same), or `openhands.toml` (Ask held
+by selecting a session mode). The schema is strict, and `cargo test -p cli-provider` rejects a file that:
 
 - has an unknown key, a command that is not a bare executable name, or an argument that is
   not fixed text (no `{prompt}`, no `$VAR`, no spaces, no shell characters);
@@ -22,6 +23,8 @@ offered). The schema is strict, and `cargo test -p cli-provider` rejects a file 
 - maps a level to a wider one, or marks Full as not enforceable;
 - uses an argument below Full that is not on the allow-list of known-safe tokens
   (`SAFE_SINGLES` and `SAFE_PAIRS` in `acp_data.rs`; the ACP start argv counts as below Full).
+  A start command of several tokens (`agent stdio`, `exec --output-format acp`) is matched as a
+  whole against `ACP_STARTS`: add it there only when the vendor's docs give that exact line.
   Permissive flags (`--yolo`, `--auto-approve true`, `--force`, ...) are only for Full, and
   no argument anywhere carries `/ : @ , =`;
 - claims anything but `support = "experimental"`, or states no `unverified` facts;

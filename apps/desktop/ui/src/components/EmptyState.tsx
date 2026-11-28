@@ -14,7 +14,8 @@ export function EmptyState({
   actionLabel,
   onAction,
   primary = true,
-  testId
+  testId,
+  actionTestId
 }: {
   icon: LucideIcon;
   title: string;
@@ -24,6 +25,7 @@ export function EmptyState({
   /** The one primary button of the view? Pass `false` when the page header already has one. */
   primary?: boolean;
   testId?: string;
+  actionTestId?: string;
 }) {
   return (
     <div className={styles.root} role="status" data-testid={testId}>
@@ -33,7 +35,7 @@ export function EmptyState({
       <p className={styles.title}>{title}</p>
       <p className={styles.body}>{children}</p>
       {actionLabel && onAction ? (
-        <Button className={styles.action} variant={primary ? "primary" : "secondary"} size="sm" onClick={onAction}>
+        <Button className={styles.action} variant={primary ? "primary" : "secondary"} size="sm" data-testid={actionTestId} onClick={onAction}>
           {actionLabel}
         </Button>
       ) : null}

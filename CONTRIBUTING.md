@@ -55,7 +55,7 @@ size are welcome: fixes, improvements and new features, from first-timers and re
 | `desktop-api`, `desktop-windows`, `desktop-linux`, `desktop-macos` | OS-agnostic desktop trait and the per-OS backends (macOS is a stub today) |
 | `vision` | OCR and visual grounding helpers |
 | `provider-catalog` | LLM provider adapters and the provider catalog |
-| `cli-provider` | Detects and runs locally installed coding CLIs (Claude Code, Codex, Cursor, OpenCode, Antigravity, Qwen Code, GitHub Copilot CLI, Kiro CLI, Kimi Code CLI, Qoder CLI, Mistral Vibe, Goose, and any ACP agent defined by a data file in `providers/cli/`: Cline, Augment Code), installs them and signs them in on a host |
+| `cli-provider` | Detects and runs locally installed coding CLIs (Claude Code, Codex, Cursor, OpenCode, Antigravity, Qwen Code, GitHub Copilot CLI, Kiro CLI, Kimi Code CLI, Qoder CLI, Mistral Vibe, Goose, and any ACP agent defined by a data file in `providers/cli/`: Cline, Augment Code, Factory Droid, Grok Build, Junie, OpenHands), installs them and signs them in on a host |
 | `pty-session` | A program on a pseudo-terminal (ConPTY / `openpty`): input, bounded text output, screen, resize, kill. Behind the `shell_interactive` tool and the CLI sign-in flows |
 | `mcp-bridge` | MCP client and server bridge, OAuth for remote MCP servers |
 | `assistant-import` | Finds the setups of other assistants (Claude, Cursor, VS Code, Codex, OpenClaw, Hermes, a folder) and plans what can be imported; behind `bot import` and the desktop Import screen ([design](docs/design/import-from-assistants-adr.md)) |
@@ -165,6 +165,16 @@ documentation, the marketing site (`site/`), packaging manifests (`packaging/`) 
 (`python3 scripts/check_guide_index.py`): run both locally when you edit `docs/` or a README. A PR
 that only changes UI sources also skips the Windows real-app smoke run (Linux still runs it; every
 push to `main` runs both). A PR is merged only when CI is green.
+
+**Server install end to end.** `.github/workflows/server-install-e2e.yml` installs Praxi with
+`scripts/install-linux.sh` on a fresh Ubuntu 24.04 (a systemd container) from a tarball built in the
+run, then checks services, `praxi doctor`, the token-protected API on loopback, the `praxi` command,
+Node.js/npm for the service user, the browser repair, `--update` (same and newer tag),
+`--uninstall` and `--purge`. It runs when the installer or `scripts/linux/` change, every Monday, and
+by hand. Locally (needs Docker with `--privileged`, and network): build `bot` and `bot-node`, then
+`bash scripts/linux/tests/e2e/run.sh --bin-dir <dir with both> [--mode host-mode|headless]`.
+The installer is not changed for the test: it trusts only `/usr/bin/gh`, which the test replaces with
+a double that checks the same policy flags and that the bundle names the archive's SHA-256 and tag.
 
 **How the pull request jobs are laid out.** The workspace tests run with
 [cargo-nextest](https://nexte.st) (the `ci` profile in `.config/nextest.toml`, no retries) and the

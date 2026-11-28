@@ -22,6 +22,7 @@ use crate::data_routes;
 use crate::doctor;
 use crate::doctor_routes;
 use crate::dto;
+use crate::elicitation_routes;
 use crate::email;
 use crate::email_channel;
 use crate::email_routes;
@@ -47,10 +48,13 @@ use crate::knowledge_settings;
 use crate::knowledge_watch;
 use crate::live_view;
 use crate::mcp;
+use crate::mcp_import;
 use crate::mcp_routes;
 use crate::mcp_server;
 use crate::memory;
 use crate::mission_routes;
+use crate::openapi_apps;
+use crate::openapi_apps_routes;
 use crate::owner_notify;
 use crate::page_reader_routes;
 use crate::peer;
@@ -71,6 +75,7 @@ use crate::triggers;
 use crate::trusted_folders;
 use crate::usage;
 use crate::voice;
+use crate::voice_live;
 use crate::voice_routes;
 use crate::web;
 use crate::web_routes;
@@ -197,6 +202,8 @@ impl Modify for Security {
         fill_routes::reveal_fill_secret,
         fill_routes::revoke_fill_grant,
         fill_routes::update_fill_secret,
+        elicitation_routes::answer_elicitation,
+        elicitation_routes::cancel_elicitation,
         handover_routes::cancel_handover,
         handover_routes::finish_handover_done,
         handover_routes::submit_handover_code,
@@ -282,6 +289,10 @@ impl Modify for Security {
         live_view::terminals,
         live_view::thumbnail,
         live_view::update_session,
+        mcp_import::inspect_bundle,
+        mcp_import::install_bundle,
+        mcp_import::install_registry,
+        mcp_import::search_registry,
         mcp_routes::cancel_mcp_auth,
         mcp_routes::complete_mcp_auth,
         mcp_routes::approve_mcp_tool_changes,
@@ -418,9 +429,16 @@ impl Modify for Security {
         trusted_folders::remove,
         usage::export_csv,
         usage::usage,
+        voice_live::audio,
+        voice_live::close,
+        voice_live::note,
+        voice_live::open,
+        voice_live::save_transcript,
+        voice_live::tool_result,
         voice_routes::get_local_voice,
         voice_routes::get_voice,
         voice_routes::install_local_voice,
+        voice_routes::synthesize,
         voice_routes::transcribe,
         voice_routes::update_voice,
         bot_limits_routes::get_bot_spend_limits,
@@ -475,6 +493,12 @@ impl Modify for Security {
         homeassistant_routes::put_homeassistant_bots,
         homeassistant_routes::delete_homeassistant,
         homeassistant_routes::test_homeassistant,
+        openapi_apps_routes::list_openapi_apps,
+        openapi_apps_routes::get_openapi_app,
+        openapi_apps_routes::add_openapi_app,
+        openapi_apps_routes::update_openapi_app,
+        openapi_apps_routes::refresh_openapi_app,
+        openapi_apps_routes::remove_openapi_app,
         web_routes::get_web_search,
         web_routes::test_web_search,
         web_routes::update_web_search,
@@ -677,6 +701,9 @@ impl Modify for Security {
         fill_routes::RevealFillSecretResponse,
         fill_routes::UpdateFillSecret,
         fill_routes::VaultKindDto,
+        elicitation_routes::AnswerElicitation,
+        elicitation_routes::ElicitationAction,
+        elicitation_routes::ElicitationOutcome,
         handover_routes::HandoverAnswer,
         handover_routes::SubmitHandoverCode,
         secret_request_routes::SecretRequestAnswer,
@@ -798,6 +825,7 @@ impl Modify for Security {
         mcp::McpTransportKind,
         mcp::McpTransportObject,
         mcp::SetSecret,
+        mcp_import::BundleApproval,
         mcp_server::CreateMcpToken,
         mcp_server::ExportedMcpTool,
         mcp_server::McpCallInput,
@@ -873,8 +901,15 @@ impl Modify for Security {
         trusted_folders::TrustFolderInput,
         trusted_folders::TrustedFoldersDto,
         voice::LocalVoiceInstallInput,
+        voice_live::LiveNote,
+        voice_live::LiveOpenInput,
+        voice_live::LiveToolResult,
+        voice_live::VoiceTranscriptInput,
+        voice_live::VoiceTranscriptOutput,
+        voice_live::VoiceTurn,
         voice::LocalVoiceModelDto,
         voice::LocalVoiceStatusDto,
+        voice::SynthesizeInput,
         voice::TranscribeInput,
         voice::TranscribeOutput,
         voice::VoiceConfigDto,
@@ -945,6 +980,16 @@ impl Modify for Security {
         homeassistant::HomeAssistantBotsInput,
         homeassistant::HomeAssistantTestInput,
         homeassistant::HomeAssistantTestReport,
+        openapi_apps::OpenApiAppDto,
+        openapi_apps::OpenApiAppInput,
+        openapi_apps::OpenApiAppUpdate,
+        openapi_apps::OpenApiAuthDto,
+        openapi_apps::OpenApiAuthInput,
+        openapi_apps::OpenApiAuthKind,
+        openapi_apps::OpenApiEffect,
+        openapi_apps::OpenApiEnabledOperation,
+        openapi_apps::OpenApiOperationDto,
+        openapi_apps::OpenApiSkippedDto,
         web::WebSearchConfigDto,
         web::WebSearchConfigInput,
         web::WebSearchTestInput,
@@ -1001,6 +1046,7 @@ impl Modify for Security {
         (name = "voice"),
         (name = "calendar"),
         (name = "homeassistant"),
+        (name = "openapi-apps"),
         (name = "web"),
         (name = "workspaces"),
         (name = "connection-test"),

@@ -354,12 +354,21 @@ pub(crate) fn start_channel_notifications(state: &AppState) {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 },
             };
-            let protocol::Event::SecretRequested(request) = item.envelope.event else {
-                continue;
+            let form = match item.envelope.event {
+                protocol::Event::SecretRequested(request) => state
+                    .agent()
+                    .secret_request(request.call_id)
+                    .is_some()
+                    .then_some(false),
+                protocol::Event::ElicitationRequested(request) => state
+                    .agent()
+                    .elicitation(request.call_id)
+                    .is_some()
+                    .then_some(true),
+                _ => continue,
             };
-            if !state.leader().components_allowed()
-                || state.agent().secret_request(request.call_id).is_none()
-            {
+            let Some(elicitation) = form else { continue };
+            if !state.leader().components_allowed() {
                 continue;
             }
             let Some(chat) = state
@@ -370,11 +379,13 @@ pub(crate) fn start_channel_notifications(state: &AppState) {
                 continue;
             };
             let channels = state.channels();
-            let send = futures::future::join_all(
-                channels
-                    .iter()
-                    .map(|channel| channel.notify_secret_request(chat)),
-            );
+            let send = futures::future::join_all(channels.iter().map(|channel| async move {
+                if elicitation {
+                    channel.notify_elicitation(chat).await;
+                } else {
+                    channel.notify_secret_request(chat).await;
+                }
+            }));
             tokio::select! {
                 () = shutdown.cancelled() => break,
                 _ = tokio::time::timeout(std::time::Duration::from_secs(20), send) => {}

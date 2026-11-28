@@ -618,8 +618,6 @@
   },
   "approvalDock": {
     "counter": "Approval {{current}} of {{total}}",
-    "keyAllow": "Allow once",
-    "keyDeny": "Deny",
     "label": "Waiting for your approval",
     "next": "Next approval",
     "previous": "Previous approval"
@@ -731,18 +729,7 @@
     "connectedToast": "{{name}} connecté",
     "custom": {
       "add": "Ajouter un serveur",
-      "command": "Commande",
-      "env": "Environnement",
-      "envHint": "Un KEY=value par ligne.",
-      "errCommand": "Saisissez la commande à exécuter.",
-      "errName": "Saisissez un nom.",
-      "errUrl": "Saisissez une URL HTTP valide.",
-      "http": "HTTP",
-      "intro": "Ajoutez à la main un serveur MCP stdio ou HTTP.",
-      "name": "Nom du serveur",
-      "stdio": "Stdio",
-      "transport": "Transport",
-      "url": "URL du serveur"
+      "command": "Commande"
     },
     "disconnect": "Déconnecter",
     "disconnectConfirm": "Déconnecter ce serveur ?",
@@ -1431,8 +1418,6 @@
     },
     "newChat": "Nouvelle conversation",
     "newChatFailed": "Impossible de démarrer une conversation : {{detail}}",
-    "noModel": "Aucun modèle",
-    "notFound": "Ce bot n'existe plus.",
     "skills": {
       "boundaryHint": "Cela limite ce qui est proposé au bot et ce qu'il peut charger avec ses outils de compétences. Ce n'est pas un coffre pour secrets : un bot qui a accès aux fichiers ou au shell peut quand même lire le dossier des compétences sur le disque.",
       "browseLibrary": "Bibliothèque de compétences",
@@ -1589,7 +1574,7 @@
         "reviewFull": "Lire tout ce qui sera envoyé"
       },
       "input": {
-        "label": "Exactement ce que {{name}} recevra",
+        "label": "Entrée complète (vérifiez avant d'autoriser)",
         "shortened": "Raccourci : seuls les {{shown}} premiers caractères sont affichés."
       },
       "mail": {
@@ -2454,12 +2439,10 @@
     "save": "Enregistrer"
   },
   "computerAccess": {
-    "allow": "Laisser les bots de {{name}} utiliser cet ordinateur",
     "allowOnce": "Autoriser une fois",
     "allowSession": "Autoriser pour cette session",
     "alwaysRead": "Ne pas demander avant que les bots de {{name}} regardent l'écran",
     "alwaysReadNote": "Sinon, on vous le demande une fois par session. Les propres fenêtres de Praxi ne sont jamais affichées.",
-    "askNote": "Chaque action qui modifie quelque chose vous demande d'abord votre accord.",
     "deny": "Refuser",
     "description": "Les serveurs que vous avez appairés peuvent demander à cet ordinateur de regarder l'écran et d'agir dessus, uniquement lorsque vous l'autorisez.",
     "details": "Précisément",
@@ -2693,8 +2676,6 @@
     "offline": "L'ordinateur sélectionné n'est pas disponible. Réessayez le lien lorsqu'il sera en ligne."
   },
   "dev": {
-    "runningLabel": "Exécution du bot active",
-    "sectionTitle": "Développeur",
     "simulateBotRun": "Simuler une exécution du bot"
   },
   "digest": {
@@ -2712,6 +2693,39 @@
     "title": "Aujourd'hui",
     "totalCost": "Coût : {{cost}}",
     "waiting": "En attente de vous : {{count}}"
+  },
+  "elicitation": {
+    "banner": "Demandé par le serveur MCP {{server}} — pas par Praxi",
+    "blocked": "Bloqué : ressemble à un identifiant, jamais envoyé",
+    "blockedRequired": "Ce formulaire exige un champ qui ressemble à un identifiant. Praxi n'envoie jamais de mots de passe, clés d'accès, codes ni numéros de carte à un serveur MCP, il ne peut donc pas être envoyé. Vous pouvez le refuser ou l'annuler.",
+    "cancel": "Annuler",
+    "choose": "Choisir…",
+    "closed": "Cette demande n'est plus ouverte.",
+    "decline": "Refuser",
+    "expired": "Le délai pour répondre à cette demande est écoulé.",
+    "expiresIn": "Temps restant pour répondre",
+    "externalLink": "lien externe",
+    "externalLinkTitle": "Écrit par le serveur MCP. Praxi ne l'ouvre pas. Vérifiez-le attentivement avant d'y aller vous-même.",
+    "messageLabel": "Message de {{server}} :",
+    "notConnected": "Pas de connexion au service. Rien n'a été envoyé et ce que vous avez saisi est conservé.",
+    "note": "Ce texte vient du serveur MCP {{server}}, pas de Praxi. Vos réponses vont uniquement à ce serveur, pas au bot.",
+    "outcome": {
+      "accepted": "Envoyé. Seul le serveur a reçu vos réponses.",
+      "cancelled": "Annulé.",
+      "declined": "Refusé. Le serveur a été informé que vous ne souhaitiez pas répondre."
+    },
+    "problem": {
+      "blocked": "{{field}} ressemble à un identifiant et n'est jamais envoyé.",
+      "integer": "{{field}} doit être un nombre entier.",
+      "number": "{{field}} doit être un nombre.",
+      "required": "{{field}} est obligatoire.",
+      "tooLarge": "{{field}} doit valoir au plus {{max}}.",
+      "tooLong": "{{field}} peut contenir au plus {{max}} caractères.",
+      "tooShort": "{{field}} doit contenir au moins {{min}} caractères.",
+      "tooSmall": "{{field}} doit valoir au moins {{min}}."
+    },
+    "submit": "Envoyer",
+    "title": "{{server}} demande des informations"
   },
   "engineConsent": {
     "allow": "Autoriser {{cli}}",
@@ -2865,6 +2879,10 @@
         "hint": "Activez-le dans Réglages, puis réessayez.",
         "title": "Ceci est désactivé"
       },
+      "elicitation_gone": {
+        "hint": "Il a reçu une réponse, a été annulé ou a expiré, ou la tâche s'est terminée. Demandez au bot de réessayer si c'est toujours nécessaire.",
+        "title": "Ce formulaire n'est plus ouvert"
+      },
       "email_provider_error": {
         "hint": "Vérifiez le compte et le mot de passe, puis réessayez.",
         "title": "Votre fournisseur de messagerie a refusé la demande"
@@ -2956,6 +2974,10 @@
       "knowledge_busy": {
         "hint": "Il est encore en train de lire vos fichiers. Réessayez dans un instant.",
         "title": "La base de connaissances est occupée"
+      },
+      "live_voice_not_configured": {
+        "hint": "Ajoutez une clé Gemini dans Réglages → Général → Dictée vocale, puis appuyez de nouveau sur Parler.",
+        "title": "La voix en direct nécessite une clé Gemini"
       },
       "login_busy": {
         "hint": "Terminez-la ou annulez-la, puis réessayez.",
@@ -3348,7 +3370,6 @@
       }
     },
     "reload": "Recharger",
-    "restartApp": "Redémarrer Praxi",
     "restartService": "Redémarrer le service local",
     "restarting": "Redémarrage…",
     "retry": "Réessayer",
@@ -3503,7 +3524,6 @@
   },
   "firstRun": {
     "back": "Retour",
-    "badge": "Configuration",
     "bot": {
       "createFailed": "Votre bot n'a pas pu être créé. Rien n'a été enregistré. Réessayez dans un instant.",
       "defaultName": "Praxi",
@@ -3572,7 +3592,6 @@
       "paste": "Coller",
       "providers": {
         "anthropic": {
-          "badge": "",
           "name": "Anthropic",
           "sub": "Modèles Claude"
         },
@@ -3582,13 +3601,11 @@
           "sub": "Rapide, avec un généreux quota gratuit"
         },
         "ollama": {
-          "badge": "",
           "found": "En cours d'exécution ici",
           "name": "Ollama",
           "sub": "Modèles sur cet ordinateur, sans clé"
         },
         "openai": {
-          "badge": "",
           "name": "OpenAI-compatible",
           "sub": "OpenAI, OpenRouter, DeepSeek"
         }
@@ -3759,6 +3776,7 @@
       "slash": "Commandes slash (tapez / dans la zone de saisie)"
     },
     "intro": "Raccourcis pratiques lorsque l'application est ouverte.",
+    "liveVoiceEnd": "Terminer la conversation vocale en direct",
     "menuAccept": "Choisir l'élément en surbrillance",
     "menuDismiss": "Fermer le menu",
     "menuMove": "Parcourir le menu slash / mention",
@@ -3857,12 +3875,10 @@
     "admin": {
       "byDesign": "{{name}} garde certaines choses pour lui : la politique d'exécution, les serveurs d'outils en ligne de commande, les compétences et les connexions aux CLI de programmation se modifient directement sur {{name}}. Les comptes e-mail, de recherche et de dictée peuvent être connectés depuis cet ordinateur.",
       "noSecrets": "{{name}} ne peut pas encore stocker de clés.",
-      "notGranted": "{{name}} n'a pas encore confirmé cet ordinateur. Exécutez ceci une fois sur {{name}} :",
-      "title": "Configurer depuis cet ordinateur"
+      "notGranted": "{{name}} n'a pas encore confirmé cet ordinateur. Exécutez ceci une fois sur {{name}} :"
     },
     "adopted": {
       "allowPc": "Facultatif : vos bots pourront alors regarder l'écran de cet ordinateur et agir dessus quand vous le demandez. Chaque action qui modifie quelque chose vous demande toujours d'abord ici.",
-      "done": "Compris",
       "moved": "Déplacé vers {{name}}",
       "stayed": "Reste sur cet ordinateur",
       "stayedBody": "Cet ordinateur conserve tout ce qu'il avait comme solution de repli et reste une cible : demandez à un bot d'y faire quelque chose à tout moment. Rien n'a été supprimé ici.",
@@ -3870,7 +3886,6 @@
     },
     "banner": {
       "back": "Passer à {{name}}",
-      "offline": "L'ordinateur de vos bots est hors ligne. Reconnexion… La liste est la dernière connue.",
       "temporary": "Vos bots s'exécutent sur cet ordinateur. {{name}} reste configuré et vous pouvez y passer à tout moment.",
       "workHere": "Utiliser cet ordinateur"
     },
@@ -3894,22 +3909,17 @@
       "none": "Le serveur n'a signalé aucune CLI de programmation.",
       "notInstalled": "Non installé.",
       "note": "Ce sont les outils propres au serveur. L'installation et la connexion se font sur {{name}}.",
-      "officialPage": "Installer {{name}} depuis la page officielle",
       "ready": "Prêt",
       "reinstall": "Réinstaller sur le serveur",
       "runOnServer": "Sur le serveur, exécutez :",
       "signIn": "Pour vous connecter, exécutez sur le serveur :",
       "signInNote": "La connexion affiche une adresse web sur le serveur (souvent avec un code). Ouvrez l'adresse sur cet ordinateur, connectez-vous et, si on vous le demande, collez le code dans le terminal du serveur. Les connexions de cet ordinateur ne sont jamais copiées vers le serveur.",
-      "signInOnServer": "Se connecter sur {{server}}",
-      "title": "CLI de programmation sur {{name}}"
+      "signInOnServer": "Se connecter sur {{server}}"
     },
     "hint": "sur {{name}}",
     "menu": {
       "add": "Ajouter un serveur",
       "makeHome": "Faire de {{name}} le foyer de mes bots",
-      "pcOff": "Désactivé · vos bots ne peuvent pas utiliser cet ordinateur",
-      "pcOn": "Activé · chaque action vous demande ici",
-      "sync": "Synchroniser ma configuration vers {{name}}",
       "terminal": "Terminal du serveur",
       "viewScreen": "Voir son écran"
     },
@@ -3930,7 +3940,6 @@
   "hostMode": {
     "managedOnServer": "Une fois cet ordinateur confirmé comme administrateur sur {{name}}, vous gérez aussi d'ici les clés, les autorisations, les outils et le courrier. L'appairage des appareils et la mise à jour de {{name}} restent sur {{name}}.",
     "model": {
-      "action": "Connecter un modèle sur {{name}}",
       "afterwards": "Cette application le détecte d'elle-même quelques secondes plus tard.",
       "copy": "Copier la commande",
       "fromApp": "Ajoutez ici la clé pour {{name}}.",
@@ -3974,7 +3983,6 @@
     "offline": "{{name}} ne répond pas. Ses bots continuent de tourner ; cette application se reconnecte d'elle-même.",
     "updateApp": "Mise à jour nécessaire : cette application ({{local}}) est plus ancienne que {{name}} ({{host}}). Mettez cette application à jour pour utiliser {{name}}.",
     "updateHost": "Mise à jour nécessaire : {{name}} ({{host}}) est plus ancien que cette application ({{local}}). Mettez {{name}} à jour pour qu'il corresponde à cette application.",
-    "useThisComputer": "Utiliser cet ordinateur",
     "versionBlocking": "Cette application ({{local}}) et {{name}} ({{host}}) sont sur des versions différentes. Mettez-les à la même version avant d'utiliser l'hôte.",
     "versionWarning": "Cette application est en {{local}} et {{name}} en {{host}} : la différence est mineure, tout devrait fonctionner."
   },
@@ -4121,12 +4129,10 @@
     "backToChat": "Retour",
     "captureTab": "Capture de la touche Tab",
     "chat": {
-      "approve": "Approuver",
       "button": "Conversation",
       "close": "Fermer la conversation",
       "collapse": "Réduire la conversation",
       "expand": "Agrandir la conversation",
-      "reject": "Refuser",
       "replying": "Le bot répond…",
       "title": "Conversation avec le bot",
       "working": "Le bot travaille…"
@@ -4134,11 +4140,9 @@
     "checkingTargets": "Recherche des écrans…",
     "clearForeignPause": "Lever la pause de {{owner}}",
     "clearPauseAction": "Lever la pause",
-    "close": "Fermer la visionneuse",
     "connectionLost": "Connexion à l'écran perdue. Reconnexion…",
     "dismissKeepsControl": "Fermer ne fait que masquer la visionneuse : le contrôle reste avec vous. Utilisez « J'ai terminé » ou Réessayer dans le panneau.",
     "doneAction": "J'ai terminé",
-    "doneLabel": "J'ai terminé",
     "emergencyStop": "Arrêter les bots",
     "errors": {
       "generic": "La requête a échoué. Vérifiez la connexion et réessayez.",
@@ -4159,7 +4163,6 @@
     "focusTrapHint": "Le clavier va vers l'écran. Maj+Échap pour quitter.",
     "globalPauseNotice": "Prendre le contrôle ou mettre en pause s'applique à tous les bots.",
     "handBackAction": "Rendre le contrôle",
-    "hostLabel": "Hôte : {{host}}",
     "infoPanel": "Infos du bot",
     "interactive": "Interactif",
     "kind": {
@@ -4256,7 +4259,6 @@
       "unsupported": "La diffusion d'écran n'est pas prise en charge pour cette cible."
     },
     "reconnecting": "Reconnexion au flux de l'écran…",
-    "recoverAction": "Lever la pause (le bot peut repartir)",
     "refresh": "Actualiser les cibles",
     "releaseFocus": "Quitter le clavier",
     "releaseOnClose": "La fermeture rend d'abord le contrôle au bot.",
@@ -4378,16 +4380,13 @@
     "title": "Voir les journaux récents"
   },
   "main": {
-    "clearSelection": "Retour à la vue d'ensemble",
     "daemonConnectingDescription": "Connexion au service en arrière-plan de Praxi-Bot intégré sur cet ordinateur.",
     "daemonConnectingTitle": "Démarrage du service local en arrière-plan…",
-    "daemonOfflineDescription": "Le service en arrière-plan de Praxi-Bot ne répond pas. Attendez quelques secondes et réessayez. Si cela échoue encore, vérifiez qu'un pare-feu ne bloque pas Praxi-Bot, ou redémarrez l'application.",
     "daemonOfflineTitle": "Le service local en arrière-plan n'est pas en cours d'exécution",
     "daemonRetry": "Réessayer la connexion",
     "runSetupWizard": "Lancer l'assistant de configuration",
     "selectBotDescription": "Choisissez un bot dans la barre latérale pour voir son profil, ou ouvrez les réglages pour personnaliser le thème, la couleur d'accent et l'arrière-plan.",
     "selectBotTitle": "Sélectionnez un bot",
-    "selectedBotLabel": "Profil du bot actif",
     "welcomeDescription": "Un bot a une personnalité, des modèles et un préréglage d'autorisations. Lancez l'assistant de configuration guidée ou créez un bot manuellement pour commencer à discuter.",
     "welcomeTitle": "Créez votre premier bot"
   },
@@ -4565,11 +4564,9 @@
     "connectModel": "Connecter un modèle",
     "connectTitle": "Connectez un modèle pour commencer à discuter",
     "empty": "Aucun modèle correspondant.",
-    "engineError": "Impossible de connecter ce CLI.",
     "hint": {
       "new": "nouveau"
     },
-    "howToInstall": "Comment l'installer",
     "install": "Installer {{name}}",
     "levels": {
       "high": "Élevé",
@@ -4582,7 +4579,6 @@
     "listFresh": "Mis à jour à l'instant",
     "noModels": "Saisissez un identifiant de modèle dans la recherche pour en utiliser un.",
     "none": "Aucun modèle",
-    "notOnServer": "{{name}} · pas encore sur {{server}}",
     "noteLocalClis": "Les CLI sous abonnement installés sur cet ordinateur sont utilisées quand un bot s'exécute sur « cet ordinateur ».",
     "otherId": "Utiliser « {{id}} » avec {{provider}}",
     "recommended": "Recommandé",
@@ -4659,7 +4655,6 @@
     "title": "Besoin de vous"
   },
   "newBot": {
-    "advanced": "Réglages avancés",
     "brain": "IA",
     "brainAuto": "Automatique",
     "brainHint": "Vous pourrez le changer plus tard dans la conversation",
@@ -4686,14 +4681,6 @@
       "star": "Étoile",
       "tri": "Triangle"
     },
-    "templates": {
-      "assistant": "Assistant",
-      "blank": "Vierge",
-      "coder": "Développeur",
-      "researcher": "Chercheur",
-      "social": "Social"
-    },
-    "templatesLabel": "Modèles",
     "title": "Nouveau bot"
   },
   "notify": {
@@ -4957,8 +4944,6 @@
     "exportHint": "Enregistrez le profil partageable de ce bot : nom, instructions, choix du modèle, outils et niveau d'autorisation. Jamais les secrets, la mémoire, les conversations, les dossiers ni les appareils.",
     "exportSaveFirst": "Enregistrez d'abord vos modifications : le profil est construit à partir du bot enregistré.",
     "exported": "Le profil de {{name}} a été enregistré dans un fichier.",
-    "galleryLabel": "Partir d'un modèle",
-    "importFromFile": "Importer depuis un fichier…",
     "level": "Niveau d'autorisation maximal",
     "levelHint": "Le bot n'obtient jamais plus que ce niveau, quoi que demande le fichier.",
     "levelLine": "Le fichier demande « {{requested}} ». Le bot obtiendra « {{granted}} ».",
@@ -5101,7 +5086,6 @@
     "exportMarkdown": "Enregistrer en texte",
     "exported": "Rapport enregistré",
     "footer": "Créé avec Praxi. Les détails privés sont omis.",
-    "hint": "Voir ce que le bot a fait dans cette exécution, étape par étape",
     "noRecordedSteps": "L'historique des étapes n'est pas disponible pour cette exécution.",
     "noSteps": "Le bot n'a utilisé aucun outil dans cette exécution.",
     "outcome": "Résultat",
@@ -5223,9 +5207,7 @@
       "keepHint": "Reste : {{spec}}",
       "kind": {
         "cron": "Cron",
-        "keep": "Conserver l'actuelle",
-        "natural": "Saisir en toutes lettres",
-        "simple": "Simple"
+        "keep": "Conserver l'actuelle"
       },
       "misfire": "Si l'ordinateur était éteint à l'heure prévue",
       "misfireHint": "Détermine ce qui se passe si l'ordinateur était éteint ou en veille au moment où une exécution était due.",
@@ -5247,7 +5229,6 @@
         "never": "Jamais",
         "problems": "Uniquement en cas de problème"
       },
-      "parsedAs": "Compris comme : {{what}}",
       "payloadKept": "Cette planification exécute un workflow ou un outil ; cette partie reste inchangée.",
       "preview": "Aperçu",
       "prompt": "Prompt",
@@ -5258,10 +5239,6 @@
         "past": "Cette heure est déjà passée. Choisissez-en une plus tardive.",
         "time": "Choisissez une heure comme 09:00."
       },
-      "templates": {
-        "hint": "Choisissez-en un pour remplir le formulaire. Vous pourrez ensuite tout modifier.",
-        "title": "Partir d'un exemple"
-      },
       "text": "Planification en toutes lettres",
       "textHint": "Anglais ou turc. Les heures utilisent {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -5269,7 +5246,6 @@
       "tz": "Fuseau horaire",
       "tzCronHint": "Utilisé si l'expression cron comporte 5 champs sans fuseau horaire.",
       "tzSearch": "Rechercher un fuseau horaire, p. ex. Europe/Istanbul",
-      "tzShown": "Les heures sont en {{tz}}.",
       "tzUnknown": "Fuseau horaire inconnu. Choisissez-en un dans la liste.",
       "weekday": "Quel jour de la semaine ?",
       "when": "Quand"
@@ -5284,7 +5260,6 @@
     "newNeedsBot": "Créez d'abord un bot, puis vous pourrez planifier quelque chose pour lui.",
     "nextRuns": "5 prochaines exécutions",
     "nextRunsEmpty": "Aucune exécution à venir.",
-    "noRuns": "Aucune exécution constatée pour l'instant.",
     "openRun": "Ouvrir",
     "originBot": "Créée par un bot",
     "originBotHint": "Un bot l'a créée après votre approbation. Les bots ne peuvent modifier que les planifications qu'ils ont créées eux-mêmes.",
@@ -5293,7 +5268,6 @@
       "unknown": "Tâche personnalisée",
       "workflow": "Exécute le workflow {{name}}"
     },
-    "recentRuns": "Exécutions récentes",
     "reclaim": "Rapatrier sur cet ordinateur",
     "reclaimAnyway": "Rapatrier malgré tout",
     "reclaimUnreachable": "{{name}} n'a pas répondu, sa copie est donc peut-être encore en cours d'exécution là-bas. La rapatrier maintenant pourrait l'exécuter sur les deux ordinateurs.",
@@ -5344,7 +5318,6 @@
     "viewList": "Liste"
   },
   "secretRequest": {
-    "allowHint": "Laissez les deux vides et le bot ne pourra l'utiliser nulle part tant que vous n'aurez pas ajouté un emplacement dans les Réglages.",
     "cancel": "Annuler",
     "cancelled": "Annulé. Rien n'a été enregistré.",
     "closed": "Cette demande n'est plus ouverte.",
@@ -5356,9 +5329,7 @@
     "hostRefused": "{{name}} n'a pas accepté cela. Rien n'a été enregistré.",
     "neverSeen": "Le bot ne voit jamais ce que vous saisissez. Il apprend seulement si c'est enregistré.",
     "notConnected": "Aucune connexion au service. Rien n'a été envoyé et ce que vous avez saisi est toujours là.",
-    "origins": "Sites web sur lesquels il peut être saisi (facultatif, un par ligne)",
     "password": "Mot de passe",
-    "programs": "Programmes dans lesquels il peut être saisi (facultatif)",
     "purposeLabel": "Écrit par le bot (non vérifié par Praxi) :",
     "replaces": "Cela remplace la valeur enregistrée pour {{name}}.",
     "stored": "Enregistré dans le coffre-fort. Le bot a été informé qu'il est enregistré.",
@@ -5457,24 +5428,16 @@
   },
   "settings": {
     "accent": {
-      "custom": "Couleur personnalisée",
-      "description": "Choisissez une couleur d'accent pour les éléments interactifs et les indicateurs actifs.",
       "presets": {
         "amber": "Ambre",
         "blue": "Bleu océan",
         "emerald": "Émeraude",
         "rose": "Rose",
         "violet": "Violet royal"
-      },
-      "reset": "Revenir à la couleur du thème",
-      "title": "Couleur d'accent"
+      }
     },
     "autostart": {
       "description": "Ouvre Praxi-Bot automatiquement quand vous ouvrez une session Windows. Désactivé par défaut, il n'affecte que votre propre compte Windows et ne demande aucun droit d'administrateur. Vous pouvez le désactiver ici à tout moment.",
-      "disable": "Désactiver le démarrage automatique",
-      "disabled": "Désactivé (par défaut)",
-      "enable": "Activer le démarrage automatique",
-      "enabled": "Activé",
       "error": "Impossible de modifier le réglage de démarrage automatique de Windows.",
       "title": "Démarrer à l'ouverture de session"
     },
@@ -5506,7 +5469,6 @@
       "title": "Résumé quotidien"
     },
     "hotkey": {
-      "currentLabel": "Raccourci actif",
       "description": "Annule les exécutions de bots en cours. Dans l'application de bureau Windows, il fonctionne aussi quand une autre application a le focus. Sur les autres plateformes, donnez d'abord le focus à Praxi-Bot.",
       "presets": {
         "altShiftS": "Alt+Shift+S",
@@ -5515,7 +5477,6 @@
       },
       "record": "Enregistrer un raccourci",
       "recording": "Appuyez sur un modificateur + une touche…",
-      "reset": "Revenir à Ctrl+Alt+Esc",
       "title": "Raccourci « Tout arrêter »"
     },
     "keepInTray": {
@@ -5551,9 +5512,6 @@
       "description": "Rouvrez l'assistant de configuration en 5 étapes pour régler un fournisseur de modèles, les paramètres de sécurité par défaut ou votre premier bot.",
       "restart": "Relancer l'assistant de configuration",
       "resume": "Reprendre l'assistant de configuration",
-      "statusCompleted": "Terminé",
-      "statusPending": "Pas encore terminé",
-      "statusSkipped": "En pause à l'étape {{step}} sur 5",
       "title": "Assistant de première configuration"
     },
     "permissions": {
@@ -5609,7 +5567,6 @@
       "noModel": "aucun modèle",
       "none": "Aucun fournisseur configuré pour l'instant.",
       "notLoaded": "Pas encore chargé",
-      "offline": "Le service local n'est pas en cours d'exécution. Redémarrez-le pour gérer les fournisseurs.",
       "provider": "Fournisseur",
       "restart": "Redémarrer le service d'arrière-plan",
       "restartHint": "Redémarrez le service d'arrière-plan pour qu'il prenne la modification en compte.",
@@ -5638,15 +5595,7 @@
     "route": {
       "title": "Acheminement"
     },
-    "subtitle": "Personnalisez le mode du thème, la couleur d'accent, l'arrière-plan et la langue de l'interface.",
-    "theme": {
-      "dark": "Sombre",
-      "description": "Basculez entre le mode clair, le mode sombre ou celui du système.",
-      "light": "Clair",
-      "system": "Système",
-      "title": "Mode du thème"
-    },
-    "title": "Apparence et réglages"
+    "theme": {}
   },
   "settingsModal": {
     "ai": {
@@ -5656,14 +5605,11 @@
       },
       "detected": {
         "copied": "Commande copiée",
-        "copyCommand": "Copier la commande",
         "copyDetails": "Copier les détails",
         "description": "Les outils trouvés ici sont activés automatiquement quand vous êtes connecté. Si vous en désactivez un, il reste désactivé.",
         "detailsCopied": "Détails copiés",
-        "detailsToggle": "Détails",
         "detectError": "Impossible de vérifier les outils de programmation installés.",
         "dismissExpired": "Écarter l'approbation expirée",
-        "docs": "Documentation",
         "enabledToast": "{{name}} activé.",
         "experimentalChip": "Expérimental",
         "install": "Installer",
@@ -5678,16 +5624,12 @@
           "powershell_missing": "PowerShell est introuvable. Copiez la commande et exécutez-la dans votre terminal.",
           "timeout": "L'installation a dépassé dix minutes et a été arrêtée. Vérifiez la sortie avant de réessayer."
         },
-        "installLabel": "Commande d'installation",
         "installRunning": "Installation en cours… quitter cette section ne révoque pas une approbation déjà acceptée.",
         "installSummary": "Installer ou mettre à jour {{engine}}",
-        "loginLabel": "Se connecter avec",
-        "moreEngines": "Autres moteurs installables ({{count}})",
         "noteNative": "Fonctionne avec ses propres outils : choisissez-le dans les réglages « Moteur » d'un bot.",
         "noteUnsupported": "Praxi le détecte mais ne peut pas encore l'exécuter comme moteur.",
         "noteUnverified": "Commande non vérifiée : consultez la documentation du fournisseur, puis copiez-la et exécutez-la vous-même.",
         "offline": "Le service local n'est pas en cours d'exécution ; les outils de programmation détectés ne peuvent donc pas être affichés.",
-        "onThisComputer": "Sur cet ordinateur",
         "pathLabel": "Emplacement",
         "problem": "Cela n'a pas fonctionné.",
         "refresh": "Analyser à nouveau",
@@ -5700,8 +5642,7 @@
           "unsupported": "Pas encore pris en charge"
         },
         "termsNotice": "Les conditions de votre abonnement auprès du fournisseur s'appliquent ; vérifiez que l'utilisation automatisée du CLI est autorisée avant de l'activer.",
-        "title": "Trouvé sur cet ordinateur",
-        "toggle": "Utiliser {{name}}"
+        "title": "Trouvé sur cet ordinateur"
       },
       "keys": {
         "add": "Ajouter",
@@ -5781,6 +5722,7 @@
       "allGood": "Tout semble en ordre",
       "checkedAt": "Dernière vérification à {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Navigateur",
         "capabilities": "Capacités",
         "catalog_freshness": "Fraîcheur du catalogue de modèles",
@@ -5805,6 +5747,7 @@
       "description": "Vérifie pourquoi le bot pourrait ne pas fonctionner et corrige les problèmes courants.",
       "empty": "Aucune vérification n'a été renvoyée",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Installez Chrome, Edge ou Chromium (pas le paquet snap).",
         "catalog_freshness": "La liste de modèles sélectionnés date de plus de 90 jours ; mettez Praxi à jour ou exécutez `bot catalog check` pour consulter les modèles actuels.",
         "cli_accounts": "Ouvrez un terminal une fois et connectez-vous au CLI (par exemple `claude` ou `codex login`).",
@@ -6012,7 +5955,6 @@
       "ignored": "E-mails d'expéditeurs non autorisés ignorés : {{n}}",
       "needsSenders": "Ce canal fonctionnait sans liste d'expéditeurs autorisés : il ne transmet donc plus AUCUN e-mail au bot. Ajoutez, sous « Expéditeurs autorisés » dans les réglages de la boîte aux lettres ci-dessus, les adresses autorisées à écrire au bot (par exemple la vôtre). D'ici là, chaque e-mail reçu reste non lu dans la boîte.",
       "noAccount": "Ajoutez d'abord une boîte aux lettres ci-dessus.",
-      "noSenders": "La boîte aux lettres sélectionnée n'a aucun expéditeur autorisé : aucun e-mail n'atteindra donc le bot. Ajoutez votre propre adresse sous « Expéditeurs autorisés » dans les réglages de la boîte aux lettres ci-dessus.",
       "note": "Le courrier est écrit par d'autres personnes : le bot le traite donc comme une information, jamais comme des ordres. Par défaut, il ne voit que l'expéditeur, l'objet et les premières lignes. Les pièces jointes ne sont jamais ouvertes. Rien n'est envoyé, sauf si vous autorisez les réponses puis approuvez chacune d'elles ici.",
       "replies": "Laisser le bot suggérer des réponses (vous approuvez chacune avant son envoi)",
       "running": "En cours d'exécution",
@@ -6249,13 +6191,8 @@
       },
       "check": {
         "action": "Rechercher des mises à jour",
-        "description": "Recherche une version plus récente et montre les nouveautés. Rien n'est installé tant que vous ne le choisissez pas.",
-        "title": "Rechercher des mises à jour",
         "working": "Recherche en cours…"
       },
-      "daemon": "Service d'arrière-plan",
-      "daemonDescription": "Processus local `bot serve`.",
-      "description": "Versions de l'application et du service d'arrière-plan.",
       "devBuild": "Build de développement",
       "errors": {
         "busy": "Une mise à jour est déjà en cours.",
@@ -6272,8 +6209,6 @@
         "hint": "L'authenticité de la mise à jour est vérifiée avant son installation. Praxi-Bot redémarre une fois l'opération terminée.",
         "working": "Mise à jour en cours…"
       },
-      "lastChecked": "Dernière vérification : {{time}}",
-      "neverChecked": "Les mises à jour n'ont pas encore été recherchées.",
       "notConfigured": "Les mises à jour sont indisponibles : ce build n'a pas de clé de signature du programme de mise à jour ni de flux de mise à jour sécurisé configurés. Rien ne sera téléchargé ni installé.",
       "rollback": {
         "action": "Revenir à la version précédente",
@@ -6283,7 +6218,6 @@
       },
       "skip": "Ignorer cette version",
       "skipped": "La version {{version}} est ignorée. Les versions plus récentes seront toujours proposées.",
-      "title": "À propos",
       "unknown": "Inconnu",
       "upToDate": "Vous avez la dernière version."
     },
@@ -6327,7 +6261,6 @@
       "testing": "Test en cours…",
       "title": "Recherche web",
       "toast": {
-        "keyCleared": "Clé d'API supprimée du stockage des secrets",
         "saved": "Réglages de la recherche web enregistrés"
       },
       "toggleBackend": "Activer ou désactiver {{name}}"
@@ -6340,7 +6273,6 @@
   },
   "sidebar": {
     "apps": "Applications",
-    "botsSection": "Bots",
     "mainBotHint": "Bot principal : celui par défaut pour les nouvelles conversations",
     "needsYou": "À votre attention",
     "needsYouCount": "{{count}} en attente de vous",
@@ -6352,10 +6284,7 @@
     "reorderHint": "Faites glisser la ligne, ou placez le focus sur cette poignée et appuyez sur la flèche haut/bas",
     "reorderMoved": "{{name}} déplacé à la position {{pos}}",
     "schedules": "Tâches planifiées",
-    "settings": "Réglages",
-    "unread": "Message non lu",
-    "unreadBot": "Nouveaux messages de ce bot",
-    "usage": "Utilisation"
+    "unreadBot": "Nouveaux messages de ce bot"
   },
   "skillFromChat": {
     "ack": "J’ai lu le texte et la vérification de sécurité, et je veux enregistrer cette skill.",
@@ -6584,7 +6513,6 @@
     "found": "Programs found: {{n}}",
     "lead": "Programs your bots can use on this server.",
     "licenseMixed": "Licences multiples",
-    "licenseName": "Licence {{name}}",
     "listLabel": "Tool packs",
     "loading": "Looking at the server…",
     "noLogin": {
@@ -6810,7 +6738,6 @@
     "safe": "Si quelque chose se passe mal, le serveur revient à la version qu'il avait avant. Vous verrez ce qui s'est passé et ce qu'il faut faire ensuite.",
     "showCommands": "Afficher plutôt les commandes",
     "showLog": "Afficher les détails",
-    "starting": "Démarrage de la mise à jour…",
     "stopped": "La mise à jour a été arrêtée avant la fin.",
     "thisServer": "ce serveur",
     "title": "Mettre à jour le serveur",
@@ -6830,7 +6757,6 @@
     "completion": "Complétion",
     "cost": "Coût",
     "costNote": "Le coût n'est affiché que pour les modèles dont le prix est connu ; un prix inconnu n'est jamais affiché comme zéro.",
-    "day": "Jour",
     "deletedBot": "Bot supprimé",
     "empty": "Envoyez un message à un bot et son utilisation apparaîtra ici, avec une estimation du coût.",
     "emptyTitle": "Rien d'utilisé pour l'instant",
@@ -7038,7 +6964,6 @@
     "newItem": "New item",
     "noBotAssigned": "No bot has access",
     "noOrigin": "No website",
-    "openButton": "Open vault",
     "revealConfirm": {
       "body": "Only reveal or copy this secret when nobody else can see your screen. Copied passwords are cleared after 30 seconds.",
       "copyConfirm": "Copy password",

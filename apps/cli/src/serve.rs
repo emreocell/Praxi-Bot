@@ -1248,6 +1248,7 @@ pub fn serve(
         }
     }
     let composio_tools = mcp_tools.clone();
+    let openapi_registry = mcp_tools.clone();
     // Safe mode registers no connector at all: no email, Home Assistant, calendar or web
     // tools (their settings routes answer "not configured" until a normal start).
     let (email, calendar, homeassistant) = if safe_mode {
@@ -1550,6 +1551,7 @@ pub fn serve(
         });
         step("mcp host ready, server connections start in background");
         if let Some(mcp) = &mcp {
+            mcp.set_elicitor(agent.elicitor());
             state.set_mcp(Arc::clone(mcp) as Arc<dyn McpControl>);
         }
         state.set_components(crate::components_host::ComponentHost::system());
@@ -1573,6 +1575,16 @@ pub fn serve(
                 Ok(host) => state.set_composio(host as Arc<dyn daemon_api::ComposioControl>),
                 Err(e) => support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: composio: {e}; app connections are off"),
             }
+        }
+        // REST APIs from OpenAPI documents: credentials stay in the secret store, only the
+        // operations the owner enabled become tools, each for the bots they chose.
+        if let Some(store) = telegram_store.clone().filter(|_| !safe_mode) {
+            let register: Arc<dyn Fn(&str) + Send + Sync> = {
+                let handle = redactor.clone();
+                Arc::new(move |value| handle.register(value))
+            };
+            let host = crate::openapi_host::OpenApiHost::start(data_dir, openapi_registry, store, register);
+            state.set_openapi_apps(host as Arc<dyn daemon_api::OpenApiAppsControl>);
         }
         let email_for_channel = email.clone();
         if let Some(email) = email {
@@ -1600,6 +1612,7 @@ pub fn serve(
             support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "mcp: {configured} server(s) configured");
         }
         step("components and apps wired");
+        daemon_api::account_health::spawn_daily(state.clone());
         // Loopback only: never bind another interface.
         let listener = tokio::net::TcpListener::from_std(socket)?;
         let addr = listener.local_addr()?;
@@ -1852,7 +1865,10 @@ paths:
 ";
         let (_api, imported) = openapi_tools::import_tools(
             openapi,
-            &openapi_tools::ImportOptions::default(),
+            &openapi_tools::ImportOptions {
+                server_host: Some("api.example.com".to_string()),
+                ..openapi_tools::ImportOptions::default()
+            },
             &openapi_tools::OpenApiConfig::new(secrets),
         )
         .unwrap();

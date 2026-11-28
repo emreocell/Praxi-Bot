@@ -1,0 +1,33 @@
+/* "REST APIs" section of the Apps dialog. Tokens only. */
+.root { display: flex; flex-direction: column; gap: var(--space-4); }
+.label { margin: var(--space-0); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-muted); }
+.form { display: flex; flex-direction: column; gap: var(--space-3); max-width: calc(var(--space-6) * 20); }
+.actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.error { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-size-xs); color: var(--color-danger); line-height: var(--line-height-normal); }
+.errorDetail { overflow-wrap: anywhere; color: var(--color-text-muted); }
+
+.list { margin: var(--space-0); padding: var(--space-0); list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.card { border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); }
+.cardHead { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); min-width: var(--space-0); }
+.expand { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-0); border: none; background: none; color: var(--color-text); font: inherit; font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); cursor: pointer; }
+.expand svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }
+.expand:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+.cardName { white-space: nowrap; }
+.cardSub { flex: 1; min-width: var(--space-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.cardBody { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-0) var(--space-3) var(--space-3); }
+
+.toolbar { display: flex; align-items: flex-end; gap: var(--space-3); flex-wrap: wrap; }
+.picker { display: flex; flex-direction: column; gap: var(--space-1); }
+
+.ops { margin: var(--space-0); padding: var(--space-0); list-style: none; display: flex; flex-direction: column; max-height: calc(var(--space-6) * 14); overflow-y: auto; }
+.op { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-1) var(--space-0); }
+.opLabel { flex: 1; min-width: var(--space-0); display: flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.opText { display: flex; flex-direction: column; min-width: var(--space-0); }
+.opPath { font-family: var(--font-mono); font-size: var(--font-size-xs); overflow-wrap: anywhere; color: var(--color-text); }
+.opSummary { font-size: var(--font-size-xs); color: var(--color-text-muted); overflow-wrap: anywhere; }
+.method { flex-shrink: 0; min-width: calc(var(--space-6) * 2); font-family: var(--font-mono); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); }
+.effect_read { color: var(--color-success); }
+.effect_write { color: var(--color-warning); }
+.effect_destructive { color: var(--color-danger); }
+.ask { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.ask svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }

@@ -2,14 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { approvalKeyAction, type ApprovalKeyEvent } from "./approvalKeys.ts";
 
-/** A DOM element as far as the rules see it: which selectors it (or an ancestor) matches. */
-function el(tag: string, ancestry: string[], value?: string) {
-  return {
+/**
+ * A DOM element as far as the rules see it: which selectors it (or an ancestor) matches. `self` lists
+ * the selectors the element itself matches (`closest` then returns the element, as in a browser).
+ */
+function el(tag: string, ancestry: string[], value?: string, self: string[] = []) {
+  const node = {
     tagName: tag,
     value,
-    closest: (sel: string) => (ancestry.some((a) => sel.split(",").map((s) => s.trim()).includes(a)) ? {} : null)
+    closest: (sel: string): unknown => {
+      const wanted = sel.split(",").map((x) => x.trim());
+      if (self.some((x) => wanted.includes(x))) return node;
+      return ancestry.some((x) => wanted.includes(x)) ? {} : null;
+    }
   };
+  return node;
 }
+const CARD = "[data-approval-card]";
+/** The card root with the focus; and something inside the card with the focus. */
+const card = () => el("DIV", [CARD], undefined, [CARD]);
+const inCard = (tag: string, matches: string[], value?: string) => el(tag, [CARD, ...matches], value);
 
 const ev = (key: string, target: unknown, extra: Partial<ApprovalKeyEvent> = {}): ApprovalKeyEvent => ({
   key,
@@ -22,46 +34,54 @@ const ev = (key: string, target: unknown, extra: Partial<ApprovalKeyEvent> = {})
 });
 const ready = { armed: true, canAllow: true };
 
-test("Enter allows and Escape denies when the focus is on the page", () => {
-  const body = el("BODY", []);
-  assert.equal(approvalKeyAction(ev("Enter", body), ready), "allow");
-  assert.equal(approvalKeyAction(ev("Escape", body), ready), "deny");
+test("Enter allows and Escape denies when the card itself has the focus", () => {
+  assert.equal(approvalKeyAction(ev("Enter", card()), ready), "allow");
+  assert.equal(approvalKeyAction(ev("Escape", card()), ready), "deny");
 });
 
-test("an empty composer lets the keys through, a composer with text never does", () => {
+test("neither key decides a card from the page, the composer (empty or not) or any other control", () => {
+  const body = el("BODY", []);
+  const html = el("HTML", []);
   const empty = el("TEXTAREA", ["[data-composer-input]", "textarea"], "");
   const typed = el("TEXTAREA", ["[data-composer-input]", "textarea"], "hello");
-  assert.equal(approvalKeyAction(ev("Enter", empty), ready), "allow");
-  assert.equal(approvalKeyAction(ev("Escape", empty), ready), "deny");
-  assert.equal(approvalKeyAction(ev("Enter", typed), ready), null);
-  assert.equal(approvalKeyAction(ev("Escape", typed), ready), null);
-});
-
-test("another field, a dialog, a modifier or an IME composition never decides a card", () => {
   const search = el("INPUT", ["input"], "");
-  assert.equal(approvalKeyAction(ev("Escape", search), ready), null);
-  const inModal = el("BODY", ["[role='dialog']"]);
-  assert.equal(approvalKeyAction(ev("Enter", inModal), ready), null);
-  assert.equal(approvalKeyAction(ev("Enter", el("BODY", []), { ctrlKey: true }), ready), null);
-  assert.equal(approvalKeyAction(ev("Enter", el("BODY", []), { shiftKey: true }), ready), null);
-  assert.equal(approvalKeyAction(ev("Enter", el("BODY", []), { isComposing: true }), ready), null);
-  assert.equal(approvalKeyAction(ev("Enter", el("BODY", []), { defaultPrevented: true }), ready), null);
-  // Somewhere else in the page (a sidebar button) is not "the page itself".
-  assert.equal(approvalKeyAction(ev("Escape", el("BUTTON", ["button"])), ready), null);
+  const sidebar = el("BUTTON", ["button"]);
+  for (const target of [body, html, empty, typed, search, sidebar, null, undefined]) {
+    assert.equal(approvalKeyAction(ev("Enter", target), ready), null);
+    assert.equal(approvalKeyAction(ev("Escape", target), ready), null);
+  }
+  // The dock around the card is not the card.
+  assert.equal(approvalKeyAction(ev("Enter", el("SECTION", ["[data-approval-dock]"])), ready), null);
+  assert.equal(approvalKeyAction(ev("Escape", el("SECTION", ["[data-approval-dock]"])), ready), null);
 });
 
-test("inside the dock a focused button keeps its own Enter, Escape still denies", () => {
-  const button = el("BUTTON", ["[data-approval-dock]", "button"]);
-  assert.equal(approvalKeyAction(ev("Enter", button), ready), null);
+test("inside the card only the card itself answers Enter: a button, a link, a code block or a field never does", () => {
+  const button = inCard("BUTTON", ["button"]);
+  const code = inCard("PRE", []);
+  const toggle = inCard("SUMMARY", ["summary"]);
+  const reason = inCard("INPUT", ["input"], "");
+  for (const target of [button, code, toggle, reason]) {
+    assert.equal(approvalKeyAction(ev("Enter", target), ready), null);
+  }
+  // Escape still denies from a button or the text of the card, but not from its field.
   assert.equal(approvalKeyAction(ev("Escape", button), ready), "deny");
-  const reason = el("INPUT", ["[data-approval-dock]", "input"], "");
+  assert.equal(approvalKeyAction(ev("Escape", code), ready), "deny");
   assert.equal(approvalKeyAction(ev("Escape", reason), ready), null);
 });
 
+test("a dialog, a modifier or an IME composition never decides a card", () => {
+  const inModal = el("DIV", [CARD, "[role='dialog']"], undefined, [CARD]);
+  assert.equal(approvalKeyAction(ev("Enter", inModal), ready), null);
+  assert.equal(approvalKeyAction(ev("Enter", card(), { ctrlKey: true }), ready), null);
+  assert.equal(approvalKeyAction(ev("Enter", card(), { shiftKey: true }), ready), null);
+  assert.equal(approvalKeyAction(ev("Enter", card(), { isComposing: true }), ready), null);
+  assert.equal(approvalKeyAction(ev("Enter", card(), { keyCode: 229 }), ready), null);
+  assert.equal(approvalKeyAction(ev("Enter", card(), { defaultPrevented: true }), ready), null);
+});
+
 test("Enter never allows a card that must be read or that has only just appeared", () => {
-  const body = el("BODY", []);
-  assert.equal(approvalKeyAction(ev("Enter", body), { armed: false, canAllow: true }), null);
-  assert.equal(approvalKeyAction(ev("Enter", body), { armed: true, canAllow: false }), null);
+  assert.equal(approvalKeyAction(ev("Enter", card()), { armed: false, canAllow: true }), null);
+  assert.equal(approvalKeyAction(ev("Enter", card()), { armed: true, canAllow: false }), null);
   // Denying is always safe, so it needs neither.
-  assert.equal(approvalKeyAction(ev("Escape", body), { armed: false, canAllow: false }), "deny");
+  assert.equal(approvalKeyAction(ev("Escape", card()), { armed: false, canAllow: false }), "deny");
 });

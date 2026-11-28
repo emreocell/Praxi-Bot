@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod approval;
 pub mod conformance;
+pub mod control;
 mod error;
 pub mod notice;
 pub mod pairing;
@@ -124,6 +125,12 @@ pub struct IncomingMessage {
     pub sender: SenderIdentity,
     /// Message identifier, when available.
     pub message_id: Option<String>,
+    /// The message was forwarded from somewhere else: its words are not the sender's own.
+    #[serde(default)]
+    pub forwarded: bool,
+    /// The message is an edit of an earlier one: what runs must be typed fresh.
+    #[serde(default)]
+    pub edited: bool,
     /// Text, unsupported attachment label, or callback.
     pub kind: IncomingKind,
 }

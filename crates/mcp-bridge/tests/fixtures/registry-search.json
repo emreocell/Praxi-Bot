@@ -1,0 +1,47 @@
+{
+  "servers": [
+    {
+      "server": {
+        "name": "io.github.fixture/weather",
+        "description": "Forecasts <script>example</script>\u202e",
+        "version": "2.1.0",
+        "repository": { "url": "https://example.com/weather" },
+        "packages": [
+          {
+            "registryType": "npm",
+            "registryBaseUrl": "https://registry.npmjs.org",
+            "identifier": "@fixture/weather",
+            "version": "2.1.0",
+            "transport": { "type": "stdio" },
+            "packageArguments": [{ "type": "named", "name": "--format", "value": "short forecast" }],
+            "environmentVariables": [{ "name": "WEATHER_KEY", "isRequired": true, "isSecret": true }]
+          },
+          {
+            "registryType": "npm",
+            "identifier": "@fixture/floating",
+            "version": "latest",
+            "transport": { "type": "stdio" }
+          },
+          {
+            "registryType": "pypi",
+            "identifier": "weather",
+            "version": "2.1.0",
+            "transport": { "type": "stdio" },
+            "runtimeArguments": [{ "type": "named", "name": "--index-url", "value": "https://example.com" }]
+          }
+        ],
+        "remotes": [{
+          "type": "streamable-http",
+          "url": "https://example.com/mcp",
+          "headers": [{ "name": "Authorization", "isRequired": true }]
+        }]
+      },
+      "_meta": { "io.modelcontextprotocol.registry/official": { "status": "active", "isLatest": true } }
+    },
+    {
+      "server": { "name": "io.github.fixture/plain", "description": "No launch source", "version": "1.0.0" },
+      "_meta": { "io.modelcontextprotocol.registry/official": { "status": "deprecated", "isLatest": true } }
+    }
+  ],
+  "metadata": { "count": 2 }
+}

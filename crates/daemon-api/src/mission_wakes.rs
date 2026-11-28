@@ -15,8 +15,9 @@ use builtin_tools::connector_email::{
     MailHandle, WaitEnd, WaitFilter, WaitPlan, found_json, link_basis, wait_for_mail,
 };
 use missions::wake::{MailCheck, MailHit, MailProbe, WakeChecks};
-use protocol::{BotId, UserId};
+use protocol::{BotId, RunId, UserId};
 use storage::Storage;
+use task_runtime::RunState;
 use uuid::Uuid;
 
 /// A mail a little older than the wait itself still counts (the clocks of the mail server and
@@ -58,6 +59,33 @@ impl WakeChecks for DaemonWakeChecks {
             return Err("that webhook is turned off".into());
         }
         Ok(hook.name)
+    }
+
+    fn child_run(&self, parent_run_id: &str, child_run_id: &str) -> Result<String, String> {
+        let parent = Uuid::parse_str(parent_run_id.trim())
+            .map_err(|_| "this is not a mission session run".to_string())?;
+        let child = Uuid::parse_str(child_run_id.trim())
+            .map_err(|_| "child_run must be a run id".to_string())?;
+        let parent = self
+            .storage
+            .get_run(RunId(parent))
+            .map_err(|e| format!("the session could not be read: {e}"))?
+            .ok_or_else(|| "the session run no longer exists".to_string())?;
+        if missions::mission_of_kind(&parent.kind).is_none() {
+            return Err("this is not a mission session run".into());
+        }
+        let child = self
+            .storage
+            .get_run(RunId(child))
+            .map_err(|e| format!("the child run could not be read: {e}"))?
+            .ok_or_else(|| "that child run does not exist".to_string())?;
+        if child.parent_run_id != Some(parent.id) {
+            return Err("that run is not a child of this mission session".into());
+        }
+        if RunState::parse(&child.state).is_some_and(RunState::is_terminal) {
+            return Err("that child run already finished".into());
+        }
+        Ok(child.kind)
     }
 }
 

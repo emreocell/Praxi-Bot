@@ -7,6 +7,7 @@ import {
   Plus,
   Square,
   CalendarClock,
+  Rocket,
   CircleHelp,
   Download,
   LayoutGrid,
@@ -43,10 +44,9 @@ import { NewMessagesDivider } from "../components/NewMessagesDivider";
 import { BotAvatar, Button } from "ui";
 import { isMockMode } from "../api/mockMode";
 import { ApiError } from "../api/client";
-import type { Bot, Message } from "../api/types";
+import type { Bot, Message, Mission } from "../api/types";
 import {
   ApprovalCard,
-  enterMayAllow,
   NoticeLine,
   QuestionCard,
   SubagentCard,
@@ -57,6 +57,7 @@ import { ApprovalBatchCard } from "../components/ApprovalBatchCard";
 import { ApprovalDock, type DockPage } from "../components/ApprovalDock";
 import { runWasRedirected } from "../lib/approvalSkip";
 import { PendingDecisions, useDecisionActions } from "../components/PendingDecisions";
+import { ElicitationCard } from "../components/ElicitationCard";
 import { HandoverCard } from "../components/HandoverCard";
 import { useDragPopOut } from "../components/useDragPopOut";
 import { SecretRequestCard } from "../components/SecretRequestCard";
@@ -77,6 +78,8 @@ import { ComposerPlusMenu } from "../components/ComposerPlusMenu";
 import { DictateButton } from "../components/DictateButton";
 import { useVoiceCall } from "../components/voiceCall/useVoiceCall";
 import { VoiceCallPanel } from "../components/voiceCall/VoiceCallPanel";
+import { useLiveVoice } from "../components/liveVoice/useLiveVoice";
+import { LiveVoicePanel, TalkButton } from "../components/liveVoice/LiveVoicePanel";
 import { MessageInfo } from "../components/MessageInfo";
 import { MessageActions } from "../components/MessageActions";
 import { composerPlaceholderKey, shouldFocusOnBoxClick, shouldTypeToFocus } from "../lib/composerFocus";
@@ -140,8 +143,10 @@ import {
   applyCompletion,
   detectTrigger,
   APP_COMMAND_EVENT,
+  COMPOSE_EVENT,
   isExportCommand,
   appCommandFor,
+  missionCommandGoal,
   parseSlashInput,
   unknownSlashCommand
 } from "../lib/slash";
@@ -176,8 +181,11 @@ import { BotFilesCard } from "../components/BotFilesCard";
 import { ComputerUseOffCard } from "../components/ComputerAccess";
 import { ComputerTargetChip, computerTargetOf } from "../components/ComputerTargetChip";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { MissionChatHeader, MissionDigestMessage, useChatMission } from "../components/MissionChatHeader";
+import { missionErrorText } from "../components/MissionBlock";
+import { MissionChatHeader, MissionDigestMessage, MissionStartedCard, useChatMission } from "../components/MissionChatHeader";
+import { chatMissionIds, rememberChatMission } from "../lib/chatMissions";
 import { parseMissionDigest } from "../lib/missionDigestText";
+import { isActiveMission, missionsStartedIn } from "../lib/missions";
 import { itemsWithoutDuplicateError } from "../lib/runErrorNotice";
 
 /** Empty-chat prompt starters (plain text for the composer, not commands). */
@@ -193,7 +201,7 @@ const STARTERS = [
 
 const SLASH_ICONS: Record<string, typeof Plus> = {
   new: Plus, stop: Square, export: Download, help: CircleHelp,
-  settings: Settings2, models: Brain, apps: LayoutGrid, schedules: CalendarClock
+  settings: Settings2, models: Brain, apps: LayoutGrid, schedules: CalendarClock, mission: Rocket
 };
 
 /** A specific, known failure (the same one in two wordings); the catch-all codes say nothing. */
@@ -228,7 +236,8 @@ type Entry =
   | { kind: "runStopped"; key: string; ts: number }
   | { kind: "route"; key: string; ts: number; run: RunState }
   | { kind: "changes"; key: string; ts: number; run: RunState }
-  | { kind: "timeline"; key: string; ts: number; run: RunState; remember: boolean; workflow: boolean };
+  | { kind: "timeline"; key: string; ts: number; run: RunState; remember: boolean; workflow: boolean }
+  | { kind: "mission"; key: string; ts: number; mission: Mission };
 
 /** `idle` = offer the button; `saved` = done; `hidden` = the daemon said no (409). */
 type RememberState = "idle" | "busy" | "saved" | "hidden";
@@ -316,8 +325,6 @@ export function ChatView({
   } = useDaemon();
   const chat = chats.find((c) => c.id === chatId);
   const bot = bots.find((b) => b.id === chat?.bot_id);
-  // A mission's chat: a compact progress header on top and its reports as cards (ux3-missions).
-  const chatMission = useChatMission(chat?.bot_id, chatId);
   const view = bot ? botView(bot) : null;
   const { dto: providersDto } = useProviders();
   const { report: connectionReport, state: connectionState } = useConnectivity();
@@ -518,6 +525,31 @@ export function ChatView({
     [events, chatId]
   );
   useAutoSpeak(chatId, chatRuns, external);
+
+  // A mission's chat: a compact progress header on top and its reports as cards (ux3-missions).
+  // Any other chat: a card for each mission started from it, by `/mission` or by the bot itself.
+  const [linkedMissions, setLinkedMissions] = useState<string[]>(() => chatMissionIds(chatId));
+  useEffect(() => setLinkedMissions(chatMissionIds(chatId)), [chatId]);
+  const ownMessages = useMemo(
+    () => messages.filter((m) => m.role === "user" && !m.superseded).map((m) => ({ text: m.content, ts: m.created_at_ms })),
+    [messages]
+  );
+  const chatMission = useChatMission(chat?.bot_id, chatId, true, (all) =>
+    missionsStartedIn(all, chatId, ownMessages, linkedMissions).some(isActiveMission)
+  );
+  const startedMissions = useMemo(
+    () => missionsStartedIn(chatMission.all, chatId, ownMessages, linkedMissions),
+    [chatMission.all, chatId, ownMessages, linkedMissions]
+  );
+  // The bot started a mission in this chat (`mission_create`): read the missions again for its card.
+  const missionCreates = chatRuns.reduce(
+    (n, r) => n + r.items.filter((i) => i.kind === "tool" && i.name === "mission_create" && i.completedMs !== undefined).length,
+    0
+  );
+  const refreshChatMission = chatMission.refresh;
+  useEffect(() => {
+    if (missionCreates > 0) void refreshChatMission();
+  }, [missionCreates, refreshChatMission]);
   const finishedCount = chatRuns.filter(
     (r) => r.finishedMs !== undefined
   ).length;
@@ -744,6 +776,9 @@ export function ChatView({
         });
       }
     }
+    for (const mission of startedMissions) {
+      out.push({ kind: "mission", key: `mission-${mission.id}`, ts: mission.started_at_ms, mission });
+    }
     // Array.prototype.sort is stable: equal timestamps keep insertion order.
     const sorted = out.sort((a, b) => a.ts - b.ts);
     const unreadAt = seenUntilMs === null ? undefined : sorted.find((e) => e.kind !== "user" && e.ts > seenUntilMs)?.key;
@@ -752,7 +787,7 @@ export function ChatView({
       return index === 0 || new Date(entry.ts).toDateString() !== new Date(sorted[index - 1].ts).toDateString()
         ? [{ kind: "day", key: `day-${entry.key}`, ts: entry.ts }, ...marker, entry] : [...marker, entry];
     });
-  }, [messages, chatRuns, showAgentRoute, remember, seenUntilMs, serverRuns, jumpMessageId]);
+  }, [messages, chatRuns, showAgentRoute, remember, seenUntilMs, serverRuns, jumpMessageId, startedMissions]);
 
   const lastActionsKey = useMemo(() => {
     for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -937,6 +972,14 @@ export function ChatView({
       }
     });
   };
+  // "Start a mission" in the bot panel puts "/mission " here: the mission starts from the chat.
+  const applyStarterRef = useRef(applyStarter);
+  applyStarterRef.current = applyStarter;
+  useEffect(() => {
+    const onCompose = (e: Event) => applyStarterRef.current((e as CustomEvent<string>).detail);
+    window.addEventListener(COMPOSE_EVENT, onCompose);
+    return () => window.removeEventListener(COMPOSE_EVENT, onCompose);
+  }, []);
 
   // Switching chats/hosts or closing the view cancels pending work and releases previews.
   useEffect(() => () => attachments.clear(), [attachments, chatId, client]);
@@ -1007,6 +1050,31 @@ export function ChatView({
     }
     if (offline && (hasFiles || (body.startsWith("/") && parseSlashInput(body)?.name !== "stop"))) {
       toast.show(t("offline.keepDraft"), "info");
+      return;
+    }
+    // "/mission the job" (or "/görev"): the app starts the mission itself, as the owner, with no confirmation
+    // (on a Full bot nothing asks; below Full the daemon says why it cannot). The card shows up here.
+    const missionGoal = !hasFiles ? missionCommandGoal(body) : null;
+    if (missionGoal !== null) {
+      if (missionGoal === "") {
+        toast.show(t("missionChat.needsGoal"), "info");
+        return;
+      }
+      if (!chat) return;
+      setSending(true);
+      try {
+        const started = await client.startMission({ bot_id: chat.bot_id, goal: missionGoal });
+        rememberChatMission(chatId, started.mission.id);
+        setLinkedMissions(chatMissionIds(chatId));
+        setText("");
+        setNav(FRESH);
+        await chatMission.refresh();
+        scrollToEnd();
+      } catch (e) {
+        toast.show(t("missionChat.startFailed", { reason: missionErrorText(e) }), "danger");
+      } finally {
+        setSending(false);
+      }
       return;
     }
     // A message typed while the bot works joins the queue as a "Sirada." bubble (slash commands such
@@ -1479,7 +1547,6 @@ export function ChatView({
       rows.forEach((r) => r.items.forEach((i) => batched.add(i.callId)));
       dockPages.push({
         key: `batch-${runId}`,
-        keys: "none",
         render: () => (
           <ApprovalBatchCard
             variant="dock"
@@ -1498,7 +1565,6 @@ export function ChatView({
       if (!tool || batched.has(entry.callId)) continue;
       dockPages.push({
         key: entry.callId,
-        keys: enterMayAllow(tool) ? "both" : "deny",
         caption:
           entry.chatId === chatId
             ? null
@@ -1557,6 +1623,24 @@ export function ChatView({
       }
     }
   });
+  // Live voice conversation (docs/design/voice-live.md): what needs the bot goes out as an ordinary
+  // message, approvals stay click-only, and the words are written into this chat when it ends.
+  const liveVoice = useLiveVoice({
+    chatId,
+    botId: chat?.bot_id,
+    botName: view?.name ?? bot?.name ?? "",
+    runs: chatRuns,
+    awaitingApproval,
+    runActive: active,
+    callOpen: voiceCall.state.phase !== "idle",
+    sendText: async (spoken) => {
+      if (client) {
+        await client.sendMessage(chatId, spoken, undefined, await ownerKey(client.baseUrl));
+      }
+    },
+    onSaved: () => void loadMessages()
+  });
+  const liveOpen = liveVoice.state.phase !== "idle";
   // The bot that answered: a mentioned bot's run has its own bot id.
   const guestBot = (botId: string | null | undefined) =>
     botId && botId !== chat?.bot_id ? bots.find((b) => b.id === botId) : undefined;
@@ -1750,6 +1834,17 @@ export function ChatView({
             onTakeControl={decisions.takeControl}
           />
         );
+      case "elicitation":
+        if (nested && item.outcome === undefined && !item.closed) {
+          return <p className={ccStyles.nestedText}>{t("chat.pendingPinned")}</p>;
+        }
+        return (
+          <ElicitationCard
+            item={item}
+            onAnswer={decisions.answerElicitation(runId, item.callId)}
+            onCancel={decisions.cancelElicitation(runId, item.callId)}
+          />
+        );
       case "todo":
         return <TodoCard todo={item} />;
       case "notice":
@@ -1810,6 +1905,7 @@ export function ChatView({
 
       {!liveChatSlots?.root ? <MissionChatHeader chat={chatMission} /> : null}
       <div className={styles.scrollWrap}>
+      <LiveVoicePanel live={liveVoice} botName={view?.name ?? bot?.name ?? ""} />
       {findOpen ? (
         <ChatFindBar key={findSeed.n} rootRef={timelineRef} contentKey={entries} initialQuery={findSeed.q} onClose={() => setFindOpen(false)} />
       ) : null}
@@ -1924,6 +2020,13 @@ export function ChatView({
                     runActions={actionsHost === e.key ? runActions : undefined} />
                 );
               }
+              case "mission":
+                // A mission started from this chat: its progress and pause/stop, one click from its own chat.
+                return (
+                  <div key={e.key} id={e.key} className={styles.missionRow} data-testid="chat-mission-row">
+                    <MissionStartedCard mission={e.mission} onChanged={chatMission.refresh} />
+                  </div>
+                );
               case "imported_note": {
                 const counts = importedNoteCounts(e.text);
                 return (
@@ -2382,12 +2485,13 @@ export function ChatView({
                 inputRef.current?.focus();
               }}
               onAttach={() => fileInputRef.current?.click()}
-              voiceTitle={t(voiceCall.blockedReason ?? "voice.call.start")}
-              voiceBlocked={(voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") && Boolean(voiceCall.blockedReason)}
-              voiceNotice={voiceCall.state.notice ? t(voiceCall.state.notice) : voiceCall.blockedReason ? t(voiceCall.blockedReason) : undefined}
+              voiceTitle={t(liveOpen ? "voice.live.blockedByLive" : (voiceCall.blockedReason ?? "voice.call.start"))}
+              voiceBlocked={liveOpen || ((voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") && Boolean(voiceCall.blockedReason))}
+              voiceNotice={liveOpen ? t("voice.live.blockedByLive") : voiceCall.state.notice ? t(voiceCall.state.notice) : voiceCall.blockedReason ? t(voiceCall.blockedReason) : undefined}
               voiceExpanded={voiceCall.state.phase !== "idle"}
               voiceControls={voiceCall.state.phase !== "idle" ? "voice-call-panel" : undefined}
               onVoice={() => {
+                if (liveOpen) return;
                 if (voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") voiceCall.start();
                 else document.querySelector<HTMLElement>('[data-testid="voice-call"]')?.focus();
               }}
@@ -2405,6 +2509,7 @@ export function ChatView({
                 e.target.value = "";
               }}
             />
+            <TalkButton live={liveVoice} name={view?.name ?? bot?.name ?? ""} className={styles.plus} />
             <DictateButton
               className={styles.plus}
               onText={(dictated) => {

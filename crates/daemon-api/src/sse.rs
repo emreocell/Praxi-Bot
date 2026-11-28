@@ -955,9 +955,10 @@ pub(crate) fn classify(event: &protocol::Event) -> EventClass {
     use protocol::Event as E;
     match event {
         E::ApprovalNeeded(_) | E::QuestionAsked(_) => EventClass::Decision,
-        E::ControlRequested(_) | E::SecretRequested(_) | E::HandoverRequested(_) => {
-            EventClass::Control
-        }
+        E::ControlRequested(_)
+        | E::SecretRequested(_)
+        | E::HandoverRequested(_)
+        | E::ElicitationRequested(_) => EventClass::Control,
         E::RunStarted(_)
         | E::RunFinished(_)
         | E::MessageDelta(_)

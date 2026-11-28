@@ -245,6 +245,16 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
     let mut add = |id: &'static str, title: &'static str, f: Box<dyn FnOnce() -> Check + Send>| {
         jobs.push((id, title, f));
     };
+    let voice = s.voice();
+    add(
+        "offline_voice",
+        "offline voice",
+        Box::new(move || {
+            voice.map_or_else(crate::voice::offline_voice_unavailable, |v| {
+                v.offline_check()
+            })
+        }),
+    );
     add(
         "daemon",
         "daemon",
@@ -335,6 +345,7 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         Box::new(move || doctor::check_cli_accounts(det.as_deref().map(Vec::as_slice), &cli_ctx)),
     );
     let node_env = s.detector().environment().clone();
+    let data_for_node = data_dir.clone();
     add(
         "node_runtime",
         "node / npm",
@@ -342,6 +353,7 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
             doctor::check_node_runtime(
                 &cli_provider::node_runtime::probe(&node_env),
                 cli_provider::identity::installed_as_service(),
+                Some(data_for_node.as_path()),
             )
         }),
     );
@@ -361,6 +373,12 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         "catalog_freshness",
         "catalog freshness",
         Box::new(|| doctor::check_catalog_freshness(SystemTime::now())),
+    );
+    let d = data_dir.clone();
+    add(
+        "account_health",
+        "account sessions",
+        Box::new(move || doctor::check_account_sessions(&d)),
     );
     add(
         "browser",

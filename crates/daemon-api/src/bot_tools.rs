@@ -24,7 +24,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use builtin_tools::{
-    BOT_PRESETS, BotCaller, BotChange, BotHost, BotPreview, BotRequest, BotView, FieldChange,
+    BOT_PRESETS, BOT_SHAPES, BotCaller, BotChange, BotHost, BotPreview, BotRequest, BotView,
+    FieldChange,
 };
 use permission_engine::{Level, Policy, Rule};
 use protocol::{BotId, PermissionCategory, RunId, UserId};
@@ -95,6 +96,15 @@ fn clean_color(raw: &str) -> Result<String, String> {
         Ok(c.to_ascii_lowercase())
     } else {
         Err("`color` must look like #rrggbb".into())
+    }
+}
+
+fn clean_shape(raw: &str) -> Result<String, String> {
+    let s = raw.trim().to_ascii_lowercase();
+    if BOT_SHAPES.contains(&s.as_str()) {
+        Ok(s)
+    } else {
+        Err(format!("`shape` must be one of {}", BOT_SHAPES.join(", ")))
     }
 }
 
@@ -498,16 +508,37 @@ impl DaemonBotHost {
             .filter(|b| b.user_id == self.user_id))
     }
 
+    /// The "Can create bots" switch of the bot's profile.
     fn manages(config: &Value) -> bool {
         config.pointer("/tools/manage_bots") == Some(&Value::Bool(true))
     }
 
+    /// The bot is at the Full level (the loop offers it the bot tools in the owner's own chat;
+    /// the level alone is never enough to use them, see [`Self::caller`]).
+    fn full_level(config: &Value) -> bool {
+        serde_json::from_value::<agent_core::BotProfile>(config.clone())
+            .is_ok_and(|p| p.permissions.mode() == permission_engine::AutonomyMode::Full)
+    }
+
+    /// The run is the owner's own chat turn on a Full bot, as the agent loop knows it (the run
+    /// id is the loop's, never the model's).
+    fn owner_full_chat(&self, who: &BotCaller) -> bool {
+        self.app()
+            .is_ok_and(|app| app.agent().bot_tools_offered_to_run(&who.run_id))
+    }
+
+    /// The calling bot, for ONE call: the one gate of `list`, `preview`, `create`, `update` and
+    /// `delete` (each of them resolves its change through here, so an approved preview that is
+    /// applied later is judged again). A bot with the switch may use the tools in any run (its
+    /// changes are shown on a card); a bot at the Full level only in the owner's own chat turn,
+    /// as the loop knows that run right now (never a schedule, a mission, a helper or a run that
+    /// read untrusted content).
     fn caller(&self, who: &BotCaller) -> Result<Caller, String> {
         let bot = self
             .bot_by_id(&who.bot_id)?
             .ok_or("the calling bot does not exist")?;
-        if !Self::manages(&bot.config) {
-            return Err("bot management is not enabled for this bot; the user can turn on \"Can create bots\" in its settings".into());
+        if !Self::manages(&bot.config) && !self.owner_full_chat(who) {
+            return Err("bot management is only for the owner's own chat on a Full bot, or a bot with \"Can create bots\" switched on in its settings".into());
         }
         let profile: agent_core::BotProfile = serde_json::from_value(bot.config.clone())
             .map_err(|e| format!("the calling bot's profile is invalid: {e}"))?;
@@ -723,6 +754,7 @@ impl DaemonBotHost {
         let filter = agent_core::ToolFilter {
             allow: allow.clone(),
             exclude: exclude.clone(),
+            ..agent_core::ToolFilter::default()
         };
         c.profile.covers_tool_filter(&filter)?;
         let id = format!(
@@ -736,6 +768,9 @@ impl DaemonBotHost {
         bot.insert("persona".into(), json!(persona));
         if let Some(col) = &req.color {
             bot.insert("color".into(), json!(clean_color(col)?));
+        }
+        if let Some(shape) = &req.shape {
+            bot.insert("shape".into(), json!(clean_shape(shape)?));
         }
         if let Some(a) = &req.avatar {
             bot.insert("avatar".into(), json!(clean_avatar(a)?));
@@ -800,6 +835,10 @@ impl DaemonBotHost {
             section(root, "bot").insert("color".into(), json!(clean_color(col)?));
             touched = true;
         }
+        if let Some(shape) = &req.shape {
+            section(root, "bot").insert("shape".into(), json!(clean_shape(shape)?));
+            touched = true;
+        }
         if let Some(a) = &req.avatar {
             section(root, "bot").insert("avatar".into(), json!(clean_avatar(a)?));
             touched = true;
@@ -839,6 +878,7 @@ impl DaemonBotHost {
             let filter = agent_core::ToolFilter {
                 allow: allow.clone(),
                 exclude: exclude.clone(),
+                ..agent_core::ToolFilter::default()
             };
             c.profile.covers_tool_filter(&filter)?;
             tp.covers_tool_filter(&filter)
@@ -1003,6 +1043,15 @@ impl BotHost for DaemonBotHost {
             .ok()
             .flatten()
             .is_some_and(|b| Self::manages(&b.config))
+    }
+
+    /// The switch, or the Full level. This is what the tool list shows; it says nothing about
+    /// the run: `caller` decides for every call (list, preview, create, update, delete).
+    fn may_see_bot_tools(&self, bot_id: &str) -> bool {
+        self.bot_by_id(bot_id)
+            .ok()
+            .flatten()
+            .is_some_and(|b| Self::manages(&b.config) || Self::full_level(&b.config))
     }
 
     async fn list(&self, who: &BotCaller) -> Result<Vec<BotView>, String> {

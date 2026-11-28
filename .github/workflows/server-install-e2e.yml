@@ -1,0 +1,125 @@
+name: Server install e2e
+
+# Installs Praxi with scripts/install-linux.sh on a fresh Ubuntu 24.04 (a systemd container) from a
+# tarball built in this run, then checks the result: services, `praxi doctor`, the authenticated API on
+# loopback, the praxi command, Node.js/npm for the service user, the browser repair, --update,
+# --uninstall and --purge. It needs no GitHub release: see scripts/linux/tests/e2e/run.sh for how the
+# release verification stays real (the installer is unmodified; only /usr/bin/gh is a test double).
+#
+# Runs when the installer or its tests change, every Monday (a new Ubuntu image, Node.js or Chrome
+# for Testing download can break a server install without any change here), and by hand.
+on:
+  pull_request:
+    paths:
+      - "scripts/install-linux.sh"
+      - "scripts/linux/**"
+      - "packaging/**"
+      - ".github/workflows/server-install-e2e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/install-linux.sh"
+      - "scripts/linux/**"
+      - "packaging/**"
+      - ".github/workflows/server-install-e2e.yml"
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-install-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build bot and bot-node
+    # A scheduled run on a fork would only burn the fork owner's minutes.
+    if: github.event_name != 'schedule' || github.repository == 'emreocell/Praxi-Bot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev libssl-dev pkg-config libxcb1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
+
+      # A debug build: the test checks the installer, not the optimiser, and a release build of the
+      # whole dependency tree would not fit the time budget. PRs restore the cache that the weekly
+      # run and pushes to main save; they never save their own.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: server-install-e2e
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build bot and bot-node
+        run: cargo build --locked -p cli -p node-agent --bin bot --bin bot-node
+
+      - name: Collect the binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist/bin
+          for b in bot bot-node; do
+            install -m 0755 "target/debug/${b}" "dist/bin/${b}"
+            strip "dist/bin/${b}"
+          done
+          dist/bin/bot --version
+          dist/bin/bot-node --version
+
+      - name: Upload the binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-binaries
+          path: dist/bin
+          if-no-files-found: error
+          retention-days: 1
+
+  e2e:
+    name: Fresh Ubuntu 24.04, ${{ matrix.mode }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # host-mode: the minimal always-on service (the browser comes later, from the app's repair).
+        # headless: the server preset (host mode + Xvfb + Chrome for Testing from the installer).
+        mode: [host-mode, headless]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-binaries
+          path: dist/bin
+
+      # The container shares the runner's kernel. Ubuntu 24.04 blocks unprivileged user namespaces
+      # except for named AppArmor profiles, and the profile the installer loads on a real server cannot
+      # be loaded from inside a container. Chrome's sandbox would then never start, so the runner
+      # (a throwaway VM) allows them; E2E_REQUIRE_BROWSER makes the browser checks mandatory.
+      - name: Allow user namespaces for Chrome's sandbox (throwaway runner)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Install on a fresh Ubuntu 24.04 and check it
+        env:
+          MODE: ${{ matrix.mode }}
+          E2E_REQUIRE_BROWSER: "1"
+        run: |
+          set -euo pipefail
+          chmod +x dist/bin/bot dist/bin/bot-node
+          timeout -k 30s 15m bash scripts/linux/tests/e2e/run.sh --bin-dir dist/bin --mode "$MODE"

@@ -688,8 +688,6 @@
   },
   "approvalDock": {
     "counter": "Aprobación {{current}} de {{total}}",
-    "keyAllow": "Permitir una vez",
-    "keyDeny": "Denegar",
     "label": "Esperando tu aprobación",
     "next": "Aprobación siguiente",
     "previous": "Aprobación anterior"
@@ -802,18 +800,7 @@
     "connectedToast": "{{name}} conectada",
     "custom": {
       "add": "Añadir servidor",
-      "command": "Comando",
-      "env": "Entorno",
-      "envHint": "Una CLAVE=valor por línea.",
-      "errCommand": "Escribe el comando que se va a ejecutar.",
-      "errName": "Escribe un nombre.",
-      "errUrl": "Escribe una URL HTTP válida.",
-      "http": "HTTP",
-      "intro": "Añade a mano un servidor MCP stdio o HTTP.",
-      "name": "Nombre del servidor",
-      "stdio": "Stdio",
-      "transport": "Transporte",
-      "url": "URL del servidor"
+      "command": "Comando"
     },
     "disconnect": "Desconectar",
     "disconnectConfirm": "¿Quieres desconectar este servidor?",
@@ -1795,8 +1782,6 @@
     },
     "newChat": "Nuevo chat",
     "newChatFailed": "No se pudo iniciar el chat: {{detail}}",
-    "noModel": "Sin modelo",
-    "notFound": "Este bot ya no existe.",
     "skills": {
       "boundaryHint": "Esto limita las habilidades que se ofrecen al bot y que puede cargar con sus herramientas de habilidades. La carpeta no sirve para guardar secretos. Si el bot tiene acceso a archivos o a la terminal, aún puede leerla en el disco.",
       "browseLibrary": "Biblioteca de habilidades",
@@ -1955,7 +1940,7 @@
         "reviewFull": "Leer todo lo que se enviará"
       },
       "input": {
-        "label": "Lo que recibirá {{name}} exactamente",
+        "label": "Entrada completa (revísala antes de permitir)",
         "shortened": "Texto abreviado: solo se muestran los primeros {{shown}} caracteres."
       },
       "mail": {
@@ -2155,6 +2140,21 @@
       "approvedAt": "Approved · {{time}} into run",
       "deniedAt": "Denied · {{time}} into run",
       "details": "Detalles",
+      "grant": {
+        "balancedLevel": "Balanced level — no question needed",
+        "fullAccess": "Full access — no question needed",
+        "ownerCard": "You approved · {{time}} into run",
+        "ownerCardNoTime": "You approved",
+        "ownerMission": "Full access, your mission — no question needed",
+        "ownerSchedule": "Full access, your scheduled run — no question needed",
+        "remembered": "Remembered choice",
+        "rememberedAlways": "Remembered: always allow {{what}}",
+        "rememberedCategory": "Remembered: always allow the {{what}} category",
+        "rememberedChat": "Remembered for this chat: {{what}}",
+        "rememberedTask": "Remembered for this task: {{what}}",
+        "siteRule": "Your site rule allowed it",
+        "standingGrant": "Your standing permission"
+      },
       "groupApp": "{{app}} ×{{count}}",
       "groupSame": "{{what}} ×{{count}}",
       "groupSite": "Navegó por {{host}}",
@@ -2917,12 +2917,10 @@
     "save": "Guardar"
   },
   "computerAccess": {
-    "allow": "Permitir que los bots de {{name}} usen este equipo",
     "allowOnce": "Permitir una vez",
     "allowSession": "Permitir durante esta sesión",
     "alwaysRead": "Permitir que los bots de {{name}} vean la pantalla sin preguntar",
     "alwaysReadNote": "Si dejas esta opción desactivada, Praxi te pregunta una vez por sesión. Las ventanas de Praxi nunca se muestran.",
-    "askNote": "Cualquier acción que haga cambios te pide permiso antes.",
     "deny": "Denegar",
     "description": "Los servidores vinculados pueden pedir acceso para ver la pantalla de este equipo y actuar en él. Solo pueden hacerlo si tú das permiso.",
     "details": "Ver detalles",
@@ -3161,8 +3159,6 @@
     "offline": "El equipo seleccionado no está disponible. Vuelve a abrir el enlace cuando se conecte."
   },
   "dev": {
-    "runningLabel": "Ejecución del bot en curso",
-    "sectionTitle": "Desarrollo",
     "simulateBotRun": "Simular una ejecución del bot"
   },
   "digest": {
@@ -3215,11 +3211,7 @@
       "minutes_one": "Reading takes about 1 minute."
     },
     "estimateNote": "This is a rough guess; large PDFs take longer. You can keep working meanwhile.",
-    "failure": {
-      "other": "Skipped.",
-      "secret_content": "Skipped: it contains a private key.",
-      "unreadable_source": "Could not be read: protected, damaged or over a limit."
-    },
+    "failure": {},
     "filesReady": "{{count}} files ready",
     "filesReady_one": "1 file ready",
     "forget": "Stop reading this folder",
@@ -3276,6 +3268,39 @@
       "web": "Web pages",
       "xlsx": "Excel"
     }
+  },
+  "elicitation": {
+    "banner": "Lo pide el servidor MCP {{server}} — no Praxi",
+    "blocked": "Bloqueado: parece una credencial, nunca se envía",
+    "blockedRequired": "Este formulario exige un campo que parece una credencial. Praxi nunca envía contraseñas, claves de acceso, códigos ni números de tarjeta a un servidor MCP, así que no se puede enviar. Puedes rechazarlo o cancelarlo.",
+    "cancel": "Cancelar",
+    "choose": "Elegir…",
+    "closed": "Esta solicitud ya no está abierta.",
+    "decline": "Rechazar",
+    "expired": "Se acabó el tiempo de esta solicitud.",
+    "expiresIn": "Tiempo restante para responder",
+    "externalLink": "enlace externo",
+    "externalLinkTitle": "Lo escribió el servidor MCP. Praxi no lo abre. Revísalo con cuidado antes de entrar tú.",
+    "messageLabel": "Mensaje de {{server}}:",
+    "notConnected": "No hay conexión con el servicio. No se envió nada y lo que escribiste sigue aquí.",
+    "note": "Este texto viene del servidor MCP {{server}}, no de Praxi. Tus respuestas van solo a ese servidor, no al bot.",
+    "outcome": {
+      "accepted": "Enviado. Solo el servidor recibió tus respuestas.",
+      "cancelled": "Cancelado.",
+      "declined": "Rechazado. Se avisó al servidor de que no quieres responder."
+    },
+    "problem": {
+      "blocked": "{{field}} parece una credencial y nunca se envía.",
+      "integer": "{{field}} debe ser un número entero.",
+      "number": "{{field}} debe ser un número.",
+      "required": "{{field}} es obligatorio.",
+      "tooLarge": "{{field}} debe ser como máximo {{max}}.",
+      "tooLong": "{{field}} admite como máximo {{max}} caracteres.",
+      "tooShort": "{{field}} necesita al menos {{min}} caracteres.",
+      "tooSmall": "{{field}} debe ser al menos {{min}}."
+    },
+    "submit": "Enviar",
+    "title": "{{server}} te pide información"
   },
   "engineConsent": {
     "allow": "Permitir que {{cli}} actúe",
@@ -3437,6 +3462,10 @@
         "hint": "Actívalo en Ajustes y vuelve a intentarlo.",
         "title": "Esto está desactivado"
       },
+      "elicitation_gone": {
+        "hint": "Se respondió, se canceló o caducó, o la ejecución terminó. Pide al bot que lo intente de nuevo si aún hace falta.",
+        "title": "Ese formulario ya no está abierto"
+      },
       "email_provider_error": {
         "hint": "Revisa la cuenta y la contraseña y vuelve a intentarlo.",
         "title": "Tu proveedor de correo rechazó la solicitud"
@@ -3528,6 +3557,10 @@
       "knowledge_busy": {
         "hint": "Todavía está leyendo tus archivos. Inténtalo de nuevo en un momento.",
         "title": "La base de conocimiento está ocupada"
+      },
+      "live_voice_not_configured": {
+        "hint": "Añade una clave de Gemini en Ajustes → General → Dictado por voz y vuelve a pulsar Hablar.",
+        "title": "La voz en vivo necesita una clave de Gemini"
       },
       "login_busy": {
         "hint": "Termínalo o cancélalo y vuelve a intentarlo.",
@@ -3936,7 +3969,6 @@
       }
     },
     "reload": "Recargar",
-    "restartApp": "Reiniciar Praxi",
     "restartService": "Reiniciar el servicio local",
     "restarting": "Reiniciando…",
     "retry": "Reintentar",
@@ -4091,7 +4123,6 @@
   },
   "firstRun": {
     "back": "Volver",
-    "badge": "Configuración",
     "bot": {
       "createFailed": "No se pudo crear tu bot. No se guardó nada. Inténtalo de nuevo en un momento.",
       "defaultName": "Praxi",
@@ -4160,7 +4191,6 @@
       "paste": "Pegar",
       "providers": {
         "anthropic": {
-          "badge": "",
           "name": "Anthropic",
           "sub": "Modelos Claude"
         },
@@ -4170,13 +4200,11 @@
           "sub": "Rápido y con una cuota gratuita amplia"
         },
         "ollama": {
-          "badge": "",
           "found": "En ejecución en este equipo",
           "name": "Ollama",
           "sub": "Modelos en este equipo, sin clave"
         },
         "openai": {
-          "badge": "",
           "name": "Compatible con OpenAI",
           "sub": "OpenAI, OpenRouter, DeepSeek"
         }
@@ -4347,6 +4375,7 @@
       "slash": "Comandos con barra (escribe / en el cuadro de mensaje)"
     },
     "intro": "Atajos que puedes usar mientras la app está abierta.",
+    "liveVoiceEnd": "Finalizar la conversación de voz en vivo",
     "menuAccept": "Elegir el elemento resaltado",
     "menuDismiss": "Cerrar el menú",
     "menuMove": "Moverte por el menú de comandos o menciones",
@@ -4441,16 +4470,23 @@
       "tokensPerMinute": "Cantidad de texto por minuto"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Chats largos: los mensajes antiguos se resumen en una nota breve para que el bot no pierda el hilo.",
+    "hint": "Los mensajes antiguos de un chat largo se resumen en una nota breve. Los mensajes siguen guardados y se pueden buscar.",
+    "label": "Resumir los mensajes antiguos de los chats largos",
+    "noBot": "Crea primero un bot.",
+    "note": "Cuando un chat se hace muy largo, el modelo del propio bot (o su modelo auxiliar más barato, salvo que haya datos privados) escribe una nota breve sobre la parte antigua. Después el bot lee esa nota y tus mensajes recientes. La nota se marca como texto no fiable, nunca como palabras tuyas, y el texto de páginas web o correos sigue marcado así. Los mensajes originales no se modifican ni se borran. Desactivado: el bot solo ve los mensajes más recientes, como antes.",
+    "title": "Chats largos"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} se reserva algunas cosas: la política de ejecución, los servidores de herramientas de línea de comandos, las habilidades y las sesiones de los CLI de programación se configuran directamente en {{name}}. Las cuentas de correo, búsqueda y dictado se pueden conectar desde este equipo.",
       "noSecrets": "{{name}} aún no puede guardar claves.",
-      "notGranted": "{{name}} aún no ha confirmado este equipo. Ejecuta esto una vez en {{name}}:",
-      "title": "Configurar desde este equipo"
+      "notGranted": "{{name}} aún no ha confirmado este equipo. Ejecuta esto una vez en {{name}}:"
     },
     "adopted": {
       "allowPc": "Si quieres, tus bots podrán ver la pantalla de este equipo y actuar en él cuando se lo pidas. Cada acción que haga cambios seguirá pidiéndote permiso aquí.",
-      "done": "Entendido",
       "moved": "Trasladado a {{name}}",
       "stayed": "Se queda en este equipo",
       "stayedBody": "Este equipo conserva todo como respaldo. Puedes pedirle a un bot que haga algo aquí en cualquier momento. No se eliminó nada.",
@@ -4458,7 +4494,6 @@
     },
     "banner": {
       "back": "Cambiar a {{name}}",
-      "offline": "El equipo de tus bots está desconectado. Reconectando… Se muestra la última lista disponible.",
       "temporary": "Tus bots se ejecutan en este equipo. {{name}} sigue configurado y puedes volver a usarlo cuando quieras.",
       "workHere": "Usar este equipo"
     },
@@ -4473,7 +4508,6 @@
     },
     "copy": "Copiar",
     "engines": {
-      "foundAt": "Found at {{path}}",
       "installFailed": "La instalación no terminó ({{code}}). Revisa la salida o ejecuta el comando manualmente.",
       "installOnServer": "Instalar en el servidor",
       "installedUnknown": "Instalado · se desconoce si hay una sesión iniciada",
@@ -4484,7 +4518,6 @@
       "none": "El servidor no encontró herramientas de programación de línea de comandos.",
       "notInstalled": "Sin instalar.",
       "note": "Estas herramientas son del servidor. La instalación y el inicio de sesión se hacen en {{name}}.",
-      "officialPage": "Instalar {{name}} desde la página oficial",
       "ready": "Listo",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstalar en el servidor",
@@ -4495,16 +4528,12 @@
       "signIn": "Para iniciar sesión, ejecuta esto en el servidor:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Al iniciar sesión se muestra una dirección web en el servidor, normalmente con un código. Abre la dirección en este equipo e inicia sesión. Si se te pide, pega el código en la terminal del servidor. Las sesiones de este equipo nunca se copian al servidor.",
-      "signInOnServer": "Iniciar sesión en {{server}}",
-      "title": "Herramientas de programación de línea de comandos en {{name}}"
+      "signInOnServer": "Iniciar sesión en {{server}}"
     },
     "hint": "en {{name}}",
     "menu": {
       "add": "Añadir un servidor",
       "makeHome": "Usar {{name}} como equipo principal de mis bots",
-      "pcOff": "Desactivado · tus bots no pueden usar este equipo",
-      "pcOn": "Activado · aquí se te pide permiso para cada acción",
-      "sync": "Sincronizar mi configuración con {{name}}",
       "terminal": "Terminal del servidor",
       "viewScreen": "Ver su pantalla"
     },
@@ -4528,7 +4557,6 @@
   "hostMode": {
     "managedOnServer": "Cuando este equipo esté confirmado como administrador en {{name}}, también podrás gestionar desde aquí claves, permisos, herramientas y correo. La vinculación de dispositivos y las actualizaciones de {{name}} se quedan en {{name}}.",
     "model": {
-      "action": "Conectar un modelo en {{name}}",
       "afterwards": "La app detectará el cambio a los pocos segundos.",
       "copy": "Copiar comando",
       "fromApp": "Añade aquí la clave para {{name}}.",
@@ -4587,7 +4615,6 @@
     "offline": "{{name}} no responde. Sus bots siguen funcionando y esta app intentará conectarse de nuevo por su cuenta.",
     "updateApp": "Debes actualizar esta app ({{local}}). Su versión es anterior a la de {{name}} ({{host}}). Actualízala para usar {{name}}.",
     "updateHost": "Debes actualizar {{name}} ({{host}}). Su versión es anterior a la de esta app ({{local}}). Actualiza {{name}} a la misma versión.",
-    "useThisComputer": "Usar este equipo",
     "versionBlocking": "Esta app ({{local}}) y {{name}} ({{host}}) tienen versiones distintas. Pon ambos en la misma versión antes de usar el equipo anfitrión.",
     "versionWarning": "Esta app usa la versión {{local}} y {{name}}, la {{host}}. La diferencia es pequeña y todo debería funcionar."
   },
@@ -4906,12 +4933,10 @@
     "backToChat": "Volver",
     "captureTab": "Capturar Tab",
     "chat": {
-      "approve": "Aprobar",
       "button": "Chat",
       "close": "Cerrar chat",
       "collapse": "Reducir chat",
       "expand": "Ampliar chat",
-      "reject": "Rechazar",
       "replying": "El bot está respondiendo…",
       "title": "Chat con el bot",
       "working": "El bot está trabajando…"
@@ -4919,7 +4944,6 @@
     "checkingTargets": "Buscando pantallas…",
     "clearForeignPause": "Quitar la pausa de {{owner}}",
     "clearPauseAction": "Quitar pausa",
-    "close": "Cerrar visor",
     "connectionLost": "Se perdió la conexión con la pantalla. Reconectando…",
     "dismissKeepsControl": "Cerrar solo oculta el visor: el control sigue contigo. Usa «Terminé» o Reintentar en el panel.",
     "dock": {
@@ -4927,7 +4951,6 @@
       "watching": "You are only watching"
     },
     "doneAction": "Terminé",
-    "doneLabel": "Terminé",
     "emergencyStop": "Detener bots",
     "emergencyStopHint": "Every bot stops what it is doing right now.",
     "errors": {
@@ -4949,7 +4972,6 @@
     "focusTrapHint": "El teclado va a la pantalla. Mayús+Esc para salir.",
     "globalPauseNotice": "Tomar el control o pausar afecta a todos los bots por igual.",
     "handBackAction": "Devolver",
-    "hostLabel": "Host: {{host}}",
     "infoPanel": "Información del bot",
     "interactive": "Interactivo",
     "kind": {
@@ -5046,7 +5068,6 @@
       "unsupported": "Este destino no admite la transmisión de pantalla."
     },
     "reconnecting": "Reconectando con la transmisión de la pantalla…",
-    "recoverAction": "Quitar pausa (el bot puede volver a ejecutarse)",
     "refresh": "Actualizar destinos",
     "releaseFocus": "Soltar teclado",
     "releaseOnClose": "Al cerrar, primero se devuelve el control al bot.",
@@ -5197,16 +5218,13 @@
     "title": "Ver registros recientes"
   },
   "main": {
-    "clearSelection": "Volver a la vista general",
     "daemonConnectingDescription": "Conectando con el servicio en segundo plano de Praxi-Bot incluido en este equipo.",
     "daemonConnectingTitle": "Iniciando el servicio local en segundo plano…",
-    "daemonOfflineDescription": "El servicio en segundo plano de Praxi-Bot no responde. Espera unos segundos e inténtalo de nuevo. Si sigue fallando, comprueba que el firewall permita Praxi-Bot o reinicia la app.",
     "daemonOfflineTitle": "El servicio local en segundo plano no está en ejecución",
     "daemonRetry": "Reintentar conexión",
     "runSetupWizard": "Abrir el asistente de configuración",
     "selectBotDescription": "Elige un bot en la barra lateral para ver su perfil. En Ajustes puedes cambiar el tema, el color de acento y el fondo.",
     "selectBotTitle": "Selecciona un bot",
-    "selectedBotLabel": "Perfil del bot activo",
     "welcomeDescription": "Cada bot tiene una personalidad, modelos y un nivel de permisos. Abre el asistente de configuración o crea un bot manualmente para empezar a conversar.",
     "welcomeTitle": "Crea tu primer bot"
   },
@@ -5475,14 +5493,6 @@
     "sessions": "{{count}} sesiones",
     "sessions_one": "{{count}} sesión",
     "sessions_other": "{{count}} sesiones",
-    "start": {
-      "button": "Iniciar",
-      "goalLabel": "¿Qué debe hacer el bot?",
-      "help": "Describe toda la tarea una sola vez; el bot preguntará al principio lo que necesite, luego trabajará hasta terminar y te informará.",
-      "placeholder": "Por ejemplo: registra mi tienda en estos 15 sitios web y dime en cuáles funcionó.",
-      "starting": "Iniciando…",
-      "summary": "Iniciar una misión"
-    },
     "stop": "Detener",
     "stopConfirm": "¿Detener esta misión definitivamente?",
     "stopNo": "Que siga",
@@ -5514,11 +5524,9 @@
     "connectModel": "Conectar un modelo",
     "connectTitle": "Conecta un modelo para empezar a chatear",
     "empty": "No hay modelos que coincidan.",
-    "engineError": "No se pudo conectar esta CLI.",
     "hint": {
       "new": "Nuevo"
     },
-    "howToInstall": "Cómo instalar",
     "install": "Instalar {{name}}",
     "levels": {
       "high": "Alto",
@@ -5531,7 +5539,6 @@
     "listFresh": "Actualizado ahora mismo",
     "noModels": "Escribe un ID de modelo en la búsqueda para usarlo.",
     "none": "Sin modelo",
-    "notOnServer": "{{name}} · aún no está en {{server}}",
     "noteLocalClis": "Las CLI de suscripción de este equipo se usan cuando un bot se ejecuta en «este equipo».",
     "otherId": "Usar «{{id}}» con {{provider}}",
     "recent": "Recientes",
@@ -5618,24 +5625,13 @@
     "title": "Requiere tu atención"
   },
   "newBot": {
-    "advanced": "Ajustes avanzados",
-    "advancedHint": "Instrucciones, imagen, modelos, permisos en detalle, apps",
-    "blankHint": "Empieza desde cero: tú eliges el nombre, el aspecto y lo que puede hacer.",
-    "blankTitle": "Bot en blanco",
     "brain": "IA",
     "brainAuto": "Automático",
     "brainHint": "Puedes cambiarlo más tarde en el chat",
-    "changeLook": "Cambiar nombre o aspecto",
     "create": "Crear",
     "creating": "Creando…",
-    "importHint": "Un archivo de perfil de bot que alguien compartió contigo. Lo revisas antes de crear nada.",
-    "importTitle": "Importar un bot compartido",
     "nameNeeded": "Ponle un nombre al bot para crearlo.",
     "namePlaceholder": "Nombre del bot",
-    "next": "Siguiente",
-    "quickLooks": "Aspectos rápidos:",
-    "readyHint": "Vienen con sus instrucciones y permisos prudentes. Revisas todo antes de crear el bot.",
-    "readyTitle": "Bots listos",
     "shapeGroup": "Forma del personaje",
     "shapes": {
       "boulder": "Frijol",
@@ -5655,25 +5651,6 @@
       "star": "Estrella",
       "tri": "Triángulo"
     },
-    "stepHints": {
-      "access": "Elige su IA y con cuánta libertad puede trabajar, y créalo.",
-      "identity": "Dale un nombre y un aspecto. Puedes cambiar ambos más tarde.",
-      "start": "Empieza desde cero, con un bot listo o con un archivo compartido."
-    },
-    "steps": {
-      "access": "Qué puede hacer",
-      "identity": "Nombre y aspecto",
-      "start": "Inicio"
-    },
-    "stepsLabel": "Pasos",
-    "templates": {
-      "assistant": "Asistente",
-      "blank": "En blanco",
-      "coder": "Programador",
-      "researcher": "Investigador",
-      "social": "Redes sociales"
-    },
-    "templatesLabel": "Plantillas",
     "title": "Nuevo bot"
   },
   "notify": {
@@ -5977,8 +5954,6 @@
     "exportHint": "Guarda el perfil compartible de este bot: nombre, instrucciones, modelo elegido, herramientas y nivel de permisos. Nunca incluye secretos, memoria, chats, carpetas ni dispositivos.",
     "exportSaveFirst": "Guarda primero tus cambios: el perfil se genera a partir del bot guardado.",
     "exported": "El perfil de {{name}} se guardó como archivo.",
-    "galleryLabel": "Empezar desde una plantilla",
-    "importFromFile": "Importar desde archivo…",
     "level": "Nivel de permisos máximo",
     "levelHint": "El bot nunca recibe más que esto, pida lo que pida el archivo.",
     "levelLine": "El archivo pide «{{requested}}». El bot recibirá «{{granted}}».",
@@ -6076,7 +6051,10 @@
       "bot": "The bot could not be created. Nothing was started. Try again.",
       "chat": "The bot was created, but its chat could not be opened. Try again; no second bot will be made.",
       "check": "Some answers are missing. Go back and fill them in.",
-      "message": "The bot and its chat are ready, but the task could not be sent. Try again; nothing is created twice."
+      "goal": "The task text is too long for a mission. Go back and shorten your answers. Nothing was created.",
+      "level": "The bot was already created on another level. Switch back to that level to continue, or close this window and start again.",
+      "message": "The bot and its chat are ready, but the task could not be sent. Try again; nothing is created twice.",
+      "mission": "The bot is ready, but the mission could not be started. Try again; no second bot or mission will be made."
     },
     "hints": {
       "pick": "Pick what you want. You review everything before anything is created.",
@@ -6085,6 +6063,7 @@
     },
     "levelRaised": "You chose a freer level than this goal asks for ({{level}}). The bot will ask you less often.",
     "levelTitle": "How freely it may work",
+    "missionHint": "On {{level}} this goal runs as a mission: a work list that survives restarts and goes on until it is done. On a lower level it runs as one chat task.",
     "need": {
       "app": {
         "fix": "Connect an app",
@@ -6119,6 +6098,7 @@
       "bot": "A new bot named \"{{name}}\".",
       "folder": "The bot can read and write only inside {{folder}}.",
       "later": "You can change the bot's name, look and settings afterwards.",
+      "mission": "The task \"{{name}}\" starts right away as a mission in its own chat: the bot lists the work, goes through it without asking and reports back.",
       "ownMail": "It uses the mailbox you connect for the bot, never your personal accounts.",
       "task": "The task \"{{name}}\" starts right away in a new chat."
     },
@@ -6204,7 +6184,6 @@
     "exportMarkdown": "Guardar como texto",
     "exported": "Informe guardado",
     "footer": "Hecho con Praxi. Se omiten los datos privados.",
-    "hint": "Consulta qué hizo el bot en esta ejecución, paso a paso",
     "noRecordedSteps": "El historial de pasos no está disponible para esta ejecución.",
     "noSteps": "El bot no usó herramientas en esta ejecución.",
     "outcome": "Resultado",
@@ -6326,9 +6305,7 @@
       "keepHint": "Se mantiene: {{spec}}",
       "kind": {
         "cron": "Cron",
-        "keep": "Conservar el horario actual",
-        "natural": "Describir en palabras",
-        "simple": "Sencillo"
+        "keep": "Conservar el horario actual"
       },
       "misfire": "Si el equipo estaba apagado a la hora prevista",
       "misfireHint": "Elige qué hacer si el equipo estaba apagado o suspendido cuando debía ejecutarse la tarea.",
@@ -6350,7 +6327,6 @@
         "never": "Nunca",
         "problems": "Solo si hay algún problema"
       },
-      "parsedAs": "Horario interpretado: {{what}}",
       "payloadKept": "Esta tarea ejecuta un flujo de trabajo o una herramienta. Esa parte se conserva.",
       "preview": "Vista previa",
       "prompt": "Instrucción",
@@ -6361,10 +6337,6 @@
         "past": "Esa hora ya pasó. Elige una posterior.",
         "time": "Elige una hora como 09:00."
       },
-      "templates": {
-        "hint": "Elige un ejemplo para rellenar el formulario. Luego puedes cambiarlo todo.",
-        "title": "Empezar con un ejemplo"
-      },
       "text": "Horario en palabras",
       "textHint": "Escribe en inglés o turco. Se usa la zona horaria {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -6372,7 +6344,6 @@
       "tz": "Zona horaria",
       "tzCronHint": "Se usa si la expresión cron tiene cinco campos y no incluye zona horaria.",
       "tzSearch": "Buscar zona horaria, p. ej. Europe/Istanbul",
-      "tzShown": "Las horas se muestran en {{tz}}.",
       "tzUnknown": "No es una zona horaria conocida. Elige una de la lista.",
       "weekday": "¿Qué día de la semana?",
       "when": "Cuándo"
@@ -6387,7 +6358,6 @@
     "newNeedsBot": "Crea un bot antes de programarle una tarea.",
     "nextRuns": "Próximas 5 ejecuciones",
     "nextRunsEmpty": "No hay próximas ejecuciones.",
-    "noRuns": "Aún no hay ejecuciones.",
     "openRun": "Abrir",
     "originBot": "Creada por un bot",
     "originBotHint": "Un bot creó esta tarea con tu aprobación. Los bots solo pueden cambiar las tareas programadas que ellos mismos crearon.",
@@ -6396,7 +6366,6 @@
       "unknown": "Tarea personalizada",
       "workflow": "Ejecuta el flujo de trabajo {{name}}"
     },
-    "recentRuns": "Ejecuciones recientes",
     "reclaim": "Traer de vuelta a este equipo",
     "reclaimAnyway": "Traerla de vuelta de todos modos",
     "reclaimUnreachable": "{{name}} no respondió y puede que su copia siga activa allí. Si la traes de vuelta ahora, podría ejecutarse en ambos equipos.",
@@ -6447,7 +6416,6 @@
     "viewList": "Lista"
   },
   "secretRequest": {
-    "allowHint": "Si dejas ambos campos vacíos, el bot no podrá usar el dato hasta que indiques dónde se permite en Ajustes.",
     "cancel": "Cancelar",
     "cancelled": "Se canceló la solicitud. No se guardó nada.",
     "closed": "Esta solicitud ya está cerrada.",
@@ -6459,10 +6427,8 @@
     "hostRefused": "{{name}} rechazó la solicitud. No se guardó nada.",
     "neverSeen": "El bot nunca ve lo que escribes. Solo se le informa si se guardó.",
     "notConnected": "Se perdió la conexión con el servicio. No se envió nada y lo que escribiste sigue aquí.",
-    "origins": "Sitios web donde el bot puede introducir el dato (opcional, uno por línea)",
     "parked": "This is for a long-running task. That task is paused only on this item and keeps working on the rest. Your answer lets it continue.",
     "password": "Contraseña",
-    "programs": "Programas donde el bot puede introducir el dato (opcional)",
     "purposeLabel": "Motivo escrito por el bot (Praxi no lo verifica):",
     "replaces": "Esto reemplaza el valor guardado de {{name}}.",
     "stored": "Se guardó en la bóveda. El bot recibió la confirmación.",
@@ -6566,24 +6532,16 @@
   },
   "settings": {
     "accent": {
-      "custom": "Color personalizado",
-      "description": "Elige un color de resalte para los elementos interactivos y los indicadores activos.",
       "presets": {
         "amber": "Ámbar",
         "blue": "Azul océano",
         "emerald": "Esmeralda",
         "rose": "Rosa",
         "violet": "Violeta real"
-      },
-      "reset": "Restablecer al color del tema",
-      "title": "Color de acento"
+      }
     },
     "autostart": {
       "description": "Abre Praxi-Bot automáticamente cuando inicias sesión en Windows. Viene desactivado por defecto, solo afecta a tu propia cuenta de Windows y no necesita permisos de administrador. Puedes desactivarlo aquí cuando quieras.",
-      "disable": "Desactivar inicio automático",
-      "disabled": "Desactivado (predeterminado)",
-      "enable": "Activar inicio automático",
-      "enabled": "Activado",
       "error": "No se pudo actualizar el inicio automático de Windows.",
       "title": "Iniciar al abrir sesión"
     },
@@ -6631,7 +6589,6 @@
       "title": "Resumen diario"
     },
     "hotkey": {
-      "currentLabel": "Atajo activo",
       "description": "Cancela las ejecuciones activas de los bots. En la aplicación de escritorio de Windows también funciona mientras otra aplicación tiene el foco. En otras plataformas, primero pon el foco en Praxi-Bot.",
       "presets": {
         "altShiftS": "Alt+Shift+S",
@@ -6640,7 +6597,6 @@
       },
       "record": "Grabar atajo",
       "recording": "Pulsa un modificador + una tecla...",
-      "reset": "Restablecer a Ctrl+Alt+Esc",
       "title": "Atajo para detener todo"
     },
     "keepInTray": {
@@ -6676,9 +6632,6 @@
       "description": "Vuelve a abrir la configuración guiada de 5 pasos para configurar un proveedor de modelos, los valores de seguridad o tu primer bot.",
       "restart": "Ejecutar el asistente de nuevo",
       "resume": "Reanudar el asistente",
-      "statusCompleted": "Completado",
-      "statusPending": "Aún no completado",
-      "statusSkipped": "En pausa en el paso {{step}} de 5",
       "title": "Asistente de primera configuración"
     },
     "permissions": {
@@ -6736,7 +6689,6 @@
       "noModel": "sin modelo",
       "none": "Aún no hay proveedores configurados.",
       "notLoaded": "Aún no cargado",
-      "offline": "El servicio local no está en marcha. Reinícialo para gestionar los proveedores.",
       "provider": "Proveedor",
       "restart": "Reiniciar el servicio en segundo plano",
       "restartHint": "Reinicia el servicio en segundo plano para que recoja el cambio.",
@@ -6765,15 +6717,7 @@
     "route": {
       "title": "Enrutamiento"
     },
-    "subtitle": "Personaliza el modo del tema, el color de acento, el fondo y el idioma de la interfaz.",
-    "theme": {
-      "dark": "Oscuro",
-      "description": "Cambia entre el esquema de color claro, oscuro o el del sistema.",
-      "light": "Claro",
-      "system": "Sistema",
-      "title": "Modo del tema"
-    },
-    "title": "Apariencia y ajustes"
+    "theme": {}
   },
   "settingsModal": {
     "ai": {
@@ -6783,14 +6727,11 @@
       },
       "detected": {
         "copied": "Comando copiado",
-        "copyCommand": "Copiar comando",
         "copyDetails": "Copiar detalles",
         "description": "Las herramientas encontradas aquí se activan solas cuando has iniciado sesión. Si desactivas una, se queda desactivada.",
         "detailsCopied": "Detalles copiados",
-        "detailsToggle": "Detalles",
         "detectError": "No se pudieron comprobar las herramientas de programación instaladas.",
         "dismissExpired": "Descartar la aprobación caducada",
-        "docs": "Documentación",
         "enabledToast": "{{name}} activado.",
         "experimentalChip": "Experimental",
         "install": "Instalar",
@@ -6805,16 +6746,12 @@
           "powershell_missing": "No se encontró PowerShell. Copia el comando y ejecútalo en tu terminal.",
           "timeout": "La instalación superó los diez minutos y se detuvo. Revisa la salida antes de volver a intentarlo."
         },
-        "installLabel": "Comando de instalación",
         "installRunning": "Instalando… salir de esta sección no revoca una aprobación ya aceptada.",
         "installSummary": "Instalar o actualizar {{engine}}",
-        "loginLabel": "Iniciar sesión con",
-        "moreEngines": "Más motores que puedes instalar ({{count}})",
         "noteNative": "Funciona con sus propias herramientas: elígelo en los ajustes de motor de un bot.",
         "noteUnsupported": "Praxi lo detecta, pero todavía no puede usarlo como motor.",
         "noteUnverified": "Comando sin verificar: consulta la documentación del fabricante y luego cópialo y ejecútalo tú mismo.",
         "offline": "El servicio local no está en marcha, así que no se pueden mostrar las herramientas de programación detectadas.",
-        "onThisComputer": "En este equipo",
         "pathLabel": "Ubicación",
         "problem": "Eso no funcionó.",
         "refresh": "Volver a buscar",
@@ -6827,8 +6764,7 @@
           "unsupported": "Aún no compatible"
         },
         "termsNotice": "Se aplican las condiciones de tu plan con el fabricante; comprueba que se permita el uso automatizado de la CLI antes de activarla.",
-        "title": "Encontrado en este equipo",
-        "toggle": "Usar {{name}}"
+        "title": "Encontrado en este equipo"
       },
       "keys": {
         "add": "Añadir",
@@ -6965,6 +6901,7 @@
       "allGood": "Todo parece estar bien",
       "checkedAt": "Última comprobación a las {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Navegador",
         "capabilities": "Capacidades",
         "catalog_freshness": "Actualidad del catálogo de modelos",
@@ -6989,6 +6926,7 @@
       "description": "Comprueba por qué el bot podría no funcionar y arregla los problemas comunes.",
       "empty": "No se devolvió ninguna comprobación",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Instala Chrome, Edge o Chromium (no el paquete snap).",
         "catalog_freshness": "La lista de modelos seleccionados tiene más de 90 días; actualiza Praxi o ejecuta `bot catalog check` para revisar los modelos actuales.",
         "cli_accounts": "Abre una terminal una vez e inicia sesión en la CLI (por ejemplo `claude` o `codex login`).",
@@ -7212,7 +7150,6 @@
       "ignored": "Correos de remitentes no permitidos que se ignoraron: {{n}}",
       "needsSenders": "Este canal funcionaba sin una lista de remitentes permitidos, así que ahora NO pasa ningún correo al bot. Añade en «Remitentes permitidos», en los ajustes del buzón de arriba, las direcciones que pueden escribir al bot (por ejemplo la tuya). Hasta entonces, todo correo entrante queda sin leer en el buzón.",
       "noAccount": "Primero añade un buzón arriba.",
-      "noSenders": "El buzón elegido no tiene remitentes permitidos, así que ningún correo llegará al bot. Añade tu propia dirección en «Remitentes permitidos» en los ajustes del buzón de arriba.",
       "note": "El correo lo escriben otras personas, así que el bot lo trata como información, nunca como órdenes. Por defecto solo ve el remitente, el asunto y las primeras líneas. Los adjuntos no se abren nunca. No se envía nada a menos que permitas las respuestas y apruebes cada una aquí.",
       "replies": "Permitir que el bot sugiera respuestas (tú apruebas cada una antes de enviarla)",
       "running": "En marcha",
@@ -7471,18 +7408,14 @@
       },
       "check": {
         "action": "Buscar actualizaciones",
-        "description": "Busca una versión más reciente y muestra las novedades. No se instala nada hasta que tú lo decidas.",
-        "title": "Buscar actualizaciones",
         "working": "Buscando…"
       },
-      "daemon": "Servicio en segundo plano",
-      "daemonDescription": "Proceso local de bot serve.",
-      "description": "Versiones de la aplicación y del servicio.",
       "devBuild": "Compilación de desarrollo",
       "errors": {
         "busy": "Ya hay una actualización en curso.",
         "failed": "La actualización no funcionó. No se cambió nada. Inténtalo de nuevo más tarde.",
         "network": "No se pudo contactar con el servidor de actualizaciones. Revisa tu conexión a internet y vuelve a intentarlo.",
+        "no_release": "Todavía no hay información de actualizaciones publicada para este canal. No se cambió nada. Inténtalo de nuevo más tarde.",
         "no_rollback": "No hay ninguna versión anterior a la que volver.",
         "not_configured": "Las actualizaciones no están configuradas en esta compilación.",
         "nothing_to_install": "Busca actualizaciones primero.",
@@ -7494,9 +7427,8 @@
         "hint": "Se comprueba la autenticidad de la actualización antes de instalarla. Praxi-Bot se reinicia al terminar.",
         "working": "Actualizando…"
       },
-      "lastChecked": "Última comprobación: {{time}}",
-      "neverChecked": "Aún no se han buscado actualizaciones.",
       "notConfigured": "Las actualizaciones no están disponibles: esta compilación no tiene una clave de firma o una fuente segura de actualizaciones configurada. No se descargará ni instalará nada.",
+      "previewBuildHint": "Estás usando una compilación de vista previa. Elige Vista previa como canal de actualizaciones para recibir sus actualizaciones.",
       "rollback": {
         "action": "Volver a la versión anterior",
         "description": "La versión {{version}} no arrancó bien. Puedes volver a la última versión que funcionaba.",
@@ -7505,7 +7437,6 @@
       },
       "skip": "Omitir esta versión",
       "skipped": "Se omite la versión {{version}}. Las versiones más recientes seguirán ofreciéndose.",
-      "title": "Acerca de",
       "unknown": "Desconocida",
       "upToDate": "Tienes la última versión."
     },
@@ -7541,7 +7472,6 @@
         "searxng": "La dirección de tu propio servidor SearXNG, por ejemplo http://127.0.0.1:8080. La guía de búsqueda web incluye una instalación para servidores con un solo comando.",
         "tavily": "Crea una clave en tu cuenta de Tavily y pégala aquí."
       },
-      "providerHint": "Los bots buscan en la web a través de un proveedor de búsqueda. Los buscadores gratuitos suelen funcionar en un ordenador de casa, pero casi siempre bloquean a los servidores, así que un servidor necesita uno de estos.",
       "providerTitle": "Proveedor de búsqueda",
       "saveAndTest": "Guardar y probar",
       "searxngLabel": "URL de SearXNG",
@@ -7563,7 +7493,6 @@
       "testing": "Probando…",
       "title": "Búsqueda web",
       "toast": {
-        "keyCleared": "Clave de API eliminada del almacén de secretos",
         "providerRemoved": "Proveedor de búsqueda quitado",
         "saved": "Ajustes de búsqueda web guardados"
       },
@@ -7593,7 +7522,6 @@
   },
   "sidebar": {
     "apps": "Aplicaciones",
-    "botsSection": "Bots",
     "mainBotHint": "Bot principal: se usa por defecto en los chats nuevos",
     "needsYou": "Pendientes",
     "needsYouCount": "{{count}} pendientes",
@@ -7605,15 +7533,12 @@
     "reorderHint": "Arrastra la fila o enfoca este control y pulsa la flecha arriba o abajo",
     "reorderMoved": "{{name}} se movió a la posición {{pos}}",
     "schedules": "Tareas programadas",
-    "settings": "Ajustes",
     "status": {
       "idle": "Inactivo",
       "needsYou": "Te necesita",
       "working": "Trabajando"
     },
-    "unread": "Mensaje sin leer",
-    "unreadBot": "Mensajes nuevos de este bot",
-    "usage": "Uso"
+    "unreadBot": "Mensajes nuevos de este bot"
   },
   "skillFromChat": {
     "ack": "He leído el texto y la comprobación de seguridad, y quiero guardar esta skill.",
@@ -7842,7 +7767,6 @@
     "found": "Programas encontrados: {{n}}",
     "lead": "Programas que tus bots pueden usar en este servidor.",
     "licenseMixed": "Licencias mixtas",
-    "licenseName": "Licencia {{name}}",
     "listLabel": "Paquetes de herramientas",
     "loading": "Mirando el servidor…",
     "noLogin": {
@@ -8068,7 +7992,6 @@
     "safe": "Si algo falla, el servidor vuelve a su versión anterior. Verás qué pasó y qué puedes hacer.",
     "showCommands": "Ver los comandos",
     "showLog": "Ver detalles",
-    "starting": "Iniciando la actualización…",
     "stopped": "La actualización se detuvo antes de terminar.",
     "thisServer": "este servidor",
     "title": "Actualizar servidor",
@@ -8088,7 +8011,6 @@
     "completion": "Respuesta",
     "cost": "Costo",
     "costNote": "El costo solo se muestra para los modelos con precio conocido; un precio desconocido nunca se muestra como cero.",
-    "day": "Día",
     "deletedBot": "Bot eliminado",
     "empty": "Envía un mensaje a un bot y su uso aparecerá aquí, con una estimación del costo.",
     "emptyTitle": "Aún no se ha usado nada",
@@ -8296,7 +8218,6 @@
     "newItem": "Nuevo elemento",
     "noBotAssigned": "Ningún bot tiene acceso",
     "noOrigin": "Sin sitio web",
-    "openButton": "Abrir bóveda",
     "revealConfirm": {
       "body": "Muestra o copia este secreto solo cuando nadie más pueda ver tu pantalla. Las contraseñas copiadas se borran tras 30 segundos.",
       "copyConfirm": "Copiar contraseña",

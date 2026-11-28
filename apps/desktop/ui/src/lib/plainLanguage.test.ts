@@ -39,7 +39,8 @@ const ADVANCED_ALLOWED = [
   "apps.advanced.", // "Advanced" apps section
   "chat.route.hover", // routing details shown on hover
   "chatExport.formats.json",
-  "health.details"
+  "health.details",
+  "elicitation.blocked" // the exact label the MCP form card shows on a suspected credential field
 ];
 
 const dir = fileURLToPath(new URL("../i18n/locales/", import.meta.url));

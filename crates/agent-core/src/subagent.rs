@@ -635,6 +635,16 @@ impl AgentLoop {
             self.sh
                 .emit(&pctx, finished_event(run_id, parent, state, &summary, None));
         }
+        if matches!(
+            res,
+            Ok(RunState::Succeeded | RunState::Failed | RunState::Cancelled)
+        ) && let Some(p) = self.sh.storage.get_run(parent).ok().flatten()
+            && let Some(mission_id) = missions::mission_of_kind(&p.kind)
+            && let Some(sink) = self.sh.mission_child_wake.read().clone()
+        {
+            let summary = self.sh.redact(summary);
+            sink.deliver(&run_id.to_string(), &summary, Some(mission_id));
+        }
         self.sh.runs.lock().remove(&run_id);
         // Reporting may have rebuilt the context of a parent that is gone.
         if !self.rt.active_runs().contains(&parent) {

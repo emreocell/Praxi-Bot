@@ -19,6 +19,7 @@ jobs:
   # documentation, repository metadata, the marketing site, packaging manifests or the
   # desktop UI sources (apps/desktop/ui, packages/ui) skips the Rust jobs. A change that only
   # touches UI sources also skips the Windows real-app smoke lane (Linux still runs it).
+  # Visual regression runs only when apps/desktop/ui or packages/ change (not site/ or lockfiles).
   # Everything else, and every push to main, runs them all.
   changes:
     name: Detect changed areas
@@ -27,12 +28,13 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       ui: ${{ steps.filter.outputs.ui }}
+      visual: ${{ steps.filter.outputs.visual }}
       smoke: ${{ steps.filter.outputs.smoke }}
       # JSON list of the operating systems the real-app smoke job runs on.
       smoke_os: ${{ steps.filter.outputs.smoke_os }}
     steps:
       - name: Checkout (merge commit and its first parent)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
@@ -44,42 +46,13 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify -q HEAD^2 >/dev/null; then
             echo "Not a pull request merge commit: run everything."
-            printf '%s\n' rust=true ui=true smoke=true 'smoke_os=["ubuntu-latest","windows-latest"]' >> "$GITHUB_OUTPUT"
+            python3 scripts/ci_pr_path_classifiers.py --full >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # HEAD is the merge of the PR into main; HEAD^1 is main.
           git diff --name-only HEAD^1 HEAD > changed.txt
           echo "Changed files:"; cat changed.txt
-          # Documentation, repository metadata, the marketing site (the UI job covers it) and the
-          # packaging manifests (no crate or test reads them); generated docs/api stays "code".
-          # Workflows other than this one cannot change what this run does.
-          docs_only='^((docs|docs-site|site|packaging)/.*|[^/]+\.md|LICENSE|NOTICE|\.github/(ISSUE_TEMPLATE/.*|CODEOWNERS|labeler\.yml|pull_request_template\.md|workflows/(docs-site|labeler|installer|linux-release|linux-scripts|test-report|test-report-weekly)\.yml))$'
-          # Desktop UI sources and the shared UI package (packages/ui, used by the desktop UI
-          # only). No Rust crate reads them: apps/desktop/build.rs only creates an empty ui/dist
-          # when it is missing, and the UI job below covers these files (the generated API schema
-          # is checked against docs/api/openapi.json, which stays "code").
-          ui_only='^(apps/desktop/ui/|packages/)'
-          # The smoke harness uses the desktop UI and the CLI daemon, including shared crates and
-          # the provider/skill assets embedded in the daemon build.
-          smoke_paths='^(apps/(desktop|cli)/|crates/|packages/|providers/|skills/|\.cargo/|(Cargo\.(toml|lock)|rust-toolchain\.toml|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.base\.json|docs/api/openapi\.json|\.github/workflows/ci\.yml)$)'
-          rust=false; ui=false; smoke=false; smoke_windows=false
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            if [ "$f" = "docs/api/openapi.json" ] \
-              || { ! printf '%s\n' "$f" | grep -Eq "$docs_only" && ! printf '%s\n' "$f" | grep -Eq "$ui_only"; }; then
-              rust=true
-            fi
-            if printf '%s\n' "$f" | grep -Eq '^(apps/desktop/ui/|packages/|site/|eslint\.config\.js$|\.stylelintrc\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|docs/api/openapi\.json$|\.github/workflows/ci\.yml$)'; then ui=true; fi
-            if printf '%s\n' "$f" | grep -Eq "$smoke_paths"; then
-              smoke=true
-              # UI-only changes leave the daemon as main tests it: Linux smoke is enough for them
-              # (pushes to main still run both).
-              printf '%s\n' "$f" | grep -Eq "$ui_only" || smoke_windows=true
-            fi
-          done < changed.txt
-          smoke_os='["ubuntu-latest"]'
-          if [ "$smoke_windows" = true ]; then smoke_os='["ubuntu-latest","windows-latest"]'; fi
-          printf '%s\n' "rust=$rust" "ui=$ui" "smoke=$smoke" "smoke_os=$smoke_os" >> "$GITHUB_OUTPUT"
+          python3 scripts/ci_pr_path_classifiers.py < changed.txt >> "$GITHUB_OUTPUT"
 
   # Always runs and is cheap: relative Markdown links must resolve.
   docs-check:
@@ -88,7 +61,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check relative Markdown links
         run: python3 scripts/check_markdown_links.py
@@ -101,6 +74,7 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p test_ci_report.py -v
           python3 scripts/test_report.py --self-test
           python3 -m unittest discover -s scripts/tests -p test_test_report_weekly.py -v
+          python3 -m unittest discover -s scripts/tests -p test_ci_pr_path_classifiers.py -v
 
       - name: Test the MCP catalog checker (offline, loopback only)
         run: python3 -B -m unittest discover -s scripts/tests -p test_check_mcp_catalog.py -v
@@ -115,11 +89,37 @@ jobs:
           python3 scripts/installer/generate_installer_assets.py --check
           python3 -B -m unittest discover -s scripts/tests -p test_installer_assets.py -v
 
+      - name: Test the in-app update feed generator and its checks
+        run: python3 -B -m unittest discover -s scripts/tests -p test_update_manifest.py -v
+
       - name: Check third-party notices consistency and dependency hygiene tests
         run: |
           python3 scripts/license_report.py --check-notices
           python3 -B -m unittest discover -s scripts/tests -p "test_license_report.py" -v
           python3 -B -m unittest discover -s scripts/tests -p "test_dependency_hygiene.py" -v
+
+      - name: Check GitHub Actions are pinned to commit SHAs
+        run: |
+          python3 scripts/ci/check_github_actions_pins.py
+          python3 -B -m unittest discover -s scripts/tests -p test_check_github_actions_pins.py -v
+
+      - name: actionlint
+        env:
+          # A fixed release, not the moving `main` download script. The sha256 below is the one in the
+          # release's own actionlint_1.7.12_checksums.txt (checked again against that file at run time).
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --output "$tarball" "$base/$tarball"
+          curl --fail --silent --show-error --location --output checksums.txt "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum --check --strict -
+          grep -F "${ACTIONLINT_SHA256}  ${tarball}" checksums.txt
+          tar -xzf "$tarball" actionlint
+          rm -f "$tarball" checksums.txt
+          ./actionlint -color
 
   build-and-test:
     name: ${{ matrix.name }}
@@ -161,15 +161,20 @@ jobs:
       # data Cargo writes, links, and restores from the dependency cache.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      CARGO_INCREMENTAL: "0"
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
         with:
           components: rustfmt, clippy
+
+      - name: Set up sccache (Windows)
+        if: matrix.os == 'windows-latest' && matrix.suite == 'workspace'
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
       - name: Install cargo-nextest
         if: matrix.suite != 'embeddings'
@@ -184,10 +189,12 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev pkg-config libxcb1-dev
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The feature-enabled lane saves a different set of compiled dependencies.
           key: ${{ matrix.suite == 'embeddings' && 'local-embeddings' || '' }}
+          # Workspace lanes on the same OS share one dependency cache (both Windows test halves).
+          shared-key: ${{ matrix.suite == 'workspace' && matrix.os || '' }}
           # PRs restore main's cache; avoid costly PR-only uploads and cache eviction. The second
           # Windows half uses the first one's cache key, so only the first one saves it.
           save-if: ${{ github.ref == 'refs/heads/main' && !matrix.tests-only }}
@@ -260,10 +267,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
 
       - name: Install Linux build dependencies
         run: |
@@ -271,8 +278,9 @@ jobs:
           sudo apt-get install -y libdbus-1-dev pkg-config libxcb1-dev
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          shared-key: ubuntu-rust
           # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
           # each, for the smoke and browser lanes) pushes the repository over GitHub's 10 GB cache
           # limit, and the eviction then removes main's cache and makes later runs start cold.
@@ -305,21 +313,22 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          shared-key: ubuntu-rust
           # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
           # each, for the smoke and browser lanes) pushes the repository over GitHub's 10 GB cache
           # limit, and the eviction then removes main's cache and makes later runs start cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check licenses
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@bb119f768ea239e765aeaef5769558d4f21213aa # v2.1.5
         with:
           arguments: --all-features
           command: check licenses bans advisories sources
@@ -335,15 +344,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -391,20 +400,20 @@ jobs:
   visual-regression:
     name: Visual regression (non-blocking)
     needs: changes
-    if: needs.changes.outputs.ui == 'true'
+    if: needs.changes.outputs.visual == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -419,7 +428,7 @@ jobs:
 
       - name: Upload screenshots and report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visual-regression
           path: ${{ runner.temp }}/visual/
@@ -442,12 +451,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -456,7 +465,7 @@ jobs:
           sudo apt-get install -y libdbus-1-dev pkg-config libxcb1-dev xvfb xauth dbus-x11 at-spi2-core
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: desktop-smoke
           # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
@@ -465,12 +474,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -547,7 +556,7 @@ jobs:
 
       - name: Upload trigger registry screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trigger-registry-${{ matrix.os }}
           path: ${{ runner.temp }}/desktop-smoke/trigger-registry-*.png
@@ -555,7 +564,7 @@ jobs:
 
       - name: Upload smoke screenshots and logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-smoke-${{ matrix.os }}
           path: ${{ runner.temp }}/desktop-smoke/

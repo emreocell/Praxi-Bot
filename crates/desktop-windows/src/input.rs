@@ -8,7 +8,7 @@ use windows::Win32::UI::{
         KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSE_EVENT_FLAGS,
         MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
         MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput,
-        VIRTUAL_KEY,
+        VIRTUAL_KEY, VkKeyScanW,
     },
     WindowsAndMessaging::{
         GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
@@ -17,7 +17,7 @@ use windows::Win32::UI::{
 };
 
 use crate::live_view_win::is_win_extended_vk;
-use crate::pure::{Key, parse_key};
+use crate::pure::{Key, chord_key_from_scan, parse_key};
 
 fn send(inputs: &[INPUT]) -> Result<(), DesktopError> {
     if inputs.is_empty() {
@@ -254,13 +254,37 @@ fn vk_event(vk: u16, up: bool) -> INPUT {
     kbd(vk, 0, flags)
 }
 
+/// The virtual key (and Shift) that types `c` on the current keyboard layout.
+fn layout_key(c: char) -> Option<(u16, bool)> {
+    let unit = u16::try_from(u32::from(c)).ok()?;
+    // SAFETY: a plain query of the current thread's keyboard layout.
+    let scan = unsafe { VkKeyScanW(unit) };
+    chord_key_from_scan(scan)
+}
+
 /// Press a chord: all keys down in order, then released in reverse order.
 pub fn key_chord(keys: &[String]) -> Result<(), DesktopError> {
     let mut parsed = Vec::with_capacity(keys.len());
     for k in keys {
-        parsed.push(
-            parse_key(k).ok_or_else(|| DesktopError::Unsupported(format!("unknown key '{k}'")))?,
-        );
+        let key =
+            parse_key(k).ok_or_else(|| DesktopError::Unsupported(format!("unknown key '{k}'")))?;
+        match key {
+            // A punctuation key in a shortcut ("ctrl+/", "ctrl+,") must be the real key the
+            // current layout gives that character: a Unicode event is not a shortcut key.
+            Key::Char(c) => match layout_key(c) {
+                Some((vk, shift)) => {
+                    let shift_held = parsed
+                        .iter()
+                        .any(|p| matches!(p, Key::Vk(0x10 | 0xA0 | 0xA1)));
+                    if shift && !shift_held {
+                        parsed.push(Key::Vk(0x10));
+                    }
+                    parsed.push(Key::Vk(vk));
+                }
+                None => parsed.push(key),
+            },
+            Key::Vk(_) => parsed.push(key),
+        }
     }
     let mut events = Vec::new();
     for k in &parsed {

@@ -42,6 +42,8 @@ impl Lang {
 pub enum Msg<'a> {
     /// A credential request is waiting in the desktop app.
     SecretRequestNotice,
+    /// An MCP server's form is waiting in the desktop app.
+    ElicitationNotice,
     /// A stranger wrote to the bot.
     NotPaired,
     /// Pairing worked.
@@ -138,6 +140,9 @@ impl Msg<'_> {
             (Msg::SecretRequestNotice, En) => "A credential request is waiting. Open Praxi on your computer to answer. Keep credentials out of this chat.".into(),
             (Msg::SecretRequestNotice, Tr) => "Yanıtınızı bekleyen bir gizli bilgi isteği var. Yanıtlamak için bilgisayarınızda Praxi’yi açın. Gizli bilgilerinizi bu sohbette paylaşmayın.".into(),
             (Msg::SecretRequestNotice, De) => "Eine Anfrage nach Zugangsdaten wartet. Öffnen Sie Praxi am Computer, um zu antworten. Teilen Sie Zugangsdaten nicht in diesem Chat.".into(),
+            (Msg::ElicitationNotice, En) => "An MCP server is asking for your input. Open Praxi on your computer to answer or decline. Do not answer it in this chat.".into(),
+            (Msg::ElicitationNotice, Tr) => "Bir MCP sunucusu sizden bilgi istiyor. Yanıtlamak ya da reddetmek için bilgisayarınızda Praxi’yi açın. Bu sohbette yanıtlamayın.".into(),
+            (Msg::ElicitationNotice, De) => "Ein MCP-Server bittet um Ihre Eingabe. Öffnen Sie Praxi am Computer, um zu antworten oder abzulehnen. Antworten Sie nicht in diesem Chat.".into(),
             (Msg::NotPaired, En) => "This bot is private. If it is yours, create a pairing code on your computer and send `!pair 123456` here in a private message.".into(),
             (Msg::NotPaired, Tr) => "Bu bot özeldir. Sizinse, bilgisayarınızda bir eşleştirme kodu oluşturun ve burada özel mesajla `!pair 123456` yazın.".into(),
             (Msg::NotPaired, De) => "Dieser Bot ist privat. Wenn es Ihrer ist, erzeugen Sie am Computer einen Kopplungscode und senden Sie hier privat `!pair 123456`.".into(),
@@ -330,6 +335,7 @@ mod tests {
     fn every_message() -> Vec<Msg<'static>> {
         vec![
             Msg::SecretRequestNotice,
+            Msg::ElicitationNotice,
             Msg::NotPaired,
             Msg::Paired,
             Msg::PairInvalid,
@@ -395,6 +401,7 @@ mod tests {
             Msg::Status { running, pending } => vec![running.to_string(), pending.to_string()],
             Msg::NotPaired => vec!["!pair 123456".into()],
             Msg::SecretRequestNotice
+            | Msg::ElicitationNotice
             | Msg::PairInDm
             | Msg::Paired
             | Msg::PairInvalid

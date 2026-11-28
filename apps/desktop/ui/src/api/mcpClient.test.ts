@@ -64,6 +64,49 @@ test("MCP client functions hit the contract routes", async () => {
   assert.deepEqual(calls[4].body, cfg);
 });
 
+test("MCP imports send owner credentials, exact approvals and binary uploads", async () => {
+  const calls: Array<{ path: string; method: string; body: BodyInit | null | undefined; headers: Headers }> = [];
+  globalThis.fetch = (async (url: URL | string, init?: RequestInit) => {
+    const parsed = new URL(url);
+    calls.push({ path: parsed.pathname + parsed.search, method: init?.method ?? "GET", body: init?.body, headers: new Headers(init?.headers) });
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  const previous = ApiClient.ownerKeyProvider;
+  ApiClient.ownerKeyProvider = async () => "fixture-owner";
+  try {
+    const c = client();
+    const checksum = "a".repeat(64);
+    const file = new File(["fixture"], "fixture.mcpb");
+    await c.searchMcpRegistry("io.github.fixture/weather");
+    assert.equal(calls[0].path, "/v1/mcp/import/registry?q=io.github.fixture%2Fweather");
+    assert.equal(calls[0].method, "GET");
+
+    const approved = { name: "io.github.fixture/weather", version: "1.2.0", approval_sha256: checksum };
+    await c.installMcpRegistry(approved);
+    assert.equal(calls[1].path, "/v1/mcp/import/registry");
+    assert.equal(calls[1].method, "POST");
+    assert.deepEqual(JSON.parse(String(calls[1].body)), approved);
+
+    await c.inspectMcpBundle(file, checksum);
+    assert.equal(calls[2].path, `/v1/mcp/import/bundle/inspect?expected_sha256=${checksum}`);
+    assert.equal(calls[2].headers.get("content-type"), "application/octet-stream");
+    assert.equal(calls[2].body, file);
+
+    const launch = "b".repeat(64);
+    await c.installMcpBundle(file, checksum, launch, { key: "fixture-input" });
+    assert.equal(calls[3].path, "/v1/mcp/import/bundle");
+    assert.equal(calls[3].headers.get("content-type"), null);
+    assert.ok(calls[3].body instanceof FormData);
+    assert.equal(await (calls[3].body.get("bundle") as File).text(), "fixture");
+    assert.deepEqual(JSON.parse(String(calls[3].body.get("approval"))), {
+      approval_sha256: checksum, launch_sha256: launch, values: { key: "fixture-input" }
+    });
+    assert.ok(calls.every((call) => call.headers.get("x-praxi-owner-key") === "fixture-owner"));
+  } finally {
+    ApiClient.ownerKeyProvider = previous;
+  }
+});
+
 test("deleteMcpServer resolves on 204 and setSecret is write-only", async () => {
   let calls = stubFetch(204, null);
   const c = client();

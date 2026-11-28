@@ -19,8 +19,7 @@ import { modelDisplayName } from "../lib/modelName";
 import { loadRecentModels, recentOptions, saveRecentModels, withRecent } from "../lib/recentModels";
 import { matchesQuery } from "../lib/searchText";
 import { THINKING_LEVELS, useThinkingLevel } from "../lib/thinkingLevel";
-import type { AdminCliEngine } from "../api/types";
-import { EngineSetup } from "../views/settings/HomeCards";
+import { openSettingsTarget } from "../lib/settingsLink";
 import { useDaemon } from "../state/DaemonContext";
 import { useCliEngineRows } from "../state/useCliEngineRows";
 import { useProviders } from "../state/useProviders";
@@ -30,7 +29,6 @@ import { Popover, type PopoverPlacement } from "./Popover";
 import { useToast } from "./Toast";
 import { humanLine } from "../lib/humanError";
 import { isPlaceholderModel } from "../lib/placeholderModel";
-import { openSettingsTarget } from "../lib/settingsLink";
 
 export interface ModelPickerAutoOption {
   label: string;
@@ -39,56 +37,29 @@ export interface ModelPickerAutoOption {
   onPick: () => void;
 }
 
-/**
- * Coding CLIs that are switched on for the bots' home but have no model there: one muted row each
- * ("Codex - not on <server> yet"), opening the install and sign-in steps. Never an empty group.
- */
-function MissingEngineRows({ ids, server, testId }: { ids: string[]; server: string; testId: string }) {
+/** CLIs enabled but not ready on the server: one short line and a link to Settings. */
+function MissingEngineRows({ ids, server, testId, onSetUp }: { ids: string[]; server: string; testId: string; onSetUp: () => void }) {
   const { t } = useTranslation();
-  const { client } = useDaemon();
-  const [open, setOpen] = useState<string | null>(null);
-  const [engines, setEngines] = useState<AdminCliEngine[] | null>(null);
-  useEffect(() => {
-    if (open === null || engines !== null || !client) return;
-    let live = true;
-    client.adminCliEngines().then(
-      (list) => live && setEngines(list),
-      () => live && setEngines([])
-    );
-    return () => {
-      live = false;
-    };
-  }, [open, engines, client]);
-  const reload = useCallback(() => setEngines(null), []);
   return (
     <>
       {ids.map((id) => {
-        const engine = engines?.find((e) => `cli:${e.id}` === id);
+        const engineId = id.replace(/^cli:/, "");
         return (
-          <div key={`missing-${id}`} className={styles.group} data-testid={`${testId}-missing-${id}`}>
+          <div key={`missing-${id}`} className={styles.missingCliRow} data-testid={`${testId}-missing-${id}`}>
+            <span className={styles.noModels}>
+              {t("modelPicker.missingCliShort", { name: sourceLabel(id), server: server || t("computerPicker.host") })}
+            </span>
             <button
               type="button"
               data-picker-row
-              className={styles.groupHead}
-              aria-expanded={open === id}
-              onClick={() => setOpen(open === id ? null : id)}
+              className={styles.setupLink}
+              onClick={() => {
+                onSetUp();
+                openSettingsTarget({ page: "models", card: "detectedAccounts", field: `cli-${engineId}` });
+              }}
             >
-              <ChevronRight aria-hidden="true" className={open === id ? styles.chevOpen : undefined} />
-              <span className={styles.noModels}>
-                {t("modelPicker.notOnServer", { name: sourceLabel(id), server: server || t("computerPicker.host") })}
-                {" · "}
-                {t("modelPicker.howToInstall")}
-              </span>
+              {t("modelPicker.setUpCli")}
             </button>
-            {open === id ? (
-              engine ? (
-                <div className={styles.noModels}>
-                  <EngineSetup engine={engine} onChanged={reload} />
-                </div>
-              ) : (
-                <p className={styles.noModels}>{t("home.engines.loading")}</p>
-              )
-            ) : null}
           </div>
         );
       })}
@@ -100,14 +71,14 @@ function MissingEngineRows({ ids, server, testId }: { ids: string[]; server: str
  * Only while the bots' home is a server: its missing CLIs as muted rows, and the note that the
  * subscription CLIs of this computer are used when a bot runs on "this computer". Nothing otherwise.
  */
-function HostCliExtras({ ids, testId, label }: { ids: string[]; testId: string; label?: ReactNode }) {
+function HostCliExtras({ ids, testId, label, onSetUp }: { ids: string[]; testId: string; label?: ReactNode; onSetUp: () => void }) {
   const { t } = useTranslation();
   const { home, workLocalNow } = useDaemon();
   if (home.kind !== "host" || workLocalNow) return null;
   return (
     <>
       {label}
-      {ids.length > 0 ? <MissingEngineRows ids={ids} server={home.name} testId={testId} /> : null}
+      {ids.length > 0 ? <MissingEngineRows ids={ids} server={home.name} testId={testId} onSetUp={onSetUp} /> : null}
       <p className={styles.noModels}>{t("modelPicker.noteLocalClis")}</p>
     </>
   );
@@ -663,10 +634,10 @@ export function ModelPicker({
                       <>
                         {sectionLabel("modelPicker.sectionCli")}
                         {sections.cli.map(groupRow)}
-                        <HostCliExtras ids={sections.emptyCli} testId={testId} />
+                        <HostCliExtras ids={sections.emptyCli} testId={testId} onSetUp={close} />
                       </>
                     ) : sections.emptyCli.length > 0 ? (
-                      <HostCliExtras ids={sections.emptyCli} testId={testId} label={sectionLabel("modelPicker.sectionCli")} />
+                      <HostCliExtras ids={sections.emptyCli} testId={testId} label={sectionLabel("modelPicker.sectionCli")} onSetUp={close} />
                     ) : null}
                     {sections.api.length > 0 ? (
                       <>

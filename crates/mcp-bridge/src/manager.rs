@@ -25,7 +25,7 @@ use tool_registry::{Tool, ToolRegistry};
 
 use crate::pins::{MemoryPinStore, PinStore, ToolChange, change_of, new_tool_change, pin_of};
 use crate::{
-    client::Signals,
+    client::{CallGuard, ElicitorSlot, Signals},
     config::{McpServerConfig, McpTransport, ToolFilter},
     diagnostics::StderrLog,
     discovery::discover,
@@ -214,6 +214,11 @@ impl Server {
 
     pub(crate) fn config(&self) -> &McpServerConfig {
         &self.config
+    }
+
+    /// Mark a tool call of run `run_id` in flight (elicitation correlation).
+    pub(crate) fn begin_call(&self, run_id: &str) -> CallGuard {
+        self.signals.begin_call(run_id)
     }
 
     fn oauth_options(
@@ -554,9 +559,13 @@ impl Server {
             let id = self.config.id.clone();
             // Dropping the request future (this timeout, or the caller's own
             // cancellation) makes rmcp send `notifications/cancelled` for it.
-            let outcome = tokio::time::timeout(
+            let request = run.clone()(session.peer().clone());
+            tokio::pin!(request);
+            let outcome = await_call(
                 self.policy.call_timeout,
-                run.clone()(session.peer().clone()),
+                FORM_HARD_CAP,
+                || self.signals.is_eliciting(),
+                request.as_mut(),
             )
             .await;
             let failure = match outcome {
@@ -977,6 +986,7 @@ pub struct McpManager {
     pins: Arc<dyn PinStore>,
     change_events: tokio::sync::broadcast::Sender<String>,
     servers: Mutex<BTreeMap<String, Arc<Server>>>,
+    elicitor: Arc<ElicitorSlot>,
 }
 
 impl McpManager {
@@ -999,7 +1009,14 @@ impl McpManager {
             pins: Arc::new(MemoryPinStore::default()),
             change_events: tokio::sync::broadcast::channel(32).0,
             servers: Mutex::new(BTreeMap::new()),
+            elicitor: Arc::default(),
         }
+    }
+
+    /// Install the host's form for MCP elicitation requests. Until then (and
+    /// for a request the host cannot place) every request is declined.
+    pub fn set_elicitor(&self, elicitor: Arc<dyn tool_registry::Elicitor>) {
+        *self.elicitor.write() = Some(elicitor);
     }
 
     /// Where approved tool fingerprints are kept (default: in memory, so a
@@ -1184,7 +1201,7 @@ impl McpManager {
             operation: tokio::sync::Mutex::new(()),
             retired: tokio::sync::watch::channel(false).0,
             bots: Mutex::new(config.bots.clone()),
-            signals: Arc::default(),
+            signals: Arc::new(Signals::new(config.id.clone(), Arc::clone(&self.elicitor))),
             pins: Arc::clone(&self.pins),
             change_events: self.change_events.clone(),
             registrar: self.registrar.clone(),
@@ -1362,9 +1379,102 @@ impl McpManager {
     }
 }
 
+/// The longest open forms may keep one call alive past `call_timeout`, however
+/// the host bounds its own wait (`approval_timeout` 0 means "no limit" there).
+/// A little over the host's own limit, so the host's `cancel` comes first.
+const FORM_HARD_CAP: Duration = Duration::from_secs(16 * 60);
+
+/// Wait for a call for `call_timeout`. While a form is open (`eliciting`) the
+/// call is waiting for the owner, not for a stuck server, so it may run on, but
+/// only until `hard_cap` has passed since the start: then the wait ends as the
+/// timeout it is, and dropping the call cancels the open form.
+async fn await_call<F: std::future::Future + Unpin>(
+    call_timeout: Duration,
+    hard_cap: Duration,
+    eliciting: impl Fn() -> bool,
+    mut request: F,
+) -> std::result::Result<F::Output, tokio::time::error::Elapsed> {
+    let started = tokio::time::Instant::now();
+    let mut wait = call_timeout;
+    loop {
+        match tokio::time::timeout(wait, &mut request).await {
+            Err(_) if eliciting() && started.elapsed() < hard_cap => {
+                // Never spin on a tiny timeout, never overshoot the cap.
+                wait = call_timeout.max(Duration::from_millis(50)).min(
+                    hard_cap
+                        .saturating_sub(started.elapsed())
+                        .max(Duration::from_millis(1)),
+                );
+            }
+            outcome => break outcome,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_call_waiting_on_a_form_ends_at_the_hard_cap_even_when_the_form_never_closes() {
+        let started = tokio::time::Instant::now();
+        let outcome = await_call(
+            Duration::from_secs(30),
+            Duration::from_secs(600),
+            || true,
+            Box::pin(std::future::pending::<()>()),
+        )
+        .await;
+        assert!(outcome.is_err());
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_secs(600), "{waited:?}");
+        assert!(
+            waited <= Duration::from_secs(600) + Duration::from_secs(1),
+            "{waited:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_call_without_a_form_times_out_on_time_and_a_form_that_closes_stops_the_extension() {
+        let started = tokio::time::Instant::now();
+        let outcome = await_call(
+            Duration::from_secs(30),
+            Duration::from_secs(600),
+            || false,
+            Box::pin(std::future::pending::<()>()),
+        )
+        .await;
+        assert!(outcome.is_err());
+        assert_eq!(started.elapsed(), Duration::from_secs(30));
+
+        // A form open during the first window only: the next window ends the call.
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let started = tokio::time::Instant::now();
+        let outcome = await_call(
+            Duration::from_secs(30),
+            Duration::from_secs(600),
+            || calls.fetch_add(1, Ordering::SeqCst) == 0,
+            Box::pin(std::future::pending::<()>()),
+        )
+        .await;
+        assert!(outcome.is_err());
+        assert_eq!(started.elapsed(), Duration::from_secs(60));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_call_that_finishes_while_a_form_is_open_returns_its_result() {
+        let outcome = await_call(
+            Duration::from_secs(30),
+            Duration::from_secs(600),
+            || true,
+            Box::pin(async {
+                tokio::time::sleep(Duration::from_secs(100)).await;
+                7
+            }),
+        )
+        .await;
+        assert_eq!(outcome.unwrap(), 7);
+    }
 
     #[test]
     fn backoff_doubles_and_caps() {

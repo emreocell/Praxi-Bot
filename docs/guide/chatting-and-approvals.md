@@ -63,7 +63,7 @@ chat), and `/workflow <name> key=value ...` (run a saved workflow directly, see
 In the desktop composer, typing `/` at the start of a message opens a command
 menu that also includes local commands handled by the app itself (never sent to
 the bot): `/export` (download the open chat as Markdown) and app shortcuts
-`/help`, `/settings`, `/models`, `/apps`, and `/schedules`. In Telegram there
+`/help`, `/settings`, `/vault`, `/models`, `/apps`, and `/schedules`. In Telegram there
 are extra commands, see [Telegram](telegram.md).
 
 ![Typing / in the message box opens the command menu](images/en/composer-commands.webp)
@@ -139,7 +139,7 @@ app sees a server, so existing chats do not all start unread):
 
 - **Keyboard shortcuts dialog**: press **`?`** anywhere when no text field has
   focus (or open it from the command palette with `Ctrl/Cmd+K` → **Keyboard
-  shortcuts**, from the account menu, or by typing `/help` in the composer). The
+  shortcuts**, from the profile menu, or by typing `/help` in the composer). The
   dialog lists global shortcuts (`Ctrl/Cmd+K` command palette, `?` shortcuts,
   `Ctrl/Cmd+,` settings, `Ctrl/Cmd+F` find in chat, `Esc` close side panel,
   `Shift+Esc` exit live-view keyboard focus, and your configured stop hotkey),
@@ -444,6 +444,8 @@ lets through is written to the audit log as `mode.full.owner_browse` (the web re
 
 One more thing the Full level does without a card, for a run you started or a mission of yours: a bot's **own sign-ups** (see [Sign-ups: a bot with its own address](email.md#sign-ups-a-bot-with-its-own-address)). `account_register`, typing the password of an account the bot made itself with `browser_fill` `secret`, and `browser_capture_secret` run without asking, also after the run read pages or your mail, because the password is made by the app, never seen by the bot, and typed only into the exact site it was registered for. Secrets you stored yourself and money still ask. These calls are written to the audit log as `mode.full.own_signup`.
 
+**Making a bot, and opening what it made.** In your own chat turn on a Full bot, "create a bot named Kralinho for chatting" makes a real bot (name, persona, colour, shape, model) with `bot_create` and no card, instead of the bot writing a web page about it. The new bot is never broader than the bot that made it (never Full, at most "approve destructive"), and only the maker can change or delete it. The new bot starts with none of the maker's secrets, accounts, mail address or apps, and "Full" is never handed out by a bot: you raise a bot to Full in the app. These tools are offered only in a turn where every message is yours (typed in the app or from your own paired Telegram chat): once the run has read a page, a mail or another bot's answer they are gone for that run (start again with a new message), and a schedule, a mission, a channel or webhook message, a subagent or a helper bot is never offered them. A bot with the "Can create bots" switch keeps them in every run, with a card for each change. `desktop_open` shows you what the bot made: it opens a file in the bot's workspace or a folder you allowed in the computer's default application or in Chrome, Firefox or Edge. Only documents, pages, pictures, sound and video open, never a program or a script. An address opened this way lands in your own browser, where you are signed in, so it asks unless you typed that very address in the chat; the bot looks at pages in its own browser with `browser_open`.
+
 **What the bot is told.** On the Full level the bot's base instructions say: carry
 the task through to the end without asking "shall I start?" or for a go-ahead;
 choose sensible defaults itself (which sites, names, wording) and say what it chose;
@@ -644,17 +646,43 @@ app become one row ("Playwright ×9"), a finished run shows one summary line
 or refused steps and the step running right now are always visible. Opening a
 row shows the individual steps with their times.
 
+### Who allowed a step
+
+A step that needed a decision says who or what made it, in the step line of the
+opened row:
+
+| Line | What it means |
+| --- | --- |
+| You approved · 3 s into run | You answered the approval card for this very call. |
+| Full access — no question needed | The bot is on Full access and you started the run, so the call ran without a card. |
+| Full access, your scheduled run — no question needed | The same, in a run that a schedule, rule, webhook or mail you set up started. |
+| Full access, your mission — no question needed | The same, in an unattended session of your mission. |
+| Balanced level — no question needed | The Balanced level lets this kind of call through. |
+| Your standing permission | A standing permission you created covered exactly this call. |
+| Remembered: always allow … | A choice you made earlier on a card (always, for this chat, for this task) covered the call. The line names the tool or category. |
+| Your site rule allowed it | One of your per-site or per-app rules allowed it. |
+
+Only calls that would otherwise have asked carry a line: a read the level
+allows anyway shows nothing. The line comes from the daemon's own record of the
+decision, never from anything a page, a mail or a tool said. A step approved
+before this record existed shows a plain "Approved". In the daemon's event
+journal an automatic grant carries the all-zero system user id as its approver
+(`00000000-0000-0000-0000-000000000000`), never yours, so a tool that reads the
+journal without knowing `granted_by` cannot mistake it for a click of yours. Calls made by a coding
+engine on its own steps, and calls from a script, have no step to attach a line
+to.
+
 ### Save a diagnostic timeline
 
 The timeline for a finished run can be saved as text (Markdown), a web page
 (HTML), or a JSON file. Saving a report downloads a local file; it does not
 send the run anywhere.
 
-#### JSON format, version 3
+#### JSON format, version 4
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "outcome": "done",
   "duration_ms": 1400,
   "steps": [
@@ -678,7 +706,10 @@ send the run anywhere.
       "step_id": "step-1",
       "kind": "approval_recorded",
       "offset_ms": 150,
-      "outcome": "approved"
+      "outcome": "approved",
+      "granted_by": "owner_card",
+      "level": "balanced",
+      "rule": null
     },
     {
       "step_id": "step-1",
@@ -704,18 +735,45 @@ send the run anywhere.
   is known, or `null` when unknown. The current timeline does not retain causal
   links, so the field is `null`; it is not an assertion of no dependencies.
 - `approval_events` is grouped by export-local `step_id`. An observed waiting
-  card gives `waiting_for_approval` with a `null` outcome. Version 3 keeps a
-  recorded decision as `approval_recorded` (`approved` or `denied`) even after the
-  tool finishes. A completed gated call separately gives `tool_outcome`
+  card gives `waiting_for_approval` with a `null` outcome. Version 3 and later keep
+  a recorded decision as `approval_recorded` (`approved` or `denied`) even after
+  the tool finishes. A completed gated call separately gives `tool_outcome`
   (`done` or `error`). Decision times use the daemon event's time relative to
   the start of the run, not the time someone clicked; unavailable or invalid
   offsets are `null`.
+- Version 4 adds three fields, each `null` when the daemon did not say:
+  `granted_by` (`owner_card`, `full_access`, `owner_schedule`, `owner_mission`,
+  `balanced_level`, `standing_grant`, `remembered_choice` or `site_rule`),
+  `level` (`ask`, `balanced` or `full`, the bot's level when the call was
+  decided) and `rule` (the remembered rule that covered the call,
+  `<scope>:<name>` with scope `chat`, `always`, `category`, `task` or `standing`
+  and a tool or category name of at most 64 characters from `A-Z a-z 0-9 _ . -`;
+  never a path, address or command; the export checks this shape again, so
+  anything else becomes `null`). The fields sit on `approval_recorded`, which
+  stays what it was in version 3: **you answered a card** (`granted_by` is
+  `owner_card`, or `null` for an approval recorded before version 4: it was an
+  approval, but its source is not claimed).
+- Version 4 also adds the event kind `automatic_grant` for a call that an
+  automatic rule allowed in place of a card (Full access, the Balanced level, a
+  standing permission, a remembered choice, a site rule). It has `outcome`
+  `null`, the same three fields (`granted_by` is never `owner_card`), and no
+  `waiting_for_approval` before it, because there was no card. It is a separate
+  kind on purpose: a reader written for version 3 counts `approval_recorded`
+  events as answers of yours, and keeps doing so correctly. Such a reader must
+  ignore event kinds it does not know; it then simply does not see the
+  automatic grants. A step that
+  version 3 exported with no approval events at all (no card was shown) now
+  also gives an `automatic_grant` when the daemon recorded one.
+- Only `schema_version` changed for a reader that ignores unknown kinds and
+  fields, so a version 3 reader keeps working on a version 4 file. Version 3
+  files stay valid version 3 files: the new fields and kind are never required.
 - A denial is reported as a decision only when the corresponding gate was
   observed. Expiry and policy veto aren't owner denials. The daemon sends the
   reason as text, so if an owner types a reason that looks like expiry or
   matches the reserved policy-veto reason, the export can't tell them apart and
   omits the decision. A missing event means no retained evidence, not proof
-  that it didn't happen. Version 2 had approval events but did not retain an
+  that it didn't happen. Version 3 had `approval_recorded` without the three
+  provenance fields. Version 2 had approval events but did not retain an
   approval after completion; version 1 had no `approval_events`.
 
 JSON excludes free text and internal IDs, including bot names, prompts, tool

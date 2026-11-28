@@ -4,6 +4,7 @@
 //! and exposes a find-tool interface that narrows the visible set for each agent turn.
 
 pub mod browser_mcp;
+pub mod elicitation;
 pub mod error;
 pub mod payment;
 pub mod registry;
@@ -11,6 +12,7 @@ pub mod spec;
 pub mod tool;
 pub mod url_guard;
 
+pub use elicitation::{ElicitationAnswer, ElicitationRequest, Elicitor};
 pub use error::ToolError;
 pub use registry::ToolRegistry;
 // PermissionCategory and Platform are defined in `protocol` and re-exported here

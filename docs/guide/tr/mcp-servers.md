@@ -18,6 +18,53 @@ Hiçbir gizli bilginin değerini asla döndürmez. Değerleri `POST /v1/secrets/
 `PUT /v1/mcp/servers/{name}`, değişikliği kayıtlı sunucunun üzerine birleştirir. Boş bıraktığın
 alan eski değerini korur. `bots: null` her bot demektir.
 
+## Resmî MCP Kayıt Defteri’nden veya bir paketten içe aktar
+
+Sunucunun çalışacağı bilgisayarın sahibi olarak **Uygulamalar → MCP
+sunucuları** bölümünü aç. Eşleştirilmiş bir ana makinede yönetici yetkin de
+varsa sunucuyu oraya kurabilirsin. **Resmî MCP Kayıt Defteri**’ni seç ve sunucu
+adını ara. Praxi arama metnini aramayı başlattığında kayıt defterine gönderir.
+Sonuçlarda yayıncının ad alanı ve denetiminin doğrulanıp doğrulanmadığı görünür.
+Bu doğrulama kimin yayın yapabildiğini gösterir. Erişim vermeden önce sunucuyu
+incele.
+
+Çalıştırma seçeneğinin yanında **Kurulumu incele**’yi seç. Kartta çalıştırılacak
+komutu, her argümanı ayrı ayrı veya HTTPS adresini, ayrıca sunucunun alacağı
+ortam değişkenlerini ya da HTTP başlıklarını görürsün. Praxi, sürümü belirtilmiş
+npm ve PyPI paketlerini ve desteklenen streamable HTTPS sunucularını kurabilir.
+Başka kurucular, özel çalışma ortamı argümanları veya şablonlu değerler isteyen
+seçenekler kullanılamaz. Onay verdiğinde Praxi kayıt defterinden ilgili sürümü
+ve çalıştırma bilgilerini tekrar kontrol eder.
+
+Dosyadan kurmak için **.mcpb dosyası aç**’ı seç. Yayıncı dosyanın tamamı için
+bir SHA-256 değeri verdiyse **Paketi incele**’ye basmadan önce bu değeri gir.
+Kart dosyanın SHA-256 değerini, imza durumunu, çalışma ortamını, manifestteki
+araçları ve programın alacağı dosya veya klasör yollarını gösterir. Ayrıca
+tüm `${...}` şablonları doldurulduktan sonraki son komutu, argümanları,
+başlayacağı klasörü ve değişken adlarını gösterir (cevaplaman gereken bir ayar
+`<name>` olarak görünür). Gerçekte çalışacak komut kartta gösterilenden farklıysa
+kurulum reddedilir. Pakete ekli imza, paketin kendisinden gelen ve güvenilir
+hiçbir köke bağlanmayan sertifikasıyla kontrol edilir. Bu yüzden Praxi onu
+**yalnızca bütünlük** olarak gösterir: dosya imzalandığından beri değişmemiştir,
+başka bir şey değil. Böyle bir imzayı herkes üretebilir, paketi kimin
+yayımladığını göstermez. Doğrulama Windows’ta Crypt32, Linux ve
+macOS’ta CMS desteği olan kurulu OpenSSL ile yapılır. Praxi geçersiz imzaları,
+eşleşmeyen sağlama değerlerini, güvensiz yolları, düz dosya ya da klasör olmayan
+girdileri (sembolik bağlantı, yeniden ayrıştırma noktası, aygıt ve boru; arşiv
+bunları nasıl kodlarsa kodlasın) ve boyut ya da dosya sayısı sınırını aşan
+paketleri reddeder. Eşleştirilmiş ana makinenin
+yükleme sınırı, yerel 100 MiB sınırından daha düşük olabilir.
+
+Erişim bilgilerini inceledikten sonra **Kapalı olarak kur**’u seç. İçe aktarma
+sırasında sunucu çalıştırılmaz veya uzak MCP oturumu açılmaz. Ortam değişkeni
+ve başlık değerleri gizli bilgi kasasına kaydedilir. Hazır olduğunda **Yönet →
+Sunucuyu etkinleştir** ile sunucuyu başlatabilirsin. Yerel program demonun
+işletim sistemi izinleriyle dosyalara, cihazlara ve ağa erişebilir. Uzak sunucu,
+yapılandırılan başlıkları ve araçlarına gönderilen verileri alır. Kaldırmak
+için **Yönet → Bağlantıyı kes**’i seç. Praxi yapılandırmayı, açılan paket
+dosyalarını ve başka bir sunucunun kullanmadığı, içe aktarmada oluşturulan
+kimlik bilgilerini kaldırır.
+
 ## Bir sunucu neye dönüşür
 
 - **İki aktarım türü:** stdin/stdout üzerinden konuşulan yerel bir program (`stdio`) ya da

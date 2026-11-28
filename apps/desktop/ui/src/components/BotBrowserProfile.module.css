@@ -1,25 +1,49 @@
-.root {
+/* The Browser card of the Tools tab: state and the one action on top, saved sites one per line, the facts folded. */
+.card {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-width: var(--space-0);
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
   color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
 }
 
-.root h3,
-.root h4,
-.root p {
+.card p {
   margin: var(--space-0);
+  line-height: var(--line-height-normal);
 }
 
-/* Section titles: the same small caps as the rest of the right panel. */
-.label {
-  padding-inline: var(--space-half);
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.caution {
   color: var(--color-text-muted);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: var(--letter-spacing-wide);
-  text-transform: uppercase;
+}
+
+.note {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background-color: var(--color-warning-subtle);
+  color: var(--color-text);
+}
+
+.head button {
+  white-space: nowrap;
+}
+
+.head svg,
+.aboutActions svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  flex: none;
 }
 
 .about > summary {
@@ -37,44 +61,9 @@
   margin-top: var(--space-2);
 }
 
-.forgetAll {
-  align-self: flex-start;
-}
-
-.root svg {
-  width: var(--size-icon-sm);
-  height: var(--size-icon-sm);
-  flex: none;
-}
-
-.warning {
-  padding: var(--space-3);
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-card);
-  background: var(--color-surface-elevated);
-  color: var(--color-text);
-}
-
-.actions {
+.aboutActions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-}
-
-.sites {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-0);
-  margin: var(--space-0);
-  list-style: none;
-}
-
-.sites li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  overflow-wrap: anywhere;
+  margin-top: var(--space-3);
 }

@@ -32,3 +32,8 @@ test("pinned and recent bots precede other bots; commands retain fuzzy highlight
   assert.deepEqual(commandOptions("stp", [], (s) => s)[0].indices, [1, 2, 4]);
   assert.deepEqual(commandOptions("zzzzzz", [], (s) => s), []);
 });
+
+test("the mission command is found by its Turkish name too", () => {
+  assert.equal(commandOptions("gör", [], (s) => s)[0]?.id, "mission");
+  assert.equal(commandOptions("miss", [], (s) => s)[0]?.insert, "mission");
+});

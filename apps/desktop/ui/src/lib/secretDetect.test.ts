@@ -250,8 +250,8 @@ test("ChatView keeps no standing send-anyway flag, checks slash text and voice, 
 
 test("the secret card refuses to wipe or claim success without a connection, and shows no host sentence", () => {
   const dec = SRC("../components/PendingDecisions.tsx");
-  // Two secret-card handlers and three hand-over (CAPTCHA / code) handlers share the guard.
-  assert.equal((dec.match(/throw new NoClientError\(\)/g) ?? []).length, 5);
+  // Two secret-card, three hand-over (CAPTCHA / code) and two MCP form handlers share the guard.
+  assert.equal((dec.match(/throw new NoClientError\(\)/g) ?? []).length, 7);
   const card = SRC("../components/SecretRequestCard.tsx");
   assert.ok(/secretRequest\.hostRefused/.test(card) && /secretRequest\.notConnected/.test(card));
 });

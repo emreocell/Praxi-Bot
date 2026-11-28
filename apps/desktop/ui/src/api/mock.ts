@@ -1,3 +1,4 @@
+import { MockOpenApiApps } from "./mockOpenApiApps.ts";
 import { historySnippetParts, type ExportFormat } from "../lib/chatHistory.ts";
 import { transcriptMarkdown } from "../lib/transcript.ts";
 import { MOCK_HOST_ID, mockHostScenario } from "./mockHostScenario.ts";
@@ -87,6 +88,8 @@ import type {
   UpdateFillSecretInput
 } from "./types.ts";
 import type {
+  LiveVoiceEvent,
+  LiveVoiceOpenInput,
   KnowledgeSource,
   KnowledgeSourceInput,
   KnowledgeSettings,
@@ -319,6 +322,31 @@ const SCHEDULES = [
     misfire_policy: "skip",
     spec: { cron: "0 9 * * 1-5 Europe/Istanbul" },
     payload: { kind: "agent_prompt", text: "Gelen kutumu kontrol et ve yanıt bekleyenleri özetle." }
+  },
+  {
+    id: "sch-standing",
+    origin: "user",
+    author: "owner",
+    revision: 1,
+    bot_id: ATLAS,
+    name: "Yedek ve gelen kutusu",
+    enabled: true,
+    has_webhook: false,
+    created_at_ms: NOW,
+    last_run_at_ms: MOCK_NOW - 2_000_000,
+    next_run_at_ms: MOCK_NOW + 1_800_000,
+    next_runs_ms: [1, 2, 3, 4, 5].map((h) => MOCK_NOW + h * 1_800_000),
+    missed_occurrences: 0,
+    misfire_policy: "skip",
+    spec: { every: { seconds: 1800 } },
+    standing_runs_today: 2,
+    standing_max_runs_per_day: 12,
+    payload: {
+      kind: "standing_order",
+      checklist: "Yedek disk %90'ın altında mı? Yanıtsız acil müşteri maili var mı?",
+      active_hours: { start: "08:00", end: "22:00", timezone: "Europe/Istanbul" },
+      max_runs_per_day: 12
+    }
   },
   {
     id: "sch-5",
@@ -892,6 +920,16 @@ const MOCK_BOT_TERMINALS: BotTerminal[] = [
 ];
 
 export class MockApiClient extends ApiClient {
+  override synthesizeVoice(_text: string, _language: string, signal: AbortSignal): Promise<Blob> {
+    signal.throwIfAborted();
+    if (!this.localVoice.tts_model.installed) {
+      return Promise.reject(new ApiError(409, "voice_not_configured", "read-aloud model is not installed"));
+    }
+    // Minimal 24 kHz mono PCM WAV with one silent sample for browser tests.
+    const wav = Uint8Array.from("RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\xc0\x5d\0\0\x80\xbb\0\0\x02\0\x10\0data\x02\0\0\0\0\0", (c) => c.charCodeAt(0));
+    return Promise.resolve(new Blob([wav], { type: "audio/wav" }));
+  }
+
   private readonly incomingWebhooks = new Map<string, IncomingWebhook[]>();
   private botCursor: BotCursorSettings = { enabled: true };
   private ownerNotify: OwnerNotifySettings = {
@@ -1391,6 +1429,30 @@ export class MockApiClient extends ApiClient {
     ];
   }
 
+  /** A scripted live voice conversation: no microphone, no network; ends when the signal aborts. */
+  override async liveVoiceOpen(_input: LiveVoiceOpenInput, onEvent: (event: LiveVoiceEvent) => void, signal: AbortSignal): Promise<void> {
+    const pause = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+    onEvent({ type: "ready", session_id: crypto.randomUUID(), model: "gemini-3.8-live", input_rate: 16000, output_rate: 24000, max_seconds: 900 });
+    const say = async (role: "you" | "bot", words: string[]) => {
+      for (const word of words) {
+        if (signal.aborted) return;
+        onEvent({ type: role, text: word });
+        if (role === "bot") onEvent({ type: "audio", data: "" });
+        await pause(140);
+      }
+      if (!signal.aborted) onEvent({ type: "turn_complete" });
+    };
+    await pause(700);
+    await say("you", ["Can ", "you ", "give ", "me ", "a ", "quick ", "summary ", "of ", "today?"]);
+    await pause(500);
+    await say("bot", ["Of ", "course. ", "You ", "have ", "two ", "meetings ", "and ", "one ", "unread ", "message ", "from ", "the ", "design ", "team."]);
+    await pause(60 * 60_000);
+  }
+
   override async searchChatHistory(q: string, offset = 0, signal?: AbortSignal): Promise<import("./types").SearchPage> {
     const results: import("./types").SearchPage["results"] = [];
     for (const chat of this.chats) {
@@ -1691,6 +1753,8 @@ export class MockApiClient extends ApiClient {
     const ok = (v: unknown) => v as T;
     const seg = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (path === "/connectivity" && method === "GET") return ok({ services: [] });
+    // Live voice uploads and the close call: nothing to do in the mock app.
+    if (seg[0] === "voice" && seg[1] === "live") return ok(undefined);
     if (seg[0] === "bots" && seg[2] === "triggers") return ok(this.triggers.route(method, seg, opts.body));
     if (path === "/bot-cursor") {
       if (method === "PUT") this.botCursor = opts.body as BotCursorSettings;
@@ -2240,6 +2304,16 @@ export class MockApiClient extends ApiClient {
           this.messages.set(seg[1], [...previous, { id: crypto.randomUUID(), chat_id: seg[1], role: "user", content: input.text ?? "", created_at_ms: Date.now() } as Message]);
           return ok({ delivery: "started", run_id: crypto.randomUUID() });
         }
+        if (seg[2] === "voice-transcript") {
+          const turns = (opts.body as { turns: { role: string; text: string }[] }).turns;
+          const previous = await this.request<Message[]>("GET", `/chats/${seg[1]}/messages`);
+          const now = Date.now();
+          this.messages.set(seg[1], [
+            ...previous,
+            ...turns.map((turn, i) => ({ id: crypto.randomUUID(), chat_id: seg[1], role: turn.role, content: turn.text, created_at_ms: now + i }) as Message)
+          ]);
+          return ok({ saved: turns.length });
+        }
         if (seg[2] === "resend") {
           return ok({ run_id: crypto.randomUUID(), message_id: crypto.randomUUID() });
         }
@@ -2422,6 +2496,10 @@ export class MockApiClient extends ApiClient {
           : typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen")?.startsWith("approval-schedule")
           ? [{ call_id: "mock-sch", run_id: "mock-live", requested_at_ms: Date.now() - 3000, decision: null, tool_name: "schedule_create", summary: "Create a schedule" }]
           : []);
+      case "POST /elicitations": {
+        const action = (opts.body as { action?: string } | undefined)?.action;
+        return ok({ call_id: seg[1] ?? "", outcome: seg[2] === "cancel" ? "cancelled" : action === "decline" ? "declined" : "accepted" });
+      }
       case "POST /approvals":
         return ok({ call_id: seg[1] ?? "", decision: (opts.body as { decision?: string } | undefined)?.decision ?? "approve" });
       case "GET /runs":
@@ -2932,6 +3010,11 @@ export class MockApiClient extends ApiClient {
       case "PUT /email":
       case "DELETE /email":
         return ok(this.email(method, seg, opts.body));
+      case "GET /openapi-apps":
+      case "POST /openapi-apps":
+      case "PUT /openapi-apps":
+      case "DELETE /openapi-apps":
+        return ok(this.mockOpenApi.route(method, seg, opts.body));
       case "GET /composio":
       case "POST /composio":
       case "PUT /composio":
@@ -2982,21 +3065,23 @@ export class MockApiClient extends ApiClient {
       case "PUT /control":
       case "POST /control":
         return ok(this.control(method, seg, opts.body));
-      case "GET /voice/local":
-        return ok(this.localVoice);
-      case "POST /voice/local/install":
-        this.localVoice = {
-          ...this.localVoice,
-          vad_installed: true,
-          models: this.localVoice.models.map((m) =>
-            m.id === (opts.body as { model?: string } | undefined)?.model ? { ...m, installed: true } : m
-          )
-        };
-        return ok(this.localVoice);
       case "GET /voice":
+        return ok(path === "/voice/local" ? this.localVoice : this.voiceConfig(opts.body));
       case "PUT /voice":
         return ok(this.voiceConfig(opts.body));
       case "POST /voice":
+        if (path === "/voice/local/install") {
+          const id = (opts.body as { model?: string } | undefined)?.model;
+          if (id === this.localVoice.tts_model.id) {
+            this.localVoice.tts_model.installed = true;
+          } else {
+            const model = this.localVoice.models.find((m) => m.id === id);
+            if (!model) throw new ApiError(422, "bad_voice_config", "unknown model");
+            model.installed = true;
+            this.localVoice.vad_installed = true;
+          }
+          return ok(this.localVoice);
+        }
         return ok({ text: "This is a mock dictation." });
       case "GET /web":
       case "PUT /web":
@@ -3284,7 +3369,7 @@ export class MockApiClient extends ApiClient {
   private mailGuardSettings: EmailGuardSettings = {
     daily_limit: 20,
     verification_link_domains: [],
-    same_recipient_days: 14,
+    same_recipient_days: 0,
     opt_out_line: true,
     footer: ""
   };
@@ -3454,6 +3539,9 @@ export class MockApiClient extends ApiClient {
     gemini_model: "gemini-3.5-transcribe-live",
     gemini_key_set: false,
     local_model: "whisper-small",
+    live_model: "gemini-3.8-live",
+    live_voice: "Kore",
+    live_keep_audio: false,
     use_provider_key: true,
     gemini_provider_key_available: true,
     stt_provider_key_available: false
@@ -3464,6 +3552,16 @@ export class MockApiClient extends ApiClient {
     vad_installed: false,
     installing: null as string | null,
     last_error: null as string | null,
+    tts_model: {
+      id: "supertonic-3",
+      label: "Supertonic 3",
+      description: "Local CPU speech synthesis.",
+      size_mb: 146,
+      license: "OpenRAIL-M",
+      license_url: "https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE",
+      source_host: "huggingface.co",
+      installed: false
+    },
     models: [
       ["whisper-tiny", "Whisper tiny (fast, rough)", 104],
       ["whisper-base", "Whisper base (balanced)", 161],
@@ -3492,6 +3590,9 @@ export class MockApiClient extends ApiClient {
       gemini_key?: string;
       clear_gemini_key?: boolean;
       use_provider_key?: boolean;
+      live_model?: string;
+      live_voice?: string;
+      live_keep_audio?: boolean;
     };
     this.voice = {
       ...this.voice,
@@ -3499,6 +3600,9 @@ export class MockApiClient extends ApiClient {
       stt_provider: b.stt_provider || this.voice.stt_provider,
       gemini_model: b.gemini_model || this.voice.gemini_model,
       local_model: b.local_model || this.voice.local_model,
+      live_model: b.live_model || this.voice.live_model,
+      live_voice: b.live_voice || this.voice.live_voice,
+      live_keep_audio: b.live_keep_audio ?? this.voice.live_keep_audio,
       gemini_key_set: b.clear_gemini_key ? false : b.gemini_key ? true : this.voice.gemini_key_set,
       stt_base_url: b.stt_base_url || this.voice.stt_base_url,
       stt_model: b.stt_model || this.voice.stt_model,
@@ -3728,6 +3832,8 @@ export class MockApiClient extends ApiClient {
     };
   }
 
+  private readonly mockOpenApi = new MockOpenApiApps();
+
   /** Review-state stand-in for `/v1/composio/*` (no network, no key). */
   private composio(method: string, seg: string[], {
     body, query
@@ -3930,7 +4036,7 @@ function mockMissionChat(ended: boolean, tr: boolean): Message[] {
 function mockLiveRunId(): string | null {
   if (typeof window === "undefined") return null;
   const screen = new URLSearchParams(window.location.search).get("screen");
-  return screen === "working" || screen === "mission" || screen === "approval" || screen === "approval-site" || screen === "subagents" || screen === "notifications" ? "mock-live" : null;
+  return screen === "working" || screen === "mission" || screen === "approval" || screen === "approval-site" || screen === "subagents" || screen === "notifications" || screen === "elicitation" ? "mock-live" : null;
 }
 
 /** Review-state events for `?mock=1&screen=...` (approval, streaming, default run). */
@@ -3938,7 +4044,7 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
   const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
   const screen = new URLSearchParams(window.location.search).get("screen");
   if (screen === "long-chat") return longChatEvents();
-  if (screen === "approval" || screen === "approval-site" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "mission" || screen === "subagents" || screen === "notifications") {
+  if (screen === "approval" || screen === "approval-site" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "mission" || screen === "subagents" || screen === "notifications" || screen === "elicitation") {
     const bot_id = "11111111-1111-4111-8111-111111111111";
     const chat_id = "33333333-3333-4333-8333-333333333333";
     const events: GlobalEnvelope["event"][] = [
@@ -3983,6 +4089,24 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
       ...(screen === "approval" ? [
         { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" } },
         { type: "approval_needed", run_id: "mock-live", call_id: "mock-rm", tool_name: "shell.run", input: { command: "rm -rf ./drafts/old" }, summary: "drafts/old klasörünü ve içindeki 14 dosyayı sil" }
+      ] as GlobalEnvelope["event"][] : []),
+      ...(screen === "elicitation" ? [
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-crm", tool_name: "acme-crm.create_trial", input: {} },
+        {
+          type: "elicitation_requested",
+          run_id: "mock-live",
+          call_id: "8f1c2d3e-4b5a-4c6d-8e7f-901234567890",
+          server: "acme-crm",
+          message: "Deneme hesabını açmak için birkaç bilgiye ihtiyacım var. Koşullar: https://acme-crm.example/terms (açılmaz).",
+          expires_in_secs: 600,
+          fields: [
+            { name: "email", title: "E-posta", description: "Hesap bu adrese açılır.", type: "string", required: true, format: "email" },
+            { name: "seats", title: "Kullanıcı sayısı", description: null, type: "integer", required: false, minimum: 1, maximum: 9, default: 3 },
+            { name: "plan", title: "Paket", description: null, type: "string", required: true, options: [{ value: "starter", label: "Starter" }, { value: "team", label: "Team" }, { value: "business", label: "Business" }] },
+            { name: "newsletter", title: "Ürün haberlerini e-postayla gönder", description: null, type: "boolean", required: false },
+            { name: "api_key", title: "API anahtarı", description: "Ayrıntılar: www.acme-crm.example/keys", type: "string", required: false, blocked: true }
+          ]
+        }
       ] as GlobalEnvelope["event"][] : []),
       ...(screen === "approval-site" ? [
         { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-site", tool_name: "browser_open", input: { url: "https://webioo.com.tr/dashboard" } },

@@ -1,9 +1,11 @@
 import { CircleCheck, Clock, DoorOpen, Hourglass, Pause, Play, Rocket, ShieldAlert, Square, TriangleAlert } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type ApiClient, ApiError } from "../api/client";
-import type { Mission, MissionDetail, MissionDigest, MissionItem } from "../api/types";
+import { ApiError } from "../api/client";
+import type { Mission, MissionDigest, MissionItem } from "../api/types";
 import { humanLine } from "../lib/humanError";
+import { requestOpenChat } from "../lib/openChatLink";
+import { missionCommandWord, requestCompose } from "../lib/slash";
 import {
   type AnswerDraft,
   buildAnswers,
@@ -18,18 +20,12 @@ import {
   missionsToShow,
   type MissionChip,
   progressPercent,
+  progressShort,
   shouldPoll,
-  waitingItems,
   waitLine
 } from "../lib/missions";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./MissionBlock.module.css";
-
-export interface MissionView {
-  mission: Mission;
-  /** The ledger's blocked and waiting items and digest; fetched for missions that have blocked or waiting items or ended. */
-  detail: MissionDetail | null;
-}
 
 export const CHIP_ICONS: Record<MissionChip, typeof Rocket> = {
   running: Rocket,
@@ -42,286 +38,171 @@ export const CHIP_ICONS: Record<MissionChip, typeof Rocket> = {
 };
 
 /** A 400 carries the daemon's own explanation (the bot is not on the Full level); the rest is humanised. */
-function errorText(e: unknown): string {
+export function missionErrorText(e: unknown): string {
   return e instanceof ApiError && e.status === 400 ? e.message : humanLine(e);
 }
 
 /**
- * The bot's missions, from the daemon. There is no event for them, so it asks again every few
- * seconds while one can still change and the Activity tab is on screen, and after every owner action.
+ * The bot's missions, from the daemon: one list request. There is no event for them, so it asks
+ * again every few seconds while one can still change and the Activity tab is on screen.
  */
-function useMissions(botId: string, visible: boolean) {
+function useMissions(botId: string, visible: boolean): Mission[] {
   const { client } = useDaemon();
-  const [views, setViews] = useState<MissionView[]>([]);
-  const version = useRef(0);
-  const active = useRef<Mission[]>([]);
-  const ended = useRef<Mission | null>(null);
-  const details = useRef(new Map<string, { at: number; detail: MissionDetail }>());
-
-  /** `full` also reads the finished missions; a poll only asks for the active ones. */
-  const load = useCallback(
-    async (full: boolean) => {
-      if (!client) {
-        return;
-      }
-      const ticket = ++version.current;
-      try {
-        let all = await client.listMissions(botId, full ? undefined : "active");
-        let readAll = full;
-        if (!full && active.current.some((m) => !all.some((x) => x.id === m.id))) {
-          // One that was active is gone from the active list: it ended, read what it left behind.
-          all = await client.listMissions(botId);
-          readAll = true;
-        }
-        const shown = readAll ? missionsToShow(all) : [...missionsToShow(all), ...(ended.current ? [ended.current] : [])];
-        const next = await Promise.all(
-          shown.map(async (mission): Promise<MissionView> => {
-            // A running mission's ledger says what it works on now; a quiet paused one needs nothing.
-            if (mission.progress.blocked === 0 && mission.progress.waiting === 0 && mission.state === "paused") {
-              return { mission, detail: null };
-            }
-            const hit = details.current.get(mission.id);
-            if (hit && hit.at === mission.updated_at_ms) {
-              return { mission, detail: hit.detail };
-            }
-            try {
-              const detail = await client.getMission(mission.id);
-              details.current.set(mission.id, { at: mission.updated_at_ms, detail });
-              return { mission, detail };
-            } catch {
-              return { mission, detail: null };
-            }
-          })
-        );
-        if (ticket !== version.current) {
-          return;
-        }
-        active.current = shown.filter(isActiveMission);
-        if (readAll) {
-          ended.current = shown.find((m) => !isActiveMission(m)) ?? null;
-        }
-        setViews(next);
-      } catch {
-        // the panel simply has nothing to say; the next poll or action tries again
-      }
-    },
-    [client, botId]
-  );
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const load = useCallback(async () => {
+    if (!client) {
+      return;
+    }
+    try {
+      setMissions(await client.listMissions(botId));
+    } catch {
+      // the panel simply has nothing to say; the next poll tries again
+    }
+  }, [client, botId]);
   useEffect(() => {
-    void load(true);
+    void load();
   }, [load]);
-  const polling = shouldPoll(
-    views.map((v) => v.mission),
-    visible
-  );
+  const polling = shouldPoll(missions, visible);
   useEffect(() => {
     if (!polling) {
       return;
     }
-    const timer = window.setInterval(() => void load(false), MISSION_POLL_MS);
+    const timer = window.setInterval(() => void load(), MISSION_POLL_MS);
     return () => window.clearInterval(timer);
   }, [polling, load]);
-  /** After an owner action: forget the cached ledgers and read everything again. */
-  const refresh = useCallback(async () => {
-    details.current.clear();
-    await load(true);
-  }, [load]);
-  return { views, refresh };
+  return missions;
 }
 
-/** "Missions": long jobs the bot works through alone; their progress, what needs the owner, the report. */
+/**
+ * "Missions" in the bot panel: one line per mission (title, status chip, "7/15"), each opening the
+ * mission's own chat, where its progress, answers, pause/stop and report live. Missions are started
+ * from the chat (`/mission`, or by asking), so the panel only lists them.
+ */
 export function MissionBlock({ botId, visible = true }: { botId: string; visible?: boolean }) {
-  const { t } = useTranslation();
-  const { client } = useDaemon();
-  const { views, refresh } = useMissions(botId, visible);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const hasActive = views.some((v) => isActiveMission(v.mission));
-  /** Run one owner action, then read the missions again. */
-  const act = async (run: (c: ApiClient) => Promise<unknown>): Promise<boolean> => {
-    if (!client || busy) {
-      return false;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await run(client);
-      await refresh();
-      return true;
-    } catch (e) {
-      setError(errorText(e));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { t, i18n } = useTranslation();
+  const shown = missionsToShow(useMissions(botId, visible));
   return (
     <section className={styles.block} aria-labelledby="bot-panel-missions" data-testid="bot-panel-missions">
       <h3 className={styles.label} id="bot-panel-missions">
         {t("missions.title")}
       </h3>
-      {!hasActive ? (
-        <StartForm
-          busy={busy}
-          onStart={(goal) => act((c) => c.startMission({ bot_id: botId, goal }))}
-        />
-      ) : null}
-      {error ? (
-        <p className={styles.error} role="alert" data-testid="mission-error">
-          {error}
+      {shown.length === 0 ? (
+        <p className={styles.emptyLine} data-testid="mission-list-empty">
+          <Rocket aria-hidden="true" />
+          <span>
+            {t("missionChat.panelEmpty")}{" "}
+            <button type="button" className={styles.link} data-testid="mission-start-in-chat" onClick={() => requestCompose(`/${missionCommandWord(i18n.language)}`)}>
+              {t("missionChat.startInChat")}
+            </button>
+          </span>
         </p>
-      ) : null}
-      {views.map((v) => (
-        <MissionCard
-          key={v.mission.id}
-          view={v}
-          busy={busy}
-          onSteer={(action) => act((c) => c.steerMission(v.mission.id, action))}
-          onAnswer={(answers) => act((c) => c.answerMission(v.mission.id, answers))}
-        />
-      ))}
+      ) : (
+        <ul className={styles.list} data-testid="mission-list">
+          {shown.map((m) => (
+            <li key={m.id}>
+              <MissionRow mission={m} />
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
 
-function StartForm({ busy, onStart }: { busy: boolean; onStart: (goal: string) => Promise<boolean> }) {
-  const { t } = useTranslation();
-  const [goal, setGoal] = useState("");
-  const id = useId();
+/** One line: the title, the status chip and "7/15", over a hairline of progress. Opens the mission's chat. */
+function MissionRow({ mission: m }: { mission: Mission }) {
+  const short = progressShort(m);
   return (
-    <details className={styles.start} data-testid="mission-start">
-      <summary className={styles.startSummary}>
-        <Rocket aria-hidden="true" />
-        {t("missions.start.summary")}
-      </summary>
-      <form
-        className={styles.startForm}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void onStart(goal.trim()).then((started) => started && setGoal(""));
-        }}
-      >
-        <label className={styles.field} htmlFor={`${id}-goal`}>
-          {t("missions.start.goalLabel")}
-        </label>
-        <p className={styles.hint} id={`${id}-help`}>
-          {t("missions.start.help")}
-        </p>
-        <textarea
-          id={`${id}-goal`}
-          className={styles.textarea}
-          rows={4}
-          maxLength={4000}
-          value={goal}
-          placeholder={t("missions.start.placeholder")}
-          aria-describedby={`${id}-help`}
-          onChange={(e) => setGoal(e.target.value)}
-        />
-        <button type="submit" className={styles.primary} disabled={busy || goal.trim() === ""}>
-          <Rocket aria-hidden="true" />
-          {busy ? t("missions.start.starting") : t("missions.start.button")}
-        </button>
-      </form>
-    </details>
+    <button
+      type="button"
+      className={styles.row}
+      data-testid="mission-row"
+      data-state={m.state}
+      title={m.goal}
+      onClick={() => requestOpenChat(m.chat_id)}
+    >
+      <span className={styles.rowTitle}>{m.title}</span>
+      <MissionChipView state={m.state} />
+      {short ? <span className={styles.rowCount}>{short}</span> : null}
+      <span className={styles.rowBar} style={{ "--share": progressPercent(m.progress) } as CSSProperties} aria-hidden="true" />
+    </button>
   );
 }
 
-function MissionCard({
-  view,
+/** The status chip: an icon and one word ("Running", "Needs you"). */
+export function MissionChipView({ state }: { state: string }) {
+  const { t } = useTranslation();
+  const chip = missionChip(state);
+  const Icon = CHIP_ICONS[chip];
+  return (
+    <span className={styles.chip} data-chip={chip} data-testid="mission-chip">
+      <Icon aria-hidden="true" />
+      {t(`missions.chip.${chip}`)}
+    </span>
+  );
+}
+
+/**
+ * Pause or resume, and Stop behind one inline "Stop it?" (stopping ends the mission for good).
+ * Nothing for a mission that ended.
+ */
+export function MissionSteer({
+  mission: m,
   busy,
-  onSteer,
-  onAnswer
+  onSteer
 }: {
-  view: MissionView;
+  mission: Mission;
   busy: boolean;
   onSteer: (action: "pause" | "resume" | "cancel") => Promise<boolean>;
-  onAnswer: (answers: ReturnType<typeof buildAnswers>["answers"]) => Promise<boolean>;
 }) {
-  const { t, i18n } = useTranslation();
-  const { mission: m, detail } = view;
-  const titleId = useId();
+  const { t } = useTranslation();
   const [confirmStop, setConfirmStop] = useState(false);
-  const chip = missionChip(m.state);
-  const ChipIcon = CHIP_ICONS[chip];
-  const live = isActiveMission(m);
-  const blocked = detail?.blocked ?? [];
-  const waiting = waitingItems(detail?.items ?? []);
-  const when = (ms: number) => new Date(ms).toLocaleString(i18n.language, { dateStyle: "medium", timeStyle: "short" });
+  if (!isActiveMission(m)) {
+    return null;
+  }
   return (
-    <article className={styles.card} aria-labelledby={titleId} data-testid="mission-card" data-state={m.state}>
-      <header className={styles.head}>
-        <h4 className={styles.title} id={titleId} title={m.goal}>
-          {m.title}
-        </h4>
-        <span className={styles.chip} data-chip={chip} data-testid="mission-chip">
-          <ChipIcon aria-hidden="true" />
-          {t(`missions.chip.${chip}`)}
+    <>
+      {m.state === "paused" ? (
+        <button type="button" className={styles.secondary} disabled={busy} data-testid="mission-resume" onClick={() => void onSteer("resume")}>
+          <Play aria-hidden="true" />
+          {t("missions.resume")}
+        </button>
+      ) : m.state === "running" || m.state === "waiting" ? (
+        <button type="button" className={styles.secondary} disabled={busy} data-testid="mission-pause" onClick={() => void onSteer("pause")}>
+          <Pause aria-hidden="true" />
+          {t("missions.pause")}
+        </button>
+      ) : null}
+      {confirmStop ? (
+        <span className={styles.confirm} role="group" aria-label={t("missions.stopConfirm")}>
+          <span>{t("missions.stopConfirm")}</span>
+          <button
+            type="button"
+            className={styles.danger}
+            disabled={busy}
+            data-testid="mission-stop-yes"
+            onClick={() => void onSteer("cancel").then(() => setConfirmStop(false))}
+          >
+            {t("missions.stopYes")}
+          </button>
+          <button type="button" className={styles.secondary} onClick={() => setConfirmStop(false)}>
+            {t("missions.stopNo")}
+          </button>
         </span>
-      </header>
-      <MissionProgress mission={m} />
-      <MissionNow mission={m} items={detail?.items ?? []} />
-      <p className={styles.meta}>
-        {[
-          t("missions.sessions", { count: m.sessions }),
-          t("missions.modelCalls", { count: m.model_steps }),
-          !live && m.finished_at_ms ? t("missions.endedAt", { when: when(m.finished_at_ms) }) : null
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      </p>
-      {m.state_reason && m.state !== "running" ? (
-        <p className={styles.reason} data-testid="mission-reason">
-          {m.state_reason}
-        </p>
-      ) : null}
-      {live ? (
-        <div className={styles.actions}>
-          {m.state === "paused" ? (
-            <button type="button" className={styles.secondary} disabled={busy} onClick={() => void onSteer("resume")}>
-              <Play aria-hidden="true" />
-              {t("missions.resume")}
-            </button>
-          ) : m.state === "running" || m.state === "waiting" ? (
-            <button type="button" className={styles.secondary} disabled={busy} onClick={() => void onSteer("pause")}>
-              <Pause aria-hidden="true" />
-              {t("missions.pause")}
-            </button>
-          ) : null}
-          {confirmStop ? (
-            <span className={styles.confirm} role="group" aria-label={t("missions.stopConfirm")}>
-              <span>{t("missions.stopConfirm")}</span>
-              <button
-                type="button"
-                className={styles.danger}
-                disabled={busy}
-                onClick={() => void onSteer("cancel").then(() => setConfirmStop(false))}
-              >
-                {t("missions.stopYes")}
-              </button>
-              <button type="button" className={styles.secondary} onClick={() => setConfirmStop(false)}>
-                {t("missions.stopNo")}
-              </button>
-            </span>
-          ) : (
-            <button type="button" className={styles.secondary} disabled={busy} onClick={() => setConfirmStop(true)}>
-              <Square aria-hidden="true" />
-              {t("missions.stop")}
-            </button>
-          )}
-        </div>
-      ) : null}
-      {live && waiting.length > 0 ? <WaitingFor items={waiting} /> : null}
-      {live && blocked.length > 0 ? <NeedsYou items={blocked} busy={busy} onSend={onAnswer} /> : null}
-      {!live && detail?.digest ? <Digest digest={detail.digest} /> : null}
-    </article>
+      ) : (
+        <button type="button" className={styles.secondary} disabled={busy} data-testid="mission-stop" onClick={() => setConfirmStop(true)}>
+          <Square aria-hidden="true" />
+          {t("missions.stop")}
+        </button>
+      )}
+    </>
   );
 }
 
-/** The bar and one line of numbers: "7 of 15 done · 2 need you · 6 left" (shared with the chat header). */
-export function MissionProgress({ mission: m }: { mission: Mission }) {
+/** The headline ("7 of 15 done, working on the rest") over the coloured bar. */
+export function MissionBar({ mission: m }: { mission: Mission }) {
   const { t } = useTranslation();
   const counts = missionCounts(m.progress);
-  const pct = progressPercent(m.progress);
   const headline = missionHeadline(m);
   const pctOf = (n: number) => (m.progress.total > 0 ? (n / m.progress.total) * 100 : 0);
   return (
@@ -333,12 +214,23 @@ export function MissionProgress({ mission: m }: { mission: Mission }) {
         aria-label={t("missions.progressLabel", { done: counts.done, total: m.progress.total })}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={pct}
+        aria-valuenow={progressPercent(m.progress)}
       >
         <span className={styles.barDone} style={{ "--share": pctOf(counts.done) } as CSSProperties} />
         <span className={styles.barWaiting} style={{ "--share": pctOf(counts.waiting) } as CSSProperties} />
         <span className={styles.barBlocked} style={{ "--share": pctOf(counts.blocked) } as CSSProperties} />
       </div>
+    </>
+  );
+}
+
+/** The bar and one line of numbers: "7 of 15 done · 2 need you · 6 left" (shared with the chat header). */
+export function MissionProgress({ mission: m }: { mission: Mission }) {
+  const { t } = useTranslation();
+  const counts = missionCounts(m.progress);
+  return (
+    <>
+      <MissionBar mission={m} />
       <dl className={styles.counts}>
         <div className={styles.count} data-kind="done">
           <dt>{t("missions.counts.done")}</dt>
@@ -400,16 +292,16 @@ export function MissionNow({ mission: m, items }: { mission: Mission; items: rea
  * The items parked on a wake: "waiting for mail from example.com", "waiting until 14:00". The bot's
  * own reason is shown as plain text; nothing here can be answered, the runtime wakes the item.
  */
-function WaitingFor({ items }: { items: readonly MissionItem[] }) {
+export function WaitingFor({ items, heading: Heading = "h4" }: { items: readonly MissionItem[]; heading?: "h3" | "h4" }) {
   const { t, i18n } = useTranslation();
   const id = useId();
   const now = Date.now();
   return (
     <section className={styles.waits} aria-labelledby={`${id}-title`} data-testid="mission-waiting">
-      <h4 className={styles.waitsTitle} id={`${id}-title`}>
+      <Heading className={styles.waitsTitle} id={`${id}-title`}>
         <Hourglass aria-hidden="true" />
         {t("missions.waiting.title", { count: items.length })}
-      </h4>
+      </Heading>
       <ul className={styles.needsList}>
         {items.map((it) => (
           <li key={it.key} className={styles.needsItem} data-testid="mission-waiting-item">

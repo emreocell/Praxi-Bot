@@ -3,6 +3,7 @@ const KNOWN_CODES = [
   "not_configured",
   "preview_not_configured",
   "network",
+  "no_release",
   "signature",
   "busy",
   "nothing_to_install",

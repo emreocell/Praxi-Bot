@@ -21,7 +21,7 @@ test("components and views never show a raw exception message to the user", () =
     }
   }
   // Route errors through humanLine()/humanError() so the user gets a title and a next step.
-  // The detected-accounts block shows the raw text only as collapsible "details" under a human message.
-  // BrainStep only classifies the text; DetectedAccountsBlock keeps it as collapsible details.
-  assert.deepEqual(offenders, ["views/firstrun/BrainStep.tsx", "views/settings/DetectedAccountsBlock.tsx"]);
+  // The coding CLIs block shows the raw text only as collapsible "details" under a human message.
+  // BrainStep only classifies the text; CodingClisBlock keeps it as copyable details.
+  assert.deepEqual(offenders, ["views/firstrun/BrainStep.tsx", "views/settings/CodingClisBlock.tsx"]);
 });

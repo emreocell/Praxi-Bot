@@ -482,6 +482,36 @@ fn http_config(
     Ok(cfg)
 }
 
+/// A server installed from the registry was approved as "a public https
+/// address", but a name can change what it resolves to. Resolve it now, refuse
+/// any non-public answer, connect only to the vetted answers (no second
+/// lookup, so no DNS rebinding), ignore proxies and follow no redirect.
+async fn public_only(
+    server: &str,
+    url: &str,
+    builder: reqwest::ClientBuilder,
+) -> Result<reqwest::ClientBuilder> {
+    let refuse = |why: &str| McpError::Transport {
+        server: server.to_owned(),
+        message: format!("refused: {why}"),
+    };
+    let parsed = reqwest::Url::parse(url).map_err(|_| refuse("the server address is invalid"))?;
+    let addrs = tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::oauth_net::PolicyHttpClient::new(false).vet(&parsed),
+    )
+    .await
+    .map_err(|_| refuse("the server address could not be resolved in time"))?
+    .map_err(|_| refuse("the server address is not a public https address"))?;
+    let mut builder = builder
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some(url::Host::Domain(name)) = parsed.host() {
+        builder = builder.resolve_to_addrs(name, &addrs);
+    }
+    Ok(builder)
+}
+
 /// Connect and complete the MCP handshake, bounded by `timeout`.
 pub(crate) async fn open(
     config: &McpServerConfig,
@@ -539,8 +569,12 @@ pub(crate) async fn open(
             McpTransport::Http { url, headers } => {
                 // A disconnected service must fail before the long tool execution deadline.
                 // No whole-request timeout: legitimate tools and SSE can run for longer.
-                let client = reqwest::Client::builder()
-                    .connect_timeout(Duration::from_secs(3))
+                let mut builder =
+                    reqwest::Client::builder().connect_timeout(Duration::from_secs(3));
+                if config.import.is_some() {
+                    builder = public_only(id, url, builder).await?;
+                }
+                let client = builder
                     .build()
                     .map_err(|e| transport_err(id, e.without_url()))?;
                 let transport = StreamableHttpClientTransport::with_client(
@@ -594,6 +628,37 @@ mod tests {
             matches!(result, Err(McpError::Timeout { seconds: 5, .. })),
             "{result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn registry_servers_are_not_connected_to_non_public_addresses() {
+        for url in [
+            "https://127.0.0.1/mcp",
+            "https://localhost/mcp",
+            "https://[::1]/mcp",
+            "https://169.254.169.254/latest",
+            "https://10.0.0.5/mcp",
+            "http://192.168.1.1/mcp",
+        ] {
+            let mut cfg = McpServerConfig::http("imported", url);
+            cfg.import = Some(crate::config::McpImport {
+                bundle_sha256: None,
+                secrets: vec![],
+            });
+            let result = open(
+                &cfg,
+                &ResolvedSecrets::default(),
+                &Arc::default(),
+                Duration::from_secs(30),
+                None,
+                Arc::default(),
+            )
+            .await;
+            let Err(McpError::Transport { message, .. }) = &result else {
+                panic!("{url}: {result:?}");
+            };
+            assert!(message.starts_with("refused:"), "{url}: {message}");
+        }
     }
 
     #[test]

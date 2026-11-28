@@ -1,5 +1,7 @@
 import type {
   DaemonEvent,
+  ElicitationField,
+  ElicitationOutcome,
   GlobalEnvelope,
   SubagentHelper,
   TodoItem
@@ -50,10 +52,69 @@ export interface ToolItem {
   details?: unknown;
   /** The call went through an approval gate. */
   gated: boolean;
-  /** The observed decision for this gate, relative to the run's start. */
-  approvalDecision?: { outcome: "approved" | "denied"; offsetMs: number };
+  /**
+   * The observed decision for this gate, relative to the run's start. `grant` says what let an
+   * approved call run; it is absent for a denial and for an approval recorded before the daemon
+   * said (provenance unknown, not "the owner").
+   */
+  approvalDecision?: { outcome: "approved" | "denied"; offsetMs: number; grant?: ApprovalGrant };
   error?: string;
   denyReason?: string;
+}
+
+/** What let a call run (`GrantedBy` in crates/protocol/src/event.rs). */
+export type GrantedBy =
+  | "owner_card"
+  | "full_access"
+  | "owner_schedule"
+  | "owner_mission"
+  | "balanced_level"
+  | "standing_grant"
+  | "remembered_choice"
+  | "site_rule";
+
+const GRANTED_BY: ReadonlySet<string> = new Set<GrantedBy>([
+  "owner_card", "full_access", "owner_schedule", "owner_mission",
+  "balanced_level", "standing_grant", "remembered_choice", "site_rule"
+]);
+
+export type GrantLevel = "ask" | "balanced" | "full";
+
+export type GrantRuleScope = "chat" | "always" | "category" | "task" | "standing";
+
+export interface ApprovalGrant {
+  by: GrantedBy;
+  level?: GrantLevel;
+  /** The remembered rule: its scope, and the tool or category name it names (never call text; see `validRuleId`). */
+  rule?: { scope: GrantRuleScope; name?: string };
+}
+
+const RULE_ID = /^(chat|always|category|task|standing)(?::([A-Za-z0-9_.-]{1,64}))?$/;
+
+/**
+ * `rule` as a daemon-shaped rule id (`<scope>` or `<scope>:<name>`), or undefined. Everything
+ * that shows or exports a rule goes through this, so a grant built by hand or by a newer reader
+ * still cannot carry text longer than 64 characters or outside `[A-Za-z0-9_.-]`.
+ */
+export function validRuleId(rule: ApprovalGrant["rule"]): string | undefined {
+  if (!rule) return undefined;
+  const id = rule.name === undefined ? rule.scope : `${rule.scope}:${rule.name}`;
+  return RULE_ID.test(id) ? id : undefined;
+}
+
+/**
+ * The provenance an approval event carries, checked field by field: a value this build does not
+ * know (a newer daemon) or one that is not shaped like a daemon id is dropped, never shown.
+ */
+export function grantOf(e: { granted_by?: unknown; level?: unknown; rule_id?: unknown }): ApprovalGrant | undefined {
+  if (typeof e.granted_by !== "string" || !GRANTED_BY.has(e.granted_by)) return undefined;
+  const grant: ApprovalGrant = { by: e.granted_by as GrantedBy };
+  if (e.level === "ask" || e.level === "balanced" || e.level === "full") grant.level = e.level;
+  const rule = typeof e.rule_id === "string" ? RULE_ID.exec(e.rule_id) : null;
+  if (rule) {
+    grant.rule = { scope: rule[1] as GrantRuleScope, ...(rule[2] ? { name: rule[2] } : {}) };
+  }
+  return grant;
 }
 
 export interface QuestionItem {
@@ -113,6 +174,25 @@ export interface HandoverItem {
   closed?: boolean;
 }
 
+/**
+ * An MCP server's form for the owner (`elicitation_requested`). The server's message, titles and
+ * descriptions are untrusted text; the answer goes to that server only and is never kept here.
+ */
+export interface ElicitationItem {
+  kind: "elicitation";
+  key: string;
+  callId: string;
+  server: string;
+  message: string;
+  fields: ElicitationField[];
+  requestedMs: number;
+  /** `Infinity` when the server set no time limit. */
+  expiresMs: number;
+  /** How the owner answered here; `closed` when the run moved on or the request expired. */
+  outcome?: ElicitationOutcome;
+  closed?: boolean;
+}
+
 export interface TodoListItem {
   kind: "todo";
   key: string;
@@ -136,6 +216,7 @@ export type TimelineItem =
   | QuestionItem
   | SecretRequestItem
   | HandoverItem
+  | ElicitationItem
   | TodoListItem
   | NoticeItem;
 
@@ -190,7 +271,8 @@ export const EMPTY_EVENTS: EventsState = { runs: {}, lastGseq: 0 };
 
 /** When an item appeared (for interleaving with user messages). */
 export function itemTs(i: TimelineItem): number {
-  return i.kind === "tool" || i.kind === "question" || i.kind === "secret" || i.kind === "handover"
+  return i.kind === "tool" || i.kind === "question" || i.kind === "secret" || i.kind === "handover" ||
+    i.kind === "elicitation"
     ? i.requestedMs
     : i.ts;
 }
@@ -314,7 +396,7 @@ function closeOpenItems(items: TimelineItem[]): TimelineItem[] {
   return items.map((i) =>
     i.kind === "question" && i.answer === undefined
       ? { ...i, closed: true }
-      : (i.kind === "secret" && !i.parked) || i.kind === "handover"
+      : (i.kind === "secret" && !i.parked) || i.kind === "handover" || i.kind === "elicitation"
         ? { ...i, closed: true }
         : i.kind === "tool" &&
           (i.status === "awaiting_approval" ||
@@ -426,18 +508,22 @@ function reduce(
           approvalDecision: undefined
         }))
       );
-    case "tool_call_approved":
+    case "tool_call_approved": {
+      const grant = grantOf(e);
       return withRun(state, e.run_id, ts, (r) =>
         updateTool(r, e.call_id, (t) => ({
           ...t,
           status: "running",
-          gated: true,
+          // An automatic grant is no card: the step did not go through an approval gate.
+          gated: t.gated || grant === undefined || grant.by === "owner_card",
           approvalDecision: t.approvalDecision ?? {
             outcome: "approved",
-            offsetMs: ts - r.startedMs
+            offsetMs: ts - r.startedMs,
+            ...(grant ? { grant } : {})
           }
         }))
       );
+    }
     case "tool_call_denied":
       return withRun(state, e.run_id, ts, (r) => {
         const expired = isExpiredReason(e.reason);
@@ -650,6 +736,25 @@ function reduce(
               : [...r.items, item]
         };
       });
+    case "elicitation_requested":
+      return withRun(state, e.run_id, ts, (r) => {
+        const item: ElicitationItem = {
+          kind: "elicitation",
+          key: `elicitation-${e.call_id}`,
+          callId: e.call_id,
+          server: e.server,
+          message: e.message,
+          fields: e.fields,
+          requestedMs: ts,
+          expiresMs: e.expires_in_secs > 0 ? ts + e.expires_in_secs * 1000 : Number.POSITIVE_INFINITY
+        };
+        // A replayed event replaces its card instead of adding a second one.
+        const idx = r.items.findIndex((i) => i.kind === "elicitation" && i.callId === e.call_id);
+        return {
+          ...r,
+          items: idx >= 0 ? r.items.map((i, n) => (n === idx ? item : i)) : [...r.items, item]
+        };
+      });
     case "secret_requested":
       return withRun(state, e.run_id, ts, (r) => {
         const item: SecretRequestItem = {
@@ -811,6 +916,31 @@ export function recordSecretOutcome(
   };
 }
 
+/** Remember how the owner answered an MCP server's form (never the answer itself). */
+export function recordElicitationOutcome(
+  state: EventsState,
+  runId: string,
+  callId: string,
+  outcome: ElicitationOutcome
+): EventsState {
+  const run = state.runs[runId];
+  if (!run) {
+    return state;
+  }
+  return {
+    ...state,
+    runs: {
+      ...state.runs,
+      [runId]: {
+        ...run,
+        items: run.items.map((i) =>
+          i.kind === "elicitation" && i.callId === callId ? { ...i, outcome } : i
+        )
+      }
+    }
+  };
+}
+
 /** Remember how the owner answered a hand-over card (never a code). */
 export function recordHandoverOutcome(
   state: EventsState,
@@ -875,7 +1005,7 @@ export function reconcile(
       }
       // A mission's form outlives its session run: it closes on its own expiry or answer.
       if (
-        ((i.kind === "secret" && !i.parked) || i.kind === "handover") &&
+        ((i.kind === "secret" && !i.parked) || i.kind === "handover" || i.kind === "elicitation") &&
         !i.closed &&
         i.outcome === undefined &&
         i.requestedMs < asOfMs &&
@@ -904,7 +1034,7 @@ export function reconcile(
 }
 
 export interface NeedsYouEntry {
-  kind: "approval" | "question" | "secret" | "handover";
+  kind: "approval" | "question" | "secret" | "handover" | "elicitation";
   runId: string;
   chatId: string;
   botId: string;
@@ -919,6 +1049,8 @@ export interface NeedsYouEntry {
   secret?: SecretRequestItem;
   /** The card to render, for a hand-over (CAPTCHA or one-time code). */
   handover?: HandoverItem;
+  /** The card to render, for an MCP server's form. */
+  elicitation?: ElicitationItem;
 }
 
 /** What the daemon's run list says about a run (enough to place a run the events never introduced). */
@@ -1009,6 +1141,17 @@ export function needsYou(
           title: i.site,
           sinceMs: i.requestedMs,
           handover: i
+        });
+      } else if (i.kind === "elicitation" && i.outcome === undefined && !i.closed && i.expiresMs > nowMs) {
+        out.push({
+          kind: "elicitation",
+          runId: run.id,
+          chatId,
+          botId,
+          callId: i.callId,
+          title: i.server,
+          sinceMs: i.requestedMs,
+          elicitation: i
         });
       }
     }

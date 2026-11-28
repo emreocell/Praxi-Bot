@@ -15,7 +15,7 @@ path = "src/main.rs"
 # `bot serve --fake-provider`: deterministic echo provider (tests, demos).
 fake-provider = ["daemon-api/fake-provider"]
 local-embeddings = ["daemon-api/local-embeddings"]
-# On-device speech-to-text (`stt_provider = "local_voice"`): Silero VAD + Whisper through sherpa-onnx.
+# On-device dictation and read-aloud: Silero VAD, Whisper and Supertonic through sherpa-onnx.
 # Off by default: the sherpa-onnx build script downloads the ONNX runtime for the build target.
 local-voice = ["dep:sherpa-onnx", "dep:opus-decoder", "dep:ogg"]
 
@@ -52,6 +52,7 @@ computer-target = { path = "../../crates/computer-target", version = "0.1.0" }
 browser-cdp = { path = "../../crates/browser-cdp", version = "0.1.0" }
 assistant-import = { path = "../../crates/assistant-import", version = "0.1.0" }
 mcp-bridge = { path = "../../crates/mcp-bridge", version = "0.1.0" }
+openapi-tools = { path = "../../crates/openapi-tools", version = "0.1.0" }
 composio = { path = "../../crates/composio", version = "0.1.0" }
 fs4 = "1"
 clap = { workspace = true, features = ["env"] }
@@ -100,7 +101,6 @@ desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }
 wiremock.workspace = true
 rmcp = { version = "3.9", default-features = false, features = ["client", "server", "transport-io"] }
 daemon-api = { path = "../../crates/daemon-api", version = "0.1.0", features = ["fake-provider"] }
-openapi-tools = { path = "../../crates/openapi-tools", version = "0.1.0" }
 tempfile.workspace = true
 
 [lints]

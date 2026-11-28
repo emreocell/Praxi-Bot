@@ -265,6 +265,13 @@ impl ChannelControl for TelegramRuntime {
         }
     }
 
+    async fn notify_elicitation(&self, chat: protocol::ChatId) {
+        let channel = self.channel.lock().clone();
+        if let Some(channel) = channel {
+            channel.notify_elicitation(chat).await;
+        }
+    }
+
     fn info(&self) -> ChannelDto {
         let channel = self.channel.lock();
         ChannelDto {

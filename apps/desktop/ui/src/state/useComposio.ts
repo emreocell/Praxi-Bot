@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import type { ComposioApp, ComposioCatalog, ComposioStatus, ComposioToolkit } from "../api/types";
+import { CATALOG_PAGE_SIZE } from "../lib/catalogOrder";
 import { appendPage, pendingSlugs, upsertApp } from "../lib/composioApps";
 import { openComposioLink } from "../lib/externalLink";
 import { useDaemon } from "./DaemonContext";
@@ -73,7 +74,8 @@ export function useComposio(active: boolean, query: string, group: string) {
         const page = await client.composioToolkits({
           search: search.trim() || undefined,
           group: grp === "all" ? undefined : grp,
-          cursor: from ?? undefined
+          cursor: from ?? undefined,
+          limit: CATALOG_PAGE_SIZE
         });
         if (mine !== seq.current) {
           return;

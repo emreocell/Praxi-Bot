@@ -300,6 +300,7 @@ impl ToolWrapper for Renamed {
             exposure_private: ctx.exposure_private,
             expected_origin: None,
             unattended_mail: false,
+            full_waived_preview: false,
             // The daemon's payment decision for this call is about the computer's own page: it
             // goes through as it is, never reset to "unchecked".
             payment: ctx.payment.clone(),

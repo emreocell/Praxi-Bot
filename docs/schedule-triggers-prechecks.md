@@ -128,3 +128,16 @@ Every external run keeps the existing isolated external_schedule initiator and o
 approval floor, including egress, resume and child runs. The old note above
 about pre-native taint describes that implementation's origin; current main also
 has native taint/egress protection, which remains in force.
+
+## Owner-only sources: feed, page, calendar, Home Assistant
+
+`Trigger::Feed`, `Trigger::PageChange`, `Trigger::Calendar` and `Trigger::HomeAssistant` are polled by the same scheduler loop as e-mail, through `WatchState` (first poll is a baseline, `take_ready` caps six batches per rolling minute) and then through the registry guard (quiet hours, per-rule and per-bot limits, queue). They exist only as owner rules (`TriggerSource::{Feed,Page,Calendar,HomeAssistant}` in "When something happens"): `Trigger::is_owner_source` is true for them, `validate_trigger` and the bot schedule tools refuse them, and the stored kinds (`feed`, `page_change`, `calendar`, `home_assistant`) are excluded from the timer query in `ScheduleStore` like `file_watch` and `email`.
+
+| Source | Read | Gate | Fires when |
+| --- | --- | --- | --- |
+| feed | `web_tools::HttpFetcher` (strict `DefaultUrlPolicy`) + `web_tools::watch::feed_items` | `AgentLoop::authorize_schedule_web_poll` (Browser category not hidden/locked/denied, not safe mode; one audit line without the URL) | an item identity not seen before |
+| page | same fetcher + `web_tools::watch::select_text` | same | the SHA-256 of the selected text differs; no match is a failed check |
+| calendar | `calendar_list_events` through `schedule_read_host` | the Read gate used for mail (explicit Allow, visible Read tool) | an event identity+start enters `[now, now+N min]` |
+| Home Assistant | `ha_get_state` through `schedule_read_host` | same Read gate | the state string changes (optionally to `to_state`) |
+
+Cadence comes from `TriggerSource::poll_seconds` (web: 900 to 86,400, default 1,800 feed / 3,600 page; calendar 60 to 3,600, default 120; Home Assistant 30 to 3,600, default 60), also after a failed check. Ten consecutive failed checks pause the rule, as for mail.

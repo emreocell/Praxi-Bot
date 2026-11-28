@@ -72,6 +72,11 @@
   cursor: pointer;
 }
 
+/* The pause and stop buttons sit in the same row as pills, like the toggles. */
+.actions button {
+  border-radius: var(--radius-pill);
+}
+
 .toggle:hover {
   background-color: var(--color-surface-active);
   color: var(--color-text);
@@ -191,4 +196,44 @@
   .toggle > .chevron {
     transition: none;
   }
+}
+
+.error {
+  padding-inline-start: calc(var(--size-icon-sm) + var(--space-2));
+}
+
+/* A mission started from this chat: a compact card in the assistant column. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(88%, calc(var(--size-control-lg) * 14));
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+:global(:root[data-style="line"]) .card {
+  background: transparent;
+  border-color: var(--color-border-strong);
+}
+
+.cardEyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-0);
+  color: var(--color-accent-text);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+.cardEyebrow > svg {
+  flex: none;
+  width: var(--font-size-xs);
+  height: var(--font-size-xs);
 }

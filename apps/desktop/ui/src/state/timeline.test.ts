@@ -625,3 +625,37 @@ test("late text of a stopped run is dropped", () => {
   s = feed(s, { type: "message_delta", run_id: RUN, text: " late" });
   assert.equal(runText(s.runs[RUN]), "Essay");
 });
+
+test("an approval keeps what the daemon says granted it; an automatic grant is not a card", () => {
+  const approvedBy = (extra: Record<string, unknown>, gate: boolean) => {
+    let s = started();
+    s = feed(s, { type: "tool_call_requested", run_id: RUN, call_id: "g1", tool_name: "shell_run", input: {} }, 1000);
+    if (gate) {
+      s = feed(s, { type: "approval_needed", run_id: RUN, call_id: "g1", tool_name: "shell_run", input: {}, summary: "x" }, 1100);
+    }
+    s = feed(s, { type: "tool_call_approved", run_id: RUN, call_id: "g1", approved_by: "u", ...extra } as DaemonEvent, 1500);
+    return s.runs[RUN].items[0] as ToolItem;
+  };
+  const card = approvedBy({ granted_by: "owner_card", level: "balanced" }, true);
+  assert.equal(card.gated, true);
+  assert.deepEqual(card.approvalDecision?.grant, { by: "owner_card", level: "balanced" });
+  const full = approvedBy({ granted_by: "full_access", level: "full" }, false);
+  assert.equal(full.gated, false, "no card was shown");
+  assert.equal(full.status, "running");
+  assert.deepEqual(full.approvalDecision?.grant, { by: "full_access", level: "full" });
+  const remembered = approvedBy({ granted_by: "remembered_choice", level: "ask", rule_id: "category:fs" }, false);
+  assert.deepEqual(remembered.approvalDecision?.grant, {
+    by: "remembered_choice", level: "ask", rule: { scope: "category", name: "fs" }
+  });
+  // Recorded before the daemon said: still an approval, with no grant to show.
+  const legacy = approvedBy({}, true);
+  assert.equal(legacy.gated, true);
+  assert.equal(legacy.approvalDecision?.outcome, "approved");
+  assert.equal(legacy.approvalDecision?.grant, undefined);
+  // A kind from a newer daemon or a malformed rule id is dropped, not displayed.
+  assert.equal(approvedBy({ granted_by: "something_new" }, true).approvalDecision?.grant, undefined);
+  assert.deepEqual(
+    approvedBy({ granted_by: "remembered_choice", rule_id: "always:C:/Users/me/secret.txt" }, false).approvalDecision?.grant,
+    { by: "remembered_choice" }
+  );
+});

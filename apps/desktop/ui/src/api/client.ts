@@ -117,6 +117,9 @@ import type {
   EmailTestReport,
   InputBatch,
   InputResult,
+  OpenApiApp,
+  OpenApiAppInput,
+  OpenApiAppUpdate,
   ComposioAction,
   ComposioApp,
   ComposioCatalog,
@@ -133,6 +136,9 @@ import type {
   McpAuthStart,
   McpTestResult,
   McpServer,
+  McpBundleInspection,
+  McpRegistryResult,
+  McpRegistryApproval,
   McpServerPatch,
   McpServerConfig,
   McpTool,
@@ -160,6 +166,8 @@ import type {
   Schedule,
   ScheduleHistoryEntry,
   HandoverAnswer,
+  AnswerElicitation,
+  ElicitationAnswer,
   SecretRequestAnswer,
   FillSecretInfo,
   CreateFillSecretInput,
@@ -201,6 +209,9 @@ import type {
   ViewHeartbeat,
   TranscribeInput,
   TranscribeOutput,
+  LiveVoiceEvent,
+  LiveVoiceOpenInput,
+  VoiceTurn,
   VoiceConfig,
   VoiceConfigInput,
   LocalVoiceStatus,
@@ -555,7 +566,7 @@ export class ApiClient {
   protected async request<T>(
     method: string,
     path: string,
-    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; noTimeout?: boolean; headers?: Record<string, string>; raw?: Blob; keepalive?: boolean; localOwnerOnly?: boolean } = {}
+    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; noTimeout?: boolean; headers?: Record<string, string>; raw?: Blob | FormData; keepalive?: boolean; localOwnerOnly?: boolean } = {}
   ): Promise<T> {
     const res = await this.send(method, path, opts);
     if (res.status === 204) {
@@ -593,7 +604,7 @@ export class ApiClient {
       noTimeout?: boolean;
       headers?: Record<string, string>;
       /** A file body, sent as is (the attachment upload); `body` stays JSON. */
-      raw?: Blob;
+      raw?: Blob | FormData;
       /** Let the request finish while the page is closing or reloading. */
       keepalive?: boolean;
       localOwnerOnly?: boolean;
@@ -622,7 +633,7 @@ export class ApiClient {
     }
     if (opts.body !== undefined) {
       headers["Content-Type"] = "application/json";
-    } else if (opts.raw !== undefined) {
+    } else if (opts.raw instanceof Blob) {
       headers["Content-Type"] = "application/octet-stream";
     }
     let res: Response;
@@ -1267,6 +1278,18 @@ export class ApiClient {
     return this.request("POST", `/handovers/${encodeURIComponent(callId)}/cancel`);
   }
 
+  /**
+   * Answer an MCP server's form (`elicitation_requested`): the answer goes to that server only,
+   * never to the model. Owner-only (the owner key is added for this computer's daemon).
+   */
+  answerElicitation(callId: string, body: AnswerElicitation): Promise<ElicitationAnswer> {
+    return this.request("POST", `/elicitations/${encodeURIComponent(callId)}`, { body, localOwnerOnly: true });
+  }
+
+  cancelElicitation(callId: string): Promise<ElicitationAnswer> {
+    return this.request("POST", `/elicitations/${encodeURIComponent(callId)}/cancel`, { localOwnerOnly: true });
+  }
+
   cancelSecretRequest(callId: string): Promise<SecretRequestAnswer> {
     return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}/cancel`, { localOwnerOnly: true });
   }
@@ -1759,6 +1782,25 @@ export class ApiClient {
   mcpCatalog(): Promise<McpCatalogEntry[]> {
     return this.request("GET", "/mcp/catalog");
   }
+  searchMcpRegistry(q: string, signal?: AbortSignal): Promise<McpRegistryResult[]> {
+    return this.request("GET", "/mcp/import/registry", { query: { q }, signal });
+  }
+  installMcpRegistry(input: McpRegistryApproval, signal?: AbortSignal): Promise<McpServer> {
+    return this.request("POST", "/mcp/import/registry", { body: input, signal });
+  }
+  inspectMcpBundle(file: Blob, checksum: string, signal?: AbortSignal): Promise<McpBundleInspection> {
+    return this.request("POST", "/mcp/import/bundle/inspect", {
+      raw: file,
+      query: checksum ? { expected_sha256: checksum } : undefined,
+      signal
+    });
+  }
+  installMcpBundle(file: File, sha256: string, launchSha256: string, values: Record<string, string>, signal?: AbortSignal): Promise<McpServer> {
+    const form = new FormData();
+    form.append("bundle", file);
+    form.append("approval", JSON.stringify({ approval_sha256: sha256, launch_sha256: launchSha256, values }));
+    return this.request("POST", "/mcp/import/bundle", { raw: form, signal });
+  }
   /**
    * Start a sign-in. With `relayPort` the browser is on THIS computer while the daemon is on a
    * server: the daemon opens no listener and expects the redirect to be forwarded
@@ -1793,6 +1835,26 @@ export class ApiClient {
     return this.request("POST", `/secrets/${encodeURIComponent(name)}`, {
       body: { value }
     });
+  }
+
+  // ---- REST APIs from OpenAPI documents (owner-only routes) -------------
+
+  openapiApps(): Promise<OpenApiApp[]> {
+    return this.request("GET", "/openapi-apps");
+  }
+  /** Connect an API from its OpenAPI document (`spec_url` or `spec_text`); every operation starts off. */
+  openapiAddApp(input: OpenApiAppInput): Promise<OpenApiApp> {
+    return this.request("POST", "/openapi-apps", { body: input });
+  }
+  /** Rename, change base URL or credentials, or replace the set of enabled operations. */
+  openapiUpdateApp(id: string, input: OpenApiAppUpdate): Promise<OpenApiApp> {
+    return this.request("PUT", `/openapi-apps/${encodeURIComponent(id)}`, { body: input });
+  }
+  openapiRefreshApp(id: string): Promise<OpenApiApp> {
+    return this.request("POST", `/openapi-apps/${encodeURIComponent(id)}/refresh`);
+  }
+  openapiRemoveApp(id: string): Promise<void> {
+    return this.request("DELETE", `/openapi-apps/${encodeURIComponent(id)}`);
   }
 
   // ---- Composio app connections (owner-only routes) ---------------------
@@ -2054,6 +2116,89 @@ export class ApiClient {
   /** Dictation: the recording goes to the service the owner configured. */
   transcribe(input: TranscribeInput): Promise<TranscribeOutput> {
     return this.request("POST", "/voice/transcribe", { body: input });
+  }
+
+  /** Generate WAV on this computer's daemon. Reply text must never follow a redirect. */
+  async synthesizeVoice(text: string, language: string, signal: AbortSignal): Promise<Blob> {
+    const res = await this.send("POST", "/voice/synthesize", { body: { text, language }, signal, localOwnerOnly: true });
+    return res.blob();
+  }
+
+  /**
+   * Open a live voice conversation: the answer is an event stream that lasts as long as the
+   * conversation. Owner only and this computer's daemon only (it spends the stored Gemini key).
+   * Aborting `signal` ends the conversation.
+   */
+  async liveVoiceOpen(
+    input: LiveVoiceOpenInput,
+    onEvent: (event: LiveVoiceEvent) => void,
+    signal: AbortSignal
+  ): Promise<void> {
+    const res = await this.send("POST", "/voice/live", { body: input, noTimeout: true, localOwnerOnly: true, signal });
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new ApiError(0, "network", "missing live voice stream");
+    }
+    const parse = createSseParser((message) => {
+      try {
+        onEvent(JSON.parse(message.data) as LiveVoiceEvent);
+      } catch {
+        // A malformed event is skipped; the next one still counts.
+      }
+    });
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          break;
+        }
+        parse(decoder.decode(chunk.value, { stream: true }));
+      }
+      parse(decoder.decode());
+    } catch (e) {
+      if (!signal.aborted) {
+        throw e;
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+  }
+
+  /** Microphone audio of the open conversation: raw 16-bit little-endian PCM, 16 kHz, mono. */
+  liveVoiceAudio(sessionId: string, pcm: Uint8Array, signal?: AbortSignal): Promise<void> {
+    return this.request("POST", `/voice/live/${encodeURIComponent(sessionId)}/audio`, {
+      raw: new Blob([pcm as BlobPart]),
+      localOwnerOnly: true,
+      signal
+    });
+  }
+
+  /** The bot's answer to a `tool_call` event (or why it could not). */
+  liveVoiceToolResult(sessionId: string, callId: string, text: string): Promise<void> {
+    return this.request("POST", `/voice/live/${encodeURIComponent(sessionId)}/tool`, {
+      body: { call_id: callId, text },
+      localOwnerOnly: true
+    });
+  }
+
+  /** A short update the voice model passes on to the owner. */
+  liveVoiceNote(sessionId: string, text: string): Promise<void> {
+    return this.request("POST", `/voice/live/${encodeURIComponent(sessionId)}/note`, {
+      body: { text },
+      localOwnerOnly: true
+    });
+  }
+
+  liveVoiceClose(sessionId: string): Promise<void> {
+    return this.request("DELETE", `/voice/live/${encodeURIComponent(sessionId)}`, { localOwnerOnly: true, keepalive: true });
+  }
+
+  /** Write a finished voice conversation into a chat as text messages (no run starts). */
+  saveVoiceTranscript(chatId: string, turns: VoiceTurn[]): Promise<{ saved: number }> {
+    return this.request("POST", `/chats/${encodeURIComponent(chatId)}/voice-transcript`, {
+      body: { turns }
+    });
   }
 
   listCalendarAccounts(): Promise<CalendarAccount[]> {

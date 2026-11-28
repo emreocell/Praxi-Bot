@@ -115,7 +115,7 @@ recorded `last_reviewed` date rather than fetched at runtime:
   ```sh
   bot catalog render-docs
   ```
-- **Staleness reminders:** `bot doctor` and Settings → Diagnostics report a
+- **Staleness reminders:** `bot doctor` and **Settings → System** report a
   non-blocking `catalog_freshness` warning when `last_reviewed` is older than
   90 days. A weekly GitHub Actions workflow
   (`.github/workflows/catalog-freshness.yml`) runs the offline check and writes

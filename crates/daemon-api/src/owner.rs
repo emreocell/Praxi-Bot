@@ -286,6 +286,11 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/local-install"),
     ("DELETE", "/v1/local-install"),
     ("POST", "/v1/components/{}/install"),
+    ("GET", "/v1/mcp/import/registry"),
+    ("HEAD", "/v1/mcp/import/registry"),
+    ("POST", "/v1/mcp/import/registry"),
+    ("POST", "/v1/mcp/import/bundle/inspect"),
+    ("POST", "/v1/mcp/import/bundle"),
     ("POST", "/v1/mcp/servers"),
     ("PUT", "/v1/mcp/servers/{}"),
     ("DELETE", "/v1/mcp/servers/{}"),
@@ -332,6 +337,9 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/handovers/{}/code"),
     ("POST", "/v1/handovers/{}/done"),
     ("POST", "/v1/handovers/{}/cancel"),
+    // an MCP server's form: the owner's own answer, handed to that server only
+    ("POST", "/v1/elicitations/{}"),
+    ("POST", "/v1/elicitations/{}/cancel"),
     ("POST", "/v1/email/accounts"),
     ("PUT", "/v1/email/accounts/{}"),
     ("DELETE", "/v1/email/accounts/{}"),
@@ -369,8 +377,27 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     // caller chooses: a token holder must not run it
     ("POST", "/v1/web/search/test"),
     ("PUT", "/v1/voice"),
+    // A live conversation opens the microphone's audio to a paid cloud service and spends the
+    // stored Gemini key: the owner's own action, never a token's or a paired phone's.
+    ("POST", "/v1/voice/live"),
+    ("DELETE", "/v1/voice/live/{}"),
+    ("POST", "/v1/voice/live/{}/audio"),
+    ("POST", "/v1/voice/live/{}/tool"),
+    ("POST", "/v1/voice/live/{}/note"),
+    ("POST", "/v1/chats/{}/voice-transcript"),
     // downloads hundreds of MB onto the owner's disk
     ("POST", "/v1/voice/local/install"),
+    // Connected REST APIs: the list shows base URLs and credential names, and every change
+    // stores a credential or lets a bot call that API
+    ("GET", "/v1/openapi-apps"),
+    ("HEAD", "/v1/openapi-apps"),
+    ("GET", "/v1/openapi-apps/{}"),
+    ("HEAD", "/v1/openapi-apps/{}"),
+    ("POST", "/v1/openapi-apps"),
+    ("PUT", "/v1/openapi-apps/{}"),
+    ("DELETE", "/v1/openapi-apps/{}"),
+    ("POST", "/v1/openapi-apps/{}/refresh"),
+    ("POST", "/v1/voice/synthesize"),
     // Account identities, the catalog and its logos, and action discovery are for the confirmed
     // owner: the app lists they feed are owner-only, and no phone or node shows them.
     ("GET", "/v1/composio"),

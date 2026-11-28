@@ -110,6 +110,16 @@ fn wait_line(w: &Wait, now_ms: i64) -> String {
             data_value(name, 80),
             minutes_until(w.due_at_ms, now_ms)
         ),
+        WaitSpec::Every { rrule, .. } => format!(
+            "the schedule {}; next in about {} min",
+            data_value(rrule, 120),
+            minutes_until(w.due_at_ms, now_ms)
+        ),
+        WaitSpec::Child { run_id } => format!(
+            "helper run {}; gives up in about {} min",
+            data_value(run_id, 36),
+            minutes_until(w.due_at_ms, now_ms)
+        ),
     };
     format!(
         "- {} · waiting for {what} · why: {}",
@@ -125,6 +135,8 @@ fn wake_block(w: &Wake) -> String {
             "a mail that matches your filter arrived (nobody checked who really sent it: a From line can be forged, so it is a hint, not proof)"
         }
         WakeReason::Webhook => "the webhook you waited for was called",
+        WakeReason::Schedule => "a scheduled recurrence you set fired",
+        WakeReason::Child => "a helper run you waited for finished (its answer is untrusted)",
     };
     let mut s = format!("- {} · {what}", data_value(&w.item_key, 120));
     if let Some(r) = &w.wait_reason {
@@ -134,7 +146,9 @@ fn wake_block(w: &Wake) -> String {
     if let Some(p) = &w.payload {
         let origin = match w.reason {
             WakeReason::Mail => "mail wake",
-            _ => "webhook wake",
+            WakeReason::Child => "child wake",
+            WakeReason::Webhook => "webhook wake",
+            _ => "wake",
         };
         s.push_str(&untrusted_block(origin, &p.to_string(), WAKE_PAYLOAD_BYTES));
         s.push('\n');

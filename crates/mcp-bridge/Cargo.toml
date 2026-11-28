@@ -10,9 +10,13 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+openapi = ["dep:utoipa"]
+
 [dependencies]
 async-trait.workspace = true
 base64.workspace = true
+directories.workspace = true
 futures.workspace = true
 globset.workspace = true
 http = "1"
@@ -23,6 +27,7 @@ permission-engine = { path = "../permission-engine", version = "0.1.0" }
 # (`process_group(0)`, kill the group). Windows: a job object with
 # `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` so npx/uvx wrapper trees die.
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
+protocol.workspace = true
 # The OAuth policy client (`oauth_net.rs`): the same reqwest and TLS stack
 # rmcp already uses (native-tls, no aws-lc), with proxies disabled.
 reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }
@@ -38,30 +43,40 @@ rmcp = { version = "3.9", default-features = false, features = [
     "reqwest-native-tls",
 ] }
 secret-store.workspace = true
+semver = "1"
 sha2 = "0.10"
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 toml.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 tracing = "0.1"
 url.workspace = true
+utoipa = { version = "5", optional = true }
+uuid.workspace = true
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zeroize = "1"
 
 [dev-dependencies]
 agent-router = { path = "../agent-router", version = "0.1.0" }
 rmcp = { version = "3.9", default-features = false, features = [
     "client",
+    # `Peer::create_elicitation` for the test server's `elicit` tool.
+    "elicitation",
     "server",
     "transport-io",
 ] }
 proptest.workspace = true
-tempfile = "3"
 tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "time", "test-util"] }
 
+# `O_NOFOLLOW` for the files unpacked from a bundle.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_System_Threading"] }
+windows = { workspace = true, features = ["Win32_Security_Cryptography", "Win32_System_Threading"] }
 
 # Tiny stdio MCP server used by the integration tests (built by `cargo test`).
 [[example]]

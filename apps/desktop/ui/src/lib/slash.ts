@@ -8,6 +8,8 @@ export interface SlashCommand {
   name: string;
   /** i18n key of the one-line description. */
   i18nKey: string;
+  /** Other names that run the same command (`/görev` for `/mission`); the menu finds it by them too. */
+  aliases?: readonly string[];
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
@@ -35,8 +37,35 @@ export const APP_COMMANDS: readonly AppCommand[] = [
   { name: "schedules", i18nKey: "chat.slash.schedules", target: "schedules" }
 ] as const;
 
+/** Window event that puts text into the open chat's message box (detail: the text). */
+export const COMPOSE_EVENT = "praxi:compose";
+
+export function requestCompose(text: string): void {
+  window.dispatchEvent(new CustomEvent<string>(COMPOSE_EVENT, { detail: text }));
+}
+
+/** `/mission <the job>` (Turkish `/görev`): the app starts a mission for this chat's bot; nothing goes to the model. */
+export const MISSION_COMMAND: SlashCommand = { name: "mission", i18nKey: "missionChat.slash", aliases: ["görev", "gorev"] };
+
 /** Commands the composer runs on the open chat itself (nothing is sent to the bot). */
-export const LOCAL_COMMANDS: readonly SlashCommand[] = [{ name: "export", i18nKey: "chat.slash.export" }] as const;
+export const LOCAL_COMMANDS: readonly SlashCommand[] = [{ name: "export", i18nKey: "chat.slash.export" }, MISSION_COMMAND] as const;
+
+/** The mission command as the owner types it: `görev` in Turkish, `mission` elsewhere. */
+export function missionCommandWord(lang: string): string {
+  return lang.toLowerCase().startsWith("tr") ? "görev" : MISSION_COMMAND.name;
+}
+
+/**
+ * The job of a `/mission` (or `/görev`) message: the text after the command, "" when there is
+ * none yet, `null` when the message is not that command.
+ */
+export function missionCommandGoal(text: string): string | null {
+  const parsed = parseSlashInput(text);
+  if (!parsed || (parsed.name !== MISSION_COMMAND.name && !MISSION_COMMAND.aliases?.includes(parsed.name))) {
+    return null;
+  }
+  return parsed.args;
+}
 
 /** True when the message is exactly `/export`. */
 export function isExportCommand(text: string): boolean {
@@ -57,7 +86,7 @@ export function appCommandFor(text: string): AppCommand | null {
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set([
   ...SLASH_COMMANDS.map((c) => c.name),
   ...APP_COMMANDS.map((c) => c.name),
-  ...LOCAL_COMMANDS.map((c) => c.name),
+  ...LOCAL_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]),
   "workflow"
 ]);
 

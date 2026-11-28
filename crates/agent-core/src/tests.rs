@@ -8,6 +8,7 @@ mod c382;
 mod c812;
 mod c821;
 mod composio_approvals;
+pub(crate) mod elicitation;
 mod external_agent;
 pub(crate) mod fill_secret;
 mod grounding;
@@ -418,6 +419,25 @@ pub(crate) fn make_loop(
     prof: BotProfile,
     config: LoopConfig,
 ) -> AgentLoop {
+    make_loop_with(
+        storage,
+        bot,
+        Arc::clone(fake) as Arc<dyn ChatProvider>,
+        tools,
+        prof,
+        config,
+    )
+}
+
+/// [`make_loop`] over any provider (a test that must act while a model call is in flight).
+pub(crate) fn make_loop_with(
+    storage: &Arc<Storage>,
+    bot: BotId,
+    provider: Arc<dyn ChatProvider>,
+    tools: &[&Arc<TestTool>],
+    prof: BotProfile,
+    config: LoopConfig,
+) -> AgentLoop {
     let registry = ToolRegistry::new();
     for t in tools {
         registry.register(Arc::clone(t) as Arc<dyn Tool>);
@@ -425,7 +445,7 @@ pub(crate) fn make_loop(
     let lp = AgentLoop::new(
         Arc::clone(storage),
         registry,
-        Providers::single(Arc::clone(fake) as Arc<dyn ChatProvider>),
+        Providers::single(provider),
         config,
     );
     lp.add_profile(bot, prof);
@@ -1364,6 +1384,7 @@ async fn bot_tool_allow_exclude_hides_and_blocks_tools() {
         "excluded tool cannot be called even by name"
     );
     assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+    assert!(tool_messages(&fake.request(1))[0].contains("tool_search"));
 }
 
 #[tokio::test]
@@ -3134,7 +3155,7 @@ async fn many_tools_switch_to_discovery_and_use_tool_is_gated_by_the_target() {
     assert_eq!(tool_messages(&fake.request(1)), vec!["read ok".to_owned()]);
 }
 
-fn system_text(req: &ChatRequest) -> String {
+pub(crate) fn system_text(req: &ChatRequest) -> String {
     req.messages[0].content.as_str().unwrap().to_owned()
 }
 
@@ -7996,7 +8017,7 @@ async fn pre_058_paused_run_with_unknown_origin_fails_closed_after_migration() {
             DROP TABLE bot_spend_limits;
             DROP TABLE incoming_webhook_seen;
             DROP TABLE incoming_webhooks;
-            DROP TABLE bot_workspaces; DROP TABLE workspace_settings;
+            DROP TABLE bot_workspaces; DROP TABLE workspace_settings; DROP TABLE chat_summaries;
             DROP TRIGGER chat_search_insert;
             DROP TRIGGER chat_search_delete;
             DROP TRIGGER chat_search_update;

@@ -51,6 +51,15 @@ const HELD_MAX: usize = 30;
 const FINISHED_COALESCE_MS: i64 = 15 * 60 * 1000;
 /// A scheduled run that fails notifies at most this often per schedule.
 const FAILED_COALESCE_MS: i64 = 5 * 60 * 1000;
+/// A standing order that reports the same problem again notifies at most this often.
+const NEEDS_OWNER_COALESCE_MS: i64 = 60 * 60 * 1000;
+/// What the notice says when a standing order ended without a clear `OK` or `NEEDS_OWNER(...)`.
+const STANDING_UNCLEAR: &str =
+    "The check ended without a clear OK or NEEDS_OWNER answer. Open the run to see what it found.";
+/// What the notice says when a guard (step limit, budget, repeat detector) cut a standing
+/// order short: an unfinished check is never a quiet one.
+const STANDING_CUT_SHORT: &str =
+    "The check was cut short by a limit before it finished. Open the run to see what it found.";
 /// Questions and approvals of one run are batched into one notice within this window.
 const BATCH_WINDOW: Duration = Duration::from_secs(4);
 /// How often held notices are checked against the quiet window.
@@ -724,6 +733,12 @@ impl AppState {
     /// the run had read something private when it said it. (The text was already passed through
     /// the secret redactor when it was stored.)
     fn run_result_text(&self, run: &storage::Run) -> Option<(String, bool)> {
+        self.run_last_message(run)
+            .map(|m| (clip(&m.content, 500), m.exposure_private))
+    }
+
+    /// The last non-empty assistant message of `run`, whole.
+    fn run_last_message(&self, run: &storage::Run) -> Option<storage::Message> {
         let chat = run.chat_id?;
         let (messages, _) = self
             .storage()
@@ -735,7 +750,87 @@ impl AppState {
                 m.role == "assistant" && m.run_id == Some(run.id) && !m.content.trim().is_empty()
             })
             .max_by_key(|m| m.created_at_ms)
-            .map(|m| (clip(&m.content, 500), m.exposure_private))
+    }
+
+    /// A standing order that ended well says nothing unless it asked for the owner: `OK`
+    /// publishes no notice at all; `NEEDS_OWNER(reason)`, or an ending that is neither, does.
+    /// Silence must be earned: an `OK` from a run a guard cut short, or that the verdict parser
+    /// finds ambiguous, is not silence.
+    ///
+    /// The reason is the bot's text, which may repeat what a page or mail said: it is scrubbed
+    /// of hidden and control characters and bounded, and after private reads it stays in the
+    /// app. What the notice is deduplicated on is that scrubbed text, never the raw one.
+    fn notify_standing_order(&self, run: &storage::Run, kind: &ScheduledKind) {
+        let message = self.run_last_message(run);
+        let verdict = message
+            .as_ref()
+            .map_or(scheduler::StandingVerdict::Unclear, |m| {
+                scheduler::StandingVerdict::parse(&m.content)
+            });
+        // Not knowing whether a guard stopped the run counts as it having.
+        let cut_short = self.agent().stopped_by_guard(run.id).unwrap_or(true);
+        let (reason, key) = match verdict {
+            scheduler::StandingVerdict::Ok if cut_short => (STANDING_CUT_SHORT.to_owned(), None),
+            scheduler::StandingVerdict::Ok => return,
+            scheduler::StandingVerdict::NeedsOwner(reason) => {
+                let reason = clip(&protocol::approval_text::scrub(&reason, false), TEXT_MAX);
+                // Text the bot wrote after reading private or untrusted content is not a
+                // reliable key: it is shown fixed, or an attacker may vary it at will. One
+                // notice per schedule and window then.
+                let loose = message
+                    .as_ref()
+                    .is_some_and(|m| m.exposure_private || m.exposure_untrusted);
+                if reason.is_empty() {
+                    (STANDING_UNCLEAR.to_owned(), None)
+                } else if loose {
+                    (reason, Some(String::new()))
+                } else {
+                    (reason.clone(), Some(reason))
+                }
+            }
+            scheduler::StandingVerdict::Unclear => (STANDING_UNCLEAR.to_owned(), None),
+        };
+        let private = message.as_ref().is_some_and(|m| m.exposure_private) && key.is_some();
+        let mut d = Draft::new(
+            NoticeKind::Blocked,
+            NoticeSource::Run,
+            self.scheduled_title(kind),
+        );
+        d.bot_name = self.bot_name(run.bot_id);
+        d.bot_id = Some(run.bot_id.to_string());
+        d.run_id = Some(run.id.to_string());
+        d.chat_id = run.chat_id.map(|c| c.to_string());
+        d.reason = Some(if private {
+            PRIVATE_RESULT.to_owned()
+        } else {
+            reason.clone()
+        });
+        // The same problem is not repeated at every check; a different one still comes
+        // through, except where the text cannot be trusted to tell problems apart. An unclear
+        // or cut-short ending has its own key, so it is never held back by a reason notice.
+        let same = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            key.as_deref().unwrap_or(reason.as_str()).hash(&mut h);
+            h.finish()
+        };
+        let which = if key.is_some() {
+            "needs_owner"
+        } else {
+            "unclear"
+        };
+        d.coalesce = Some((
+            format!("{}:{which}:{same:x}", kind.schedule),
+            NEEDS_OWNER_COALESCE_MS,
+        ));
+        self.owner_notify().publish(d, storage::now_ms());
+    }
+
+    fn is_standing_order(&self, kind: &ScheduledKind) -> bool {
+        self.schedule_store()
+            .ok()
+            .and_then(|s| s.get(TaskId(kind.schedule)).ok().flatten())
+            .is_some_and(|s| matches!(s.payload, scheduler::Payload::StandingOrder { .. }))
     }
 
     fn scheduled_title(&self, kind: &ScheduledKind) -> String {
@@ -758,6 +853,10 @@ impl AppState {
             return;
         };
         let failed = error.is_some() || run.state == "failed";
+        if !failed && self.is_standing_order(&kind) {
+            self.notify_standing_order(&run, &kind);
+            return;
+        }
         let mut d = Draft::new(
             if failed {
                 NoticeKind::Failed

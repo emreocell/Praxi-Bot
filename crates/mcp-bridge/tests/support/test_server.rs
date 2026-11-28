@@ -11,6 +11,10 @@
 //! resources and one prompt. `echo` with `"pid": true` answers the process id.
 //! `MCP_EXIT_MARKER` names a file written when the server exits by itself
 //! after its stdin was closed.
+//!
+//! `MCP_TEST_MODE=elicit` offers only `elicit`: it asks the client for an
+//! e-mail address (`elicitation/create`) and answers `accept:<email>`,
+//! `decline` or `cancel`.
 
 #![allow(clippy::unused_async_trait_impl)]
 
@@ -19,11 +23,12 @@ use std::sync::Arc;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
-        GetPromptRequestParams, GetPromptResponse, GetPromptResult, Implementation, JsonObject,
-        ListPromptsResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt,
-        PromptMessage, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-        Resource, ResourceContents, Role, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ElicitRequestParams,
+        ElicitationAction, ElicitationSchema, GetPromptRequestParams, GetPromptResponse,
+        GetPromptResult, Implementation, JsonObject, ListPromptsResult, ListResourcesResult,
+        ListToolsResult, PaginatedRequestParams, Prompt, PromptMessage, ReadResourceRequestParams,
+        ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, Role,
+        ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
     },
     service::{RequestContext, SubscriptionContext},
     transport::stdio,
@@ -167,6 +172,7 @@ impl ServerHandler for TestServer {
                 );
                 return Ok(ListToolsResult::with_all_items(vec![large]));
             }
+            Ok("elicit") => return Ok(elicit_tools()),
             Ok("secret-error") => {
                 return Err(ErrorData::internal_error(
                     std::env::var("API_KEY").unwrap(),
@@ -316,6 +322,9 @@ impl ServerHandler for TestServer {
         if contract() {
             return Ok(contract_call(&request).await.into());
         }
+        if std::env::var("MCP_TEST_MODE").as_deref() == Ok("elicit") {
+            return Ok(elicit_call(&context.peer).await);
+        }
         let wants_pid = request
             .arguments
             .as_ref()
@@ -399,6 +408,39 @@ impl ServerHandler for TestServer {
         eprintln!("test_server handled {}", request.name);
         Ok(result.into())
     }
+}
+
+fn elicit_tools() -> ListToolsResult {
+    ListToolsResult::with_all_items(vec![tool(
+        "elicit",
+        "Asks the user for an e-mail address",
+        true,
+    )])
+}
+
+/// `elicit`: asks the client for an address and reports the answer.
+async fn elicit_call(peer: &rmcp::Peer<RoleServer>) -> CallToolResponse {
+    let form = ElicitRequestParams::FormElicitationParams {
+        meta: None,
+        message: "Which address should I use?".into(),
+        requested_schema: ElicitationSchema::builder()
+            .required_email("email")
+            .build()
+            .unwrap(),
+    };
+    let text = match peer.create_elicitation(form).await {
+        Ok(r) if r.action == ElicitationAction::Accept => format!(
+            "accept:{}",
+            r.content
+                .as_ref()
+                .and_then(|c| c["email"].as_str())
+                .unwrap_or("")
+        ),
+        Ok(r) if r.action == ElicitationAction::Decline => "decline".to_owned(),
+        Ok(_) => "cancel".to_owned(),
+        Err(e) => format!("error:{e}"),
+    };
+    CallToolResult::success(vec![ContentBlock::text(text)]).into()
 }
 
 /// Child that would outlive this process unless the parent's process group

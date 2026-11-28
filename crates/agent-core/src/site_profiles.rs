@@ -339,8 +339,7 @@ impl Shared {
         Some(std::sync::Arc::new(RuleUrlGuard {
             sh: std::sync::Arc::clone(self),
             bot: ctx.bot_id,
-            run: ctx.run_id,
-            user: ctx.user_id,
+            audit: Some((ctx.user_id, ctx.run_id)),
         }))
     }
 
@@ -394,8 +393,7 @@ fn strictness(a: ProfileAction) -> u8 {
 struct RuleUrlGuard {
     sh: std::sync::Arc<Shared>,
     bot: BotId,
-    run: protocol::RunId,
-    user: protocol::UserId,
+    audit: Option<(protocol::UserId, protocol::RunId)>,
 }
 
 impl tool_registry::UrlGuard for RuleUrlGuard {
@@ -422,10 +420,10 @@ impl tool_registry::UrlGuard for RuleUrlGuard {
             ProfileAction::Ask => redirect_hop,
             ProfileAction::Allow => false,
         };
-        if refused {
+        if refused && let Some((user, run)) = self.audit {
             let _ = self.sh.storage.append_audit(
-                self.user,
-                Some(self.run),
+                user,
+                Some(run),
                 "system",
                 AUDIT_PROFILE_APPLIED,
                 &json!({
@@ -627,4 +625,16 @@ pub(crate) fn recent_subjects(
         }
     }
     out
+}
+
+impl crate::AgentLoop {
+    /// Site rules applied to unattended web polling and every redirect.
+    #[must_use]
+    pub fn schedule_url_guard(&self, bot: BotId) -> std::sync::Arc<dyn tool_registry::UrlGuard> {
+        std::sync::Arc::new(RuleUrlGuard {
+            sh: std::sync::Arc::clone(&self.sh),
+            bot,
+            audit: None,
+        })
+    }
 }

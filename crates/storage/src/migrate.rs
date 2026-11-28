@@ -78,6 +78,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0023_bot_workspaces",
         include_str!("../migrations/0023_bot_workspaces.sql"),
     ),
+    (
+        "0024_chat_summaries",
+        include_str!("../migrations/0024_chat_summaries.sql"),
+    ),
 ];
 
 /// Highest schema version this build supports.
@@ -190,9 +194,9 @@ mod tests {
     fn migrates_empty_db_and_is_idempotent() {
         let mut conn = Connection::open_in_memory().unwrap();
         assert_eq!(current_version(&conn).unwrap(), 0);
-        assert_eq!(latest_version(), 23);
-        assert_eq!(migrate(&mut conn).unwrap(), 18);
-        assert_eq!(current_version(&conn).unwrap(), 23);
+        assert_eq!(latest_version(), 24);
+        assert_eq!(migrate(&mut conn).unwrap(), 19);
+        assert_eq!(current_version(&conn).unwrap(), 24);
         assert_eq!(migrate(&mut conn).unwrap(), 0);
         assert_eq!(
             tables(&conn),
@@ -210,6 +214,7 @@ mod tests {
                 "chat_messages_fts_data",
                 "chat_messages_fts_docsize",
                 "chat_messages_fts_idx",
+                "chat_summaries",
                 "chats",
                 "event_index",
                 "file_provenance",
@@ -255,8 +260,8 @@ mod tests {
     fn fresh_database_ends_at_latest_version() {
         let mut conn = Connection::open_in_memory().unwrap();
         migrate(&mut conn).unwrap();
-        assert_eq!(latest_version(), 23);
-        assert_eq!(current_version(&conn).unwrap(), 23);
+        assert_eq!(latest_version(), 24);
+        assert_eq!(current_version(&conn).unwrap(), 24);
         assert_eq!(MIGRATIONS[5].0, "0006_bot_skill_assignment");
         assert_eq!(MIGRATIONS[6].0, "0007_message_exposure");
         assert_eq!(MIGRATIONS[7].0, "0013_bot_version");
@@ -288,8 +293,8 @@ mod tests {
                 .iter()
                 .any(|t| t.starts_with("bot_skill_assignment"))
         );
-        assert_eq!(migrate(&mut conn).unwrap(), 13);
-        assert_eq!(current_version(&conn).unwrap(), 23);
+        assert_eq!(migrate(&mut conn).unwrap(), 14);
+        assert_eq!(current_version(&conn).unwrap(), 24);
         // An existing bot starts at version 1.
         let v: i64 = conn
             .query_row("SELECT version FROM bots WHERE id='bot'", [], |r| r.get(0))
@@ -333,10 +338,49 @@ mod tests {
         without_exposure.push(MIGRATIONS[7]);
         assert_eq!(migrate_list(&mut conn, &without_exposure).unwrap(), 7);
         assert_eq!(current_version(&conn).unwrap(), 13);
-        assert_eq!(migrate(&mut conn).unwrap(), 11);
+        assert_eq!(migrate(&mut conn).unwrap(), 12);
         conn.prepare("SELECT exposure_untrusted,exposure_private,exposure_sources FROM messages")
             .unwrap();
         assert_eq!(migrate(&mut conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn chat_summaries_upgrade_from_0023_cascade_and_an_older_build_refuses_them() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        let before = &MIGRATIONS[..MIGRATIONS.len() - 1];
+        assert_eq!(before.last().unwrap().0, "0023_bot_workspaces");
+        migrate_list(&mut conn, before).unwrap();
+        assert!(!tables(&conn).contains(&"chat_summaries".to_owned()));
+        assert_eq!(migrate(&mut conn).unwrap(), 1);
+        assert_eq!(current_version(&conn).unwrap(), 24);
+        conn.execute_batch(
+            "INSERT INTO users (id, name, created_at_ms) VALUES ('u', 'u', 0);
+             INSERT INTO bots (id, user_id, name, created_at_ms) VALUES ('b', 'u', 'b', 0);
+             INSERT INTO chats (id, user_id, bot_id, title, created_at_ms) VALUES ('c1', 'u', 'b', 't', 0), ('c2', 'u', 'b', 't', 0);
+             INSERT INTO chat_summaries (chat_id, user_id, content, covered_until_ms, covered_until_id, covered_messages, rounds, first_message_ms, model, created_at_ms, updated_at_ms)
+             VALUES ('c1', 'u', 's', 0, 'm', 1, 1, 0, 'p/m', 0, 0), ('c2', 'u', 's', 0, 'm', 1, 1, 0, 'p/m', 0, 0);",
+        )
+        .unwrap();
+        let rows = |conn: &Connection| -> i64 {
+            conn.query_row("SELECT count(*) FROM chat_summaries", [], |r| r.get(0))
+                .unwrap()
+        };
+        // The row goes with its chat, whoever deletes it.
+        conn.execute("DELETE FROM chats WHERE id = 'c1'", [])
+            .unwrap();
+        assert_eq!(rows(&conn), 1);
+        conn.execute("DELETE FROM chats WHERE user_id = 'u'", [])
+            .unwrap();
+        assert_eq!(rows(&conn), 0);
+        // A build without 0024 does not open this database (no half-known table under it).
+        assert!(matches!(
+            migrate_list(&mut conn, before),
+            Err(StorageError::SchemaTooNew {
+                found: 24,
+                supported: 23
+            })
+        ));
     }
 
     #[test]

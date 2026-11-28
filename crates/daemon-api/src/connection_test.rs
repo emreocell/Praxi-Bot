@@ -608,6 +608,13 @@ pub(crate) async fn test_voice(
             Err(VoiceControlError::Invalid(m) | VoiceControlError::Internal(m)) => {
                 ConnectionTestReport::failed("voice", ConnectionOutcome::Unknown, None, None, m)
             }
+            Err(VoiceControlError::Busy) => ConnectionTestReport::failed(
+                "voice",
+                ConnectionOutcome::Unknown,
+                None,
+                None,
+                "another local voice request is running",
+            ),
             Err(VoiceControlError::Upstream(m)) => {
                 let status = first_http_status(&m);
                 let outcome = status

@@ -50,6 +50,10 @@ test("rows show the product logo, not the company's", () => {
   // Data-driven engines (`providers/cli/`) are named like any other.
   assert.equal(providerBrand("cli:cline").label, "Cline");
   assert.equal(providerBrand("cli:auggie").label, "Augment Code");
+  assert.equal(providerBrand("cli:droid").label, "Factory Droid");
+  assert.equal(providerBrand("cli:grok").label, "Grok Build");
+  assert.equal(providerBrand("cli:junie").label, "Junie");
+  assert.equal(providerBrand("cli:openhands").label, "OpenHands");
   assert.equal(productBrandKey("openai", "gpt-4.1"), "openai");
   assert.equal(productBrandKey("openai", "o3"), "openai");
   assert.equal(productBrandKey("gemini", "gemini-2.5-flash"), "googlegemini");

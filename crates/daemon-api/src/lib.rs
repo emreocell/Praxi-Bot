@@ -14,6 +14,7 @@
 //! other exception is `GET /v1/events`, which also accepts `?token=<token>` for
 //! browser `EventSource` clients (Host / Origin still apply).
 
+pub mod account_health;
 mod assistant_import_routes;
 mod attachment_routes;
 mod audit_routes;
@@ -62,6 +63,7 @@ mod local_install;
 mod local_models;
 mod logs;
 pub mod mcp;
+pub mod mcp_import;
 mod mcp_routes;
 pub mod mcp_server;
 pub mod memory;
@@ -70,6 +72,8 @@ pub mod mission_host;
 mod mission_routes;
 mod mission_wakes;
 pub mod openapi;
+pub mod openapi_apps;
+mod openapi_apps_routes;
 pub mod owner;
 mod owner_notify;
 pub mod pc_access;
@@ -89,6 +93,7 @@ mod browser_profiles;
 pub mod calendar;
 mod calendar_routes;
 mod data_routes;
+mod elicitation_routes;
 mod embeddings_routes;
 pub mod homeassistant;
 mod homeassistant_routes;
@@ -106,9 +111,11 @@ mod spend_routes;
 mod sse;
 mod stop;
 pub mod terminal;
+mod trigger_sources;
 mod triggers;
 pub mod usage;
 pub mod voice;
+pub mod voice_live;
 mod voice_routes;
 pub mod web;
 mod web_routes;
@@ -154,10 +161,12 @@ pub use error::ApiError;
 pub use homeassistant::{HomeAssistantControl, HomeAssistantControlError};
 pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
+pub use openapi_apps::{OpenApiAppsControl, OpenApiAppsError};
 pub use policy::{PolicyLoadError, load_policy, validate_policy};
 pub use schedule_tools::{ScheduleLimits, load_schedule_limits};
 pub use skills::SkillAssignments;
 pub use voice::{VoiceControl, VoiceControlError};
+pub use voice_live::{LiveDown, LiveLink, LiveOpen, LiveUp};
 pub use web::{WebControl, WebControlError};
 
 /// Default TCP port of `bot serve`.
@@ -273,6 +282,9 @@ pub trait ChannelControl: Send + Sync {
     /// Notify the paired owner about a secure form in the local desktop chat.
     /// A chat id is navigation only and conveys no authority or request content.
     async fn notify_secret_request(&self, _chat: protocol::ChatId) {}
+    /// Notify the paired owner that an MCP server's form waits in the local desktop chat.
+    /// Same rule: a chat id is navigation only, and no form text is sent.
+    async fn notify_elicitation(&self, _chat: protocol::ChatId) {}
     /// Current state of the channel.
     fn info(&self) -> dto::ChannelDto;
     /// A fresh one-time pairing code.
@@ -320,6 +332,8 @@ struct Inner {
     mcp_server: parking_lot::Mutex<mcp_server::McpServerBook>,
     /// Composio app connections (see [`AppState::set_composio`]).
     composio: OnceLock<Arc<dyn ComposioControl>>,
+    /// REST APIs from `OpenAPI` documents (see [`AppState::set_openapi_apps`]).
+    openapi_apps: OnceLock<Arc<dyn OpenApiAppsControl>>,
     /// Missing-component installer (see [`AppState::set_components`]).
     components: OnceLock<Arc<dyn ComponentControl>>,
     /// E-mail account management (see [`AppState::set_email`]).
@@ -336,6 +350,8 @@ struct Inner {
     web: OnceLock<Arc<dyn WebControl>>,
     /// Dictation (speech-to-text) management (see [`AppState::set_voice`]).
     voice: OnceLock<Arc<dyn VoiceControl>>,
+    /// The one open live voice conversation (see [`voice_live`]).
+    live_voice: parking_lot::Mutex<Option<voice_live::LiveSlot>>,
     /// Skill catalog index (see [`AppState::set_skills`]).
     skills: OnceLock<::skills::SkillIndex>,
     /// Serialises owner catalog mutations with per-bot assignment writes.
@@ -386,6 +402,8 @@ struct Inner {
     mission_store: OnceLock<Arc<missions::MissionStore>>,
     /// The running mission supervisor (leader components only).
     missions: parking_lot::Mutex<Option<mission_host::MissionRuntime>>,
+    /// Clock and pacing of missions when the embedder replaced the real ones (the evals).
+    mission_timing: OnceLock<mission_host::MissionTiming>,
     leader: OnceLock<host::LeaderControl>,
     /// Embedder additions to `/v1/doctor` (see [`AppState::set_doctor_host`]).
     doctor_host: OnceLock<Arc<dyn DoctorHost>>,
@@ -542,6 +560,7 @@ impl AppState {
             mcp: OnceLock::new(),
             mcp_server: parking_lot::Mutex::new(mcp_server::McpServerBook::default()),
             composio: OnceLock::new(),
+            openapi_apps: OnceLock::new(),
             components: OnceLock::new(),
             email: OnceLock::new(),
             email_channel: OnceLock::new(),
@@ -550,6 +569,7 @@ impl AppState {
             homeassistant: OnceLock::new(),
             web: OnceLock::new(),
             voice: OnceLock::new(),
+            live_voice: parking_lot::Mutex::new(None),
             skills: OnceLock::new(),
             skill_mutations: parking_lot::Mutex::new(()),
             web_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
@@ -585,6 +605,7 @@ impl AppState {
             scheduler: parking_lot::Mutex::new(None),
             mission_store: OnceLock::new(),
             missions: parking_lot::Mutex::new(None),
+            mission_timing: OnceLock::new(),
             leader: OnceLock::new(),
             doctor_host: OnceLock::new(),
             doctor_runs: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -691,6 +712,11 @@ impl AppState {
     /// [`serve`]; a second call is ignored).
     pub fn set_mcp(&self, mcp: Arc<dyn McpControl>) {
         let _ = self.0.mcp.set(mcp);
+    }
+
+    /// Enable `/v1/openapi-apps/*` with the embedder's manager (call once, at start).
+    pub fn set_openapi_apps(&self, apps: Arc<dyn OpenApiAppsControl>) {
+        let _ = self.0.openapi_apps.set(apps);
     }
 
     /// Enable `/v1/composio/*` with the embedder Composio service (call once,
@@ -820,6 +846,9 @@ impl AppState {
         self.0.components.get().cloned()
     }
 
+    pub(crate) fn openapi_apps(&self) -> Option<Arc<dyn OpenApiAppsControl>> {
+        self.0.openapi_apps.get().cloned()
+    }
     pub(crate) fn composio(&self) -> Option<Arc<dyn ComposioControl>> {
         self.0.composio.get().cloned()
     }
@@ -1384,6 +1413,7 @@ fn api_routes() -> Router<AppState> {
     use homeassistant_routes as ha;
     use live_view as v;
     use mcp_routes as m;
+    use openapi_apps_routes as oa;
     use routes as r;
     use voice_routes as vo;
     use web_routes as w;
@@ -1977,6 +2007,20 @@ fn api_routes() -> Router<AppState> {
             post(m::logout_mcp_auth),
         )
         .route("/v1/mcp/catalog", get(m::mcp_catalog))
+        .route(
+            "/v1/mcp/import/registry",
+            get(mcp_import::search_registry).post(mcp_import::install_registry),
+        )
+        .route(
+            "/v1/mcp/import/bundle/inspect",
+            post(mcp_import::inspect_bundle),
+        )
+        .route(
+            "/v1/mcp/import/bundle",
+            post(mcp_import::install_bundle).layer(axum::extract::DefaultBodyLimit::max(
+                mcp_import::MAX_INSTALL_BODY,
+            )),
+        )
         .route("/v1/components", get(crate::components::list_components))
         .route("/v1/components/{id}", get(crate::components::get_component))
         .route(
@@ -2091,6 +2135,24 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/homeassistant/test", post(ha::test_homeassistant))
         .route(
+            "/v1/openapi-apps",
+            get(oa::list_openapi_apps).post(oa::add_openapi_app).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    openapi_apps_routes::MAX_SPEC_BYTES + 64 * 1024,
+                ),
+            ),
+        )
+        .route(
+            "/v1/openapi-apps/{id}",
+            get(oa::get_openapi_app)
+                .put(oa::update_openapi_app)
+                .delete(oa::remove_openapi_app),
+        )
+        .route(
+            "/v1/openapi-apps/{id}/refresh",
+            post(oa::refresh_openapi_app),
+        )
+        .route(
             "/v1/connection-test/provider",
             post(connection_test::test_provider),
         )
@@ -2125,8 +2187,24 @@ fn api_routes() -> Router<AppState> {
             get(spend_routes::get_spend_limit).put(spend_routes::put_spend_limit),
         )
         .route("/v1/voice", get(vo::get_voice).put(vo::update_voice))
+        .route("/v1/voice/live", post(voice_live::open))
+        .route(
+            "/v1/voice/live/{id}",
+            axum::routing::delete(voice_live::close),
+        )
+        .route("/v1/voice/live/{id}/audio", post(voice_live::audio))
+        .route("/v1/voice/live/{id}/tool", post(voice_live::tool_result))
+        .route("/v1/voice/live/{id}/note", post(voice_live::note))
+        .route(
+            "/v1/chats/{id}/voice-transcript",
+            post(voice_live::save_transcript),
+        )
         .route("/v1/voice/local", get(vo::get_local_voice))
         .route("/v1/voice/local/install", post(vo::install_local_voice))
+        .route(
+            "/v1/voice/synthesize",
+            post(vo::synthesize).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
         .route(
             "/v1/voice/transcribe",
             post(vo::transcribe).layer(axum::extract::DefaultBodyLimit::max(vo::MAX_BODY_BYTES)),
@@ -2156,6 +2234,14 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/secret-requests/{call_id}/cancel",
             post(secret_request_routes::cancel_secret_request),
+        )
+        .route(
+            "/v1/elicitations/{call_id}",
+            post(elicitation_routes::answer_elicitation),
+        )
+        .route(
+            "/v1/elicitations/{call_id}/cancel",
+            post(elicitation_routes::cancel_elicitation),
         )
         .route(
             "/v1/handovers/{call_id}/code",

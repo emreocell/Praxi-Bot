@@ -26,6 +26,7 @@ pub mod policy;
 pub mod scrape;
 pub mod search;
 pub mod tools;
+pub mod watch;
 pub mod xmlfeed;
 
 pub use error::WebError;

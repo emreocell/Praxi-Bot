@@ -7,10 +7,12 @@ import { isAlreadyDecidedError } from "../lib/popout";
 import { useTranslation } from "react-i18next";
 import type { NeedsYouEntry } from "../state/timeline";
 import { ApprovalCard, QuestionCard, type ApprovalCardProps } from "./ChatCards";
+import { ElicitationCard } from "./ElicitationCard";
 import { HandoverCard } from "./HandoverCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { useOptionalLiveView } from "../state/LiveViewContext";
 import { NoClientError, type SubmitBody } from "../lib/secretRequestForm";
+import type { AnswerElicitation } from "../api/types";
 import styles from "./PendingDecisions.module.css";
 
 type Decide = ApprovalCardProps["onDecide"];
@@ -20,7 +22,8 @@ type Decide = ApprovalCardProps["onDecide"];
  * inline cards, the pinned cards above the composer and the live view banner decide the same way.
  */
 export function useDecisionActions() {
-  const { client, recordAnswer, recordSecretOutcome, recordHandoverOutcome, refreshRuns, home } = useDaemon();
+  const { client, recordAnswer, recordSecretOutcome, recordHandoverOutcome, recordElicitationOutcome, refreshRuns, home } =
+    useDaemon();
   const liveView = useOptionalLiveView();
   const { t } = useTranslation();
   const decide = useCallback(
@@ -136,6 +139,23 @@ export function useDecisionActions() {
     },
     [client, recordHandoverOutcome]
   );
+  // The answer goes from the card to the daemon (and on to the MCP server) only: the outcome is recorded.
+  const answerElicitation = useCallback(
+    (runId: string, callId: string) => async (body: AnswerElicitation) => {
+      if (!client) throw new NoClientError();
+      const res = await client.answerElicitation(callId, body);
+      recordElicitationOutcome(runId, callId, res.outcome);
+    },
+    [client, recordElicitationOutcome]
+  );
+  const cancelElicitation = useCallback(
+    (runId: string, callId: string) => async () => {
+      if (!client) throw new NoClientError();
+      const res = await client.cancelElicitation(callId);
+      recordElicitationOutcome(runId, callId, res.outcome);
+    },
+    [client, recordElicitationOutcome]
+  );
   const takeControl = useCallback(() => liveView?.openViewer(), [liveView]);
   return {
     decide,
@@ -146,6 +166,8 @@ export function useDecisionActions() {
     handoverDone,
     cancelHandover,
     takeControl,
+    answerElicitation,
+    cancelElicitation,
     trustFolder,
     serverName: home.kind === "host" ? home.name : null
   };
@@ -193,6 +215,15 @@ export function PendingCard({ entry }: { entry: NeedsYouEntry }): ReactNode {
         onDone={actions.handoverDone(entry.runId, entry.callId)}
         onCancel={actions.cancelHandover(entry.runId, entry.callId)}
         onTakeControl={actions.takeControl}
+      />
+    );
+  }
+  if (entry.elicitation) {
+    return (
+      <ElicitationCard
+        item={entry.elicitation}
+        onAnswer={actions.answerElicitation(entry.runId, entry.callId)}
+        onCancel={actions.cancelElicitation(entry.runId, entry.callId)}
       />
     );
   }

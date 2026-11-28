@@ -18,6 +18,37 @@ Bei manchen Apps bittet dich Praxi zuerst, dich einmal bei einem kostenlosen Die
 
 > **Bild:** das Fenster **Apps** mit **Apps suchen**, **Entdecken** und **Verbunden**.
 
+## MCP-Server importieren
+
+Öffne **Apps → MCP-Server** als Eigentümer des Computers, auf dem der Server
+laufen soll. Ein gekoppelter Desktop mit Administratorrechten kann dort
+ebenfalls Server importieren. Wähle **Official MCP Registry**, um gezielt nach
+einem Server zu suchen. Die Ergebnisse zeigen den Namensraum des Herausgebers
+und ob das Verzeichnis dessen Kontrolle überprüft hat. Prüfe den Server und
+seine Zugriffsrechte vor der Installation.
+
+Unter **Review installation** siehst du den genauen Befehl mit seinen einzelnen
+Argumenten oder den HTTPS-Endpunkt. Die Karte zeigt auch, welche
+Umgebungsvariablen oder HTTP-Header der Server erhält. Praxi prüft die genaue
+Version und den ausgewählten Startbefehl bei der Bestätigung erneut.
+
+Mit **Open a .mcpb file** wählst du ein Paket aus. Falls der Herausgeber einen
+SHA-256-Wert für die ganze Datei nennt, gib ihn vor **Inspect bundle** ein.
+Praxi prüft den Wert und eine eingebettete Signatur, sofern vorhanden. Die
+Karte zeigt außerdem die Laufzeit, die im Manifest angegebenen Werkzeuge und
+die Pfade, die das Programm erhält. Die Signaturprüfung zeigt, ob die Datei
+zum enthaltenen Zertifikat passt. Über das Vertrauen in den Herausgeber
+entscheidest du selbst. Für signierte Pakete wird unter Linux und macOS ein
+installiertes OpenSSL mit CMS-Unterstützung benötigt.
+
+Wähle **Install disabled**, um den Server zunächst ausgeschaltet zu speichern.
+Werte für Umgebungsvariablen und HTTP-Header landen im Schlüsselspeicher. Über
+**Verwalten → Enable server** kannst du den Server später starten. Ein lokales
+Programm hat die Betriebssystemrechte des Praxi-Daemons. Ein entfernter Server
+erhält die konfigurierten Header und die an seine Werkzeuge gesendeten Daten.
+Mit **Verwalten → Trennen** entfernst du die Einstellungen, entpackte Dateien
+und die beim Import angelegten Zugangsdaten, die kein anderer Server benutzt.
+
 ## Wer die App nutzen darf
 
 Drücke bei einer verbundenen App auf **Verwalten**. Wähle unter **Wer diese App nutzen darf**:

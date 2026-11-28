@@ -33,22 +33,44 @@ varsayılanla) sesli okur. Daemonda ayrı bir ses yolu yoktur.
   daha gösterilmez. Google ile konuşan uygulama penceresi değil, daemondur ve her cümle için kısa
   bir bağlantı kurar. Yalnızca yazıya çevrilen metin kullanılır. Yanıt yine seçtiğin bot
   modelinden gelir, Live modelinin kendi yanıtı yok sayılır.
-- **Bu bilgisayarda (çevrimdışı)**: Whisper ve Silero ses algılama Praxi-Bot'un içinde çalışır,
-  yani konuşman bilgisayarından hiç çıkmaz. Bir model seç (small en doğru olanıdır, Türkçe ve
-  Almanca için de) ve **İndir**'e bas. Dosyalar huggingface.co / github.com adreslerinden bir kez
-  gelir, sabit bir sağlama toplamıyla doğrulanır ve `<data dir>/models/voice/` altına kaydedilir.
-  İndirmeden önce lisans gösterilir (sunulan tüm modeller için MIT). `local-voice` cargo
-  özelliğiyle derlenmiş bir sürüm gerekir (`cargo build -p cli --features local-voice`). Diğer
-  sürümler sessizce başarısız olmak yerine bunu söyler. Bu sağlayıcı açıkken eşleştirilmiş
+- **Bu bilgisayarda (çevrimdışı)**: Praxi-Bot'un yerel ses işleminde Silero konuşmayı algılar,
+  Whisper yazıya çevirir. Bir model seç, indir ve sağlayıcıyı kaydet. Türkçe ve Almanca için en
+  isabetli seçenek small modelidir. Silero dahil tiny yaklaşık 105 MB, base 162 MB ve small
+  377 MB yer kaplar. Her iki model de MIT lisanslıdır. Bu sağlayıcı açıkken eşleştirilmiş
   kullanıcıların **Telegram ses notları** da bu bilgisayarda yazıya çevrilir (en çok 2 dakika),
   metin “🎤 ...” olarak geri yansıtılır ve sonra yazılmış metin gibi işlenir. Eğik çizgili
   komutlar ve onaylar için yine yazılmış metin ya da düğmeler gerekir. Başka herhangi bir
-  sağlayıcıyla ses notları bir bulut servisine asla gönderilmez, bot yalnızca okuyamadığını
-  söyler. Sesli okuma yine işletim sisteminin seslerini kullanır. Cihaz üstünde sesli okuma bu
-  sürümün parçası değildir.
+  sağlayıcıyla bot ses notunu okuyamadığını söyler. Ses notu bulut servisine gönderilmez.
 
-Ses, bilgisayarından yalnızca dikte ettiğin ya da bir aramadayken ve yalnızca ayarladığın servise
-çıkar. Ücretsiz katman anahtarları Google'ın kendi sınırlarına ve koşullarına tabidir.
+Eller serbest aramada kaydı seçili bilgisayar yazıya çevirir. Orada bir bulut sağlayıcısı
+ayarlıysa kayıt o sağlayıcıya gider. Ücretsiz anahtarlar Google'ın sınırlarına ve koşullarına tabidir.
+
+## Çevrimdışı dikte ve sesli okuma
+
+Arka plan hizmetini `cargo build -p cli --features local-voice` komutuyla derle. Standart yapıda
+bu özellik kapalıdır. Modeller, sahip Ayarlar'da **İndir**'e bastığında indirilir. İndirmeden önce
+boyut, kaynak ve lisans gösterilir. Praxi-Bot yeterli disk alanı olduğunu kontrol eder, 512 MiB
+boş alan ayırır ve dosyaları kullanmadan önce sabit SHA-256 değerleriyle doğrular. Dosyalar
+`<veri dizini>/models/voice/` altında saklanır. Bağlantı kesilirse devam etmek için yeniden
+**İndir**'e bas. Model dosyaları kurulum paketinde yer almaz.
+
+1. **Ayarlar → Genel → Sesli dikte** altında **Bu bilgisayarda (çevrimdışı)** seçeneğini kaydet.
+   Sohbet yazı alanındaki mikrofon düğmesini veya **Mikrofon ve bas-konuş** ayarından açtığın
+   kısayolu kullan. Algılanan metin yazı alanına gelir. Bu bilgisayarda çevrimdışı dikte açıksa
+   eşleştirilmiş sunucudaki sohbetlerin yazı alanı da bu bilgisayarı kullanır.
+2. **Ayarlar → Genel → Ses → Çevrimdışı sesli okuma** altında Supertonic 3'ü indir (yaklaşık
+   146 MB, OpenRAIL-M) ve anahtarı aç. Yanıtın yanındaki **Sesli oku** düğmesini kullanabilir veya
+   tamamlanan her yanıtın otomatik okunmasını açabilirsin. Eller serbest aramadaki ses, işletim
+   sisteminin ses ayarını kullanır.
+
+İki model de işlemcide çalışır. İlk ses birkaç saniye sürebilir. Büyük Whisper modeli daha fazla
+işlemci süresi ister. Dikte ve sesli okuma Türkçe, İngilizce ve Almanca dahil uygulamanın dilini
+izler. Supertonic uygulama dilini desteklemediğinde İngilizce okur. Kurulumdan sonra ses adımları
+çevrimdışı çalışır. Sohbet yanıtlarını bot için ayarladığın dil modeli üretir.
+
+Çevrimdışı sesin kullanılabilirliğini ve hangi model dosyalarının bulunduğunu görmek için
+`bot doctor` çalıştır veya **Ayarlar → Tanılama** bölümünü aç. Ayarlar ve ses işlemi, model
+dosyalarının SHA-256 değerlerini sırasıyla indirme durumunu gösterirken ve kullanmadan önce doğrular.
 
 ## Arama başlatmak ve kullanmak
 

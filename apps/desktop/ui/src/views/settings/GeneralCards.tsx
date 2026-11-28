@@ -17,6 +17,7 @@ import styles from "../SettingsModal.module.css";
 import { ImportCard } from "./ImportCard";
 import { QuickAskCard } from "./QuickAskCard";
 import { DictationCard } from "./DictationCard";
+import { LocalVoicePanel } from "./LocalVoicePanel";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { VoiceSettings } from "./VoiceSettings";
 import type { CardDef, SettingsBridge } from "./types";
@@ -140,6 +141,16 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
         />
       </SettingRow>,
       { keywords: "ses voice speak read aloud tts sesli oku vorlesen stimme" }
+    ),
+    card(
+      "offline-read-aloud",
+      t("voice.offlineReadAloud.title"),
+      t("voice.offlineReadAloud.description"),
+      <SettingRow stacked title={t("voice.offlineReadAloud.title")} description={t("voice.offlineReadAloud.description")}>
+        <LocalVoicePanel kind="tts" enabled={settings.offlineReadAloud}
+          onEnabled={(offlineReadAloud) => update({ offlineReadAloud })} />
+      </SettingRow>,
+      { keywords: "offline local voice speech tts çevrimdışı yerel seslendirme vorlesen" }
     ),
     card(
       "voice",

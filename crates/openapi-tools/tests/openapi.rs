@@ -91,10 +91,18 @@ fn bearer() -> Auth {
     }
 }
 
+/// Options trusting the `servers` of a document that came from `host`.
+fn trusted(host: &str) -> ImportOptions {
+    ImportOptions {
+        server_host: Some(host.into()),
+        ..ImportOptions::default()
+    }
+}
+
 fn opts(server: &MockServer) -> ImportOptions {
     ImportOptions {
         base_url: Some(server.uri()),
-        ..ImportOptions::default()
+        ..trusted("placeholder.invalid")
     }
 }
 
@@ -120,7 +128,7 @@ fn parse(o: &ImportOptions) -> ApiSpec {
 
 #[test]
 fn imports_operations_with_names_and_effects() {
-    let api = parse(&ImportOptions::default());
+    let api = parse(&trusted("placeholder.invalid"));
     assert_eq!(api.title, "Petstore");
     assert_eq!(api.base_url, "http://placeholder.invalid/v1");
     let names: Vec<_> = api.operations.iter().map(|o| o.name.as_str()).collect();
@@ -152,7 +160,7 @@ fn imports_operations_with_names_and_effects() {
 fn tool_specs_have_effects_schema_and_no_refs() {
     let api = parse(&ImportOptions {
         name_prefix: "pets".into(),
-        ..ImportOptions::default()
+        ..trusted("placeholder.invalid")
     });
     // placeholder.invalid is not a private host, so the SSRF guard stays on.
     let mut c = cfg(Auth::None);
@@ -195,7 +203,7 @@ fn json_and_3_1_are_accepted() {
     let json_spec = r#"{"openapi":"3.1.0","info":{"title":"T","version":"1"},
         "servers":[{"url":"https://{host}/api","variables":{"host":{"default":"example.com"}}}],
         "paths":{"/a":{"get":{"summary":"A","responses":{"200":{"description":"ok"}}}}}}"#;
-    let api = ApiSpec::parse(json_spec, &ImportOptions::default()).unwrap();
+    let api = ApiSpec::parse(json_spec, &trusted("example.com")).unwrap();
     assert_eq!(api.base_url, "https://example.com/api");
     assert_eq!(api.operations[0].name, "get_a");
     assert!(api.operations[0].description.contains("[GET /a]"));
@@ -203,7 +211,7 @@ fn json_and_3_1_are_accepted() {
 
 #[test]
 fn rejects_bad_specs() {
-    let o = ImportOptions::default();
+    let o = trusted("placeholder.invalid");
     assert!(matches!(
         ApiSpec::parse("swagger: '2.0'", &o),
         Err(OpenApiError::UnsupportedVersion(_))
@@ -219,7 +227,7 @@ fn rejects_bad_specs() {
     ));
     let small = ImportOptions {
         max_spec_bytes: 10,
-        ..ImportOptions::default()
+        ..trusted("placeholder.invalid")
     };
     assert!(matches!(
         ApiSpec::parse(PETSTORE, &small),
@@ -230,7 +238,7 @@ fn rejects_bad_specs() {
 #[test]
 fn filters_and_limits() {
     let names = |f: &dyn Fn(&mut ImportOptions)| {
-        let mut o = ImportOptions::default();
+        let mut o = trusted("placeholder.invalid");
         f(&mut o);
         parse(&o)
             .operations
@@ -251,13 +259,13 @@ fn filters_and_limits() {
 
     let capped = ImportOptions {
         max_operations: 2,
-        ..ImportOptions::default()
+        ..trusted("placeholder.invalid")
     };
     assert!(matches!(
         ApiSpec::parse(PETSTORE, &capped),
         Err(OpenApiError::TooManyOperations { limit: 2, .. })
     ));
-    let counts = parse(&ImportOptions::default()).tag_counts();
+    let counts = parse(&trusted("placeholder.invalid")).tag_counts();
     assert_eq!(counts["pets"], 5);
 }
 
@@ -270,7 +278,7 @@ paths:
   /a: {get: {operationId: do-it, responses: {}}}
   /b: {get: {operationId: do_it, responses: {}}}
 ";
-    let api = ApiSpec::parse(spec, &ImportOptions::default()).unwrap();
+    let api = ApiSpec::parse(spec, &trusted("x.test")).unwrap();
     let mut names: Vec<_> = api.operations.iter().map(|o| o.name.clone()).collect();
     names.sort();
     assert_eq!(names, vec!["do_it", "do_it_2"]);
@@ -290,7 +298,7 @@ fn private_hosts_are_blocked_by_default() {
             PETSTORE,
             &ImportOptions {
                 base_url: Some(url.into()),
-                ..ImportOptions::default()
+                ..trusted("placeholder.invalid")
             },
         )
         .unwrap();
@@ -303,7 +311,7 @@ fn private_hosts_are_blocked_by_default() {
 
 #[test]
 fn invalid_secret_name_is_a_config_error() {
-    let spec = parse(&ImportOptions::default());
+    let spec = parse(&trusted("placeholder.invalid"));
     for name in [
         "",
         "__reserved",
@@ -337,7 +345,7 @@ fn invalid_secret_name_is_refused_when_the_reference_is_read() {
 
 #[test]
 fn registers_into_registry() {
-    let spec = parse(&ImportOptions::default());
+    let spec = parse(&trusted("placeholder.invalid"));
     let reg = ToolRegistry::new();
     let n = register(&reg, &spec, &cfg(Auth::None)).unwrap();
     assert_eq!(n, spec.operations.len());
@@ -661,7 +669,7 @@ paths:
 fn mini_tools(server: &MockServer, auth: Auth, base_suffix: &str) -> Vec<Arc<dyn Tool>> {
     let o = ImportOptions {
         base_url: Some(format!("{}{base_suffix}", server.uri())),
-        ..ImportOptions::default()
+        ..trusted("placeholder.invalid")
     };
     import_tools(MINI, &o, &cfg(auth)).unwrap().1
 }
@@ -752,7 +760,7 @@ paths:
       responses: {{"200": {{description: ok}}}}
 "#
     );
-    let api = ApiSpec::parse(&spec, &ImportOptions::default()).unwrap();
+    let api = ApiSpec::parse(&spec, &trusted("example.com")).unwrap();
     let keys: Vec<&str> = api.operations[0]
         .params
         .iter()

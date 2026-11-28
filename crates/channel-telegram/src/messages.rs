@@ -87,6 +87,7 @@ pub(crate) enum Message<'a> {
         tool: &'a str,
     },
     SecretRequestNotice,
+    ElicitationNotice,
     LanguageSet,
     LanguageUsage {
         current: Language,
@@ -309,6 +310,8 @@ impl<'a> Message<'a> {
             (Self::RunError { message }, true) => format!("⚠️ Hata: {message}").into(),
             (Self::SecretRequestNotice, false) => "A credential request is waiting. Open Praxi on your computer to answer. Keep credentials out of this chat.".into(),
             (Self::SecretRequestNotice, true) => "Yanıtınızı bekleyen bir gizli bilgi isteği var. Yanıtlamak için bilgisayarınızda Praxi’yi açın. Gizli bilgilerinizi bu sohbette paylaşmayın.".into(),
+            (Self::ElicitationNotice, false) => "An MCP server is asking for your input. Open Praxi on your computer to answer or decline. Do not answer it in this chat.".into(),
+            (Self::ElicitationNotice, true) => "Bir MCP sunucusu sizden bilgi istiyor. Yanıtlamak ya da reddetmek için bilgisayarınızda Praxi’yi açın. Bu sohbette yanıtlamayın.".into(),
             (Self::LanguageSet, false) => "This chat now uses English.".into(),
             (Self::LanguageSet, true) => "Bu sohbet artık Türkçe.".into(),
             (Self::LanguageUsage { current }, false) => {
@@ -416,6 +419,7 @@ mod tests {
             | Message::Answered
             | Message::ApprovalIncomplete
             | Message::SecretRequestNotice
+            | Message::ElicitationNotice
             | Message::LanguageSet
             | Message::LanguageUsage { .. }
             | Message::VoiceUnavailable
@@ -481,6 +485,7 @@ mod tests {
             Message::ApprovalIncomplete,
             Message::ApprovalDesktopOnly { tool },
             Message::SecretRequestNotice,
+            Message::ElicitationNotice,
             Message::LanguageSet,
             Message::LanguageUsage {
                 current: Language::EN,

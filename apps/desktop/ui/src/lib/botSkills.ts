@@ -218,6 +218,22 @@ export function payloadWithSkill(dto: BotSkills, name: string): PutBotSkillsInpu
   return { mode: "selected", names: [...names, name], expected_version: dto.version };
 }
 
+/** One line of the Library tab's skills list. */
+export interface PanelSkillRow {
+  name: string;
+  /** `shared`: from the catalog and visible to the bot; `learned`: the bot's own; `missing`: assigned but gone from disk. */
+  kind: "shared" | "learned" | "missing";
+}
+
+/** Everything the bot has right now, one row per skill: catalog skills first, then learned, then missing. */
+export function panelSkillRows(dto: BotSkills): PanelSkillRow[] {
+  const shared = dto.available.filter((s) => s.assigned).map((s): PanelSkillRow => ({ name: s.name, kind: "shared" }));
+  const seen = new Set(shared.map((r) => r.name));
+  const learned = dto.own.filter((o) => !seen.has(o.name)).map((o): PanelSkillRow => ({ name: o.name, kind: "learned" }));
+  const missing = dto.assigned.filter((a) => a.state === "missing").map((a): PanelSkillRow => ({ name: a.name, kind: "missing" }));
+  return [...shared, ...learned, ...missing];
+}
+
 /** Names the panel previews: assigned skills first by catalog order, capped, plus the rest count. */
 export function skillPreview(
   dto: BotSkills,

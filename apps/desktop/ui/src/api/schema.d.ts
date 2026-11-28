@@ -1610,6 +1610,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/{id}/voice-transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write a finished voice conversation into a chat as ordinary text messages (no run starts).
+         * @description `user` lines are what the owner said into their own microphone in their own session
+         *     (speech-to-text), so they stay the owner's words. `assistant` lines are the voice model's
+         *     output, which can repeat what the bot fetched from the web or an e-mail, so they are stored as
+         *     untrusted content (source `gemini-live`): a later run that reads this chat is treated as having
+         *     seen untrusted text and asks before it acts on it.
+         */
+        post: operations["save_transcript"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/components": {
         parameters: {
             query?: never;
@@ -2236,6 +2260,40 @@ export interface paths {
         get: operations["report"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/elicitations/{call_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer an MCP server's form: `accept` with the values, or `decline`. */
+        post: operations["answer_elicitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/elicitations/{call_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss an MCP server's form: the server learns `cancel`. */
+        post: operations["cancel_elicitation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3661,6 +3719,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mcp/import/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["install_bundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/import/bundle/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["inspect_bundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/import/registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search_registry"];
+        put?: never;
+        post: operations["install_registry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mcp/servers": {
         parameters: {
             query?: never;
@@ -4154,6 +4260,71 @@ export interface paths {
         put?: never;
         /** Resume a paused or blocked mission (owner only). */
         post: operations["resume_mission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/openapi-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The connected REST APIs and the operations found in their documents. */
+        get: operations["list_openapi_apps"];
+        put?: never;
+        /**
+         * Connect a REST API from its `OpenAPI` 3.x document (`spec_url` or `spec_text`).
+         *     The credential goes to the secret store and is never returned. Requests only
+         *     ever go to `base_url`'s host; redirects to other hosts are not followed.
+         *     Every operation starts disabled.
+         */
+        post: operations["add_openapi_app"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/openapi-apps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One connected REST API. */
+        get: operations["get_openapi_app"];
+        /**
+         * Change the name, base URL or credentials, or the set of enabled operations
+         *     and the bots that may use each. Applied to the bots' tools at once.
+         */
+        put: operations["update_openapi_app"];
+        post?: never;
+        /** Disconnect an API: its tools, its saved document and its credential are removed. */
+        delete: operations["remove_openapi_app"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/openapi-apps/{id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download the document again (apps added from a URL). Enabled operations that
+         *     still exist stay enabled.
+         */
+        post: operations["refresh_openapi_app"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5511,6 +5682,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/voice/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a live voice conversation. The response is an event stream (`data:` lines of JSON, one
+         *     `type` field each): `ready`, then `audio`, `you`, `bot`, `turn_complete`, `interrupted`,
+         *     `tool_call`, `tool_cancelled`, `reconnecting` and finally `ended`. Closing the response ends
+         *     the session. Owner only; one session at a time.
+         */
+        post: operations["open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** End a conversation now. */
+        delete: operations["close"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload microphone audio (raw 16-bit little-endian PCM, 16 kHz, mono; up to one second). */
+        post: operations["audio"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pass an update to the voice model (the bot finished a task the owner was told to wait for). */
+        post: operations["note"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}/tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Return the bot's answer to a `tool_call`. */
+        post: operations["tool_result"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/voice/local": {
         parameters: {
             query?: never;
@@ -5545,6 +5806,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/voice/synthesize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Synthesize speech on this computer (local owner only). */
+        post: operations["synthesize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/voice/transcribe": {
         parameters: {
             query?: never;
@@ -5554,7 +5832,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Transcribe a recording with the configured service (owner-triggered dictation). */
+        /**
+         * Transcribe a recording with the configured service (owner-triggered dictation).
+         * @description With `local_only` the daemon refuses (409) unless the provider is on-device, so the recording
+         *     is never uploaded. A paired peer cannot use the host's on-device engine (403): decoding and
+         *     recognition burn the host's CPU for up to two minutes and would starve the owner's own dictation.
+         */
         post: operations["transcribe"];
         delete?: never;
         options?: never;
@@ -5956,6 +6239,12 @@ export interface components {
             secrets_available: boolean;
             /** @description What to do when `secrets_available` is false. */
             secrets_hint?: string | null;
+        };
+        /** @description Body of `POST /v1/elicitations/{call_id}`. */
+        AnswerElicitation: {
+            action: components["schemas"]["ElicitationAction"];
+            /** @description Field name to value (`accept` only). Write-only: no route returns it. */
+            content?: Record<string, never>;
         };
         /** @description `POST /v1/questions/{call_id}`. */
         AnswerQuestion: {
@@ -6455,6 +6744,22 @@ export interface components {
             sites_available: boolean;
             /** Format: int64 */
             size_bytes: number;
+        };
+        /** @description JSON metadata inside the bundle installation form. */
+        BundleApproval: {
+            /** @description SHA-256 returned by the inspection and approved by the owner. */
+            approval_sha256: string;
+            /** @description `launch_sha256` of the inspection: the resolved command line the owner saw. */
+            launch_sha256: string;
+            /** @description Owner-provided MCPB user settings. */
+            values?: components["schemas"]["ImportValues"];
+        };
+        /** @description Multipart installation request. The browser uploads the reviewed file again. */
+        BundleInstallForm: {
+            /** @description JSON-encoded `BundleApproval`. */
+            approval: string;
+            /** Format: binary */
+            bundle: string;
         };
         /** @enum {string} */
         Button: "left" | "middle" | "right";
@@ -7061,6 +7366,25 @@ export interface components {
             enabled: boolean;
             /** @description Let them read files here (writing asks every time). */
             files?: boolean;
+        };
+        /** @description A setting the owner is asked for (the form of the install dialog). */
+        ConfigField: {
+            /** @description Default value as text. */
+            default?: string | null;
+            /** @description Help text, may be empty. */
+            description: string;
+            /** @description Key used in `${user_config.KEY}`. */
+            key: string;
+            /** @description `string`, `number`, `boolean`, `directory` or `file`. */
+            kind: string;
+            /** @description Multiple full paths, one per line in the approval form. */
+            multiple: boolean;
+            /** @description Must be filled in (no default). */
+            required: boolean;
+            /** @description Stored in the secret store, never in the config file. */
+            sensitive: boolean;
+            /** @description Label to show. */
+            title: string;
         };
         /** @description A configured provider (never carries a key). */
         ConfiguredProviderDto: {
@@ -7698,6 +8022,21 @@ export interface components {
             /** Format: int32 */
             quality: number;
         };
+        /**
+         * @description What the owner does with the form.
+         * @enum {string}
+         */
+        ElicitationAction: "accept" | "decline";
+        /** @description How a form ended. Never carries an answer. */
+        ElicitationOutcome: {
+            /**
+             * Format: uuid
+             * @description The form that was answered.
+             */
+            call_id: string;
+            /** @description `accepted`, `declined` or `cancelled`. */
+            outcome: string;
+        };
         /** @description A configured account (`GET /v1/email/accounts`): the non-secret fields only. */
         EmailAccountDto: {
             /** @description Address mail is sent from. */
@@ -7903,7 +8242,7 @@ export interface components {
             opt_out_line: boolean;
             /**
              * Format: int32
-             * @description Warn when a recipient got mail within this many days (`0` = no warning). Default 14.
+             * @description Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).
              */
             same_recipient_days: number;
             /**
@@ -9266,6 +9605,10 @@ export interface components {
             /** @description `env` or `header`. */
             place: string;
         };
+        /** @description Install settings, including write-only secrets. */
+        ImportValues: {
+            [key: string]: string;
+        };
         ImportWorkflow: {
             /** Format: uuid */
             bot_id: string;
@@ -9429,6 +9772,62 @@ export interface components {
             /** Format: int64 */
             applied_through: number;
             state: components["schemas"]["ViewState"];
+        };
+        /** @description The approval card: everything the owner should see before anything runs. */
+        Inspection: {
+            /**
+             * @description The arguments exactly as they will be passed, after every `${...}`
+             *     substitution. A setting with a default shows its default; a setting
+             *     you must fill in shows as `<name>`.
+             */
+            args: string[];
+            /** @description Author name, if given (untrusted text). */
+            author?: string | null;
+            /** @description The file matched an independently supplied SHA-256. */
+            checksum_verified: boolean;
+            /** @description The program that will be started. */
+            command: string;
+            /** @description The folder the server is started in (the bundle's own folder). */
+            cwd: string;
+            /** @description Short description from the manifest (untrusted text). */
+            description: string;
+            /** @description Human name. */
+            display_name: string;
+            /** @description Names of the environment variables the server will receive (no values). */
+            env_names: string[];
+            /** @description Settings the owner must fill in. */
+            fields: components["schemas"]["ConfigField"][];
+            /** @description Number of files that will be unpacked. */
+            file_count: number;
+            /** @description Server id (becomes `mcp:<id>/<tool>`), derived from the bundle name. */
+            id: string;
+            /**
+             * @description SHA-256 (hex) of the resolved launch line shown here (command,
+             *     arguments, working folder and variable names). Installing needs the
+             *     same digest, and is refused if the launch line it would really run
+             *     differs from this one.
+             */
+            launch_sha256: string;
+            /** @description What it needs to run. */
+            runtime: components["schemas"]["Runtime"];
+            /** @description SHA-256 (hex) of the bundle file. The approval is for exactly these bytes. */
+            sha256: string;
+            /**
+             * @description What the embedded signature, if any, proves. It never proves who
+             *     published the bundle.
+             */
+            signature: components["schemas"]["SignatureStatus"];
+            /** @description Names of tools declared by the bundle. Actual tools are discovered on enable. */
+            tools: string[];
+            /**
+             * Format: int64
+             * @description Unpacked size in bytes.
+             */
+            unpacked_bytes: number;
+            /** @description Bundle version. */
+            version: string;
+            /** @description Things the owner should read before approving (suspicious text, ...). */
+            warnings: components["schemas"]["Warning"][];
         };
         /**
          * @description Why it failed, as a stable kind the UI turns into a sentence.
@@ -9732,6 +10131,25 @@ export interface components {
              */
             tpm?: number | null;
         };
+        /** @description Body of `POST /v1/voice/live/{id}/note`. */
+        LiveNote: {
+            /** @description Plain text the voice model passes on. */
+            text: string;
+        };
+        /** @description Body of `POST /v1/voice/live`. */
+        LiveOpenInput: {
+            /** @description Name of the bot the owner is talking to. */
+            assistant_name?: string | null;
+            /** @description UI language hint (ISO-639-1). */
+            language?: string | null;
+        };
+        /** @description Body of `POST /v1/voice/live/{id}/tool`. */
+        LiveToolResult: {
+            /** @description `call_id` of the `tool_call` event. */
+            call_id: string;
+            /** @description The bot's final text, or why it could not do it. */
+            text: string;
+        };
         /** @description Advice for this machine. `recommended` null means "no recommendation". */
         LocalAdviceDto: {
             basis: components["schemas"]["MemoryBasisDto"];
@@ -9834,6 +10252,7 @@ export interface components {
             last_error?: string | null;
             /** @description Models the owner can install. */
             models: components["schemas"]["LocalVoiceModelDto"][];
+            tts_model?: null | components["schemas"]["LocalVoiceModelDto"];
             /** @description Whether the voice-activity model (end-of-speech detection) is installed. */
             vad_installed: boolean;
         };
@@ -10950,6 +11369,17 @@ export interface components {
         };
         /** @enum {string} */
         Modifier: "alt" | "ctrl" | "meta" | "shift";
+        /** @description An environment variable or header the server needs. */
+        Needed: {
+            /** @description What it is for (untrusted text). */
+            description: string;
+            /** @description Variable or header name. */
+            name: string;
+            /** @description Must be provided. */
+            required: boolean;
+            /** @description The value is a secret (goes to the secret store). */
+            secret: boolean;
+        };
         /** @description How many questions an answer took. */
         NoticeAnswersDto: {
             /**
@@ -11015,6 +11445,137 @@ export interface components {
          * @enum {string}
          */
         NoticeSource: "mission" | "run";
+        /** @description A connected API (`GET /v1/openapi-apps`). */
+        OpenApiAppDto: {
+            /** @description Credentials. */
+            auth: components["schemas"]["OpenApiAuthDto"];
+            /** @description The only origin and path prefix requests go to. */
+            base_url: string;
+            /**
+             * Format: int32
+             * @description How many operations are enabled for at least one bot.
+             */
+            enabled_count: number;
+            /** @description Short id (also the tool-name prefix: `api_<id>_<operation>`). */
+            id: string;
+            /**
+             * Format: int32
+             * @description Largest number of operations that can be enabled at once.
+             */
+            max_enabled: number;
+            /** @description Display name chosen by the owner. */
+            name: string;
+            /** @description Operations found, in document order. */
+            operations: components["schemas"]["OpenApiOperationDto"][];
+            /** @description Authentication the document declares, for a hint to the owner. */
+            security_hints: string[];
+            /** @description Operations left out, with the reason. */
+            skipped: components["schemas"]["OpenApiSkippedDto"][];
+            /** @description Where the document came from again on refresh; absent when it was pasted or uploaded. */
+            spec_url?: string | null;
+            /** @description `info.title` of the document (third-party text). */
+            title: string;
+            /** @description `info.version` of the document. */
+            version: string;
+            /** @description Notes from the import (unresolved references and similar). */
+            warnings: string[];
+        };
+        /** @description Body of `POST /v1/openapi-apps`. Give the document as `spec_url` or `spec_text`. */
+        OpenApiAppInput: {
+            auth?: null | components["schemas"]["OpenApiAuthInput"];
+            /**
+             * @description The API's base URL; the only server ever used (the document's `servers`
+             *     are ignored). It may be left out only with `spec_url` when the
+             *     document's first `servers` entry is on the same host as `spec_url`;
+             *     otherwise it is required.
+             */
+            base_url?: string | null;
+            /** @description Display name. */
+            name: string;
+            /** @description The document itself (JSON or YAML), for example read from a file. */
+            spec_text?: string | null;
+            /** @description Where to download the document (http or https, public address). */
+            spec_url?: string | null;
+        };
+        /** @description Body of `PUT /v1/openapi-apps/{id}`; omitted fields keep their value. */
+        OpenApiAppUpdate: {
+            auth?: null | components["schemas"]["OpenApiAuthInput"];
+            /** @description New base URL. */
+            base_url?: string | null;
+            /** @description New display name. */
+            name?: string | null;
+            /** @description The complete set of enabled operations; anything not listed is off. */
+            operations?: components["schemas"]["OpenApiEnabledOperation"][] | null;
+        };
+        /** @description The credentials of an API as stored (no secret value). */
+        OpenApiAuthDto: {
+            /** @description Kind of credential. */
+            kind: components["schemas"]["OpenApiAuthKind"];
+            /** @description Header or query parameter name (API key kinds). */
+            name?: string | null;
+            /** @description A secret is stored (its value is never returned). */
+            secret_set: boolean;
+            /** @description User name (basic). */
+            username?: string | null;
+        };
+        /** @description Credentials in a request. `secret` is write-only. */
+        OpenApiAuthInput: {
+            /** @description Kind of credential. */
+            kind: components["schemas"]["OpenApiAuthKind"];
+            /** @description Header or query parameter name (API key kinds). */
+            name?: string | null;
+            /** @description The key, token or password. Omit it to keep the stored one. */
+            secret?: string | null;
+            /** @description User name (basic). */
+            username?: string | null;
+        };
+        /**
+         * @description How the API is authenticated.
+         * @enum {string}
+         */
+        OpenApiAuthKind: "none" | "api_key_header" | "api_key_query" | "bearer" | "basic";
+        /**
+         * @description How an operation changes things, from its HTTP method.
+         * @enum {string}
+         */
+        OpenApiEffect: "read" | "write" | "destructive";
+        /** @description One enabled operation in an update. */
+        OpenApiEnabledOperation: {
+            /** @description Bots that may use it; `null` = every bot, `[]` = none. */
+            bots?: string[] | null;
+            /** @description Tool name of the operation. */
+            name: string;
+        };
+        /** @description One operation found in the document. */
+        OpenApiOperationDto: {
+            /** @description Money-like (pay, charge, checkout, ...): asks on every autonomy level. */
+            always_ask: boolean;
+            /** @description Bots that may use it; `null` = every bot. Meaningful when `enabled`. */
+            bots?: string[] | null;
+            /** @description Effect class from the method. */
+            effect: components["schemas"]["OpenApiEffect"];
+            /** @description At least one bot may use it. */
+            enabled: boolean;
+            /** @description HTTP method (upper case). */
+            method: string;
+            /** @description Tool name a bot sees. */
+            name: string;
+            /** @description Path template. */
+            path: string;
+            /** @description First line of the operation's summary (third-party text). */
+            summary: string;
+            /** @description Tags of the operation. */
+            tags: string[];
+        };
+        /** @description An operation the importer left out. */
+        OpenApiSkippedDto: {
+            /** @description HTTP method. */
+            method: string;
+            /** @description Path template. */
+            path: string;
+            /** @description Why it was left out. */
+            reason: string;
+        };
         OpenTerminalInput: {
             /** Format: int32 */
             cols: number;
@@ -11467,6 +12028,37 @@ export interface components {
         };
         /** @enum {string} */
         RecoveryReason: "owner_lost" | "device_revoked" | "daemon_restart";
+        /** @description Explicit registry install approval. The server is looked up again by version. */
+        RegistryApproval: {
+            approval_sha256: string;
+            name: string;
+            values?: components["schemas"]["ImportValues"];
+            version: string;
+        };
+        /** @description Launch details serialized for the approval card. */
+        RegistryPreview: {
+            /** @description Opaque digest binding the approval to this result and launch source. */
+            approval_sha256: string;
+            /** @description Exact argv entries following the command. */
+            args: string[];
+            /** @description Exact executable name, for a stdio source. */
+            command?: string | null;
+            /** @description Environment variables or headers that the server will receive. */
+            fields: components["schemas"]["Needed"][];
+            /** @description Endpoint, for a remote source. */
+            url?: string | null;
+        };
+        /** @description One search result and the supported launch previews it offers. */
+        RegistryResult: {
+            active: boolean;
+            description: string;
+            name: string;
+            namespace_verified: boolean;
+            publisher: string;
+            repository?: string | null;
+            sources: components["schemas"]["RegistryPreview"][];
+            version: string;
+        };
         ReleaseRequest: {
             /** Format: int64 */
             control_epoch: number;
@@ -11704,6 +12296,11 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * @description What the server needs to run. Shown on the approval card.
+         * @enum {string}
+         */
+        Runtime: "node" | "python" | "uv" | "binary";
         /** @description Bot `[runtime]` settings (ADR-0027 §7). */
         RuntimeConfigDto: {
             /**
@@ -11831,7 +12428,11 @@ export interface components {
             /**
              * @description What it does: `{"kind": "agent_prompt", "text": "..."}`,
              *     `{"kind": "workflow", "name": "...", "params": {}}` or
-             *     `{"kind": "tool", "name": "...", "input": {}}`.
+             *     `{"kind": "tool", "name": "...", "input": {}}`, or a standing order that speaks only
+             *     when something needs you: `{"kind": "standing_order", "checklist": "...",
+             *     "active_hours": {"start": "08:00", "end": "22:00", "timezone": "Europe/Istanbul"},
+             *     "max_runs_per_day": 24}` (`active_hours` optional; each run ends `OK`, which creates
+             *     no notice, or `NEEDS_OWNER(reason)`, which does).
              */
             payload: unknown;
             /** @description Read-only deterministic condition, including full script source. */
@@ -11852,6 +12453,16 @@ export interface components {
              *     `{"every": {"seconds": 600}}` or `{"at": {"unix_ms": 1767225600000}}`.
              */
             spec: unknown;
+            /**
+             * Format: int32
+             * @description Standing order: daily run cap from its payload.
+             */
+            standing_max_runs_per_day?: number | null;
+            /**
+             * Format: int32
+             * @description Standing order: runs already started today (in the counter's calendar day).
+             */
+            standing_runs_today?: number | null;
             /** @description Non-webhook trigger definition; never includes webhook secrets. */
             trigger?: unknown;
         };
@@ -11881,6 +12492,8 @@ export interface components {
              * @description Linked run id, if a run was created.
              */
             run_id?: string | null;
+            /** @description Standing order: `ok`, `needs_owner` or `unclear` from the last assistant line of the run. */
+            standing_verdict?: string | null;
             /**
              * Format: int64
              * @description When the run started (Unix ms), if it started.
@@ -12188,6 +12801,16 @@ export interface components {
              */
             exclude: string[];
         };
+        /**
+         * @description What a bundle signature proves.
+         *
+         *     The signer certificate travels inside the bundle and chains to no root
+         *     that Praxi trusts, so the best a signature can say is that the file has not
+         *     changed since that certificate's key signed it. Anyone can make such a
+         *     signature, so it must never be presented as verified or trusted.
+         * @enum {string}
+         */
+        SignatureStatus: "unsigned" | "integrity_only";
         /** @description One rule as the owner sees it. */
         SiteRuleDto: {
             /** @description `block`, `ask` or `allow`. */
@@ -12620,6 +13243,13 @@ export interface components {
             /** @description The secret (write-only). */
             value?: string | null;
         };
+        /** @description Text and app language for local synthesis (`POST /v1/voice/synthesize`). */
+        SynthesizeInput: {
+            /** @description App language (BCP 47, e.g. `tr` or `en-US`). */
+            language: string;
+            /** @description Plain text, at most 1,000 Unicode characters. */
+            text: string;
+        };
         TakeoverAccepted: {
             /** Format: int64 */
             control_epoch: number;
@@ -12989,6 +13619,12 @@ export interface components {
             gemini_model: string;
             /** @description A Gemini provider with a key exists under Bots & models. */
             gemini_provider_key_available: boolean;
+            /** @description Keep the audio of live conversations on this computer (default off). */
+            live_keep_audio: boolean;
+            /** @description Gemini Live model used for live voice conversations (e.g. `gemini-3.8-live`). */
+            live_model: string;
+            /** @description Prebuilt voice the live model speaks with (e.g. `Kore`). */
+            live_voice: string;
             /** @description Id of the on-device speech model used when the provider is `local_voice`. */
             local_model: string;
             /** @description Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`). */
@@ -13017,6 +13653,12 @@ export interface components {
             gemini_key?: string | null;
             /** @description Gemini Live model name. */
             gemini_model?: string | null;
+            /** @description Keep the audio of live conversations on this computer. */
+            live_keep_audio?: boolean | null;
+            /** @description Gemini Live model for live voice conversations. */
+            live_model?: string | null;
+            /** @description Prebuilt voice name for live voice conversations. */
+            live_voice?: string | null;
             /** @description Id of an on-device speech model from `GET /v1/voice/local`. */
             local_model?: string | null;
             /** @description `https://...`, or `http://` for a loopback server only. */
@@ -13034,6 +13676,31 @@ export interface components {
          * @enum {string}
          */
         VoiceProvider: "whisper" | "gemini_live" | "local_voice";
+        /** @description Body of `POST /v1/chats/{id}/voice-transcript`. */
+        VoiceTranscriptInput: {
+            /** @description Lines in order. */
+            turns: components["schemas"]["VoiceTurn"][];
+        };
+        /** @description Result of `POST /v1/chats/{id}/voice-transcript`. */
+        VoiceTranscriptOutput: {
+            /**
+             * Format: int32
+             * @description Messages written.
+             */
+            saved: number;
+        };
+        /** @description One line of a finished conversation. */
+        VoiceTurn: {
+            /** @description `user` (the owner) or `assistant` (the voice model). */
+            role: string;
+            /** @description What was said. */
+            text: string;
+        };
+        /**
+         * @description Findings from the static review of untrusted manifest text.
+         * @enum {string}
+         */
+        Warning: "hidden_text" | "ai_instructions" | "bundled_binary";
         /**
          * @description Current web search configuration (`GET /v1/web/search`): non-secret fields
          *     only.
@@ -17934,6 +18601,49 @@ export interface operations {
             };
         };
     };
+    save_transcript: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Chat id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceTranscriptInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceTranscriptOutput"];
+                };
+            };
+            /** @description bad transcript */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_components: {
         parameters: {
             query?: never;
@@ -19225,6 +19935,99 @@ export interface operations {
             };
             /** @description safe redaction unavailable or the report did not finish in time */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    answer_elicitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Id from the elicitation_requested event */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerElicitation"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ElicitationOutcome"];
+                };
+            };
+            /** @description the answer does not fit the form; it keeps waiting */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code elicitation_gone: not waiting any more */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    cancel_elicitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Id from the elicitation_requested event */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ElicitationOutcome"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code elicitation_gone: not waiting any more */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -22584,6 +23387,178 @@ export interface operations {
             };
         };
     };
+    install_bundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["BundleInstallForm"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    inspect_bundle: {
+        parameters: {
+            query?: {
+                expected_sha256?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Inspection"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    search_registry: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryResult"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    install_registry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegistryApproval"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_mcp_servers: {
         parameters: {
             query?: never;
@@ -23761,6 +24736,292 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_openapi_apps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"][];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    add_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenApiAppInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description malformed input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description unusable document, base URL or address */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the document could not be downloaded */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenApiAppUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description malformed input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description unknown operation, too many enabled or bad base URL */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    remove_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    refresh_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the app has no document URL or the document is unusable */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the document could not be downloaded */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26722,6 +27983,234 @@ export interface operations {
             };
         };
     };
+    open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveOpenInput"];
+            };
+        };
+        responses: {
+            /** @description Server-sent events of the conversation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description no Gemini key, or another conversation is open */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid live voice settings */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the voice service failed */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    close: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ended (or already gone) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description bad audio */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the session cannot take audio right now */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveNote"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no such conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the session is gone */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    tool_result: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveToolResult"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the session is gone */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_local_voice: {
         parameters: {
             query?: never;
@@ -26791,6 +28280,83 @@ export interface operations {
             };
         };
     };
+    synthesize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SynthesizeInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": number[];
+                };
+            };
+            /** @description invalid text or language */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description local owner required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description offline read-aloud is not installed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description offline voice is busy */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description offline synthesis failed */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     transcribe: {
         parameters: {
             query?: never;
@@ -26821,8 +28387,26 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
-            /** @description dictation is not set up */
+            /** @description on-device dictation is for the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description dictation is not set up, or `local_only` and the provider is not on-device */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description offline voice is busy */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

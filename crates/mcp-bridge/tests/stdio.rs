@@ -1213,3 +1213,52 @@ async fn an_http_server_that_wants_oauth_gives_an_actionable_error_and_is_not_re
     endpoint.abort();
     mgr.shutdown().await;
 }
+
+/// Answers every form with one address and records who asked.
+struct Answer(std::sync::Mutex<Vec<(String, String, String)>>);
+
+#[async_trait::async_trait]
+impl tool_registry::Elicitor for Answer {
+    async fn elicit(
+        &self,
+        run_id: &str,
+        request: tool_registry::ElicitationRequest,
+    ) -> tool_registry::ElicitationAnswer {
+        let field = request
+            .fields
+            .first()
+            .map(|f| f.name.clone())
+            .unwrap_or_default();
+        self.0
+            .lock()
+            .unwrap()
+            .push((run_id.to_owned(), request.server, field));
+        let mut content = serde_json::Map::new();
+        content.insert("email".into(), json!("owner@example.com"));
+        tool_registry::ElicitationAnswer::Accept(content)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_form_reaches_the_runs_owner_and_the_answer_reaches_the_server() {
+    let reg = ToolRegistry::new();
+    let mgr = McpManager::with_policy(reg.clone(), fast_policy(3));
+    // Before an elicitor is installed, a form is declined.
+    mgr.add_server(mode_config("e", "elicit")).await.unwrap();
+    let ctx = ToolContext {
+        run_id: "run-7".into(),
+        ..ToolContext::default()
+    };
+    let tool = reg.get("mcp:e/elicit").unwrap();
+    let out = tool.call(&ctx, json!({})).await.unwrap();
+    assert_eq!(text_of(&out.content), "decline");
+
+    let seen = std::sync::Arc::new(Answer(std::sync::Mutex::default()));
+    mgr.set_elicitor(seen.clone());
+    let out = tool.call(&ctx, json!({})).await.unwrap();
+    assert_eq!(text_of(&out.content), "accept:owner@example.com");
+    assert_eq!(
+        *seen.0.lock().unwrap(),
+        [("run-7".to_owned(), "e".to_owned(), "email".to_owned())]
+    );
+}

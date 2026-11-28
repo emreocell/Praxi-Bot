@@ -51,15 +51,18 @@ mod dst_tests;
 #[cfg(test)]
 mod registry_tests;
 #[cfg(test)]
+mod standing_tests;
+#[cfg(test)]
 mod tests;
 
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use engine::{CLOCK_JUMP_THRESHOLD_MS, MISFIRE_GRACE_MS, ScheduleExecutor, Scheduler};
 pub use error::{Result, SchedulerError};
 pub use model::{
-    AttemptRun, FileEvent, MisfirePolicy, Occurrence, OccurrenceState, ParsedCron, Payload,
+    ActiveHours, AttemptRun, DEFAULT_MAX_RUNS_PER_DAY, FileEvent, MAX_CHECKLIST_CHARS,
+    MAX_RUNS_PER_DAY_LIMIT, MisfirePolicy, Occurrence, OccurrenceState, ParsedCron, Payload,
     Precheck, RUN_ALL_CAP, Schedule, ScheduleAuthor, ScheduleId, ScheduleOrigin, SchedulePayload,
-    ScheduleSpec, Spec, Trigger,
+    ScheduleSpec, Spec, StandingVerdict, Trigger,
 };
 pub use nl::{parse_natural_language, parse_natural_language_with_tz, parse_nl};
 pub use protocol::{BotId, ChatId, Initiator, InitiatorKind, TaskId};

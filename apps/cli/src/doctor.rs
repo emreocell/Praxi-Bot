@@ -96,6 +96,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         ),
         core::check_disk(env.data_dir),
         check_local_models(env.data_dir),
+        crate::voice_host::check_offline_voice(env.data_dir),
         check_resources(),
         check_telegram(env),
         core::check_unicode_path(env.data_dir),
@@ -106,6 +107,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_node_runtime(
             &cli_provider::node_runtime::probe(&cli_provider::PathEnv::from_ambient()),
             cli_provider::identity::installed_as_service(),
+            Some(env.data_dir),
         ),
         core::check_peer_link(env.data_dir, &live_link(env)),
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
@@ -113,6 +115,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             std::time::SystemTime::now(),
             core::newest_mtime(env.data_dir),
         ),
+        core::check_account_sessions(env.data_dir),
     ];
     if let Some(url) = env.time_url {
         checks.push(core::check_clock_skew(
@@ -253,18 +256,23 @@ const FIX_DISPLAY: &str = "run `sudo systemctl restart praxi-xvfb` and `sudo sys
 const FIX_BROWSER: &str = "run `bot browser install` (downloads a checked Chrome into the Praxi data folder; `sudo praxi browser install` on a host set up with install-linux.sh), or `sudo ./install-linux.sh --update --with-desktop` (installs a non-snap Chromium), or set BOT_BROWSER_PATH; then `sudo praxi doctor`";
 
 /// A browser that is there but did not start needs the fix for its cause, not a second install.
-fn fix_for_launch_error(error: &str) -> &'static str {
+fn fix_for_launch_error(error: &str) -> std::borrow::Cow<'static, str> {
     if error.contains("sandbox cannot start") {
-        FIX_BROWSER_SANDBOX
+        FIX_BROWSER_SANDBOX.into()
     } else if error.contains("missing system libraries") {
-        FIX_BROWSER_LIBRARIES
+        fix_browser_libraries().into()
     } else {
-        FIX_BROWSER
+        FIX_BROWSER.into()
     }
 }
 
 const FIX_BROWSER_SANDBOX: &str = "run `sudo ./install-linux.sh --update --with-desktop` once: it installs the browser together with the AppArmor rule that lets its sandbox start; then `sudo praxi doctor`";
-const FIX_BROWSER_LIBRARIES: &str = "install the libraries Chrome needs (Ubuntu/Debian: `sudo apt-get install -y libnss3 libatk-bridge2.0-0 libcups2 libgbm1 libxkbcommon0 libasound2 libxdamage1 libxfixes3 libxrandr2 libpango-1.0-0 libcairo2`), or run `sudo ./install-linux.sh --update --with-desktop`; then `sudo praxi doctor`";
+fn fix_browser_libraries() -> String {
+    format!(
+        "install the libraries Chrome needs (Ubuntu/Debian: `{}`), or run `sudo ./install-linux.sh --update --with-desktop`; then `sudo praxi doctor`",
+        daemon_api::browser_install::apt_install_command()
+    )
+}
 
 fn diagnose_host_display(
     f: &HostDisplayFacts<'_>,
@@ -1540,14 +1548,14 @@ id = "m1"
         );
         assert_eq!(
             fix_for_launch_error("the browser is missing system libraries. Browser said: libnss3"),
-            FIX_BROWSER_LIBRARIES
+            fix_browser_libraries()
         );
         assert_eq!(
             fix_for_launch_error("headless launch timed out"),
             FIX_BROWSER
         );
         assert!(
-            FIX_BROWSER_SANDBOX.contains("AppArmor") && FIX_BROWSER_LIBRARIES.contains("libnss3")
+            FIX_BROWSER_SANDBOX.contains("AppArmor") && fix_browser_libraries().contains("libnss3")
         );
     }
 

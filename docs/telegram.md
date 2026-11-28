@@ -43,7 +43,11 @@ In the chat with your bot: `/bots`, `/use <bot>`, `/stop`, `/status`,
 `/answer <text>` (answer the questions of a "needs you" message the daemon sent on its
 own, see [When a bot reports back on its own](guide/telegram.md#when-a-bot-reports-back-on-its-own)), and
 `/lang tr` or `/lang en` to pick the chat's language (see
-[Language](guide/telegram.md#language)). Any other text is sent to the selected
+[Language](guide/telegram.md#language)). Missions can be steered from the chat too:
+`/missions`, `/mission <id>`, `/pause <id>`, `/resume <id>`, `/stop <id>` (confirmed with
+a button) and `/mission new <text>`, owner only, in English or Turkish names (see
+[Manage missions from your phone](guide/telegram.md#manage-missions-from-your-phone)).
+Any other text is sent to the selected
 bot. Voice messages, photos and files are not
 read yet: the bot answers that it only understands text.
 

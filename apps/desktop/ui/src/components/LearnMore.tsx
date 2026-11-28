@@ -15,7 +15,8 @@ export const LEARN_DOCS: Record<LearnTerm, string> = {
   permissions: "chatting-and-approvals.md",
   folders: "security.md",
   memory: "knowledge-embeddings.md",
-  safeMode: "troubleshooting.md"
+  safeMode: "troubleshooting.md",
+  mcpTrust: "mcp-servers.md"
 };
 
 /** Hover: a short wait before it opens, and a grace period so the pointer can move into the popover. */

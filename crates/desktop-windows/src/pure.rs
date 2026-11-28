@@ -262,6 +262,41 @@ pub fn parse_key(name: &str) -> Option<Key> {
     }
 }
 
+/// How a character is typed on the CURRENT keyboard layout, from the result of
+/// `VkKeyScanW`: the virtual key and whether Shift must be held. `None` when the
+/// layout has no such key, or it needs Ctrl or Alt (`AltGr`) as well: the caller
+/// then sends the character as a Unicode event instead.
+#[must_use]
+pub fn chord_key_from_scan(scan: i16) -> Option<(u16, bool)> {
+    if scan == -1 {
+        return None;
+    }
+    let [low, high] = scan.to_le_bytes();
+    // Bit 0: Shift. Bits 1 and 2: Ctrl and Alt. Anything else is a layout quirk.
+    if high & !1 != 0 {
+        return None;
+    }
+    Some((u16::from(low), high & 1 != 0))
+}
+
+/// Whether a UIA toggle state (0 off, 1 on, 2 indeterminate) is the wanted one.
+/// Indeterminate is never "on" or "off".
+#[must_use]
+pub fn toggle_reached(state: i32, want_on: bool) -> bool {
+    matches!((state, want_on), (1, true) | (0, false))
+}
+
+/// Whether a UIA `ExpandCollapseState` (0 collapsed, 1 expanded, 2 partially
+/// expanded, 3 leaf) satisfies an expand or a collapse.
+#[must_use]
+pub fn expand_reached(state: i32, want_expanded: bool) -> bool {
+    if want_expanded {
+        matches!(state, 1 | 2)
+    } else {
+        state == 0
+    }
+}
+
 /// Whether a virtual key needs `KEYEVENTF_EXTENDEDKEY`.
 #[must_use]
 pub fn is_extended(vk: u16) -> bool {
@@ -294,6 +329,26 @@ mod tests {
             password: false,
             pattern_states: vec![],
         }
+    }
+
+    #[test]
+    fn a_character_is_typed_by_the_key_the_layout_gives_it() {
+        // US layout: '/' is VK_OEM_2 (0xBF) unshifted; '?' is the same key with Shift.
+        assert_eq!(chord_key_from_scan(0x00BF), Some((0xBF, false)));
+        assert_eq!(chord_key_from_scan(0x01BF), Some((0xBF, true)));
+        // Not on this layout, or only with AltGr (Ctrl+Alt): fall back to a Unicode event.
+        assert_eq!(chord_key_from_scan(-1), None);
+        assert_eq!(chord_key_from_scan(0x0651), None);
+        assert_eq!(chord_key_from_scan(0x0251), None);
+    }
+
+    #[test]
+    fn toggle_and_expand_targets() {
+        assert!(toggle_reached(1, true) && toggle_reached(0, false));
+        assert!(!toggle_reached(2, true) && !toggle_reached(2, false));
+        assert!(!toggle_reached(0, true) && !toggle_reached(1, false));
+        assert!(expand_reached(1, true) && expand_reached(2, true) && !expand_reached(0, true));
+        assert!(expand_reached(0, false) && !expand_reached(1, false) && !expand_reached(3, false));
     }
 
     #[test]

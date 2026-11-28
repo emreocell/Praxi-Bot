@@ -66,12 +66,79 @@ pub struct ApprovalNeeded {
     pub details: Option<Value>,
 }
 
-/// The user approved a pending tool call.
+/// What let a tool call run: who or which rule answered the question that would
+/// otherwise have been a card. A closed set of daemon facts; nothing a page, a
+/// mail or a tool result says can reach it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantedBy {
+    /// The owner answered an approval card for this very call.
+    OwnerCard,
+    /// The Full level let the call through without a card, in a run the owner
+    /// started.
+    FullAccess,
+    /// The Full level let the call through in a run started by a schedule, rule,
+    /// webhook or mail the owner set up.
+    OwnerSchedule,
+    /// The Full level let the call through in an unattended session of the
+    /// owner's mission.
+    OwnerMission,
+    /// The Balanced level's lane let the call through.
+    BalancedLevel,
+    /// An owner-created standing grant covered exactly this call.
+    StandingGrant,
+    /// A choice the owner made earlier on a card ("this chat", "always",
+    /// "for this task") covered the call; `rule_id` names it.
+    RememberedChoice,
+    /// The owner's own per-site or per-app allow rule covered the call.
+    SiteRule,
+}
+
+/// The permission level the bot was on when the call was decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AutonomyLevel {
+    Ask,
+    Balanced,
+    Full,
+}
+
+/// A pending tool call was allowed to run: the owner approved its card, or an
+/// automatic rule did the owner's part (see [`GrantedBy`]).
+///
+/// The three provenance fields are additive. An event recorded before they
+/// existed has none of them and always meant an answered card, but it does not
+/// say so: readers show it as an approval of unknown provenance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolCallApproved {
     pub run_id: RunId,
     pub call_id: ToolCallId,
+    /// The owner who answered the card. For an automatic grant nobody answered, so it is
+    /// [`UserId::SYSTEM`] (the nil UUID): a reader that predates `granted_by` and only looks
+    /// at this field still cannot take the grant for the owner's own click.
     pub approved_by: UserId,
+    /// What granted the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted_by: Option<GrantedBy>,
+    /// The bot's permission level when the call was decided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<AutonomyLevel>,
+    /// The remembered rule that covered the call, as `<scope>:<name>` with scope
+    /// `chat`, `always`, `category` or `task` and `name` a tool or category name.
+    /// Never a path, address, command or other text of the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+}
+
+impl ToolCallApproved {
+    /// Whether a person answered a card for this call: an `owner_card` grant, or an event
+    /// from before `granted_by` existed (which always meant an answered card, though it does
+    /// not say so). Every count or display of "the owner approved" must use this, not the
+    /// event's mere presence: an automatic grant is also a `tool_call_approved`.
+    #[must_use]
+    pub fn is_owner_answer(&self) -> bool {
+        matches!(self.granted_by, None | Some(GrantedBy::OwnerCard))
+    }
 }
 
 /// The user denied a pending tool call.
@@ -212,6 +279,83 @@ pub struct HandoverRequested {
     /// fake prompt on a page can ask for a code.
     pub untrusted_content: bool,
     /// Seconds until the request expires on its own.
+    pub expires_in_secs: u64,
+}
+
+// ── MCP elicitation ───────────────────────────────────────────────────────────
+
+/// The value type of one [`ElicitationField`]. A choice list is a `string`
+/// field with [`ElicitationField::options`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ElicitationFieldType {
+    String,
+    Number,
+    Integer,
+    Boolean,
+}
+
+/// One choice of an enum field: the value sent back and the label shown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ElicitationOption {
+    pub value: String,
+    pub label: String,
+}
+
+/// One input of an MCP elicitation form. Every text here comes from the MCP
+/// server: untrusted, shown as plain text, never as markup.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ElicitationField {
+    /// Property name, the key of the answer.
+    pub name: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: ElicitationFieldType,
+    pub required: bool,
+    /// Allowed values of a choice field (empty: free input).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<ElicitationOption>,
+    /// Bounds of a `number` / `integer` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<f64>,
+    /// Length bounds of a `string` field, in characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u32>,
+    /// `email`, `uri`, `date` or `date-time` for a `string` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// The server's default value: the only value a form may prefill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+    /// A suspected credential field (password, token, one-time code, card or
+    /// API key, by name, title or description): shown as blocked and never
+    /// submitted, whatever the server asks. Set by the daemon, never by the server.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub blocked: bool,
+}
+
+/// An MCP server asked the owner for input during one of its tool calls
+/// (elicitation); the run waits until the owner submits, declines or cancels
+/// the form on the local desktop, or the request expires. The event carries
+/// the form and NEVER an answer: the owner's app posts it straight to the
+/// daemon (`POST /v1/elicitations/{call_id}`), which hands it to the server
+/// only. The model, the journal and the logs never see it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ElicitationRequested {
+    pub run_id: RunId,
+    /// Id to answer or cancel with (its own id, not a model tool call).
+    pub call_id: ToolCallId,
+    /// The MCP server that asks (its configured id).
+    pub server: String,
+    /// The server's message. Untrusted plain text, never markup.
+    pub message: String,
+    pub fields: Vec<ElicitationField>,
+    /// Seconds until the request expires on its own (0: no limit).
     pub expires_in_secs: u64,
 }
 
@@ -412,6 +556,7 @@ pub enum Event {
     QuestionAsked(QuestionAsked),
     SecretRequested(SecretRequested),
     HandoverRequested(HandoverRequested),
+    ElicitationRequested(ElicitationRequested),
     ModelFallback(ModelFallback),
     RouteDecided(RouteDecided),
     WorkflowStepStarted(WorkflowStepStarted),
@@ -449,6 +594,55 @@ mod tests {
         });
         let v = serde_json::to_value(&ev).unwrap();
         assert_eq!(v["type"], "message_delta");
+    }
+
+    #[test]
+    fn approval_provenance_is_additive_and_old_event_round_trips_unchanged() {
+        let old = serde_json::json!({
+            "type": "tool_call_approved", "run_id": RunId::new(),
+            "call_id": ToolCallId::new(), "approved_by": UserId::new(),
+        });
+        let event: Event = serde_json::from_value(old.clone()).unwrap();
+        let Event::ToolCallApproved(a) = &event else {
+            panic!("not an approval");
+        };
+        assert_eq!(
+            (a.granted_by, a.level, a.rule_id.as_deref()),
+            (None, None, None)
+        );
+        assert_eq!(serde_json::to_value(&event).unwrap(), old);
+        let mut full = old;
+        full["granted_by"] = serde_json::json!("remembered_choice");
+        full["level"] = serde_json::json!("balanced");
+        full["rule_id"] = serde_json::json!("always:shell_run");
+        let event: Event = serde_json::from_value(full.clone()).unwrap();
+        assert_eq!(serde_json::to_value(event).unwrap(), full);
+    }
+
+    #[test]
+    fn only_a_card_answer_or_a_legacy_event_is_an_owner_answer() {
+        let approved = |granted_by| ToolCallApproved {
+            run_id: RunId::new(),
+            call_id: ToolCallId::new(),
+            approved_by: UserId::new(),
+            granted_by,
+            level: None,
+            rule_id: None,
+        };
+        assert!(approved(None).is_owner_answer());
+        assert!(approved(Some(GrantedBy::OwnerCard)).is_owner_answer());
+        for by in [
+            GrantedBy::FullAccess,
+            GrantedBy::OwnerSchedule,
+            GrantedBy::OwnerMission,
+            GrantedBy::BalancedLevel,
+            GrantedBy::StandingGrant,
+            GrantedBy::RememberedChoice,
+            GrantedBy::SiteRule,
+        ] {
+            assert!(!approved(Some(by)).is_owner_answer(), "{by:?}");
+        }
+        assert!(UserId::SYSTEM.is_system() && !UserId::new().is_system());
     }
 
     #[test]

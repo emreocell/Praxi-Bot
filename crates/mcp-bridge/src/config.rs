@@ -95,6 +95,9 @@ pub const MAX_SERVER_ID: usize = 100;
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
+    /// Ownership information for files and credentials created by an import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import: Option<McpImport>,
     /// OAuth client settings, HTTP only. Tokens are never configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth: Option<OAuthConfig>,
@@ -162,6 +165,15 @@ pub struct McpServerConfig {
     pub bots: Option<Vec<String>>,
 }
 
+/// Resources to remove when an imported MCP server is uninstalled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpImport {
+    /// SHA-256 of the approved bundle, if the import unpacked one.
+    pub bundle_sha256: Option<String>,
+    /// Secret references created by the import, even if the config is later edited.
+    pub secrets: Vec<String>,
+}
+
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` signature
 fn is_false(b: &bool) -> bool {
     !*b
@@ -216,6 +228,7 @@ impl McpServerConfig {
         args: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         Self {
+            import: None,
             oauth: None,
             id: id.into(),
             transport: McpTransport::Stdio {
@@ -242,6 +255,7 @@ impl McpServerConfig {
     #[must_use]
     pub fn http(id: impl Into<String>, url: impl Into<String>) -> Self {
         Self {
+            import: None,
             oauth: None,
             id: id.into(),
             transport: McpTransport::Http {

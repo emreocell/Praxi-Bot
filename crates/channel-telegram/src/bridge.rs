@@ -7,6 +7,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use channel_api::control::{
+    Control, OwnerId, Say, StopPress, canonical, keep_label, parse_stop_callback, say,
+    stop_cancel_callback, stop_confirm_callback, stop_label,
+};
 use channel_api::notice::{
     Feedback, Flavor, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
     reply_error_feedback, retry_callback,
@@ -29,6 +33,7 @@ use crate::bot_api::{
 use crate::channel_trait::{
     Channel, ChannelCaps, ChatRef, IncomingKind, IncomingMessage, InlineButton, OutgoingMessage,
 };
+use crate::control::{Answer, ControlHub};
 use crate::daemon_client::{
     ApprovalDecision, DaemonClient, DeliveryKind, format_approval_callback,
     format_question_callback, parse_approval_callback, parse_question_callback,
@@ -403,6 +408,8 @@ struct Inner {
     wake: Notify,
     /// The owner notices pushed to this bot's chats (what `/answer` and the retry button name).
     notices: NoticeBook,
+    /// Mission commands (`/missions`, `/pause`, ...): rate limit and stop confirmations.
+    control: ControlHub,
 }
 
 /// Own streams outside the runtime lock. Dropping a cancelled drain restores all
@@ -545,6 +552,23 @@ fn cut_secrets(text: String) -> (String, Option<bool>) {
     }
 }
 
+/// The mission command in `text` (`/missions`, `/gorev yeni ...`, `/stop 1a2b3c4d`), in either
+/// language; `None` for anything else, including a bare `/stop` (that stops the chat's run).
+fn control_command(text: &str) -> Option<Control> {
+    let rest = text.trim().strip_prefix('/')?;
+    let (head, arg) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+    Control::parse(head.split('@').next().unwrap_or(head), arg)
+}
+
+/// Whether `text` is just `/name` (or its Turkish name, `/name@bot`), with nothing after it.
+fn bare_command(text: &str, name: &str) -> bool {
+    let Some(rest) = text.trim().strip_prefix('/') else {
+        return false;
+    };
+    let head = rest.split('@').next().unwrap_or(rest);
+    !rest.contains(char::is_whitespace) && canonical(head) == name
+}
+
 /// The text after `/answer` (or `/answer@bot`), if `text` is that command.
 fn answer_arg(text: &str) -> Option<&str> {
     let t = text.trim();
@@ -599,7 +623,6 @@ impl TelegramChannel {
         let inner = Arc::new(Inner {
             config,
             bot_api,
-            api_client,
             pairing,
             redactor,
             runtime: Mutex::new(runtime),
@@ -621,6 +644,8 @@ impl TelegramChannel {
             status: watch::channel(ChannelStatus::Stopped).0,
             wake: Notify::new(),
             notices: NoticeBook::default(),
+            control: ControlHub::new(Arc::clone(&api_client)),
+            api_client,
         });
 
         Ok(Self {
@@ -646,12 +671,23 @@ impl TelegramChannel {
 
     /// Notify paired users in their private chats. The URI only opens a local chat.
     pub async fn notify_secret_request(&self, chat: protocol::ChatId) {
+        self.notify_open_app(chat, Message::SecretRequestNotice)
+            .await;
+    }
+
+    /// Tell paired users that an MCP server's form waits in the desktop chat. Same
+    /// rules as [`Self::notify_secret_request`]: the form itself never leaves the app.
+    pub async fn notify_elicitation(&self, chat: protocol::ChatId) {
+        self.notify_open_app(chat, Message::ElicitationNotice).await;
+    }
+
+    async fn notify_open_app(&self, chat: protocol::ChatId, message: Message<'_>) {
         if self.status() != ChannelStatus::Running {
             return;
         }
         for user in self.pairing().paired_users() {
             let language = self.language(user);
-            let notice = Message::SecretRequestNotice.render(language);
+            let notice = message.render(language);
             let locale = if language.code() == "tr" { "tr/" } else { "" };
             let launcher = channel_api::DESKTOP_CHAT_LAUNCHER;
             let link = format!("{launcher}{locale}open/#{chat}");
@@ -926,6 +962,102 @@ impl TelegramChannel {
                 say(Feedback::AnswerFailed).await
             }
         }
+    }
+
+    /// A mission command (`/missions`, `/mission`, `/pause`, `/resume`, `/stop <id>`,
+    /// `/mission new`, `/help`). Only the paired user, typing in their own private chat, runs one
+    /// (a message that was forwarded from somewhere else carries someone else's words).
+    ///
+    /// Never fails the update: a lost reply must not make the inbox run the command again, which
+    /// would start a second mission.
+    async fn handle_control(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+        forwarded: bool,
+        ctl: &Control,
+    ) -> Result<()> {
+        if !self.owns_chat(chat_id, user_id) {
+            return Ok(());
+        }
+        let Some(owner) = OwnerId::telegram(user_id) else {
+            return Ok(());
+        };
+        let lang = self.notice_lang(chat_id);
+        let answer = if forwarded {
+            Answer {
+                text: say(lang, Flavor::Plain, &Say::Forwarded),
+                confirm: None,
+            }
+        } else {
+            let bot = if ctl.is_start() {
+                self.resolve_bot_for_chat(chat_id).await.ok()
+            } else {
+                None
+            };
+            self.inner
+                .control
+                .handle(owner, ctl, lang, Flavor::Plain, bot)
+                .await
+        };
+        self.send_control_answer(chat_id, lang, answer).await;
+        Ok(())
+    }
+
+    async fn send_control_answer(&self, chat_id: i64, lang: NoticeLang, answer: Answer) {
+        if answer.text.is_empty() {
+            return;
+        }
+        let markup = answer.confirm.as_deref().and_then(|id| {
+            InlineKeyboardMarkup::from_rows(vec![vec![
+                InlineButton::new(stop_label(lang), stop_confirm_callback(id)),
+                InlineButton::new(keep_label(lang), stop_cancel_callback(id)),
+            ]])
+        });
+        if let Err(e) = self
+            .send_redacted(chat_id, &answer.text, markup.as_ref())
+            .await
+        {
+            self.report_error(&e);
+        }
+    }
+
+    /// A press of "Stop it" or "Keep going" under a stop question: only the paired user, in their
+    /// own chat, on a question this bridge asked a moment ago.
+    async fn handle_stop_press(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+        query_id: &str,
+        press: &StopPress,
+    ) -> Result<()> {
+        let owner = OwnerId::telegram(user_id).filter(|_| self.owns_chat(chat_id, user_id));
+        let Some(owner) = owner else {
+            self.inner
+                .bot_api
+                .answer_callback_query(query_id, None)
+                .await?;
+            return Ok(());
+        };
+        let lang = self.notice_lang(chat_id);
+        let answer = match press {
+            StopPress::Confirm(id) => {
+                self.inner
+                    .control
+                    .confirm_stop(owner, id, lang, Flavor::Plain)
+                    .await
+            }
+            StopPress::Cancel(id) => self
+                .inner
+                .control
+                .cancel_stop(owner, id, lang, Flavor::Plain),
+        };
+        self.inner
+            .bot_api
+            .answer_callback_query(query_id, None)
+            .await?;
+        self.send_control_answer(chat_id, lang, answer).await;
+        Ok(())
     }
 
     /// The paired user, in their own private chat (the chat id of a private chat is the user's).
@@ -1484,6 +1616,9 @@ impl TelegramChannel {
                         .handle_answer_command(chat_id, user_id, forwarded, arg)
                         .await;
                 }
+                if let Some(ctl) = control_command(&text) {
+                    return self.handle_control(chat_id, user_id, forwarded, &ctl).await;
+                }
                 self.handle_paired_text(chat_id, &text, msg.update_id).await
             }
             IncomingKind::Voice {
@@ -1506,6 +1641,11 @@ impl TelegramChannel {
                 if let Some(notice_id) = parse_retry_callback(&data) {
                     return self
                         .handle_retry_callback(chat_id, user_id, &query_id, notice_id)
+                        .await;
+                }
+                if let Some(press) = parse_stop_callback(&data) {
+                    return self
+                        .handle_stop_press(chat_id, user_id, &query_id, &press)
                         .await;
                 }
                 self.handle_callback(chat_id, &query_id, &data, msg.update_id)
@@ -1654,10 +1794,10 @@ impl TelegramChannel {
                 .map_or("", |(_, rest)| rest.trim());
             return self.handle_use_command(chat_id, arg).await;
         }
-        if trimmed == "/stop" || trimmed.starts_with("/stop@") {
+        if bare_command(trimmed, "stop") {
             return self.handle_stop_command(chat_id, update_id).await;
         }
-        if trimmed == "/status" || trimmed.starts_with("/status@") {
+        if bare_command(trimmed, "status") {
             return self.handle_status_command(chat_id).await;
         }
         if trimmed == "/lang" || trimmed.starts_with("/lang ") || trimmed.starts_with("/lang@") {
@@ -1867,7 +2007,13 @@ impl TelegramChannel {
             run: run.as_deref(),
         }
         .render(self.language(chat_id));
-        self.send_redacted(chat_id, &msg, None).await?;
+        let extra = self
+            .inner
+            .control
+            .status_lines(self.notice_lang(chat_id), Flavor::Plain)
+            .await;
+        self.send_redacted(chat_id, &format!("{msg}\n{extra}"), None)
+            .await?;
         Ok(())
     }
 

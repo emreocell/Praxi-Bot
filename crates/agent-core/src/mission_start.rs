@@ -29,7 +29,8 @@ use crate::shared::{RunCtx, Shared};
 /// Name of the tool.
 pub(crate) const MISSION_CREATE: &str = "mission_create";
 
-/// Longest goal a mission takes, in characters (the same limit as the "Start a mission" route).
+/// Longest goal a mission takes, in characters (the same limit as the "Start a mission" route,
+/// which the app's `/mission` command uses).
 const MAX_GOAL_CHARS: usize = 4_000;
 /// Longest context line the model may add, in characters.
 const MAX_CONTEXT_CHARS: usize = 400;
@@ -178,7 +179,7 @@ impl Shared {
         // request has to be acted on before the run reads anything untrusted.
         if ctx.taint.lock().exposure.untrusted {
             return Err(refuse(
-                "this chat already read outside content, so it cannot start a mission any more; ask the owner to start it with the Start a mission button, or ask again in a new message",
+                "this chat already read outside content, so it cannot start a mission any more; ask the owner to type /mission and the job in the chat, or to ask again in a new message",
             ));
         }
         let store = self
@@ -280,7 +281,7 @@ impl Shared {
     fn owner_goal(&self, ctx: &RunCtx) -> Result<String, ToolError> {
         let not_owner = || {
             ToolError::Execution(
-                "the owner's message is not available as a goal; ask the owner to start the mission with the Start a mission button".into(),
+                "the owner's message is not available as a goal; ask the owner to type /mission and the job in the chat".into(),
             )
         };
         let (text, source, untrusted) = self
@@ -296,7 +297,7 @@ impl Shared {
             .ok_or_else(not_owner)?;
         if goal.chars().count() > MAX_GOAL_CHARS {
             return Err(ToolError::Execution(format!(
-                "the owner's message is longer than {MAX_GOAL_CHARS} characters; ask them to shorten it or to use the Start a mission button"
+                "the owner's message is longer than {MAX_GOAL_CHARS} characters; ask them to shorten it"
             )));
         }
         Ok(goal)
@@ -381,8 +382,8 @@ impl Shared {
 }
 
 /// Whether a stored user message may become a mission's goal: recorded as the owner's own
-/// (typed in the app, or from their paired Telegram chat) and not written after untrusted
-/// content. Any other source, including an empty (untagged) one, is refused.
+/// (typed in the app, or from their paired Telegram or Discord chat) and not written after
+/// untrusted content. Any other source, including an empty (untagged) one, is refused.
 pub(crate) fn goal_origin_ok(source: &str, exposure_untrusted: bool) -> bool {
-    !exposure_untrusted && matches!(source, "owner" | "telegram_owner")
+    !exposure_untrusted && matches!(source, "owner" | "telegram_owner" | "discord_owner")
 }

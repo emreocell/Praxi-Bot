@@ -18,8 +18,8 @@ use futures::StreamExt;
 use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
 use protocol::event::{
-    MessageDelta, ModelFallback, RunError, TodoItem, TodoStatus, TodoUpdated, ToolCallCompleted,
-    ToolCallDenied, ToolCallRequested,
+    GrantedBy, MessageDelta, ModelFallback, RunError, TodoItem, TodoStatus, TodoUpdated,
+    ToolCallCompleted, ToolCallDenied, ToolCallRequested,
 };
 use protocol::{Event, RunId, ToolCallId};
 use provider_catalog::{
@@ -32,7 +32,7 @@ use task_runtime::{ExecError, RetryPolicy, StepExecutor, StepSpec, StepStatus};
 use tokio_util::sync::CancellationToken;
 use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 
-use crate::approval::{ExecPermit, QuestionRoute};
+use crate::approval::{Decided, ExecPermit, Provenance, QuestionRoute};
 use crate::compaction::Compaction;
 use crate::history::{
     GUARD_NOTE, build_messages, status_of, step_output, tool_defs, truncate_utf8,
@@ -79,6 +79,8 @@ enum Slot {
         /// the policy mutex immediately before the tool is invoked.
         permit: Option<ExecPermit>,
         auto_reason: Option<&'static str>,
+        /// What stood in for the card, journaled once the call is committed to run.
+        grant: Option<Provenance>,
         payment: tool_registry::PaymentApproval,
         class: PlannedClass,
         /// The program a desktop input call would reach, resolved before the
@@ -95,6 +97,8 @@ enum Slot {
         permit: Option<ExecPermit>,
         /// Why the Full lane let the call through without a card, audited before it runs.
         auto_reason: Option<&'static str>,
+        /// What stood in for the card, journaled once the call is committed to run.
+        grant: Option<Provenance>,
     },
 }
 
@@ -942,7 +946,8 @@ impl TurnExecutor {
                 if s.name == crate::mission_start::MISSION_CREATE {
                     return offer_create;
                 }
-                ctx.mission.is_some() || !missions::tools::is_mission_tool(&s.name)
+                self.sh.bot_tool_allowed(&ctx, &s.name)
+                    && (ctx.mission.is_some() || !missions::tools::is_mission_tool(&s.name))
             });
             if !self.sh.cfg.legacy_tool_surface {
                 crate::discovery::bound_legacy(&mut specs);
@@ -1768,7 +1773,10 @@ impl TurnExecutor {
                     .resolve_offered(&ctx, &call.name, &input, &hints, offered.as_deref())
             else {
                 invalid_calls.insert(call_uuid);
-                slots.push(err(format!("unknown tool {:?}", call.name)));
+                slots.push(err(format!(
+                    "unknown tool {:?}; search for available tools with tool_search or find_tool",
+                    call.name
+                )));
                 continue;
             };
             if call.name == agent_router::TOOL_DESCRIBE
@@ -1871,8 +1879,12 @@ impl TurnExecutor {
                 },
                 tool_registry::PaymentApproval::Approved,
             );
-            let (decision, auto_reason) = match &resolved.spec {
-                Some(spec) => self.sh.decide_with_reason(
+            let Decided {
+                decision,
+                reason: auto_reason,
+                grant: auto_grant,
+            } = match &resolved.spec {
+                Some(spec) => self.sh.decide_with_grant(
                     &ctx,
                     &resolved.name,
                     spec.effect,
@@ -1881,7 +1893,11 @@ impl TurnExecutor {
                     target.as_ref(),
                 ),
                 // Malformed `use_tool`: executes nothing, only reports the error.
-                None => (Decision::Allow, None),
+                None => Decided {
+                    decision: Decision::Allow,
+                    reason: None,
+                    grant: None,
+                },
             };
             // Recheck immediately before the approval branch too: policy can
             // change after preflight. No prepared slot has executed yet.
@@ -2011,13 +2027,14 @@ impl TurnExecutor {
                 // call (verified by the tool against the live facts) stands in
                 // for the card. Nothing else can: policy, presets and grants
                 // were already overridden to Ask for such a call.
-                if category != PermissionCategory::Money
-                    && self
-                        .sh
+                let standing = if category == PermissionCategory::Money {
+                    None
+                } else {
+                    self.sh
                         .standing_grant(&ctx, &resolved.name, &resolved.input)
                         .await
-                        .is_some()
-                {
+                };
+                if let Some(standing) = standing {
                     Slot::Run {
                         tool,
                         name: resolved.name.clone(),
@@ -2026,6 +2043,11 @@ impl TurnExecutor {
                         meta,
                         permit: None,
                         auto_reason: None,
+                        grant: Some(Provenance {
+                            granted_by: GrantedBy::StandingGrant,
+                            level: self.sh.level_of(&ctx),
+                            rule_id: Some(crate::approval::rule_id("standing", &standing.id)),
+                        }),
                         payment,
                         class,
                         target,
@@ -2053,6 +2075,7 @@ impl TurnExecutor {
                             meta,
                             permit: Some(permit),
                             auto_reason: None,
+                            grant: None,
                             payment,
                             class,
                             target,
@@ -2082,6 +2105,7 @@ impl TurnExecutor {
                     call: call_uuid,
                     meta,
                     auto_reason: carried.is_none().then_some(auto_reason).flatten(),
+                    grant: carried.is_none().then_some(auto_grant).flatten(),
                     permit: carried,
                     payment,
                     class,
@@ -2093,6 +2117,7 @@ impl TurnExecutor {
                     call: c,
                     permit,
                     auto_reason,
+                    grant,
                     ..
                 } if is_spawn => Slot::Spawn {
                     name: spawn_name,
@@ -2101,6 +2126,7 @@ impl TurnExecutor {
                     model_call_id: call.id.clone(),
                     permit,
                     auto_reason,
+                    grant,
                 },
                 other => other,
             };
@@ -2140,6 +2166,7 @@ impl TurnExecutor {
                     model_call_id,
                     permit,
                     auto_reason,
+                    grant,
                 } => {
                     if let Err(reason) = commit_or_deny(permit) {
                         return (user_denied(reason), true, None, None, not_run);
@@ -2149,6 +2176,9 @@ impl TurnExecutor {
                         && let Err(error) = self.sh.audit_auto_allow(ctx_ref, &name, reason)
                     {
                         return (error, true, None, None, not_run);
+                    }
+                    if let Some(grant) = grant {
+                        self.sh.emit_grant(ctx_ref, call_id, grant);
                     }
                     if name == crate::delegation::ASK_BOT {
                         let (t, e, d, fact) = self
@@ -2174,6 +2204,7 @@ impl TurnExecutor {
                     meta,
                     permit,
                     auto_reason,
+                    grant,
                     payment,
                     class,
                     target,
@@ -2189,6 +2220,9 @@ impl TurnExecutor {
                             self.sh.audit_auto_allow(ctx_ref, &tool.spec().name, reason)
                     {
                         return (error, true, None, None, not_run);
+                    }
+                    if let Some(grant) = grant {
+                        self.sh.emit_grant(ctx_ref, call_id, grant);
                     }
                     let typed_secret = (tool.spec().name == "browser_fill")
                         .then(|| {
@@ -2211,6 +2245,9 @@ impl TurnExecutor {
                                 expected_origin: class.page_origin.clone(),
                                 unattended_mail: auto_reason
                                     .is_some_and(|r| r.starts_with("mode.full.")),
+                                full_waived_preview: auto_reason
+                                    .is_some_and(|r| r.starts_with("mode.full."))
+                                    && self.sh.bot_preview_waived(ctx_ref, &tool.spec().name),
                                 payment,
                             },
                         )
@@ -2338,7 +2375,10 @@ impl TurnExecutor {
         for ((call, call_uuid), (text, mut is_error, duration_ms, own_spill, fact)) in
             calls.iter().zip(uuids).zip(outcomes)
         {
-            let mut text = self.sh.redact(text);
+            let text = self.sh.redact(text);
+            // What the owner typed into a server's form is for that server only: when it echoes
+            // the value back in the result, the model reads the mask instead.
+            let mut text = crate::shared::Shared::redact_elicited(&ctx, text);
             let knowledge_request = knowledge_requests.get(&call_uuid);
             if !is_error && let Some(request) = knowledge_request {
                 text = crate::knowledge::rebudget_text(&text, request);
@@ -2561,6 +2601,7 @@ impl TurnExecutor {
                     exposure_untrusted: exposure.untrusted,
                     expected_origin: authorization.expected_origin,
                     unattended_mail: authorization.unattended_mail,
+                    full_waived_preview: authorization.full_waived_preview,
                     payment: authorization.payment,
                     exposure_private: exposure.private,
                     control_guard,

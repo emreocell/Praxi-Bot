@@ -12,9 +12,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use daemon_api::voice::{
-    LocalVoiceStatusDto, TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl,
-    VoiceControlError, VoiceProvider,
+    LocalVoiceStatusDto, SynthesizeInput, TranscribeOutput, VoiceConfigDto, VoiceConfigInput,
+    VoiceControl, VoiceControlError, VoiceProvider,
 };
+use daemon_api::voice_live::{LiveLink, LiveOpen};
 use provider_catalog::{ProviderConfig, ProviderSettings, config_path};
 use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,23 @@ struct VoiceFile {
     /// Reuse a matching provider key from Bots & models (default on).
     #[serde(default = "default_true")]
     use_provider_key: bool,
+    /// Gemini Live model for live voice conversations.
+    #[serde(default = "default_live_model")]
+    live_model: String,
+    /// Prebuilt voice the live model speaks with.
+    #[serde(default = "default_live_voice")]
+    live_voice: String,
+    /// Keep the audio of live conversations on this computer (default off).
+    #[serde(default)]
+    live_keep_audio: bool,
+}
+
+fn default_live_model() -> String {
+    crate::voice_live::DEFAULT_MODEL.to_owned()
+}
+
+fn default_live_voice() -> String {
+    crate::voice_live::DEFAULT_VOICE.to_owned()
 }
 
 fn default_true() -> bool {
@@ -78,6 +96,9 @@ impl Default for VoiceFile {
             gemini_model: default_gemini_model(),
             local_model: default_local_model(),
             use_provider_key: true,
+            live_model: default_live_model(),
+            live_voice: default_live_voice(),
+            live_keep_audio: false,
         }
     }
 }
@@ -92,7 +113,7 @@ pub struct VoiceHost {
     gemini_ws_base: String,
     local: crate::voice_local::LocalVoice,
     #[cfg(feature = "local-voice")]
-    engine: Arc<crate::voice_local_engine::Engine>,
+    inference: tokio::sync::Semaphore,
 }
 
 impl VoiceHost {
@@ -112,15 +133,12 @@ impl VoiceHost {
             gemini_ws_base: crate::voice_gemini::DEFAULT_WS_BASE.to_owned(),
             local: crate::voice_local::LocalVoice::new(data_dir),
             #[cfg(feature = "local-voice")]
-            engine: Arc::default(),
+            inference: tokio::sync::Semaphore::new(1),
         }
     }
 
     fn load(&self) -> VoiceFile {
-        std::fs::read_to_string(self.data_dir.join(VOICE_FILE))
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        load_voice_file(&self.data_dir)
     }
 
     fn save(&self, file: &VoiceFile) -> Result<(), VoiceControlError> {
@@ -208,8 +226,15 @@ impl VoiceHost {
             use_provider_key: file.use_provider_key,
             gemini_provider_key_available: self.gemini_provider_key().is_some(),
             stt_provider_key_available: self.stt_provider_key(&file.stt_base_url).is_some(),
+            live_model: file.live_model.clone(),
+            live_voice: file.live_voice.clone(),
+            live_keep_audio: file.live_keep_audio,
         }
     }
+}
+
+fn is_model_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')
 }
 
 /// Validate a transcription base URL: `https`, or `http` for a loopback host that is not the
@@ -337,11 +362,7 @@ impl VoiceControl for VoiceHost {
         }
         if let Some(m) = &input.gemini_model {
             let m = m.trim();
-            if m.chars().count() > 100
-                || !m
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-            {
+            if m.chars().count() > 100 || !m.chars().all(is_model_char) {
                 return Err(VoiceControlError::Invalid(
                     "`gemini_model` is not a valid model name".into(),
                 ));
@@ -351,6 +372,36 @@ impl VoiceControl for VoiceHost {
             } else {
                 m.to_owned()
             };
+        }
+        if let Some(m) = &input.live_model {
+            let m = m.trim();
+            if m.chars().count() > 100 || !m.chars().all(is_model_char) || m.contains("transcribe")
+            {
+                return Err(VoiceControlError::Invalid(
+                    "`live_model` is not a valid live conversation model name".into(),
+                ));
+            }
+            file.live_model = if m.is_empty() {
+                default_live_model()
+            } else {
+                m.to_owned()
+            };
+        }
+        if let Some(v) = &input.live_voice {
+            let v = v.trim();
+            if v.chars().count() > 40 || !v.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Err(VoiceControlError::Invalid(
+                    "`live_voice` is not a valid voice name".into(),
+                ));
+            }
+            file.live_voice = if v.is_empty() {
+                default_live_voice()
+            } else {
+                v.to_owned()
+            };
+        }
+        if let Some(keep) = input.live_keep_audio {
+            file.live_keep_audio = keep;
         }
         if let Some(m) = &input.local_model {
             let m = m.trim();
@@ -489,22 +540,96 @@ impl VoiceControl for VoiceHost {
         })
     }
 
+    async fn live_open(&self, open: LiveOpen) -> Result<LiveLink, VoiceControlError> {
+        let file = self.load();
+        let key = self
+            .effective_gemini_key(&file)
+            .ok_or(VoiceControlError::NotConfigured)?;
+        crate::voice_live::open(crate::voice_live::SessionConfig {
+            ws_base: crate::voice_gemini::validate_ws_base(&self.gemini_ws_base)?,
+            key,
+            model: file.live_model,
+            voice: file.live_voice,
+            open,
+            // Audio is never written unless the owner switched it on.
+            keep_audio: file
+                .live_keep_audio
+                .then(|| self.data_dir.join("voice-live")),
+            limits: crate::voice_live::Limits::default(),
+        })
+        .await
+    }
+
     fn local_status(&self) -> LocalVoiceStatusDto {
         self.local.status()
     }
 
-    #[allow(clippy::unused_async)]
     async fn local_install(&self, model: String) -> Result<LocalVoiceStatusDto, VoiceControlError> {
         self.local
             .start_install(model.trim())
             .map_err(VoiceControlError::Invalid)?;
-        Ok(self.local.status())
+        let local = self.local.clone();
+        tokio::task::spawn_blocking(move || local.status())
+            .await
+            .map_err(|_| VoiceControlError::Internal("local voice status task failed".into()))
+    }
+
+    async fn synthesize(&self, input: SynthesizeInput) -> Result<Vec<u8>, VoiceControlError> {
+        self.synthesize_local(input).await
+    }
+
+    fn offline_check(&self) -> daemon_api::doctor::Check {
+        check_offline_voice(&self.data_dir)
+    }
+}
+
+fn load_voice_file(data_dir: &Path) -> VoiceFile {
+    std::fs::read_to_string(data_dir.join(VOICE_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn check_offline_voice(data_dir: &Path) -> daemon_api::doctor::Check {
+    use crate::voice_local::{self, LocalVoice};
+    use daemon_api::doctor::Check;
+
+    const ID: &str = "offline_voice";
+    const TITLE: &str = "offline voice";
+    if !LocalVoice::compiled_in() {
+        return Check::skipped(ID, TITLE, "this build does not include offline voice");
+    }
+    let config = load_voice_file(data_dir);
+    let stt_enabled = config.stt_provider == VoiceProvider::LocalVoice;
+    let tts_present = voice_local::model_files_present(data_dir, &voice_local::TTS);
+    let tts = if tts_present {
+        "read-aloud model files present"
+    } else {
+        "read-aloud model files missing or incomplete"
+    };
+    if stt_enabled && !voice_local::stt_files_present(data_dir, &config.local_model) {
+        return Check::warn(
+            ID,
+            TITLE,
+            format!("selected dictation model files missing or incomplete, {tts}"),
+            "download the model again in Settings > Dictation",
+        );
+    }
+    let stt = if stt_enabled {
+        "dictation model files present"
+    } else {
+        "offline dictation is off"
+    };
+    let detail = format!("{stt}, {tts}");
+    if stt_enabled || tts_present {
+        Check::ok(ID, TITLE, detail)
+    } else {
+        Check::skipped(ID, TITLE, detail)
     }
 }
 
 impl VoiceHost {
-    /// On-device transcription: audio is decoded, cut by Silero VAD and read by Whisper in this
-    /// process. Nothing is sent anywhere.
+    /// On-device transcription through the private voice worker.
     #[cfg(feature = "local-voice")]
     async fn transcribe_local(
         &self,
@@ -513,24 +638,26 @@ impl VoiceHost {
         language: Option<String>,
         model: &str,
     ) -> Result<TranscribeOutput, VoiceControlError> {
-        if !self.local.ready(model) {
+        if !crate::voice_local::stt_files_present(&self.data_dir, model) {
             return Err(VoiceControlError::Invalid(
-                "the speech model is not downloaded yet: install it in Settings > Dictation".into(),
+                "the speech model is not downloaded: install it in Settings > Dictation".into(),
             ));
         }
+        let _permit = self
+            .inference
+            .try_acquire()
+            .map_err(|_| VoiceControlError::Busy)?;
         let language = language
             .filter(|l| (2..=3).contains(&l.len()) && l.bytes().all(|b| b.is_ascii_lowercase()));
-        let (mime, model) = (mime.to_owned(), model.to_owned());
-        let engine = Arc::clone(&self.engine);
-        let dir = self.data_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            let samples = crate::voice_local::decode_audio(&audio, &mime)?;
-            engine.transcribe(&dir, &model, language.as_deref(), &samples)
-        })
-        .await
-        .map_err(|e| VoiceControlError::Internal(format!("speech task failed: {e}")))?
-        .map(|text| TranscribeOutput { text })
-        .map_err(VoiceControlError::Invalid)
+        let operation = crate::voice_sidecar::Operation::Transcribe {
+            model: model.to_owned(),
+            mime: mime.to_owned(),
+            language,
+        };
+        let bytes = crate::voice_sidecar::run(&self.data_dir, operation, &audio).await?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| VoiceControlError::Upstream("invalid voice worker transcript".into()))?;
+        Ok(TranscribeOutput { text })
     }
 
     #[cfg(not(feature = "local-voice"))]
@@ -545,6 +672,37 @@ impl VoiceHost {
         Err(VoiceControlError::Invalid(
             "this build of Praxi-Bot does not include on-device voice".into(),
         ))
+    }
+
+    #[cfg(feature = "local-voice")]
+    async fn synthesize_local(
+        &self,
+        mut input: SynthesizeInput,
+    ) -> Result<Vec<u8>, VoiceControlError> {
+        use crate::voice_local::{TTS, model_files_present};
+        // Every caller of `VoiceControl::synthesize` gets the route's limits, not only the route.
+        input.validate()?;
+        if !model_files_present(&self.data_dir, &TTS) {
+            return Err(VoiceControlError::NotConfigured);
+        }
+        let _permit = self
+            .inference
+            .try_acquire()
+            .map_err(|_| VoiceControlError::Busy)?;
+        let operation = crate::voice_sidecar::Operation::Synthesize {
+            text: input.text,
+            language: crate::voice_local::synthesis_language(&input.language).to_owned(),
+        };
+        crate::voice_sidecar::run(&self.data_dir, operation, &[]).await
+    }
+
+    #[cfg(not(feature = "local-voice"))]
+    #[allow(clippy::unused_self)] // same signature as the local-voice build
+    fn synthesize_local(
+        &self,
+        mut input: SynthesizeInput,
+    ) -> std::future::Ready<Result<Vec<u8>, VoiceControlError>> {
+        std::future::ready(input.validate().and(Err(VoiceControlError::NotConfigured)))
     }
 }
 
@@ -629,6 +787,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("praxi-voice-local-{}", rand_u64()));
         std::fs::create_dir_all(&dir).unwrap();
         let host = VoiceHost::new(&dir, 7000, None);
+        assert_eq!(
+            host.transcribe(vec![0; 64], "audio/pcm".into(), None, true)
+                .await,
+            Err(VoiceControlError::NotConfigured),
+        );
         let bad = host
             .update(VoiceConfigInput {
                 local_model: Some("../../etc/passwd".into()),
@@ -660,6 +823,75 @@ mod tests {
         );
         let st = host.local_status();
         assert!(st.models.iter().all(|m| !m.installed));
+        assert_eq!(st.tts_model.is_some(), cfg!(feature = "local-voice"));
+        assert!(st.tts_model.is_none_or(|model| !model.installed));
+        assert_eq!(
+            host.synthesize(SynthesizeInput {
+                text: "Günaydın".into(),
+                language: "tr".into()
+            })
+            .await,
+            Err(VoiceControlError::NotConfigured),
+        );
+        // The limits hold for a direct caller of the trait too, not only on the route.
+        for (text, language) in [
+            ("a".repeat(1001), "tr"),
+            ("a\0b".to_owned(), "tr"),
+            ("hello".to_owned(), "../../x"),
+        ] {
+            let err = host
+                .synthesize(SynthesizeInput {
+                    text,
+                    language: language.into(),
+                })
+                .await
+                .unwrap_err();
+            assert!(matches!(err, VoiceControlError::Invalid(_)), "{err:?}");
+        }
+        assert_eq!(
+            check_offline_voice(&dir).status,
+            if cfg!(feature = "local-voice") {
+                daemon_api::doctor::Status::Warn
+            } else {
+                daemon_api::doctor::Status::Skipped
+            }
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn local_only_never_falls_back_to_a_network_provider() {
+        // A loopback "cloud" service that would see the recording if the daemon forwarded it.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let dir = std::env::temp_dir().join(format!("praxi-voice-only-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = secret_store::MemoryStore::new();
+        let host = VoiceHost::new(&dir, 7000, Some(Arc::new(store)));
+        for provider in [VoiceProvider::Whisper, VoiceProvider::GeminiLive] {
+            host.update(VoiceConfigInput {
+                stt_provider: Some(provider),
+                stt_base_url: Some(format!(
+                    "http://127.0.0.1:{}/v1",
+                    listener.local_addr().unwrap().port()
+                )),
+                stt_key: Some("sk-test-key".into()),
+                gemini_key: Some("gemini-test-key".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                host.transcribe(vec![1; 64], "audio/pcm".into(), Some("tr".into()), true)
+                    .await,
+                Err(VoiceControlError::NotConfigured),
+                "{provider:?}"
+            );
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "{provider:?}: the recording was sent to a network service"
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -769,6 +1001,56 @@ mod tests {
             })
             .await;
         assert!(matches!(bad, Err(VoiceControlError::Invalid(_))));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[tokio::test]
+    async fn live_voice_settings_are_validated_and_need_a_gemini_key() {
+        let dir = std::env::temp_dir().join(format!("praxi-voice-live-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = VoiceHost::new(&dir, 7000, None);
+        let dto = host.get();
+        assert_eq!(
+            (
+                dto.live_model.as_str(),
+                dto.live_voice.as_str(),
+                dto.live_keep_audio
+            ),
+            ("gemini-3.8-live", "Kore", false),
+            "audio is not kept unless the owner turns it on"
+        );
+        for bad in [
+            VoiceConfigInput {
+                live_model: Some("gemini 3".into()),
+                ..Default::default()
+            },
+            VoiceConfigInput {
+                live_model: Some("gemini-3.5-transcribe-live".into()),
+                ..Default::default()
+            },
+            VoiceConfigInput {
+                live_voice: Some("../Kore".into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                host.update(bad).await,
+                Err(VoiceControlError::Invalid(_))
+            ));
+        }
+        let dto = host
+            .update(VoiceConfigInput {
+                live_model: Some("gemini-3.8-live-extended-thinking".into()),
+                live_voice: Some("Puck".into()),
+                live_keep_audio: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(dto.live_voice, "Puck");
+        assert!(dto.live_keep_audio);
+        // No key anywhere: an honest "not set up", and nothing leaves the machine.
+        let err = host.live_open(LiveOpen::default()).await.err().unwrap();
+        assert_eq!(err, VoiceControlError::NotConfigured);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

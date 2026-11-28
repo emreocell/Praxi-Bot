@@ -1513,6 +1513,7 @@ fn action_name(a: &Action) -> &'static str {
         Action::Scroll { .. } => "scroll",
         Action::KeyPress { .. } => "key",
         Action::Drag { .. } => "drag",
+        Action::Element { .. } => "element action",
     }
 }
 
@@ -1778,7 +1779,7 @@ fn canonical_target(path: &Path) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-const CREDENTIAL_DIRS: [&str; 21] = [
+const CREDENTIAL_DIRS: [&str; 25] = [
     ".claude",
     ".codex",
     ".gemini",
@@ -1790,6 +1791,10 @@ const CREDENTIAL_DIRS: [&str; 21] = [
     ".vibe",
     ".cline",
     ".augment",
+    ".factory",
+    ".grok",
+    ".junie",
+    ".openhands",
     ".cursor",
     ".config",
     ".local",
@@ -1933,6 +1938,7 @@ fn describe_action(
             target_text(from),
             target_text(to)
         )),
+        Action::Element { target, op } => Ok(format!("{} {}", op.label(), target_text(target))),
     }
 }
 

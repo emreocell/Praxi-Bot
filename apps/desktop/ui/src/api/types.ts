@@ -336,6 +336,12 @@ export type DaemonEvent =
       run_id: string;
       call_id: string;
       approved_by: string;
+      /** What granted the call (`GrantedBy` in crates/protocol); absent on events recorded before it existed. */
+      granted_by?: string;
+      /** The bot's permission level when the call was decided: `ask`, `balanced` or `full`. */
+      level?: string;
+      /** The remembered rule that covered the call, `<scope>:<name>`; never text of the call. */
+      rule_id?: string;
     }
   | {
       type: "tool_call_denied";
@@ -371,6 +377,21 @@ export type DaemonEvent =
       /** Origin the browser reported for the page. */
       site: string;
       untrusted_content: boolean;
+      expires_in_secs: number;
+    }
+  | {
+      /**
+       * An MCP server asks the owner for input through a form. `call_id` is the request's own id
+       * (not a model tool call); the card posts to /v1/elicitations/{call_id}. `message` and the
+       * field titles and descriptions are untrusted server text: render as plain text only.
+       */
+      type: "elicitation_requested";
+      run_id: string;
+      call_id: string;
+      server: string;
+      message: string;
+      fields: ElicitationField[];
+      /** 0 = no time limit. */
       expires_in_secs: number;
     }
   | {
@@ -501,6 +522,40 @@ export interface GlobalEnvelope extends Envelope {
 // ---- Credential requests and the vault (`/v1/secret-requests/*`, `/v1/fill-secrets`) -----
 export type SecretRequestAnswer = S["SecretRequestAnswer"];
 export type HandoverAnswer = S["HandoverAnswer"];
+/** `POST /v1/elicitations/{call_id}` (schema `AnswerElicitation`). */
+export interface AnswerElicitation {
+  action: "accept" | "decline";
+  content: Record<string, string | number | boolean>;
+}
+export type ElicitationOutcome = "accepted" | "declined" | "cancelled";
+export interface ElicitationAnswer {
+  call_id: string;
+  outcome: ElicitationOutcome;
+}
+
+/** One field of an MCP server's form (`elicitation_requested`). */
+export interface ElicitationField {
+  name: string;
+  title: string | null;
+  description: string | null;
+  type: "string" | "number" | "integer" | "boolean";
+  required: boolean;
+  /** Present only for choice fields (type string). */
+  options?: { value: string; label: string }[];
+  minimum?: number;
+  maximum?: number;
+  /** In characters (type string). */
+  min_length?: number;
+  max_length?: number;
+  format?: "email" | "uri" | "date" | "date-time";
+  /** The only value a form may prefill. */
+  default?: unknown;
+  /**
+   * A suspected credential field (password, token, one-time code, card number, API key): shown
+   * as blocked and never submitted. The event JSON leaves it out when false.
+   */
+  blocked?: boolean;
+}
 export type FillSecretInfo = S["FillSecretDto"];
 export type VaultKind = S["VaultKindDto"];
 export type CreateFillSecretInput = S["CreateFillSecret"];
@@ -516,6 +571,10 @@ export type McpAuthState = S["McpAuthState"];
 export type McpAuthStart = S["McpAuthStart"];
 export type McpTestResult = S["McpTestResult"];
 export type McpServer = S["McpServerDto"];
+export type McpBundleInspection = S["Inspection"];
+export type McpRegistryResult = S["RegistryResult"];
+export type McpRegistrySource = S["RegistryPreview"];
+export type McpRegistryApproval = S["RegistryApproval"];
 /** Body of `POST /v1/mcp/servers`. */
 export type McpServerConfig = S["McpServerInput"] & { name: string };
 /** Body of `PUT /v1/mcp/servers/{name}` (every field optional). */
@@ -533,6 +592,13 @@ export type ComposioApp = S["ComposioAppDto"];
 export type ComposioConnect = S["ComposioConnectDto"];
 export type ComposioLogin = S["ComposioLoginDto"];
 export type ComposioLoginStatus = S["ComposioLoginStatusDto"];
+export type OpenApiApp = S["OpenApiAppDto"];
+export type OpenApiOperation = S["OpenApiOperationDto"];
+export type OpenApiAuthKind = S["OpenApiAuthKind"];
+export type OpenApiAuthInput = S["OpenApiAuthInput"];
+export type OpenApiAppInput = S["OpenApiAppInput"];
+export type OpenApiAppUpdate = S["OpenApiAppUpdate"];
+export type OpenApiEnabledOperation = S["OpenApiEnabledOperation"];
 export type Component = S["ComponentDto"];
 export type ComponentId = S["ComponentId"];
 export type ComposioDisconnect = S["ComposioDisconnectDto"];
@@ -578,8 +644,35 @@ export type EmailGuardSettings = S["EmailGuardSettingsDto"];
 export type EmailOptOut = S["EmailOptOutDto"];
 export type EmailSendLogEntry = S["EmailSendLogDto"];
 
-export type VoiceConfig = S["VoiceConfigDto"];
-export type VoiceConfigInput = S["VoiceConfigInput"];
+/** Live voice settings (`/v1/voice`); intersected so the UI also builds against an older generated schema. */
+export interface LiveVoiceSettings {
+  live_model: string;
+  live_voice: string;
+  live_keep_audio: boolean;
+}
+export type VoiceConfig = S["VoiceConfigDto"] & LiveVoiceSettings;
+export type VoiceConfigInput = S["VoiceConfigInput"] & Partial<LiveVoiceSettings>;
+/** What the daemon sends on the live voice event stream (`POST /v1/voice/live`), one JSON object per event. */
+export type LiveVoiceEvent =
+  | { type: "ready"; session_id: string; model: string; input_rate: number; output_rate: number; max_seconds: number }
+  | { type: "audio"; data: string }
+  | { type: "you"; text: string }
+  | { type: "bot"; text: string }
+  | { type: "turn_complete" }
+  | { type: "interrupted" }
+  | { type: "tool_call"; call_id: string; request: string }
+  | { type: "tool_cancelled"; call_ids: string[] }
+  | { type: "reconnecting" }
+  | { type: "ended"; reason: "limit" | "idle" | "error" | "closed"; message?: string };
+export interface LiveVoiceOpenInput {
+  language?: string;
+  assistant_name?: string;
+}
+/** One line of a finished voice conversation, written into the chat as an ordinary message. */
+export interface VoiceTurn {
+  role: "user" | "assistant";
+  text: string;
+}
 export type LocalVoiceStatus = S["LocalVoiceStatusDto"];
 export type TranscribeInput = S["TranscribeInput"];
 export type TranscribeOutput = S["TranscribeOutput"];

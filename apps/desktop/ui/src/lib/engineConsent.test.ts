@@ -70,9 +70,13 @@ test("a freshly added engine with default settings ends up runnable: ready, or o
     vibe: ["ask", "accept_edits", "auto", "full"],
     // Goose has no edits-only mode: Accept edits would run as Ask, so it is not offered.
     goose: ["ask", "auto", "full"],
-    // Data-driven engines (`providers/cli/`): Cline holds Ask; Augment Code is Full only.
+    // Data-driven engines (`providers/cli/`): Cline and OpenHands hold Ask; the others are Full only.
     cline: ["ask", "full"],
-    auggie: ["full"]
+    auggie: ["full"],
+    droid: ["full"],
+    grok: ["full"],
+    junie: ["full"],
+    openhands: ["ask", "full"]
   };
   for (const [id, levels] of Object.entries(offered)) {
     const list = [engine(id, { runnable: id === "claude", levels })];

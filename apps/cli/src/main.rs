@@ -34,6 +34,7 @@ mod logs_cmd;
 mod mcp_host;
 mod mcp_paste;
 mod mcp_serve;
+mod openapi_host;
 mod pc_target;
 mod peer;
 mod presets;
@@ -47,9 +48,12 @@ mod update;
 mod view_targets;
 mod voice_gemini;
 mod voice_host;
+mod voice_live;
 mod voice_local;
 #[cfg(feature = "local-voice")]
 mod voice_local_engine;
+#[cfg(feature = "local-voice")]
+mod voice_sidecar;
 mod web_host;
 mod wizard;
 mod workflow;
@@ -835,6 +839,13 @@ fn main() {
 
 #[allow(clippy::too_many_lines)] // one flat dispatch over every command
 fn run() -> Result<()> {
+    #[cfg(feature = "local-voice")]
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == voice_sidecar::COMMAND)
+    {
+        return Ok(voice_sidecar::worker()?);
+    }
     let cli = Cli::parse();
     let Some(command) = &cli.command else {
         println!(

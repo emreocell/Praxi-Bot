@@ -1,14 +1,16 @@
 /**
- * Keyboard shortcuts of the approval dock, kept pure so they run without a browser:
- * Enter allows the card once, Escape denies it. They only apply while the keys have nothing else
- * to do: the focus is on the page itself, on the EMPTY composer, or inside the dock. A key typed
- * into any other field, into the composer once it holds text, or while a dialog is open never
- * decides a card, and Enter never replaces a click on the button that has the focus.
+ * Keyboard shortcuts of the approval card, kept pure so they run without a browser. They never
+ * work from "somewhere on the page": the focus must be on the card the person chose to reach.
+ *  - Enter allows once only while the card ITSELF has the focus (not a field, not a button, not a
+ *    code block inside it, and never the composer or the page). A focused button keeps its own Enter.
+ *  - Escape denies from the card or anything non-editable inside it.
+ * Nothing here moves the focus: the card is never focused for the person, and neither is Allow.
  */
 
 const EDITABLE = "input, textarea, select, [contenteditable=''], [contenteditable='true'], [contenteditable='plaintext-only']";
 const INTERACTIVE =
   "button, a[href], summary, [role='button'], [role='menuitem'], [role='tab'], [role='option'], [role='checkbox'], [role='switch'], [role='radio']";
+const CARD = "[data-approval-card]";
 const DIALOG = "[role='dialog'], [aria-modal='true'], dialog";
 
 /** The slice of a DOM element these rules need. */
@@ -35,7 +37,7 @@ function isTargetLike(t: unknown): t is KeyTargetLike {
 }
 
 /**
- * `armed`: the card has been on screen long enough that an Enter typed before it appeared cannot
+ * `armed`: the card has been on screen long enough that an Enter held down before it appeared cannot
  * allow it. `canAllow`: this card may be allowed by a key (`enterMayAllowCall`: only a look-only
  * call; never a change, delete, shell or program start, payload to review, send or mail). Escape
  * denies whatever the card is.
@@ -48,21 +50,12 @@ export function approvalKeyAction(
   if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return null;
   if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return null;
   const target = e.target;
-  if (isTargetLike(target)) {
-    if (target.closest(DIALOG)) return null;
-    const onComposer = target.closest("[data-composer-input]") !== null;
-    const inDock = target.closest("[data-approval-dock]") !== null;
-    const onPage = target.tagName === "BODY" || target.tagName === "HTML";
-    if (onComposer) {
-      if (typeof target.value === "string" && target.value.length > 0) return null;
-    } else if (inDock) {
-      // A field or a button of the dock keeps its own Enter / Escape.
-      if (target.closest(EDITABLE)) return null;
-      if (e.key === "Enter" && target.closest(INTERACTIVE)) return null;
-    } else if (!onPage) {
-      return null;
-    }
-  }
+  if (!isTargetLike(target)) return null;
+  const card = target.closest(CARD);
+  if (card === null || target.closest(DIALOG)) return null;
+  // A field of the card (the reason line) keeps its own Enter / Escape.
+  if (target.closest(EDITABLE)) return null;
+  if (e.key === "Enter" && (card !== target || target.closest(INTERACTIVE))) return null;
   if (e.key === "Escape") return "deny";
   return state.armed && state.canAllow ? "allow" : null;
 }

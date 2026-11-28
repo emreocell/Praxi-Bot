@@ -246,6 +246,7 @@ impl AgentLoop {
                 control: RwLock::new(None),
                 computer_provider: RwLock::new(None),
                 mission_store: RwLock::new(None),
+                mission_child_wake: RwLock::new(None),
                 mail: Arc::new(builtin_tools::connector_email::MailHandle::new()),
                 server_links: RwLock::new(None),
                 static_desktop: RwLock::new(None),
@@ -268,6 +269,7 @@ impl AgentLoop {
                 mention_chain: Mutex::new(HashMap::new()),
                 tasks: Mutex::new(HashMap::new()),
                 bg: Mutex::new(Vec::new()),
+                summaries: Mutex::new(HashMap::new()),
                 gseq: AtomicU64::new(first_gseq),
                 emit_gate: Mutex::new(()),
                 send_gate: Mutex::new(()),
@@ -281,6 +283,7 @@ impl AgentLoop {
                 external_source_owner: RwLock::new(None),
                 secret_requests: Mutex::new(HashMap::new()),
                 handovers: Mutex::new(HashMap::new()),
+                elicitations: Mutex::new(HashMap::new()),
                 skill_hints: RwLock::new(None),
                 router: crate::router::Router::default(),
                 directives: Mutex::new(HashMap::new()),
@@ -561,6 +564,16 @@ impl AgentLoop {
         *self.sh.mission_store.write() = Some(store);
     }
 
+    /// Deliver child-run finishes to the mission supervisor's wake loop.
+    pub fn set_mission_child_wake(&self, sink: Arc<dyn missions::ChildWakeSink>) {
+        *self.sh.mission_child_wake.write() = Some(sink);
+    }
+
+    /// Stop delivering child-run finishes (leader hand-off or missions shutdown).
+    pub fn clear_mission_child_wake(&self) {
+        *self.sh.mission_child_wake.write() = None;
+    }
+
     /// Install the paired servers a bot may use as its own computer
     /// (`[runtime].computer = "server:<key>"`) while its brain stays here.
     pub fn set_server_links(&self, links: Arc<dyn builtin_tools::pc::ServerLinks>) {
@@ -697,6 +710,22 @@ impl AgentLoop {
         *self.sh.providers.write() = providers.with_redactor(self.sh.cfg.redactor.clone());
         // The K2 embedder and the K3 classifier come from the providers.
         self.sh.router.reset();
+    }
+
+    /// Whether run `run_id` is the owner's own chat turn on a Full bot: the runs that get the bot
+    /// management tools without the "Can create bots" switch. The daemon asks again on every
+    /// call; an unknown run is `false`.
+    #[must_use]
+    pub fn bot_tools_offered_to_run(&self, run_id: &str) -> bool {
+        let Ok(id) = run_id.parse::<uuid::Uuid>() else {
+            return false;
+        };
+        self.sh
+            .runs
+            .lock()
+            .get(&protocol::RunId(id))
+            .cloned()
+            .is_some_and(|ctx| self.sh.bot_tools_offered(&ctx))
     }
 
     /// The workspace-wide default permission policy.
@@ -2242,6 +2271,62 @@ impl AgentLoop {
             .map_err(|_| LoopError::NoPendingApproval(call_id))
     }
 
+    /// The [`tool_registry::Elicitor`] to install into the MCP bridge: a server's
+    /// form is shown to the owner of the run whose tool call is in flight.
+    #[must_use]
+    pub fn elicitor(&self) -> Arc<dyn tool_registry::Elicitor> {
+        Arc::new(crate::elicitation::LoopElicitor {
+            sh: Arc::downgrade(&self.sh),
+        })
+    }
+
+    /// The fields of a parked MCP elicitation form, `None` when none waits under
+    /// `call_id` (the id from `ElicitationRequested`).
+    #[must_use]
+    pub fn elicitation(
+        &self,
+        call_id: ToolCallId,
+    ) -> Option<Vec<protocol::event::ElicitationField>> {
+        self.sh
+            .elicitations
+            .lock()
+            .get(&call_id)
+            .map(|i| i.fields.clone())
+    }
+
+    /// Answer a parked MCP elicitation form. An `Accept` is checked against the
+    /// form first; one that does not fit leaves the form waiting. The answer goes
+    /// to the server only, never to the model.
+    ///
+    /// # Errors
+    /// [`crate::ElicitationRefusal::Gone`] when no form waits (or its run was
+    /// stopped), [`crate::ElicitationRefusal::Invalid`] when the answer does not fit.
+    pub fn finish_elicitation(
+        &self,
+        call_id: ToolCallId,
+        answer: tool_registry::ElicitationAnswer,
+    ) -> std::result::Result<(), crate::ElicitationRefusal> {
+        use crate::ElicitationRefusal::{Gone, Invalid};
+        use tool_registry::ElicitationAnswer::{Accept, Cancel, Parked};
+        let fields = self.elicitation(call_id).ok_or(Gone)?;
+        let answer = match answer {
+            Accept(content) => {
+                self.refuse_if_stopped(call_id).map_err(|_| Gone)?;
+                let redactor = self.sh.cfg.redactor.as_ref();
+                Accept(crate::elicitation::validate(&fields, content, redactor).map_err(Invalid)?)
+            }
+            // Only the loop parks a form, never a caller.
+            Parked(_) => Cancel,
+            other => other,
+        };
+        self.sh.elicitations.lock().remove(&call_id);
+        self.take_pending(call_id, &[PendingKind::Elicitation])
+            .map_err(|_| Gone)?
+            .tx
+            .send(Verdict::Elicited(answer))
+            .map_err(|_| Gone)
+    }
+
     /// Reconcile portable computer state against this daemon and its paired desktops.
     /// Persist the public local identity so a regenerated key produces a one-time audit notice.
     ///
@@ -3739,6 +3824,7 @@ impl AgentLoop {
                 let _ = m.store.index_message(&msg);
             }
             self.enqueue_memory(run, &text);
+            self.enqueue_summary(run);
         }
         if let Some(ctx) = &ctx {
             if let Some(message) = &error {
@@ -3886,6 +3972,36 @@ impl AgentLoop {
             bg.retain(|h| !h.is_finished());
             bg.push(handle);
         }
+    }
+
+    /// Fold the older part of a long chat into its rolling summary (background task, see
+    /// `summary`). Cheap when the chat is under the thresholds: one count query. The chat is
+    /// claimed here, before the task exists: a second turn that ends meanwhile spawns nothing.
+    pub(crate) fn enqueue_summary(&self, run: &storage::Run) {
+        let Some(chat) = run.chat_id else {
+            return;
+        };
+        if run.parent_run_id.is_some()
+            || missions::mission_of_kind(&run.kind).is_some()
+            || !crate::summary::due(&self.sh, chat, run.bot_id)
+        {
+            return;
+        }
+        let Some(claim) = crate::summary::claim(&self.sh, chat) else {
+            return;
+        };
+        let Ok(ctx) = self.sh.ctx(run) else {
+            return;
+        };
+        let sh = Arc::clone(&self.sh);
+        let activity = crate::usage::Activity::new(&sh, run.id);
+        let handle = tokio::spawn(async move {
+            let _activity = activity;
+            crate::summary::run(sh, ctx, claim).await;
+        });
+        let mut bg = self.sh.bg.lock();
+        bg.retain(|h| !h.is_finished());
+        bg.push(handle);
     }
 
     fn final_text(&self, run_id: RunId) -> Option<String> {

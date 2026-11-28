@@ -78,6 +78,13 @@
   mask-image: linear-gradient(to bottom, transparent, var(--color-text) var(--scroll-fade));
 }
 
+/* While "Jump to latest" is up, the lines under it feather out too, so the button floats over a quiet
+   edge instead of crossing a line of text mid-letter. */
+.scrollWrap:has(> .jump) > .scroller {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, var(--color-text) var(--scroll-fade), var(--color-text) calc(100% - var(--space-16)), transparent);
+  mask-image: linear-gradient(to bottom, transparent, var(--color-text) var(--scroll-fade), var(--color-text) calc(100% - var(--space-16)), transparent);
+}
+
 .scroller:focus-visible {
   outline: var(--size-border-thick) solid var(--color-focus);
   outline-offset: calc(var(--size-border-thick) * -1);
@@ -232,6 +239,7 @@
 .routeRow,
 .rememberRow,
 .laneRow,
+.missionRow,
 .runError,
 .runStopped {
   margin-left: var(--lane);
@@ -265,31 +273,38 @@
   font-size: var(--font-size-sm);
 }
 
+/* "Jump to latest" floats over the text, so it reads as a raised control (the popover shadow), a
+   full 32 px target, and it rises in a little instead of popping. */
 .jump {
   position: absolute;
-  bottom: var(--space-3);
+  bottom: var(--space-4);
   left: 50%;
   z-index: 5;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3);
+  min-height: var(--size-control-md);
+  padding: var(--space-0) var(--space-4) var(--space-0) var(--space-3);
   transform: translateX(-50%);
   border: var(--size-border) solid var(--color-border-strong);
   border-radius: var(--radius-pill);
   background-color: var(--color-surface-elevated-opaque);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-popover);
   color: var(--color-text);
   font: inherit;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-ui);
   font-weight: var(--font-weight-medium);
+  white-space: nowrap;
   cursor: pointer;
-  animation: jumpIn var(--motion-duration-fast) var(--motion-easing-standard);
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+  animation: jumpIn var(--motion-duration-normal) var(--motion-easing-out);
 }
 
 .jump svg {
+  flex: none;
   width: var(--size-icon-sm);
   height: var(--size-icon-sm);
+  color: var(--color-text-secondary);
 }
 
 .jump:hover {
@@ -298,12 +313,19 @@
 
 .jump:focus-visible {
   outline: none;
-  box-shadow: var(--shadow-focus);
+  box-shadow: var(--shadow-popover), var(--shadow-focus);
 }
 
 @keyframes jumpIn {
   from {
     opacity: 0;
+    transform: translate(-50%, var(--space-2));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jump {
+    animation: none;
   }
 }
 
@@ -525,18 +547,24 @@
   color: var(--color-text-muted);
 }
 
+/* The chips wrap into even rows (4 + 3, never 6 + 1 orphan): they are inline boxes on balanced lines,
+   so the row lengths follow the words of the language instead of a fixed count per row. */
 .starters {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-2);
   max-width: calc(var(--size-content-max) * 0.75);
-  margin-top: var(--space-4);
+  /* The chips' own margin adds the rest of the space above them. */
+  margin: var(--space-3) var(--space-0) var(--space-0);
+  text-align: center;
+  text-wrap: balance;
+  line-height: var(--line-height-ui);
 }
 
 /* Quiet suggestion chips: a hairline and the secondary ink; the hover is a state layer, not a new fill. */
 .starter {
-  padding: var(--space-1) var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--size-control-sm);
+  margin: var(--space-1);
+  padding: var(--space-0) var(--space-3);
   border: var(--size-border) solid var(--color-border);
   border-radius: var(--radius-pill);
   background: var(--chat-plate-fill);

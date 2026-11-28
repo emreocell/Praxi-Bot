@@ -7313,6 +7313,75 @@
         ]
       }
     },
+    "/v1/chats/{id}/voice-transcript": {
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Write a finished voice conversation into a chat as ordinary text messages (no run starts).",
+        "description": "`user` lines are what the owner said into their own microphone in their own session\n(speech-to-text), so they stay the owner's words. `assistant` lines are the voice model's\noutput, which can repeat what the bot fetched from the web or an e-mail, so they are stored as\nuntrusted content (source `gemini-live`): a later run that reads this chat is treated as having\nseen untrusted text and asks before it acts on it.",
+        "operationId": "save_transcript",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Chat id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceTranscriptInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTranscriptOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad transcript",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/components": {
       "get": {
         "tags": [
@@ -9150,6 +9219,142 @@
           },
           "503": {
             "description": "safe redaction unavailable or the report did not finish in time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/elicitations/{call_id}": {
+      "post": {
+        "tags": [
+          "elicitations"
+        ],
+        "summary": "Answer an MCP server's form: `accept` with the values, or `decline`.",
+        "operationId": "answer_elicitation",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Id from the elicitation_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerElicitation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElicitationOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "the answer does not fit the form; it keeps waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "code elicitation_gone: not waiting any more",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/elicitations/{call_id}/cancel": {
+      "post": {
+        "tags": [
+          "elicitations"
+        ],
+        "summary": "Dismiss an MCP server's form: the server learns `cancel`.",
+        "operationId": "cancel_elicitation",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Id from the elicitation_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElicitationOutcome"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "code elicitation_gone: not waiting any more",
             "content": {
               "application/json": {
                 "schema": {
@@ -13916,6 +14121,257 @@
         ]
       }
     },
+    "/v1/mcp/import/bundle": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "install_bundle",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/BundleInstallForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/import/bundle/inspect": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "inspect_bundle",
+        "parameters": [
+          {
+            "name": "expected_sha256",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inspection"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/import/registry": {
+      "get": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "search_registry",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RegistryResult"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "operationId": "install_registry",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryApproval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/mcp/servers": {
       "get": {
         "tags": [
@@ -15716,6 +16172,386 @@
           },
           "409": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/openapi-apps": {
+      "get": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "The connected REST APIs and the operations found in their documents.",
+        "operationId": "list_openapi_apps",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OpenApiAppDto"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Connect a REST API from its `OpenAPI` 3.x document (`spec_url` or `spec_text`).\nThe credential goes to the secret store and is never returned. Requests only\never go to `base_url`'s host; redirects to other hosts are not followed.\nEvery operation starts disabled.",
+        "operationId": "add_openapi_app",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenApiAppInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "unusable document, base URL or address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the document could not be downloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/openapi-apps/{id}": {
+      "get": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "One connected REST API.",
+        "operationId": "get_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Change the name, base URL or credentials, or the set of enabled operations\nand the bots that may use each. Applied to the bots' tools at once.",
+        "operationId": "update_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenApiAppUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "unknown operation, too many enabled or bad base URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Disconnect an API: its tools, its saved document and its credential are removed.",
+        "operationId": "remove_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "removed"
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/openapi-apps/{id}/refresh": {
+      "post": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Download the document again (apps added from a URL). Enabled operations that\nstill exist stay enabled.",
+        "operationId": "refresh_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "the app has no document URL or the document is unusable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the document could not be downloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
             "content": {
               "application/json": {
                 "schema": {
@@ -20178,6 +21014,317 @@
         ]
       }
     },
+    "/v1/voice/live": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Open a live voice conversation. The response is an event stream (`data:` lines of JSON, one\n`type` field each): `ready`, then `audio`, `you`, `bot`, `turn_complete`, `interrupted`,\n`tool_call`, `tool_cancelled`, `reconnecting` and finally `ended`. Closing the response ends\nthe session. Owner only; one session at a time.",
+        "operationId": "open",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveOpenInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Server-sent events of the conversation",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "409": {
+            "description": "no Gemini key, or another conversation is open",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid live voice settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the voice service failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "voice is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}": {
+      "delete": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "End a conversation now.",
+        "operationId": "close",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Ended (or already gone)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}/audio": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Upload microphone audio (raw 16-bit little-endian PCM, 16 kHz, mono; up to one second).",
+        "operationId": "audio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          },
+          "400": {
+            "description": "bad audio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the session cannot take audio right now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}/note": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Pass an update to the voice model (the bot finished a task the owner was told to wait for).",
+        "operationId": "note",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveNote"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          },
+          "404": {
+            "description": "no such conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the session is gone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}/tool": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Return the bot's answer to a `tool_call`.",
+        "operationId": "tool_result",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveToolResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the session is gone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/voice/local": {
       "get": {
         "tags": [
@@ -20270,12 +21417,114 @@
         ]
       }
     },
+    "/v1/voice/synthesize": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Synthesize speech on this computer (local owner only).",
+        "operationId": "synthesize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesizeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid text or language",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "local owner required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "offline read-aloud is not installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "offline voice is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "offline synthesis failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "voice is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/voice/transcribe": {
       "post": {
         "tags": [
           "voice"
         ],
         "summary": "Transcribe a recording with the configured service (owner-triggered dictation).",
+        "description": "With `local_only` the daemon refuses (409) unless the provider is on-device, so the recording\nis never uploaded. A paired peer cannot use the host's on-device engine (403): decoding and\nrecognition burn the host's CPU for up to two minutes and would starve the owner's own dictation.",
         "operationId": "transcribe",
         "requestBody": {
           "content": {
@@ -20308,8 +21557,28 @@
               }
             }
           },
+          "403": {
+            "description": "on-device dictation is for the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "dictation is not set up",
+            "description": "dictation is not set up, or `local_only` and the provider is not on-device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "offline voice is busy",
             "content": {
               "application/json": {
                 "schema": {
@@ -21759,6 +23028,22 @@
           }
         }
       },
+      "AnswerElicitation": {
+        "type": "object",
+        "description": "Body of `POST /v1/elicitations/{call_id}`.",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ElicitationAction"
+          },
+          "content": {
+            "type": "object",
+            "description": "Field name to value (`accept` only). Write-only: no route returns it."
+          }
+        }
+      },
       "AnswerQuestion": {
         "type": "object",
         "description": "`POST /v1/questions/{call_id}`.",
@@ -22880,6 +24165,47 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "BundleApproval": {
+        "type": "object",
+        "description": "JSON metadata inside the bundle installation form.",
+        "required": [
+          "approval_sha256",
+          "launch_sha256"
+        ],
+        "properties": {
+          "approval_sha256": {
+            "type": "string",
+            "description": "SHA-256 returned by the inspection and approved by the owner."
+          },
+          "launch_sha256": {
+            "type": "string",
+            "description": "`launch_sha256` of the inspection: the resolved command line the owner saw."
+          },
+          "values": {
+            "$ref": "#/components/schemas/ImportValues",
+            "description": "Owner-provided MCPB user settings."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BundleInstallForm": {
+        "type": "object",
+        "description": "Multipart installation request. The browser uploads the reviewed file again.",
+        "required": [
+          "bundle",
+          "approval"
+        ],
+        "properties": {
+          "approval": {
+            "type": "string",
+            "description": "JSON-encoded `BundleApproval`."
+          },
+          "bundle": {
+            "type": "string",
+            "format": "binary"
           }
         }
       },
@@ -24458,6 +25784,56 @@
           "files": {
             "type": "boolean",
             "description": "Let them read files here (writing asks every time)."
+          }
+        }
+      },
+      "ConfigField": {
+        "type": "object",
+        "description": "A setting the owner is asked for (the form of the install dialog).",
+        "required": [
+          "key",
+          "kind",
+          "title",
+          "description",
+          "required",
+          "sensitive",
+          "multiple"
+        ],
+        "properties": {
+          "default": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Default value as text."
+          },
+          "description": {
+            "type": "string",
+            "description": "Help text, may be empty."
+          },
+          "key": {
+            "type": "string",
+            "description": "Key used in `${user_config.KEY}`."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`string`, `number`, `boolean`, `directory` or `file`."
+          },
+          "multiple": {
+            "type": "boolean",
+            "description": "Multiple full paths, one per line in the approval form."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Must be filled in (no default)."
+          },
+          "sensitive": {
+            "type": "boolean",
+            "description": "Stored in the secret store, never in the config file."
+          },
+          "title": {
+            "type": "string",
+            "description": "Label to show."
           }
         }
       },
@@ -26069,6 +27445,33 @@
           }
         }
       },
+      "ElicitationAction": {
+        "type": "string",
+        "description": "What the owner does with the form.",
+        "enum": [
+          "accept",
+          "decline"
+        ]
+      },
+      "ElicitationOutcome": {
+        "type": "object",
+        "description": "How a form ended. Never carries an answer.",
+        "required": [
+          "call_id",
+          "outcome"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The form that was answered."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`accepted`, `declined` or `cancelled`."
+          }
+        }
+      },
       "EmailAccountDto": {
         "type": "object",
         "description": "A configured account (`GET /v1/email/accounts`): the non-secret fields only.",
@@ -26515,7 +27918,7 @@
           "same_recipient_days": {
             "type": "integer",
             "format": "int32",
-            "description": "Warn when a recipient got mail within this many days (`0` = no warning). Default 14.",
+            "description": "Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).",
             "minimum": 0
           },
           "verification_link_domains": {
@@ -30204,6 +31607,16 @@
           }
         }
       },
+      "ImportValues": {
+        "type": "object",
+        "description": "Install settings, including write-only secrets.",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "propertyNames": {
+          "type": "string"
+        }
+      },
       "ImportWorkflow": {
         "type": "object",
         "required": [
@@ -30650,6 +32063,130 @@
           },
           "state": {
             "$ref": "#/components/schemas/ViewState"
+          }
+        }
+      },
+      "Inspection": {
+        "type": "object",
+        "description": "The approval card: everything the owner should see before anything runs.",
+        "required": [
+          "id",
+          "display_name",
+          "version",
+          "description",
+          "runtime",
+          "command",
+          "args",
+          "cwd",
+          "env_names",
+          "launch_sha256",
+          "fields",
+          "sha256",
+          "checksum_verified",
+          "signature",
+          "tools",
+          "file_count",
+          "unpacked_bytes",
+          "warnings"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments exactly as they will be passed, after every `${...}`\nsubstitution. A setting with a default shows its default; a setting\nyou must fill in shows as `<name>`."
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Author name, if given (untrusted text)."
+          },
+          "checksum_verified": {
+            "type": "boolean",
+            "description": "The file matched an independently supplied SHA-256."
+          },
+          "command": {
+            "type": "string",
+            "description": "The program that will be started."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The folder the server is started in (the bundle's own folder)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Short description from the manifest (untrusted text)."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Human name."
+          },
+          "env_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of the environment variables the server will receive (no values)."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigField"
+            },
+            "description": "Settings the owner must fill in."
+          },
+          "file_count": {
+            "type": "integer",
+            "description": "Number of files that will be unpacked.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Server id (becomes `mcp:<id>/<tool>`), derived from the bundle name."
+          },
+          "launch_sha256": {
+            "type": "string",
+            "description": "SHA-256 (hex) of the resolved launch line shown here (command,\narguments, working folder and variable names). Installing needs the\nsame digest, and is refused if the launch line it would really run\ndiffers from this one."
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/Runtime",
+            "description": "What it needs to run."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 (hex) of the bundle file. The approval is for exactly these bytes."
+          },
+          "signature": {
+            "$ref": "#/components/schemas/SignatureStatus",
+            "description": "What the embedded signature, if any, proves. It never proves who\npublished the bundle."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of tools declared by the bundle. Actual tools are discovered on enable."
+          },
+          "unpacked_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unpacked size in bytes.",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "Bundle version."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            },
+            "description": "Things the owner should read before approving (suspicious text, ...).",
+            "uniqueItems": true
           }
         }
       },
@@ -31628,6 +33165,57 @@
           }
         }
       },
+      "LiveNote": {
+        "type": "object",
+        "description": "Body of `POST /v1/voice/live/{id}/note`.",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Plain text the voice model passes on."
+          }
+        }
+      },
+      "LiveOpenInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/voice/live`.",
+        "properties": {
+          "assistant_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the bot the owner is talking to."
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "UI language hint (ISO-639-1)."
+          }
+        }
+      },
+      "LiveToolResult": {
+        "type": "object",
+        "description": "Body of `POST /v1/voice/live/{id}/tool`.",
+        "required": [
+          "call_id",
+          "text"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "description": "`call_id` of the `tool_call` event."
+          },
+          "text": {
+            "type": "string",
+            "description": "The bot's final text, or why it could not do it."
+          }
+        }
+      },
       "LocalAdviceDto": {
         "type": "object",
         "description": "Advice for this machine. `recommended` null means \"no recommendation\".",
@@ -31897,6 +33485,17 @@
               "$ref": "#/components/schemas/LocalVoiceModelDto"
             },
             "description": "Models the owner can install."
+          },
+          "tts_model": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalVoiceModelDto",
+                "description": "Optional downloadable model for offline read-aloud."
+              }
+            ]
           },
           "vad_installed": {
             "type": "boolean",
@@ -34647,6 +36246,34 @@
           "shift"
         ]
       },
+      "Needed": {
+        "type": "object",
+        "description": "An environment variable or header the server needs.",
+        "required": [
+          "name",
+          "description",
+          "secret",
+          "required"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What it is for (untrusted text)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Variable or header name."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Must be provided."
+          },
+          "secret": {
+            "type": "boolean",
+            "description": "The value is a secret (goes to the secret store)."
+          }
+        }
+      },
       "NoticeAnswersDto": {
         "type": "object",
         "description": "How many questions an answer took.",
@@ -34770,6 +36397,380 @@
           "mission",
           "run"
         ]
+      },
+      "OpenApiAppDto": {
+        "type": "object",
+        "description": "A connected API (`GET /v1/openapi-apps`).",
+        "required": [
+          "id",
+          "name",
+          "title",
+          "version",
+          "base_url",
+          "auth",
+          "operations",
+          "skipped",
+          "warnings",
+          "security_hints",
+          "enabled_count",
+          "max_enabled"
+        ],
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/OpenApiAuthDto",
+            "description": "Credentials."
+          },
+          "base_url": {
+            "type": "string",
+            "description": "The only origin and path prefix requests go to."
+          },
+          "enabled_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many operations are enabled for at least one bot.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Short id (also the tool-name prefix: `api_<id>_<operation>`)."
+          },
+          "max_enabled": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Largest number of operations that can be enabled at once.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name chosen by the owner."
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenApiOperationDto"
+            },
+            "description": "Operations found, in document order."
+          },
+          "security_hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Authentication the document declares, for a hint to the owner."
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenApiSkippedDto"
+            },
+            "description": "Operations left out, with the reason."
+          },
+          "spec_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the document came from again on refresh; absent when it was pasted or uploaded."
+          },
+          "title": {
+            "type": "string",
+            "description": "`info.title` of the document (third-party text)."
+          },
+          "version": {
+            "type": "string",
+            "description": "`info.version` of the document."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Notes from the import (unresolved references and similar)."
+          }
+        }
+      },
+      "OpenApiAppInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/openapi-apps`. Give the document as `spec_url` or `spec_text`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "auth": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OpenApiAuthInput",
+                "description": "Credentials; default none."
+              }
+            ]
+          },
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The API's base URL; the only server ever used (the document's `servers`\nare ignored). It may be left out only with `spec_url` when the\ndocument's first `servers` entry is on the same host as `spec_url`;\notherwise it is required."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "spec_text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The document itself (JSON or YAML), for example read from a file."
+          },
+          "spec_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to download the document (http or https, public address)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiAppUpdate": {
+        "type": "object",
+        "description": "Body of `PUT /v1/openapi-apps/{id}`; omitted fields keep their value.",
+        "properties": {
+          "auth": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OpenApiAuthInput",
+                "description": "New credentials (`secret` omitted keeps the stored secret)."
+              }
+            ]
+          },
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New base URL."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New display name."
+          },
+          "operations": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/OpenApiEnabledOperation"
+            },
+            "description": "The complete set of enabled operations; anything not listed is off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiAuthDto": {
+        "type": "object",
+        "description": "The credentials of an API as stored (no secret value).",
+        "required": [
+          "kind",
+          "secret_set"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OpenApiAuthKind",
+            "description": "Kind of credential."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Header or query parameter name (API key kinds)."
+          },
+          "secret_set": {
+            "type": "boolean",
+            "description": "A secret is stored (its value is never returned)."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "User name (basic)."
+          }
+        }
+      },
+      "OpenApiAuthInput": {
+        "type": "object",
+        "description": "Credentials in a request. `secret` is write-only.",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OpenApiAuthKind",
+            "description": "Kind of credential."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Header or query parameter name (API key kinds)."
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key, token or password. Omit it to keep the stored one."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "User name (basic)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiAuthKind": {
+        "type": "string",
+        "description": "How the API is authenticated.",
+        "enum": [
+          "none",
+          "api_key_header",
+          "api_key_query",
+          "bearer",
+          "basic"
+        ]
+      },
+      "OpenApiEffect": {
+        "type": "string",
+        "description": "How an operation changes things, from its HTTP method.",
+        "enum": [
+          "read",
+          "write",
+          "destructive"
+        ]
+      },
+      "OpenApiEnabledOperation": {
+        "type": "object",
+        "description": "One enabled operation in an update.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use it; `null` = every bot, `[]` = none."
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool name of the operation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiOperationDto": {
+        "type": "object",
+        "description": "One operation found in the document.",
+        "required": [
+          "name",
+          "method",
+          "path",
+          "summary",
+          "tags",
+          "effect",
+          "always_ask",
+          "enabled"
+        ],
+        "properties": {
+          "always_ask": {
+            "type": "boolean",
+            "description": "Money-like (pay, charge, checkout, ...): asks on every autonomy level."
+          },
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use it; `null` = every bot. Meaningful when `enabled`."
+          },
+          "effect": {
+            "$ref": "#/components/schemas/OpenApiEffect",
+            "description": "Effect class from the method."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "At least one bot may use it."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method (upper case)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool name a bot sees."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path template."
+          },
+          "summary": {
+            "type": "string",
+            "description": "First line of the operation's summary (third-party text)."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags of the operation."
+          }
+        }
+      },
+      "OpenApiSkippedDto": {
+        "type": "object",
+        "description": "An operation the importer left out.",
+        "required": [
+          "method",
+          "path",
+          "reason"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "HTTP method."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path template."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it was left out."
+          }
+        }
       },
       "OpenTerminalInput": {
         "type": "object",
@@ -35929,6 +37930,118 @@
           "daemon_restart"
         ]
       },
+      "RegistryApproval": {
+        "type": "object",
+        "description": "Explicit registry install approval. The server is looked up again by version.",
+        "required": [
+          "name",
+          "version",
+          "approval_sha256"
+        ],
+        "properties": {
+          "approval_sha256": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "$ref": "#/components/schemas/ImportValues"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegistryPreview": {
+        "type": "object",
+        "description": "Launch details serialized for the approval card.",
+        "required": [
+          "approval_sha256",
+          "args",
+          "fields"
+        ],
+        "properties": {
+          "approval_sha256": {
+            "type": "string",
+            "description": "Opaque digest binding the approval to this result and launch source."
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact argv entries following the command."
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact executable name, for a stdio source."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Needed"
+            },
+            "description": "Environment variables or headers that the server will receive."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint, for a remote source."
+          }
+        }
+      },
+      "RegistryResult": {
+        "type": "object",
+        "description": "One search result and the supported launch previews it offers.",
+        "required": [
+          "name",
+          "description",
+          "version",
+          "publisher",
+          "namespace_verified",
+          "active",
+          "sources"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace_verified": {
+            "type": "boolean"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "repository": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistryPreview"
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
       "ReleaseRequest": {
         "type": "object",
         "required": [
@@ -36545,6 +38658,16 @@
         },
         "additionalProperties": false
       },
+      "Runtime": {
+        "type": "string",
+        "description": "What the server needs to run. Shown on the approval card.",
+        "enum": [
+          "node",
+          "python",
+          "uv",
+          "binary"
+        ]
+      },
       "RuntimeConfigDto": {
         "type": "object",
         "description": "Bot `[runtime]` settings (ADR-0027 §7).",
@@ -36752,7 +38875,7 @@
             "description": "Who created it: `user`, or `bot` (a bot's schedule tools, after you\napproved it). A bot may change only its own `bot` schedules."
           },
           "payload": {
-            "description": "What it does: `{\"kind\": \"agent_prompt\", \"text\": \"...\"}`,\n`{\"kind\": \"workflow\", \"name\": \"...\", \"params\": {}}` or\n`{\"kind\": \"tool\", \"name\": \"...\", \"input\": {}}`."
+            "description": "What it does: `{\"kind\": \"agent_prompt\", \"text\": \"...\"}`,\n`{\"kind\": \"workflow\", \"name\": \"...\", \"params\": {}}` or\n`{\"kind\": \"tool\", \"name\": \"...\", \"input\": {}}`, or a standing order that speaks only\nwhen something needs you: `{\"kind\": \"standing_order\", \"checklist\": \"...\",\n\"active_hours\": {\"start\": \"08:00\", \"end\": \"22:00\", \"timezone\": \"Europe/Istanbul\"},\n\"max_runs_per_day\": 24}` (`active_hours` optional; each run ends `OK`, which creates\nno notice, or `NEEDS_OWNER(reason)`, which does)."
           },
           "precheck": {
             "description": "Read-only deterministic condition, including full script source."
@@ -36770,6 +38893,24 @@
           },
           "spec": {
             "description": "When it fires: `{\"cron\": \"0 9 * * 1-5 Europe/Istanbul\"}`,\n`{\"every\": {\"seconds\": 600}}` or `{\"at\": {\"unix_ms\": 1767225600000}}`."
+          },
+          "standing_max_runs_per_day": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Standing order: daily run cap from its payload.",
+            "minimum": 0
+          },
+          "standing_runs_today": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Standing order: runs already started today (in the counter's calendar day).",
+            "minimum": 0
           },
           "trigger": {
             "description": "Non-webhook trigger definition; never includes webhook secrets."
@@ -36826,6 +38967,13 @@
             ],
             "format": "uuid",
             "description": "Linked run id, if a run was created."
+          },
+          "standing_verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Standing order: `ok`, `needs_owner` or `unclear` from the last assistant line of the run."
           },
           "started_at_ms": {
             "type": [
@@ -37565,6 +39713,14 @@
           }
         },
         "additionalProperties": false
+      },
+      "SignatureStatus": {
+        "type": "string",
+        "description": "What a bundle signature proves.\n\nThe signer certificate travels inside the bundle and chains to no root\nthat Praxi trusts, so the best a signature can say is that the file has not\nchanged since that certificate's key signed it. Anyone can make such a\nsignature, so it must never be presented as verified or trusted.",
+        "enum": [
+          "unsigned",
+          "integrity_only"
+        ]
       },
       "SiteRuleDto": {
         "type": "object",
@@ -38525,6 +40681,24 @@
         },
         "additionalProperties": false
       },
+      "SynthesizeInput": {
+        "type": "object",
+        "description": "Text and app language for local synthesis (`POST /v1/voice/synthesize`).",
+        "required": [
+          "text",
+          "language"
+        ],
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "App language (BCP 47, e.g. `tr` or `en-US`)."
+          },
+          "text": {
+            "type": "string",
+            "description": "Plain text, at most 1,000 Unicode characters."
+          }
+        }
+      },
       "TakeoverAccepted": {
         "type": "object",
         "required": [
@@ -39475,7 +41649,10 @@
           "stt_key_set",
           "use_provider_key",
           "gemini_provider_key_available",
-          "stt_provider_key_available"
+          "stt_provider_key_available",
+          "live_model",
+          "live_voice",
+          "live_keep_audio"
         ],
         "properties": {
           "gemini_key_set": {
@@ -39489,6 +41666,18 @@
           "gemini_provider_key_available": {
             "type": "boolean",
             "description": "A Gemini provider with a key exists under Bots & models."
+          },
+          "live_keep_audio": {
+            "type": "boolean",
+            "description": "Keep the audio of live conversations on this computer (default off)."
+          },
+          "live_model": {
+            "type": "string",
+            "description": "Gemini Live model used for live voice conversations (e.g. `gemini-3.8-live`)."
+          },
+          "live_voice": {
+            "type": "string",
+            "description": "Prebuilt voice the live model speaks with (e.g. `Kore`)."
           },
           "local_model": {
             "type": "string",
@@ -39552,6 +41741,27 @@
             ],
             "description": "Gemini Live model name."
           },
+          "live_keep_audio": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Keep the audio of live conversations on this computer."
+          },
+          "live_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Gemini Live model for live voice conversations."
+          },
+          "live_voice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Prebuilt voice name for live voice conversations."
+          },
           "local_model": {
             "type": [
               "string",
@@ -39607,6 +41817,64 @@
           "whisper",
           "gemini_live",
           "local_voice"
+        ]
+      },
+      "VoiceTranscriptInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/chats/{id}/voice-transcript`.",
+        "required": [
+          "turns"
+        ],
+        "properties": {
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceTurn"
+            },
+            "description": "Lines in order."
+          }
+        }
+      },
+      "VoiceTranscriptOutput": {
+        "type": "object",
+        "description": "Result of `POST /v1/chats/{id}/voice-transcript`.",
+        "required": [
+          "saved"
+        ],
+        "properties": {
+          "saved": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Messages written.",
+            "minimum": 0
+          }
+        }
+      },
+      "VoiceTurn": {
+        "type": "object",
+        "description": "One line of a finished conversation.",
+        "required": [
+          "role",
+          "text"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "`user` (the owner) or `assistant` (the voice model)."
+          },
+          "text": {
+            "type": "string",
+            "description": "What was said."
+          }
+        }
+      },
+      "Warning": {
+        "type": "string",
+        "description": "Findings from the static review of untrusted manifest text.",
+        "enum": [
+          "hidden_text",
+          "ai_instructions",
+          "bundled_binary"
         ]
       },
       "WebSearchConfigDto": {
@@ -40527,6 +42795,9 @@
     },
     {
       "name": "homeassistant"
+    },
+    {
+      "name": "openapi-apps"
     },
     {
       "name": "web"

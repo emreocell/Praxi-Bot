@@ -22,15 +22,7 @@ export interface ModelRef {
 }
 
 export type PresetChoice = PermissionPreset | "custom";
-export type BotTemplateId = "blank" | "researcher" | "coder" | "assistant" | "social";
 export type AutonomyLevel = "ask" | "balanced" | "auto";
-
-export interface BotTemplate {
-  id: BotTemplateId;
-  defaultName: string;
-  shape: BotShapeId;
-  color: string;
-}
 
 export interface BotDraft {
   name: string;
@@ -63,14 +55,6 @@ export interface BotFilesDraft {
 
 export const BOT_COLORS = CHARACTER_COLORS;
 export const DEFAULT_NEW_BOT_COLOR = "#34c77b";
-
-export const BOT_TEMPLATES: readonly BotTemplate[] = [
-  { id: "blank", defaultName: "", shape: "pebble", color: "#f4f4f5" },
-  { id: "researcher", defaultName: "Nova", shape: "diamond", color: "#2fc4b2" },
-  { id: "coder", defaultName: "Byte", shape: "gem", color: "#4c8dff" },
-  { id: "assistant", defaultName: "Mira", shape: "cloud", color: "#f25fa8" },
-  { id: "social", defaultName: "Echo", shape: "flower", color: "#f5803e" }
-] as const;
 
 export const AUTONOMY_LEVELS: readonly AutonomyLevel[] = ["ask", "balanced", "auto"] as const;
 

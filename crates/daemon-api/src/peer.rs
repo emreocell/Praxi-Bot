@@ -207,6 +207,9 @@ pub(crate) fn admin_desktop_never(method: &Method, check_path: &str) -> Option<&
     if under(check_path, "/v1/doctor") {
         return Some("host-local diagnostics are not allowed for peers");
     }
+    if check_path == "/v1/voice/synthesize" || check_path == "/v1/voice/local/install" {
+        return Some("offline voice downloads and synthesis are done at the host's own app");
+    }
     if *method == Method::POST && check_path == "/v1/channels/telegram/pair-code" {
         return Some("host transfer and channel pairing are done on the host itself");
     }
@@ -349,6 +352,7 @@ pub const PEER_DENIED_FILL_PREFIXES: &[&str] = &[
     "/v1/fill-grants",
     "/v1/secret-requests",
     "/v1/handovers",
+    "/v1/elicitations",
 ];
 
 /// MCP server management starts programs and names host secrets: a mutation
@@ -374,6 +378,14 @@ pub const PEER_OWNER_PREFIX_COMPOSIO: &str = "/v1/composio";
 /// Whether `path` (decoded and slash-normalized) is a Composio endpoint.
 fn is_composio_path(path: &str) -> bool {
     path.strip_prefix(PEER_OWNER_PREFIX_COMPOSIO)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+/// Connected REST APIs are the owner's too (same rule as Composio).
+pub const PEER_OWNER_PREFIX_OPENAPI_APPS: &str = "/v1/openapi-apps";
+
+fn is_openapi_apps_path(path: &str) -> bool {
+    path.strip_prefix(PEER_OWNER_PREFIX_OPENAPI_APPS)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
@@ -462,6 +474,9 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     }
     if under(check_path, "/v1/connection-test") {
         return Some("connection tests spend this host's stored keys and are an owner action");
+    }
+    if under(check_path, "/v1/mcp/import") {
+        return Some("MCP imports are managed by the owner of this host");
     }
     if check_path == "/v1/mcp-server" || check_path.starts_with("/v1/mcp-server/") {
         return Some("the MCP server facade is host-local and requires scoped credentials");
@@ -781,6 +796,10 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
         && peer.role != PeerRole::Desktop
     {
         return ApiError::forbidden("mailboxes are read from the owner's desktop only")
+            .into_response();
+    }
+    if is_openapi_apps_path(&check_path) && peer.role != PeerRole::Desktop {
+        return ApiError::forbidden("REST APIs are managed by the owner's desktop only")
             .into_response();
     }
     if is_composio_path(&check_path) && peer.role != PeerRole::Desktop {

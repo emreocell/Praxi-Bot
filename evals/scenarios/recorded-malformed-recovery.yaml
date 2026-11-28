@@ -72,7 +72,7 @@ transcript:
       cache_write_tokens: null
     - !done ToolCalls
   - request:
-      fingerprint: 36df1a4292f908ad
+      fingerprint: 0d7e3a98893a40a3
       roles:
       - user
       - assistant
@@ -81,7 +81,7 @@ transcript:
       - tool
       tool_results:
       - 'Error: invalid JSON arguments: key must be a string at line 1 column 2'
-      - 'Error: unknown tool "does_not_exist"'
+      - 'Error: unknown tool "does_not_exist"; search for available tools with tool_search or find_tool'
       tools:
       - t_read
       - todo_write

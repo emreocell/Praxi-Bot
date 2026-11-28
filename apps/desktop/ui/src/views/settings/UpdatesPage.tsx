@@ -23,6 +23,9 @@ import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
 import styles from "./UpdatesPage.module.css";
 
+/** A version with a suffix (0.1.0-alpha.3) is a preview build: Stable never offers it updates. */
+const isPreviewVersion = (version: string) => version.includes("-");
+
 type Phase = "idle" | "checking" | "installing" | "rollingBack" | "saving";
 
 const HEADLINE_ICON = {
@@ -146,6 +149,9 @@ export function UpdatesPage() {
           <p className={styles.hint}>
             {status.previewAvailable ? t("settingsModal.updates.channel.description") : t("settingsModal.updates.channel.unavailable")}
           </p>
+        ) : null}
+        {status?.enabled && status.channel === "stable" && isPreviewVersion(status.currentVersion) ? (
+          <p className={styles.hint}>{t("settingsModal.updates.previewBuildHint")}</p>
         ) : null}
         {status?.skippedVersion ? (
           <p className={styles.hint}>{t("settingsModal.updates.skipped", { version: status.skippedVersion })}</p>

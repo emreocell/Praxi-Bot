@@ -4,9 +4,10 @@
 //! which verifies the minisign signature of the installer against the public
 //! key built into this app BEFORE anything is installed. This module adds:
 //!
-//! * a config flag: with no public key built in (`PRAXI_UPDATER_PUBKEY`, set at
-//!   build time) and no https endpoint the whole feature is off and no
-//!   network request is made - an update is never applied unsigned;
+//! * a config flag: with no public key (`plugins.updater.pubkey` in
+//!   `tauri.conf.json`, or `PRAXI_UPDATER_PUBKEY` set at build time) and no
+//!   https endpoint the whole feature is off and no network request is made -
+//!   an update is never applied unsigned;
 //! * language-aware release notes (plain text, never HTML);
 //! * start-up bookkeeping so a new version that keeps failing to start can be
 //!   rolled back to the last good, signed installer from a second feed.
@@ -54,16 +55,35 @@ pub struct UpdateSettings {
 }
 
 impl UpdateSettings {
-    /// Settings from build-time values, plus (debug builds only) environment
-    /// overrides so tests and developers can point the app at a mock server.
-    /// Release builds ignore the environment: nobody can redirect the feed.
+    /// Settings from the app configuration (`plugins.updater` in
+    /// `tauri.conf.json`, compiled into the app), a build-time override
+    /// (`PRAXI_UPDATER_*` set while compiling) and, in debug builds only,
+    /// environment overrides so tests and developers can point the app at a mock
+    /// server. Release builds ignore the environment: nobody can redirect the feed.
     #[must_use]
-    pub fn from_build() -> Option<Self> {
-        Self::resolve(
-            option_env!("PRAXI_UPDATER_PUBKEY"),
-            option_env!("PRAXI_UPDATER_ENDPOINT"),
+    pub fn from_build(config: Option<&serde_json::Value>) -> Option<Self> {
+        let configured = ConfiguredFeeds::read(config);
+        let built = |value: Option<&'static str>, fallback: &Option<String>| {
+            value
+                .filter(|v| !v.trim().is_empty())
+                .map(str::to_owned)
+                .or_else(|| fallback.clone())
+        };
+        let pubkey = built(option_env!("PRAXI_UPDATER_PUBKEY"), &configured.pubkey);
+        let endpoint = built(option_env!("PRAXI_UPDATER_ENDPOINT"), &configured.endpoint);
+        let rollback = built(
             option_env!("PRAXI_UPDATER_ROLLBACK_ENDPOINT"),
+            &configured.rollback_endpoint,
+        );
+        let preview = built(
             option_env!("PRAXI_UPDATER_PREVIEW_ENDPOINT"),
+            &configured.preview_endpoint,
+        );
+        Self::resolve(
+            pubkey.as_deref(),
+            endpoint.as_deref(),
+            rollback.as_deref(),
+            preview.as_deref(),
             |name| {
                 if cfg!(debug_assertions) {
                     std::env::var(name).ok()
@@ -108,6 +128,36 @@ impl UpdateSettings {
             rollback_endpoint,
             preview_endpoint,
         })
+    }
+}
+
+/// The update values of the app configuration: the standard `pubkey` and
+/// `endpoints` of the updater plugin (the first endpoint is the Stable feed)
+/// plus Praxi's `praxiPreviewEndpoint` and `praxiRollbackEndpoint`.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ConfiguredFeeds {
+    pubkey: Option<String>,
+    endpoint: Option<String>,
+    preview_endpoint: Option<String>,
+    rollback_endpoint: Option<String>,
+}
+
+impl ConfiguredFeeds {
+    fn read(config: Option<&serde_json::Value>) -> Self {
+        let text = |value: Option<&serde_json::Value>| {
+            value
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+        };
+        let get = |key: &str| config.and_then(|c| c.get(key));
+        Self {
+            pubkey: text(get("pubkey")),
+            endpoint: text(get("endpoints").and_then(|e| e.get(0))),
+            preview_endpoint: text(get("praxiPreviewEndpoint")),
+            rollback_endpoint: text(get("praxiRollbackEndpoint")),
+        }
     }
 }
 
@@ -424,8 +474,15 @@ pub struct UpdateInfo {
 fn describe(e: &tauri_plugin_updater::Error) -> String {
     use tauri_plugin_updater::Error as E;
     match e {
-        E::Minisign(_) | E::Base64(_) | E::SignatureUtf8(_) => "signature",
-        E::Reqwest(_) | E::Network(_) | E::ReleaseNotFound => "network",
+        E::Minisign(_)
+        | E::Base64(_)
+        | E::SignatureUtf8(_)
+        | E::SignedVersionMismatch { .. }
+        | E::MissingSignedVersion => "signature",
+        // The feed answered, but with nothing usable (for example the address does not exist
+        // yet because no release was published on this channel).
+        E::ReleaseNotFound => "no_release",
+        E::Reqwest(_) | E::Network(_) => "network",
         _ => "failed",
     }
     .to_owned()
@@ -699,16 +756,18 @@ pub fn spawn_startup_watch<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
-/// The updater plugin and the shared state for `run()`. Updates stay off
-/// (empty key, no feed) unless a signing key and an https feed were built in.
+/// The updater plugin and the shared state for `run()`. `config` is the
+/// `plugins.updater` section of the app configuration. Updates stay off (empty
+/// key, no feed) unless a signing key and an https feed were built in.
 #[must_use]
 pub fn init(
     current_version: &str,
+    config: Option<&serde_json::Value>,
 ) -> (
     tauri::plugin::TauriPlugin<tauri::Wry, tauri_plugin_updater::Config>,
     UpdateRuntime,
 ) {
-    let settings = UpdateSettings::from_build();
+    let settings = UpdateSettings::from_build(config);
     let pubkey = settings
         .as_ref()
         .map(|s| s.pubkey.clone())
@@ -742,6 +801,70 @@ mod tests {
             None
         );
         assert!(UpdateSettings::resolve(Some("KEY"), url, None, None, no_env, false).is_some());
+    }
+
+    #[test]
+    fn the_app_configuration_supplies_the_key_and_the_feeds() {
+        let config = serde_json::json!({
+            "pubkey": " KEY ",
+            "endpoints": ["https://example.com/latest.json", "https://example.com/second.json"],
+            "praxiPreviewEndpoint": "https://example.com/preview.json",
+            "praxiRollbackEndpoint": "",
+            "requireSignedVersion": true
+        });
+        let feeds = ConfiguredFeeds::read(Some(&config));
+        assert_eq!(feeds.pubkey.as_deref(), Some("KEY"));
+        assert_eq!(
+            feeds.endpoint.as_deref(),
+            Some("https://example.com/latest.json")
+        );
+        assert_eq!(
+            feeds.preview_endpoint.as_deref(),
+            Some("https://example.com/preview.json")
+        );
+        assert_eq!(
+            feeds.rollback_endpoint, None,
+            "an empty value counts as not set"
+        );
+        assert_eq!(ConfiguredFeeds::read(None), ConfiguredFeeds::default());
+        // The checked-in configuration has the feeds but no key until the owner adds one:
+        // updates stay off rather than guessing.
+        let checked_in: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let checked_in = &checked_in["plugins"]["updater"];
+        assert_eq!(checked_in["requireSignedVersion"], true);
+        let feeds = ConfiguredFeeds::read(Some(checked_in));
+        let (stable, preview) = (
+            feeds.endpoint.expect("stable feed"),
+            feeds.preview_endpoint.expect("preview feed"),
+        );
+        for feed in [&stable, &preview] {
+            assert!(
+                parse_endpoint(feed, false).is_some(),
+                "{feed} must be a valid https address"
+            );
+        }
+        let with_key = UpdateSettings::resolve(
+            Some("KEY"),
+            Some(&stable),
+            None,
+            Some(&preview),
+            no_env,
+            false,
+        )
+        .expect("a key plus the checked-in feeds turns updates on");
+        assert_eq!(with_key.endpoint.as_str(), stable);
+        assert!(with_key.preview_endpoint.is_some());
+    }
+
+    #[test]
+    fn a_missing_release_is_told_apart_from_a_network_failure() {
+        use tauri_plugin_updater::Error as E;
+        assert_eq!(describe(&E::ReleaseNotFound), "no_release");
+        assert_eq!(describe(&E::Network("down".into())), "network");
+        assert_eq!(describe(&E::EmptyEndpoints), "failed");
+        // An installer signed for another version is a failed verification, not a glitch.
+        assert_eq!(describe(&E::MissingSignedVersion), "signature");
     }
 
     #[test]

@@ -171,7 +171,10 @@ export function ShellBridgeHost({
       index(env);
       const e = env.event;
       if (e.type === "tool_call_approved") {
-        resolveNotificationByCallId(e.call_id, "approved");
+        // Only an answered card is an approval; an automatic grant had no notification to close.
+        if (e.granted_by === undefined || e.granted_by === "owner_card") {
+          resolveNotificationByCallId(e.call_id, "approved");
+        }
         return;
       }
       if (e.type === "tool_call_completed" && pendingSecrets.delete(e.call_id)) {

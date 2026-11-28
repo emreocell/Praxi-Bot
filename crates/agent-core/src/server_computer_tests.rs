@@ -25,7 +25,7 @@ use crate::tests::{
 
 /// The server's end of the link: records what it was asked, or refuses.
 #[derive(Default)]
-struct ServerLink {
+pub(crate) struct ServerLink {
     calls: Mutex<Vec<(String, Value)>>,
     refuse: Option<&'static str>,
 }
@@ -49,7 +49,7 @@ impl PcLink for ServerLink {
 }
 
 /// Knows the servers it was given, by key.
-struct Links(Vec<(&'static str, Arc<ServerLink>)>);
+pub(crate) struct Links(pub(crate) Vec<(&'static str, Arc<ServerLink>)>);
 
 impl ServerLinks for Links {
     fn link(&self, id: &str) -> Option<(String, Arc<dyn PcLink>)> {

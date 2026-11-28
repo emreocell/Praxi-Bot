@@ -1,0 +1,184 @@
+/*
+ * The MCP form card. It must not pass for Praxi's own secret or approval cards (solid warning
+ * border): an MCP server wrote this form, so it gets a dashed accent frame, an accent banner of
+ * ours on top, and a plain left rule on the server's text. Tokens only, so every theme (light and
+ * dark) restyles it the same way as the other cards.
+ */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-0) var(--space-0) var(--space-4);
+  border-radius: var(--radius-card);
+  border: var(--size-border-thick) dashed var(--color-accent);
+  background-color: var(--color-surface-elevated);
+  overflow: hidden;
+}
+
+.card > :not(.banner) {
+  margin-inline: var(--space-4);
+}
+
+/* Praxi's own line: who is asking. Always shown, in every state of the card. */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-accent-subtle);
+  border-bottom: var(--size-border) solid var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.banner svg {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.title svg {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.countdown {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.messageLabel {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.message {
+  margin: var(--space-0);
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--size-border-thick) dotted var(--color-accent);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A web address in server text: shown, never opened. */
+.link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1);
+  max-width: 100%;
+  cursor: default;
+}
+
+.linkText {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+  background-color: var(--color-code-bg);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.linkTag {
+  padding: var(--space-0) var(--space-1);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+/* A suspected credential field: a row, not an input. */
+.blocked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--size-border) dashed var(--color-danger);
+  background-color: var(--color-danger-subtle);
+}
+
+.blockedName {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.blockedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.blockedTag svg {
+  flex: none;
+  color: var(--color-danger);
+}
+
+.blockedNote {
+  margin: var(--space-0);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--size-border) solid var(--color-danger);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.status {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}

@@ -685,6 +685,9 @@ pub(crate) enum Verdict {
     /// The owner finished a `browser_handover` (a code was typed into the page, or
     /// the CAPTCHA was solved and the page moved on). Carries nothing.
     HandoverDone,
+    /// The owner answered an MCP elicitation form (checked against the form).
+    /// The content goes back to the server only.
+    Elicited(tool_registry::ElicitationAnswer),
 }
 
 /// What a parked `browser_handover` asks for: facts only, never a code.
@@ -768,6 +771,8 @@ pub(crate) enum PendingKind {
     Secret,
     /// A CAPTCHA or one-time-code handover (`browser_handover`).
     Handover,
+    /// An MCP server's form (elicitation).
+    Elicitation,
 }
 
 /// Browser actions that act on the page open right now: their allowance is bound to its origin.
@@ -812,6 +817,7 @@ pub(crate) struct Grants {
 }
 
 impl Grants {
+    #[cfg(test)]
     pub fn covers(
         &self,
         bot: BotId,
@@ -819,16 +825,30 @@ impl Grants {
         category: PermissionCategory,
         computer: Option<&str>,
     ) -> bool {
-        self.always.iter().any(|g| {
-            !g.inert
-                && g.bot_id == bot
-                && g.computer.as_deref() == computer
-                && match &g.target {
-                    GrantTarget::Tool(t) => t == tool,
-                    GrantTarget::Category(c) => *c == category,
-                    GrantTarget::Scoped { .. } => false,
-                }
-        })
+        self.covering(bot, tool, category, computer).is_some()
+    }
+
+    /// The first persisted tool or category rule that covers the call.
+    pub fn covering(
+        &self,
+        bot: BotId,
+        tool: &str,
+        category: PermissionCategory,
+        computer: Option<&str>,
+    ) -> Option<&GrantTarget> {
+        self.always
+            .iter()
+            .find(|g| {
+                !g.inert
+                    && g.bot_id == bot
+                    && g.computer.as_deref() == computer
+                    && match &g.target {
+                        GrantTarget::Tool(t) => t == tool,
+                        GrantTarget::Category(c) => *c == category,
+                        GrantTarget::Scoped { .. } => false,
+                    }
+            })
+            .map(|g| &g.target)
     }
 
     /// A persisted rule for this tool whose target covers `call`.
@@ -858,6 +878,11 @@ pub(crate) struct CtxState {
     pub secret_requests: u32,
     /// `browser_handover` calls this run has made (asked or refused).
     pub handovers: u32,
+    /// MCP server forms this run has been asked for (shown or refused after the owner check).
+    pub elicitations: u32,
+    /// What the owner typed into this run's MCP forms: masked in every tool result of this
+    /// run (a server may echo it). Scoped to the run, never shared or kept.
+    pub elicited: Option<secret_store::Redactor>,
 }
 
 /// Per-run resolved computer placement fixed at run start.
@@ -1166,6 +1191,8 @@ pub(crate) struct Shared {
     /// The mission ledger, set by the daemon. Mission sessions park a CAPTCHA / 2FA
     /// item in it instead of waiting for the owner, and ask the owner once.
     pub mission_store: RwLock<Option<Arc<missions::MissionStore>>>,
+    /// When a child run of a mission session finishes, wakes any matching wait.
+    pub mission_child_wake: RwLock<Option<Arc<dyn missions::ChildWakeSink>>>,
     /// Paired servers a bot may use as ITS computer while it runs here.
     pub server_links: RwLock<Option<Arc<dyn builtin_tools::pc::ServerLinks>>>,
     /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when
@@ -1186,6 +1213,8 @@ pub(crate) struct Shared {
     pub secret_requests: Mutex<HashMap<ToolCallId, SecretRequestInfo>>,
     /// `browser_handover` calls waiting for the owner (see `approval.rs`).
     pub handovers: Mutex<HashMap<ToolCallId, HandoverInfo>>,
+    /// MCP elicitation forms waiting for the owner (see `elicitation.rs`).
+    pub elicitations: Mutex<HashMap<ToolCallId, crate::elicitation::ElicitationInfo>>,
     pub grants: Mutex<Grants>,
     /// Per-site / per-app permission rules of every bot (see `site_profiles`).
     pub profile_rules: Mutex<Vec<(BotId, permission_engine::ProfileRule)>>,
@@ -1197,6 +1226,8 @@ pub(crate) struct Shared {
     pub tasks: Mutex<HashMap<RunId, JoinHandle<()>>>,
     /// Background work (memory extraction).
     pub bg: Mutex<Vec<JoinHandle<()>>>,
+    /// Chats whose history is being summarised, or failed lately (and when they may retry).
+    pub summaries: Mutex<HashMap<ChatId, crate::summary::Attempt>>,
     pub surface: ToolSurface,
     /// Last `gseq` handed out (see [`StreamItem::gseq`]).
     pub gseq: AtomicU64,
@@ -2171,6 +2202,7 @@ impl Shared {
             let prior = crate::history::chat_provenance(
                 &self.storage,
                 chat_id,
+                run.bot_id,
                 Some(run.id),
                 schedule_id_of(&run.kind),
             );
@@ -2347,6 +2379,8 @@ impl Shared {
                 todos: Vec::new(),
                 secret_requests: 0,
                 handovers: 0,
+                elicitations: 0,
+                elicited: None,
             }),
             taint: Mutex::new(taint),
             control_grants: Mutex::new(Vec::new()),
@@ -2446,15 +2480,10 @@ impl Shared {
         let Ok(id) = run_id.parse::<Uuid>() else {
             return false;
         };
-        let Some((profile, bot)) = self
-            .runs
-            .lock()
-            .get(&RunId(id))
-            .map(|c| (Arc::clone(&c.profile), c.bot_id))
-        else {
+        let Some(ctx) = self.runs.lock().get(&RunId(id)).cloned() else {
             return false;
         };
-        self.spec_visible(&profile, bot, spec)
+        self.bot_tool_allowed(&ctx, &spec.name) && self.spec_visible(&ctx.profile, ctx.bot_id, spec)
     }
 
     /// Profile allow / exclude lists, platform and the tool's own per-bot
@@ -2658,6 +2687,16 @@ impl Shared {
         hints: &[String],
         offered: Option<&[String]>,
     ) -> Option<Resolved> {
+        // The bot management tools belong to the runs `bot_tool_allowed` names, also when the
+        // model reaches one through `use_tool`.
+        let target = if name == agent_router::USE_TOOL {
+            input.get("name").and_then(Value::as_str).unwrap_or(name)
+        } else {
+            name
+        };
+        if !self.bot_tool_allowed(ctx, target) {
+            return None;
+        }
         let Some(offered) = offered else {
             return self.resolve_call(&ctx.profile, ctx.bot_id, name, input, hints);
         };
@@ -2906,7 +2945,7 @@ pub(crate) fn redact_value(r: &SharedRedactor, v: &mut serde_json::Value) -> boo
 
 /// Events that must be on disk before `emit` returns: approvals, questions,
 /// control hand-over and run state.  Everything else is journaled in batches.
-fn needs_barrier(event: &Event) -> bool {
+pub(crate) fn needs_barrier(event: &Event) -> bool {
     matches!(
         event,
         Event::RunStarted(_)
@@ -2917,6 +2956,7 @@ fn needs_barrier(event: &Event) -> bool {
             | Event::QuestionAsked(_)
             | Event::SecretRequested(_)
             | Event::HandoverRequested(_)
+            | Event::ElicitationRequested(_)
             | Event::ControlRequested(_)
             | Event::SubagentStarted(_)
             | Event::SubagentFinished(_)

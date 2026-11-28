@@ -87,16 +87,19 @@ the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 ## sherpa-onnx (Apache-2.0) and on-device speech models
 
 `apps/cli/src/voice_local_engine.rs` (cargo feature `local-voice`) uses the official `sherpa-onnx` crate and
-adapts the Silero-VAD and Whisper calls from its Rust examples
+adapts the Silero-VAD, Whisper and Supertonic calls from its Rust examples
 (`rust-api-examples/examples/silero_vad_remove_silence.rs`, Copyright (c) 2026 Xiaomi Corporation, and
-`whisper.rs`, Copyright (c) 2026 Yujie Wu; <https://github.com/k2-fsa/sherpa-onnx>), licensed under the
+`whisper.rs`, Copyright (c) 2026 Yujie Wu, and `supertonic_tts.rs`, Copyright (c) 2026 Xiaomi Corporation;
+<https://github.com/k2-fsa/sherpa-onnx>), licensed under the
 Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). Changes: the two stages are chained,
-the recogniser is cached, segments are capped at 25 s. Voice notes are decoded with the pure-Rust
+segments are capped at 25 s, and both engines run in a separate, bounded process. Voice notes are decoded with the pure-Rust
 `opus-decoder` (MIT OR Apache-2.0) and `ogg` (BSD-3-Clause) crates.
 
 Model weights are downloaded on demand (never bundled) and their licence is shown before the download:
 OpenAI Whisper (MIT, <https://github.com/openai/whisper>), converted to ONNX by the sherpa-onnx project;
-Silero VAD (MIT, <https://github.com/snakers4/silero-vad>). Piper (GPL-3.0) is deliberately not used, and
+Silero VAD (MIT, <https://github.com/snakers4/silero-vad>); and Supertonic 3 by Supertone Inc.
+(OpenRAIL-M, <https://huggingface.co/Supertone/supertonic-3/blob/724fb5abbf5502583fb520898d45929e62f02c0b/LICENSE>),
+converted to int8 ONNX by the sherpa-onnx project. Piper (GPL-3.0) is deliberately not used, and
 NVIDIA Parakeet (CC-BY-4.0, attribution required) is not offered; if it is added later its attribution
 belongs here and in the model picker.
 
@@ -144,6 +147,15 @@ shape unchanged; files in `apps/desktop/ui/src/assets/brands/`. These are vendor
 trademark artwork, not CC0, shown only to identify the integration; no
 endorsement is implied. Terms and the licence status of each are in
 `docs/design/brand-icons.md`.
+
+The Composio logomark comes from Composio's brand hub
+([brand.composio.dev](https://brand.composio.dev/logo), `Logomark-Black.svg`,
+checked 2026-11-27), whose guidelines say "Use the provided SVGs and scale
+freely". Its outline stroke is expanded to a filled shape and the mark is
+rescaled from 100 to 24 units, drawn black on light themes and white on dark
+ones like the kit's two files; the shape is unchanged. It identifies the
+Composio integration only; Composio is a trademark of its owner. File:
+`apps/desktop/ui/src/assets/brands/composio.svg`.
 
 Neutral initials for Groq, Together AI and Playwright and the neutral glyph for
 Goose contain no vendor artwork. Groq is a trademark of Groq LLC and/or its
