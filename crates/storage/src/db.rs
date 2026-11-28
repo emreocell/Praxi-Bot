@@ -58,6 +58,21 @@ pub fn now_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
+/// Statements whose plans the hot paths depend on (`idx_messages_run`,
+/// `idx_audit_run`, `idx_audit_user_action`); the plan tests below read them too.
+const RUN_USER_MESSAGE_SOURCES_SQL: &str =
+    "SELECT source FROM messages WHERE run_id = ?1 AND role = 'user' ORDER BY created_at_ms";
+const RUN_HAS_AUDIT_ACTION_SQL: &str =
+    "SELECT EXISTS(SELECT 1 FROM audit_log WHERE user_id = ?1 AND run_id = ?2 AND action = ?3)";
+const BOT_USAGE_SINCE_SQL: &str = "SELECT                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.cost_usd') IN ('real','integer') THEN MAX(json_extract(a.detail_json, '$.cost_usd'), 0.0)                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0.0                  ELSE COALESCE(MAX(json_extract(a.detail_json, '$.limit_estimate_usd'), 0.0), 0.0) END), 0.0),                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN MAX(COALESCE(json_extract(a.detail_json, '$.prompt_tokens'), 0), 0) + MAX(COALESCE(json_extract(a.detail_json, '$.completion_tokens'), 0), 0)                  ELSE MAX(COALESCE(json_extract(a.detail_json, '$.limit_estimate_tokens'), 0), 0) END), 0),                COALESCE(SUM(CASE WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0 ELSE 1 END), 0)              FROM audit_log a JOIN runs r ON r.id = a.run_id              WHERE a.user_id = ?1 AND (r.bot_id = ?2 OR json_extract(r.spec_json, '$.delegation.caller_bot_id') = ?2) AND a.action = 'usage' AND a.ts_ms >= ?3                AND json_extract(a.detail_json, '$.ledger_version') = 1";
+
+fn audit_for_run_sql(actions: usize) -> String {
+    let marks = vec!["?"; actions].join(",");
+    format!(
+        "SELECT id, user_id, run_id, actor, action, detail_json, ts_ms FROM audit_log WHERE user_id = ?1 AND run_id = ?2 AND action IN ({marks})"
+    )
+}
+
 fn conv_err<E: std::error::Error + Send + Sync + 'static>(idx: usize, e: E) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(idx, Type::Text, Box::new(e))
 }
@@ -1669,9 +1684,7 @@ impl Storage {
     /// Fails on SQLite errors.
     pub fn run_user_message_sources(&self, run: RunId) -> Result<Vec<String>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT source FROM messages WHERE run_id = ?1 AND role = 'user' ORDER BY created_at_ms",
-        )?;
+        let mut stmt = conn.prepare(RUN_USER_MESSAGE_SOURCES_SQL)?;
         let rows = stmt.query_map(params![run.to_string()], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
@@ -1935,6 +1948,50 @@ impl Storage {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Whether `run` already has an audit row of `action` (an index seek on
+    /// `idx_audit_run`, unlike scanning [`Self::list_audit`]).
+    ///
+    /// # Errors
+    /// Fails on a database error.
+    pub fn run_has_audit_action(
+        &self,
+        user_id: UserId,
+        run_id: RunId,
+        action: &str,
+    ) -> Result<bool> {
+        Ok(self.conn().query_row(
+            RUN_HAS_AUDIT_ACTION_SQL,
+            params![user_id.to_string(), run_id.to_string(), action],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// A user's audit entries of the given runs and actions, in insertion order
+    /// (the per-run accounting needs a few runs' rows, not the whole log).
+    ///
+    /// # Errors
+    /// Fails on a database error.
+    pub fn list_audit_for_runs(
+        &self,
+        user_id: UserId,
+        runs: &[RunId],
+        actions: &[&str],
+    ) -> Result<Vec<AuditEntry>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(&audit_for_run_sql(actions.len()))?;
+        let mut rows = Vec::new();
+        for run in runs {
+            let args = [user_id.to_string(), run.to_string()]
+                .into_iter()
+                .chain(actions.iter().map(|a| (*a).to_owned()));
+            for row in st.query_map(rusqlite::params_from_iter(args), audit_row)? {
+                rows.push(row?);
+            }
+        }
+        rows.sort_by_key(|row| row.id);
+        Ok(rows)
+    }
+
     /// Month-to-date usage ledger totals computed in SQL: the sum of recorded
     /// `cost_usd` (never negative per row) and the count of calls that reported
     /// tokens but have no price. Only `ledger_version` 1 rows count.
@@ -1968,7 +2025,7 @@ impl Storage {
         since_ms: i64,
     ) -> Result<(f64, u64, u64)> {
         Ok(self.conn().query_row(
-            "SELECT                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.cost_usd') IN ('real','integer') THEN MAX(json_extract(a.detail_json, '$.cost_usd'), 0.0)                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0.0                  ELSE COALESCE(MAX(json_extract(a.detail_json, '$.limit_estimate_usd'), 0.0), 0.0) END), 0.0),                COALESCE(SUM(CASE                  WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN MAX(COALESCE(json_extract(a.detail_json, '$.prompt_tokens'), 0), 0) + MAX(COALESCE(json_extract(a.detail_json, '$.completion_tokens'), 0), 0)                  ELSE MAX(COALESCE(json_extract(a.detail_json, '$.limit_estimate_tokens'), 0), 0) END), 0),                COALESCE(SUM(CASE WHEN json_type(a.detail_json, '$.tokens') = 'object' THEN 0 ELSE 1 END), 0)              FROM audit_log a JOIN runs r ON r.id = a.run_id              WHERE a.user_id = ?1 AND (r.bot_id = ?2 OR json_extract(r.spec_json, '$.delegation.caller_bot_id') = ?2) AND a.action = 'usage' AND a.ts_ms >= ?3                AND json_extract(a.detail_json, '$.ledger_version') = 1",
+            BOT_USAGE_SINCE_SQL,
             params![user_id.to_string(), bot_id.to_string(), since_ms],
             |row| {
                 Ok((
@@ -3561,6 +3618,97 @@ mod tests {
         );
         assert!(f.st.raw_execute("DELETE FROM audit_log").is_err());
         assert_eq!(f.st.list_audit(f.user.id).unwrap().len(), 1);
+    }
+
+    /// The query plan of `sql` bound to `params` NULLs, one line per step.
+    fn plan(st: &Storage, sql: &str, params: usize) -> String {
+        let conn = st.conn();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let args = vec![rusqlite::types::Value::Null; params];
+        let rows: Vec<String> = stmt
+            .query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        rows.join("\n")
+    }
+
+    /// Per-run and per-call lookups must stay index seeks: they run on every
+    /// permission decision, model call and run end, so a table scan makes each
+    /// run slower the more history the install holds.
+    #[test]
+    fn hot_path_queries_use_their_indexes() {
+        let f = fx();
+        let cases = [
+            (
+                RUN_USER_MESSAGE_SOURCES_SQL.to_owned(),
+                1,
+                "idx_messages_run",
+            ),
+            (RUN_HAS_AUDIT_ACTION_SQL.to_owned(), 3, "idx_audit_run"),
+            (audit_for_run_sql(2), 4, "idx_audit_run"),
+            (BOT_USAGE_SINCE_SQL.to_owned(), 3, "idx_audit_user_action"),
+        ];
+        for (sql, params, index) in cases {
+            let plan = plan(&f.st, &sql, params);
+            assert!(plan.contains(index), "{index} unused:\n{plan}");
+            assert!(
+                !plan.lines().any(|l| l.starts_with("SCAN messages")
+                    || l.starts_with("SCAN audit_log")
+                    || l.starts_with("SCAN a")),
+                "table scan:\n{plan}"
+            );
+        }
+    }
+
+    #[test]
+    fn audit_lookups_by_run_return_only_that_runs_rows() {
+        let f = fx();
+        let (a, b) = (run(&f), run(&f));
+        let other = User {
+            id: UserId::new(),
+            name: "other".into(),
+            created_at_ms: 1,
+        };
+        f.st.insert_user(&other).unwrap();
+        let other = other.id;
+        for (user, run, action) in [
+            (f.user.id, Some(a.id), "usage"),
+            (f.user.id, Some(a.id), "tool.call"),
+            (f.user.id, Some(b.id), "llm.call_started"),
+            (f.user.id, Some(b.id), "run.usage_summary"),
+            (f.user.id, None, "usage"),
+            (other, Some(a.id), "usage"),
+        ] {
+            f.st.append_audit(user, run, "bot", action, &json!({}))
+                .unwrap();
+        }
+        assert!(
+            f.st.run_has_audit_action(f.user.id, b.id, "run.usage_summary")
+                .unwrap()
+        );
+        assert!(
+            !f.st
+                .run_has_audit_action(f.user.id, a.id, "run.usage_summary")
+                .unwrap()
+        );
+        assert!(
+            !f.st
+                .run_has_audit_action(other, b.id, "run.usage_summary")
+                .unwrap()
+        );
+        let rows =
+            f.st.list_audit_for_runs(f.user.id, &[a.id, b.id], &["usage", "llm.call_started"])
+                .unwrap();
+        let got: Vec<_> = rows.iter().map(|r| (r.run_id, r.action.as_str())).collect();
+        assert_eq!(
+            got,
+            [(Some(a.id), "usage"), (Some(b.id), "llm.call_started")]
+        );
+        assert!(
+            rows.windows(2).all(|w| w[0].id < w[1].id),
+            "insertion order"
+        );
     }
 
     #[test]

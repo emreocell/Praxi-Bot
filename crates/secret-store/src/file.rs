@@ -336,6 +336,28 @@ impl SecretStore for EncryptedFileStore {
         let _transaction = self.lock()?;
         Ok(self.load()?.into_names())
     }
+
+    /// File identity, size and modification time. Every save writes a new file
+    /// and renames it over the old one, so any change moves at least the inode
+    /// or the timestamp.
+    fn change_token(&self) -> Option<u64> {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        match std::fs::metadata(&self.path) {
+            Ok(m) => {
+                m.len().hash(&mut h);
+                m.modified().ok()?.hash(&mut h);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    (m.dev(), m.ino()).hash(&mut h);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0u8.hash(&mut h),
+            Err(_) => return None,
+        }
+        Some(h.finish())
+    }
 }
 
 #[cfg(test)]
@@ -366,6 +388,27 @@ mod tests {
         assert_eq!(s2.list_names().unwrap(), ["a", "b"]);
         assert!(s2.delete("a").unwrap());
         assert!(s2.get("a").unwrap().is_none());
+    }
+
+    #[test]
+    fn change_token_moves_with_every_write_and_not_with_reads() {
+        let d = tempfile::tempdir().unwrap();
+        let s = store(d.path(), "pw");
+        let absent = s.change_token().unwrap();
+        s.set("a", "alpha").unwrap();
+        let one = s.change_token().unwrap();
+        assert_ne!(absent, one);
+        // Reads never move it, and a second handle on the same file agrees.
+        s.get("a").unwrap();
+        s.list_names().unwrap();
+        assert_eq!(s.change_token(), Some(one));
+        assert_eq!(store(d.path(), "pw").change_token(), Some(one));
+        // A write of the same length still produces a new file.
+        s.set("a", "alphb").unwrap();
+        let two = s.change_token().unwrap();
+        assert_ne!(one, two);
+        s.delete("a").unwrap();
+        assert_ne!(two, s.change_token().unwrap());
     }
 
     #[test]

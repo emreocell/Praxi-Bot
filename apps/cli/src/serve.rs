@@ -93,6 +93,9 @@ const BUILTIN_CATALOG_SOURCES: &[&str] = &[
     include_str!("../../../providers/catalog/together.toml"),
 ];
 
+/// Last successful redactor refresh: store change token (if any) and extras snapshot.
+type RedactorLastRead = Arc<parking_lot::Mutex<Option<(u64, Vec<String>)>>>;
+
 /// Names of the environment variables that hold provider API keys: every
 /// `ApiKeyEnv` of the built-in catalog and of the user's custom providers.
 fn catalog_env_vars(data_dir: &Path) -> Vec<String> {
@@ -125,6 +128,8 @@ struct RedactorSources {
     passphrase: Option<String>,
     /// Provider key environment variables (see [`catalog_env_vars`]).
     catalog_vars: Vec<String>,
+    /// What the last successful refresh read (see [`RedactorSources::refresh`]).
+    last_read: RedactorLastRead,
 }
 
 impl RedactorSources {
@@ -138,9 +143,28 @@ impl RedactorSources {
     }
 
     /// Re-read everything into `handle`; on failure the previous contents stay.
+    ///
+    /// A store that can tell cheaply whether it changed (the encrypted file: a
+    /// stat instead of one key derivation per secret) is only re-read when it
+    /// did, or when the other secrets (token, passphrase, environment) moved.
     fn refresh(&self, handle: &SharedRedactor) {
-        if let Err(e) = handle.refresh_from_store(self.store.as_deref(), &self.extras()) {
-            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: secret redaction refresh failed (keeping the previous set): {e}");
+        let extras = self.extras();
+        // Taken before reading: a write during the read moves it again.
+        let token = self.store.as_deref().and_then(SecretStore::change_token);
+        let mut last = self.last_read.lock();
+        if let Some(t) = token
+            && last
+                .as_ref()
+                .is_some_and(|(seen, seen_extras)| *seen == t && *seen_extras == extras)
+        {
+            return;
+        }
+        *last = None;
+        match handle.refresh_from_store(self.store.as_deref(), &extras) {
+            Ok(()) => *last = token.map(|t| (t, extras)),
+            Err(e) => {
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: secret redaction refresh failed (keeping the previous set): {e}");
+            }
         }
     }
 }
@@ -153,9 +177,12 @@ impl RedactorSources {
 fn production_redactor(sources: &RedactorSources) -> SharedRedactor {
     let handle = SharedRedactor::default();
     let extras = sources.extras();
+    let token = sources.store.as_deref().and_then(SecretStore::change_token);
     if let Err(e) = handle.refresh_from_store(sources.store.as_deref(), &extras) {
         support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: secret redaction: cannot read the secret store: {e}");
         let _ = handle.refresh_from_store(None, &extras);
+    } else {
+        *sources.last_read.lock() = token.map(|t| (t, extras));
     }
     let s = sources.clone();
     handle.set_refresher(Arc::new(move |h| s.refresh(h)));
@@ -182,6 +209,7 @@ pub fn report_redactor(
             .unwrap_or_default(),
         passphrase: env_passphrase(),
         catalog_vars: catalog_env_vars(data_dir),
+        last_read: Arc::default(),
     };
     let extras: Vec<String> = sources
         .extras()
@@ -218,6 +246,9 @@ impl SecretStore for RegisteringStore {
     }
     fn list_names(&self) -> std::result::Result<Vec<String>, secret_store::SecretError> {
         self.inner.list_names()
+    }
+    fn change_token(&self) -> Option<u64> {
+        self.inner.change_token()
     }
 }
 
@@ -1157,6 +1188,7 @@ pub fn serve(
         api_token: api_token.clone(),
         passphrase,
         catalog_vars: catalog_env_vars(data_dir),
+        last_read: Arc::default(),
     };
     let redactor = production_redactor(&sources);
     // Secrets written through the daemon are masked immediately.
@@ -1814,6 +1846,7 @@ id = "unpriced"
             api_token: "daemon-token-abcdef123456".into(),
             passphrase: passphrase.map(ToOwned::to_owned),
             catalog_vars: vec!["ACME_KEY".into()],
+            last_read: Arc::default(),
         }
     }
 
@@ -2076,6 +2109,86 @@ min_interval_secs = 0",
         r.refresh_now();
         assert!(r.contains_secret("late-secret-value-99"));
         assert!(r.contains_secret("daemon-token-abcdef123456"));
+    }
+
+    /// Counts whole-store reads and reports a settable change token, like the
+    /// encrypted-file store does (where every read costs a key derivation).
+    #[derive(Default)]
+    struct TokenStore {
+        inner: MemoryStore,
+        reads: std::sync::atomic::AtomicUsize,
+        token: std::sync::atomic::AtomicU64,
+        fail: std::sync::atomic::AtomicBool,
+    }
+
+    impl SecretStore for TokenStore {
+        fn get(
+            &self,
+            name: &str,
+        ) -> std::result::Result<Option<secret_store::SecretValue>, secret_store::SecretError>
+        {
+            self.inner.get(name)
+        }
+        fn set(
+            &self,
+            name: &str,
+            value: &str,
+        ) -> std::result::Result<(), secret_store::SecretError> {
+            self.inner.set(name, value)
+        }
+        fn delete(&self, name: &str) -> std::result::Result<bool, secret_store::SecretError> {
+            self.inner.delete(name)
+        }
+        fn list_names(&self) -> std::result::Result<Vec<String>, secret_store::SecretError> {
+            use std::sync::atomic::Ordering::SeqCst;
+            self.reads.fetch_add(1, SeqCst);
+            if self.fail.load(SeqCst) {
+                return Err(secret_store::SecretError::Corrupt("injected".into()));
+            }
+            self.inner.list_names()
+        }
+        fn change_token(&self) -> Option<u64> {
+            Some(self.token.load(std::sync::atomic::Ordering::SeqCst))
+        }
+    }
+
+    /// The redactor is refreshed at every run start and every few seconds; a
+    /// store that says it did not change must not be read again (one key
+    /// derivation per secret each time on a host), yet a change, or a failed
+    /// read, must always be picked up.
+    #[test]
+    fn redactor_refresh_skips_an_unchanged_store_but_never_a_changed_one() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let store = Arc::new(TokenStore::default());
+        let r = production_redactor(&sources(Some(store.clone()), None));
+        assert_eq!(store.reads.load(SeqCst), 1, "initial read");
+        for _ in 0..10 {
+            r.refresh_now();
+        }
+        assert_eq!(store.reads.load(SeqCst), 1, "unchanged store re-read");
+
+        store.inner.set("late", "late-secret-value-99").unwrap();
+        store.token.fetch_add(1, SeqCst);
+        r.refresh_now();
+        assert_eq!(store.reads.load(SeqCst), 2);
+        assert!(r.contains_secret("late-secret-value-99"));
+        r.refresh_now();
+        assert_eq!(store.reads.load(SeqCst), 2, "read again without a change");
+
+        // A failed read is not remembered as "up to date".
+        store.token.fetch_add(1, SeqCst);
+        store.fail.store(true, SeqCst);
+        r.refresh_now();
+        assert_eq!(store.reads.load(SeqCst), 3);
+        assert!(
+            r.contains_secret("late-secret-value-99"),
+            "kept the old set"
+        );
+        store.fail.store(false, SeqCst);
+        r.refresh_now();
+        assert_eq!(store.reads.load(SeqCst), 4, "retried after the failure");
+        r.refresh_now();
+        assert_eq!(store.reads.load(SeqCst), 4);
     }
 
     // Review #1: provider keys that only live in the environment and match no

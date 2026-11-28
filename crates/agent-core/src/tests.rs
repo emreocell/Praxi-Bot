@@ -7998,6 +7998,7 @@ async fn pre_058_paused_run_with_unknown_origin_fails_closed_after_migration() {
             DROP TABLE incoming_webhook_seen;
             DROP TABLE incoming_webhooks;
             DROP TABLE bot_workspaces; DROP TABLE workspace_settings;
+            DROP INDEX idx_messages_run; DROP INDEX idx_audit_run; DROP INDEX idx_audit_user_action;
             DROP TRIGGER chat_search_insert;
             DROP TRIGGER chat_search_delete;
             DROP TRIGGER chat_search_update;

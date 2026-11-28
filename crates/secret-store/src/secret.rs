@@ -229,6 +229,15 @@ pub trait SecretStore: Send + Sync {
     /// # Errors
     /// Backend failures.
     fn list_names(&self) -> Result<Vec<String>, SecretError>;
+
+    /// An opaque token that differs whenever the stored secrets may have
+    /// changed, for backends that can tell without reading them (the encrypted
+    /// file: a stat, no key derivation). Callers that poll the whole store may
+    /// skip a re-read while the token is unchanged. `None` (the default) means
+    /// "cannot tell": always re-read.
+    fn change_token(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// Resolve a [`SecretRef`] to its value. Call only at the provider / MCP boundary.
