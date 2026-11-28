@@ -45,6 +45,7 @@ import {
   initialDetailMode,
   metaOfCard,
   pageTextKey,
+  pageUsesManualCardSave,
   parsePage,
   queryWords,
   RECOMMENDED_SAFETY_PRESET,
@@ -532,6 +533,7 @@ export function SettingsModal({
       </section>
     ));
   const resettable = !searching && canReset(page);
+  const showAutoSave = !searching && !pageUsesManualCardSave(page);
 
   return (
     <Modal
@@ -633,15 +635,17 @@ export function SettingsModal({
                   <span>{t("settingsModal.reset.button")}</span>
                 </button>
               ) : null}
-              <span
-                className={[styles.saveState, save === "saved" ? styles.saveOk : ""].filter(Boolean).join(" ")}
-                role="status"
-                aria-live="polite"
-                data-testid="settings-save-state"
-              >
-                {save === "saving" ? <LoaderCircle className={styles.spin} aria-hidden="true" /> : <Check aria-hidden="true" />}
-                <span>{t(`settingsModal.save.${save}`)}</span>
-              </span>
+              {showAutoSave ? (
+                <span
+                  className={[styles.saveState, save === "saved" ? styles.saveOk : ""].filter(Boolean).join(" ")}
+                  role="status"
+                  aria-live="polite"
+                  data-testid="settings-save-state"
+                >
+                  {save === "saving" ? <LoaderCircle className={styles.spin} aria-hidden="true" /> : <Check aria-hidden="true" />}
+                  <span>{t(`settingsModal.save.${save}`)}</span>
+                </span>
+              ) : null}
               <button
                 type="button"
                 className={styles.close}
