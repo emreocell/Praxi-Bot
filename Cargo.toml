@@ -88,7 +88,7 @@ jpeg-encoder = "0.7"
 parking_lot = "0.12"
 png = "0.18"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "json"] }
-schemars = { version = "0.8", features = ["uuid1"] }
+schemars = { version = "1.2", features = ["uuid1"] }
 thiserror = "2"
 toml = "1.2.3"
 windows = "0.62"
