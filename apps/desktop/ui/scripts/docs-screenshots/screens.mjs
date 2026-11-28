@@ -40,10 +40,11 @@ export const SCREENS = [
     name: 'schedule-standing',
     height: 1280,
     query: 'screen=schedules',
-    ready: '[data-testid=schedule-standing-fields]',
+    ready: '[data-testid="schedules-view-list"]',
     act: async (page) => {
       await page.getByRole('button', { name: /^(New schedule|Yeni zamanlama)/ }).click();
       await page.getByTestId('schedule-task-kind-standing').click();
+      await page.waitForSelector('[data-testid="schedule-standing-fields"]', { timeout: 15000 });
       await page.waitForTimeout(400);
     }
   },

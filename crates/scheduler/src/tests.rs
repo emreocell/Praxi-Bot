@@ -1296,18 +1296,18 @@ async fn run_now_and_trigger_webhook_return_before_the_execution_ends() {
     let scheduler = Scheduler::start_with_clock(Arc::clone(&store), exec.clone(), clock);
 
     assert!(matches!(
-        scheduler.run_now(TaskId::new()),
+        scheduler.run_now(TaskId::new(), true),
         Err(SchedulerError::NotFound(_))
     ));
     let waiting = entered.notified();
     tokio::pin!(waiting);
     waiting.as_mut().enable();
-    scheduler.run_now(id).unwrap();
+    scheduler.run_now(id, true).unwrap();
     waiting.await;
     assert!(scheduler.is_in_flight(id));
     // Busy while the first one runs, for both entry points.
     assert!(matches!(
-        scheduler.run_now(id),
+        scheduler.run_now(id, true),
         Err(SchedulerError::Busy(_))
     ));
     let sig = sign_webhook_body("k", b"x");

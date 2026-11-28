@@ -34,7 +34,7 @@ import type {
   ScheduleHistoryEntry
 } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
-import { Switch } from "../components/SettingsUi";
+import { Switch, SwitchField } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
 import { botHasFullAccess, botView } from "../lib/botProfile";
 import { POLICY_CHANGED_EVENT } from "./settings/SafetyLevelsCard";
@@ -125,13 +125,17 @@ function TimezonePicker({
   value,
   allowEmpty,
   inputRef,
-  onChange
+  onChange,
+  ariaLabel,
+  testId = "schedule-tz"
 }: {
   inputRef?: Ref<HTMLInputElement>;
   value: string;
   /** `true`: an empty field means UTC (a 5-field cron). */
   allowEmpty: boolean;
   onChange: (tz: string) => void;
+  ariaLabel?: string;
+  testId?: string;
 }) {
   const { t } = useTranslation();
   const listId = useId();
@@ -150,10 +154,10 @@ function TimezonePicker({
         value={text}
         spellCheck={false}
         autoComplete="off"
-        aria-label={t("schedules.form.tz")}
+        aria-label={ariaLabel ?? t("schedules.form.tz")}
         aria-invalid={!valid}
         placeholder={t("schedules.form.tzSearch")}
-        data-testid="schedule-tz"
+        data-testid={testId}
         onChange={(e) => {
           setText(e.target.value);
           const v = e.target.value.trim();
@@ -1759,7 +1763,7 @@ function ScheduleForm({
                 <span className={formStyles.hint}>{t("schedules.form.promptHint")}</span>
               </label>
             ) : (
-              <div className={styles.formPair} data-testid="schedule-standing-fields">
+              <div data-testid="schedule-standing-fields">
                 <label className={formStyles.field}>
                   <span className={formStyles.label}>{t("schedules.form.standing.checklist")}</span>
                   <textarea
@@ -1772,41 +1776,36 @@ function ScheduleForm({
                   />
                   <span className={formStyles.hint}>{t("schedules.form.standing.checklistHint")}</span>
                 </label>
-                <div className={styles.formPair}>
-                  <label className={formStyles.field}>
-                    <span className={formStyles.label}>{t("schedules.form.standing.maxRuns")}</span>
-                    <input
-                      className={formStyles.input}
-                      type="number"
-                      min={1}
-                      max={288}
-                      value={draft.standing.maxRunsPerDay}
-                      data-testid="schedule-standing-max-runs"
-                      onChange={(e) =>
-                        patch({
-                          standing: {
-                            ...draft.standing,
-                            maxRunsPerDay: Number(e.target.value)
-                          }
-                        })
-                      }
-                    />
-                    <span className={formStyles.hint}>{t("schedules.form.standing.maxRunsHint")}</span>
-                  </label>
-                  <label className={formStyles.field}>
-                    <span className={formStyles.label}>
-                      <Switch
-                        checked={draft.standing.activeHoursEnabled}
-                        label={t("schedules.form.standing.activeHours")}
-                        onChange={(checked) =>
-                          patch({
-                            standing: { ...draft.standing, activeHoursEnabled: checked }
-                          })
+                <label className={formStyles.field}>
+                  <span className={formStyles.label}>{t("schedules.form.standing.maxRuns")}</span>
+                  <input
+                    className={formStyles.input}
+                    type="number"
+                    min={1}
+                    max={288}
+                    value={draft.standing.maxRunsPerDay}
+                    data-testid="schedule-standing-max-runs"
+                    onChange={(e) =>
+                      patch({
+                        standing: {
+                          ...draft.standing,
+                          maxRunsPerDay: Number(e.target.value)
                         }
-                      />
-                    </span>
-                  </label>
-                </div>
+                      })
+                    }
+                  />
+                  <span className={formStyles.hint}>{t("schedules.form.standing.maxRunsHint")}</span>
+                </label>
+                <SwitchField
+                  checked={draft.standing.activeHoursEnabled}
+                  label={t("schedules.form.standing.activeHours")}
+                  testId="schedule-standing-active-hours"
+                  onChange={(checked) =>
+                    patch({
+                      standing: { ...draft.standing, activeHoursEnabled: checked }
+                    })
+                  }
+                />
                 {draft.standing.activeHoursEnabled ? (
                   <div className={styles.formPair}>
                     <label className={formStyles.field}>
@@ -1844,6 +1843,8 @@ function ScheduleForm({
                       <TimezonePicker
                         value={draft.standing.activeHoursTz}
                         allowEmpty={false}
+                        ariaLabel={t("schedules.form.standing.hoursZone")}
+                        testId="schedule-standing-tz"
                         onChange={(tz) =>
                           patch({ standing: { ...draft.standing, activeHoursTz: tz || LOCAL_TZ } })
                         }

@@ -312,7 +312,7 @@ impl Scheduler {
             return Err(SchedulerError::Busy(id.to_string()));
         };
         self.commit_replay(pending, now_ms)?;
-        spawn_direct_execution(&self.inner, fired, guard);
+        spawn_direct_execution(&self.inner, fired, guard, false);
         Ok(())
     }
 
@@ -337,7 +337,7 @@ impl Scheduler {
     /// # Errors
     /// [`SchedulerError::NotFound`] for an unknown id,
     /// [`SchedulerError::Busy`] while a run of `id` is in flight.
-    pub fn run_now(&self, id: TaskId) -> Result<()> {
+    pub fn run_now(&self, id: TaskId, bypass_standing_hours: bool) -> Result<()> {
         let mut schedule = self
             .inner
             .store
@@ -352,7 +352,7 @@ impl Scheduler {
         let now_ms = self.inner.clock.wall_ms();
         self.inner.store.touch_last_run(id, now_ms)?;
         schedule.last_run_at = Some(now_ms);
-        spawn_direct_execution(&self.inner, schedule, guard);
+        spawn_direct_execution(&self.inner, schedule, guard, bypass_standing_hours);
         Ok(())
     }
 
@@ -721,7 +721,12 @@ fn try_acquire_in_flight(inner: &Arc<Inner>, schedule: &Schedule) -> Option<InFl
     })
 }
 
-fn spawn_direct_execution(inner: &Arc<Inner>, schedule: Schedule, guard: InFlightGuard) {
+fn spawn_direct_execution(
+    inner: &Arc<Inner>,
+    schedule: Schedule,
+    guard: InFlightGuard,
+    bypass_standing_hours: bool,
+) {
     let inner = Arc::clone(inner);
     tokio::spawn(async move {
         let _guard = guard;
@@ -731,7 +736,7 @@ fn spawn_direct_execution(inner: &Arc<Inner>, schedule: Schedule, guard: InFligh
             &schedule,
             None,
             inner.clock.wall_ms(),
-            true,
+            bypass_standing_hours,
         )
         .await
         {

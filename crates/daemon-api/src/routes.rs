@@ -2914,13 +2914,18 @@ pub(crate) async fn delete_schedule(
 pub(crate) async fn run_schedule_now(
     State(s): State<AppState>,
     Path(sid): Path<String>,
+    peer: Option<axum::Extension<crate::peer::PeerIdentity>>,
+    headers: axum::http::HeaderMap,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
     let sc = schedule_of_user(&s, &sid)?;
     if s.schedule_store()?.frozen_for(sc.id)?.is_some() {
         return Err(scheduler::SchedulerError::Frozen(sc.id.to_string()).into());
     }
+    let bypass_standing_hours =
+        author_of_caller(&s, peer.as_deref(), &headers) == scheduler::ScheduleAuthor::Owner;
     let scheduler = s.scheduler()?;
-    s.leader().with_active(|| scheduler.run_now(sc.id))??;
+    s.leader()
+        .with_active(|| scheduler.run_now(sc.id, bypass_standing_hours))??;
     Ok((
         StatusCode::ACCEPTED,
         Json(AcceptedResponse {

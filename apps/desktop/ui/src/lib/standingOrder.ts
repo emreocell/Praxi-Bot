@@ -1,7 +1,10 @@
 /** Standing-order helpers for the schedule editor (mirrors scheduler payload rules). */
 
+import { isTimeZoneName } from "./schedules.ts";
+
 export const DEFAULT_MAX_RUNS_PER_DAY = 24;
 export const MAX_RUNS_PER_DAY = 288;
+export const MAX_CHECKLIST_CHARS = 4000;
 
 export interface StandingActiveHours {
   start: string;
@@ -70,23 +73,24 @@ export function standingFromPayload(
 }
 
 export function validateStanding(fields: StandingOrderFields): StandingDraftError | null {
-  if (fields.checklist.trim() === "") return "checklist";
+  const checklist = fields.checklist.trim();
+  if (checklist === "") return "checklist";
+  if (checklist.length > MAX_CHECKLIST_CHARS) return "checklist";
   if (
-    !Number.isFinite(fields.maxRunsPerDay) ||
+    !Number.isInteger(fields.maxRunsPerDay) ||
     fields.maxRunsPerDay < 1 ||
     fields.maxRunsPerDay > MAX_RUNS_PER_DAY
   ) {
     return "maxRuns";
   }
   if (!fields.activeHoursEnabled) return null;
-  if (parseHhmm(fields.activeHoursStart) === null) return "hoursStart";
-  if (parseHhmm(fields.activeHoursEnd) === null) return "hoursEnd";
-  if (fields.activeHoursStart === fields.activeHoursEnd) return "hoursEnd";
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: fields.activeHoursTz.trim() });
-  } catch {
-    return "hoursTz";
-  }
+  const start = fields.activeHoursStart.trim();
+  const end = fields.activeHoursEnd.trim();
+  if (parseHhmm(start) === null) return "hoursStart";
+  if (parseHhmm(end) === null) return "hoursEnd";
+  if (start === end) return "hoursEnd";
+  const tz = fields.activeHoursTz.trim();
+  if (tz === "" || !isTimeZoneName(tz)) return "hoursTz";
   return null;
 }
 

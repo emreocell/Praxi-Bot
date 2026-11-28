@@ -958,3 +958,66 @@ async fn a_gated_timer_occurrence_is_not_recorded_as_a_success() {
     assert!(states.iter().all(|st| st == "missed"), "{states:?}");
     scheduler.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_webhook_does_not_bypass_standing_active_hours() {
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let exec = Arc::new(Counting::default());
+    let clock = Arc::new(FakeClock::new(utc_ms(3, 0)));
+    let mut s = Schedule::new(
+        BotId::new(),
+        None,
+        "hook",
+        ScheduleSpec::Every { seconds: 3600 },
+        order(Some(hours("08:00", "22:00", "UTC")), 5),
+        MisfirePolicy::Skip,
+        0,
+    )
+    .unwrap();
+    s.author = ScheduleAuthor::Owner;
+    let id = s.id;
+    store.insert(&s).unwrap();
+    store
+        .set_trigger(id, &Trigger::Webhook { secret: "k".into() })
+        .unwrap();
+    let scheduler = Scheduler::start_with_clock(store.clone(), exec.clone(), clock.clone());
+    let sig = crate::sign_webhook_body("k", b"go");
+    scheduler.trigger_webhook(id, "go", &sig).unwrap();
+    scheduler.settle().await;
+    assert_eq!(*exec.0.lock(), 0);
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn run_now_bypasses_hours_only_when_asked_and_the_daily_cap_always_holds() {
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let exec = Arc::new(Counting::default());
+    let clock = Arc::new(FakeClock::new(utc_ms(3, 0)));
+    let mut s = Schedule::new(
+        BotId::new(),
+        None,
+        "now",
+        ScheduleSpec::Every { seconds: 3600 },
+        order(Some(hours("08:00", "22:00", "UTC")), 1),
+        MisfirePolicy::Skip,
+        0,
+    )
+    .unwrap();
+    s.author = ScheduleAuthor::Owner;
+    store.insert(&s).unwrap();
+    let id = s.id;
+    let scheduler = Scheduler::start_with_clock(store.clone(), exec.clone(), clock.clone());
+    // Non-owner-style run-now: outside active hours, nothing runs.
+    scheduler.run_now(id, false).unwrap();
+    scheduler.settle().await;
+    assert_eq!(*exec.0.lock(), 0);
+    // Owner run-now at night: runs once.
+    scheduler.run_now(id, true).unwrap();
+    scheduler.settle().await;
+    assert_eq!(*exec.0.lock(), 1);
+    // Cap still applies even when bypassing hours.
+    scheduler.run_now(id, true).unwrap();
+    scheduler.settle().await;
+    assert_eq!(*exec.0.lock(), 1);
+    scheduler.shutdown().await;
+}
