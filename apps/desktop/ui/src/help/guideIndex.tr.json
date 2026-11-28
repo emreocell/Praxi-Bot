@@ -875,7 +875,9 @@
   {
     "doc": "tr/triggers.md",
     "title": "Bir şey olduğunda",
-    "headings": [],
+    "headings": [
+      "Akışlar, web sayfaları, takvim etkinlikleri ve Home Assistant"
+    ],
     "summary": "Bot panelinde Otomasyon → Bir şey olduğunda bölümünü açın. Yeni e-posta,"
   },
   {

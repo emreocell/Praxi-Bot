@@ -61,7 +61,7 @@ Seven short pages in plain words. Read them in this order:
 
 | Page | What it is |
 | --- | --- |
-| Wake a bot when mail or a signed call arrives | [When something happens](triggers.md) |
+| Wake a bot when mail, a signed call, a feed item, a page change, a calendar event or a Home Assistant change happens | [When something happens](triggers.md) |
 | [Getting started in 5 minutes](getting-started.md) | Install, get a free key, have your first chat, and learn what a bot is. |
 | [Keep your bot safe](keep-your-bot-safe.md) | The permission levels, approvals, and what leaves your computer. |
 | [Run it on this computer or on a server](local-or-server.md) | Why you do not need a server, and how to add one if you want. |

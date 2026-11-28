@@ -24,10 +24,97 @@ pub enum TriggerSource {
     Webhook { id: uuid::Uuid },
     /// Uses the existing scheduler clock and occurrence recovery.
     Time { spec: ScheduleSpec },
+    /// A new item in an RSS/Atom feed. The owner's URL, fetched politely with the SSRF guard.
+    Feed {
+        url: String,
+        #[serde(default = "default_feed_poll")]
+        poll_seconds: u64,
+    },
+    /// The text a CSS selector picks on a page changed. Same fetch rules as `Feed`.
+    Page {
+        url: String,
+        selector: String,
+        #[serde(default = "default_page_poll")]
+        poll_seconds: u64,
+    },
+    /// A calendar event starts within `minutes_before` minutes (`calendar_list_events`).
+    Calendar {
+        #[serde(default)]
+        account: Option<String>,
+        minutes_before: u32,
+        #[serde(default = "default_calendar_poll")]
+        poll_seconds: u64,
+    },
+    /// A Home Assistant entity changes state (`ha_get_state`).
+    HomeAssistant {
+        entity_id: String,
+        #[serde(default)]
+        to_state: Option<String>,
+        #[serde(default = "default_ha_poll")]
+        poll_seconds: u64,
+    },
 }
 
 const fn default_poll() -> u64 {
     120
+}
+/// Web sources are other people's servers: never faster than every 15 minutes.
+pub const WEB_MIN_POLL_SECONDS: u64 = 900;
+const fn default_feed_poll() -> u64 {
+    1800
+}
+const fn default_page_poll() -> u64 {
+    3600
+}
+const fn default_calendar_poll() -> u64 {
+    120
+}
+const fn default_ha_poll() -> u64 {
+    60
+}
+
+impl TriggerSource {
+    /// The polled trigger of an owner source that needs no mail filters; `None` for the rest.
+    #[must_use]
+    pub fn watch_trigger(&self) -> Option<Trigger> {
+        match self {
+            Self::Feed { url, .. } => Some(Trigger::Feed { url: url.clone() }),
+            Self::Page { url, selector, .. } => Some(Trigger::PageChange {
+                url: url.clone(),
+                selector: selector.clone(),
+            }),
+            Self::Calendar {
+                account,
+                minutes_before,
+                ..
+            } => Some(Trigger::Calendar {
+                account: account.clone().filter(|a| !a.is_empty()),
+                minutes_before: *minutes_before,
+            }),
+            Self::HomeAssistant {
+                entity_id,
+                to_state,
+                ..
+            } => Some(Trigger::HomeAssistant {
+                entity_id: entity_id.clone(),
+                to_state: to_state.clone().filter(|s| !s.is_empty()),
+            }),
+            Self::Mail { .. } | Self::Webhook { .. } | Self::Time { .. } => None,
+        }
+    }
+
+    /// How often the scheduler checks this source; `None` for sources it does not poll.
+    #[must_use]
+    pub const fn poll_seconds(&self) -> Option<u64> {
+        match self {
+            Self::Mail { poll_seconds, .. }
+            | Self::Feed { poll_seconds, .. }
+            | Self::Page { poll_seconds, .. }
+            | Self::Calendar { poll_seconds, .. }
+            | Self::HomeAssistant { poll_seconds, .. } => Some(*poll_seconds),
+            Self::Webhook { .. } | Self::Time { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,6 +319,40 @@ impl Rule {
                 }
             }
             TriggerSource::Webhook { .. } => {}
+            TriggerSource::Feed { poll_seconds, .. } | TriggerSource::Page { poll_seconds, .. } => {
+                let trigger = self
+                    .source
+                    .watch_trigger()
+                    .ok_or("choose a feed or page address")?;
+                if trigger.validate().is_err() {
+                    return Err(
+                        "use an http(s) address without a password and a selector of visible characters",
+                    );
+                }
+                if !(WEB_MIN_POLL_SECONDS..=86400).contains(poll_seconds) {
+                    return Err(
+                        "check a web address at most every 15 minutes (900 to 86,400 seconds)",
+                    );
+                }
+            }
+            TriggerSource::Calendar { poll_seconds, .. } => {
+                let trigger = self.source.watch_trigger().ok_or("choose a calendar")?;
+                if trigger.validate().is_err() {
+                    return Err("choose 1 to 1,440 minutes before the event");
+                }
+                if !(60..=3600).contains(poll_seconds) {
+                    return Err("check the calendar every 60 to 3,600 seconds");
+                }
+            }
+            TriggerSource::HomeAssistant { poll_seconds, .. } => {
+                let trigger = self.source.watch_trigger().ok_or("choose an entity")?;
+                if trigger.validate().is_err() {
+                    return Err("choose an entity such as light.kitchen and an optional state");
+                }
+                if !(30..=3600).contains(poll_seconds) {
+                    return Err("check Home Assistant every 30 to 3,600 seconds");
+                }
+            }
         }
         Ok(())
     }
@@ -245,7 +366,7 @@ impl Rule {
                 subject_filter: (!self.filters.subject.is_empty())
                     .then(|| self.filters.subject.clone()),
             }),
-            _ => None,
+            other => other.watch_trigger(),
         }
     }
     #[must_use]
@@ -254,6 +375,10 @@ impl Rule {
             TriggerSource::Mail { .. } => "trigger.mail",
             TriggerSource::Webhook { .. } => "trigger.webhook",
             TriggerSource::Time { .. } => "trigger.schedule",
+            TriggerSource::Feed { .. } => "trigger.feed",
+            TriggerSource::Page { .. } => "trigger.page",
+            TriggerSource::Calendar { .. } => "trigger.calendar",
+            TriggerSource::HomeAssistant { .. } => "trigger.home_assistant",
         }
     }
 

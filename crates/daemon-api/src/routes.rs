@@ -2331,10 +2331,7 @@ fn dto_of(s: &AppState, sc: &Schedule) -> Result<ScheduleDto, ApiError> {
     let has = matches!(trigger, Some(Trigger::Webhook { .. }));
     let mut dto = schedule_dto(sc, has);
     dto.moved_to = store.frozen_for(sc.id)?;
-    if matches!(
-        trigger,
-        Some(Trigger::FileWatch { .. } | Trigger::Email { .. })
-    ) {
+    if trigger.as_ref().is_some_and(Trigger::is_polled) {
         dto.next_run_at_ms = None;
     }
     dto.next_runs_ms = compute_next_runs(sc, dto.next_run_at_ms, dto.moved_to.is_some());
@@ -2790,10 +2787,10 @@ pub(crate) async fn update_schedule(
         && (input.trigger.is_some()
             || input.precheck.is_some()
             || sc.precheck.is_some()
-            || matches!(
-                s.schedule_store()?.get_trigger(sc.id)?,
-                Some(Trigger::FileWatch { .. } | Trigger::Email { .. })
-            ))
+            || s.schedule_store()?
+                .get_trigger(sc.id)?
+                .as_ref()
+                .is_some_and(Trigger::is_polled))
     {
         return Err(ApiError::forbidden(
             "schedule triggers and prechecks are local-owner only",

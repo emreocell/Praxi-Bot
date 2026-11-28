@@ -110,6 +110,7 @@ mod spend_routes;
 mod sse;
 mod stop;
 pub mod terminal;
+mod trigger_sources;
 mod triggers;
 pub mod usage;
 pub mod voice;

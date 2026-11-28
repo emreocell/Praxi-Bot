@@ -1433,7 +1433,11 @@
       "noHooks": "This bot has no signed address yet. Create one under “Signed addresses” below, then pick it here.",
       "shouldPlaceholder": "For example: summarise it and tell me only if I must reply today.",
       "title": {
+        "calendar": "Before a calendar event",
+        "feed": "When a feed has something new",
+        "home_assistant": "When a home device changes",
         "mail": "When an email arrives",
+        "page": "When a web page changes",
         "time": "At a set time",
         "webhook": "When an app calls in"
       }
@@ -1451,14 +1455,30 @@
     },
     "empty": "Nothing runs on its own yet. Write above when and what, for example “Every Monday at 8:00, plan my week”.",
     "events": {
+      "calendar": {
+        "line": "A calendar event is about to start, so the bot can prepare you.",
+        "title": "Before a calendar event"
+      },
+      "feed": {
+        "line": "A blog, news or release feed (RSS or Atom) gets a new item.",
+        "title": "When a feed has something new"
+      },
       "file": {
         "line": "A file is added to or changed in a folder. Ask in the chat (“when a new invoice lands in Downloads, file it”); the bot asks for the folder first.",
         "title": "When a file arrives"
+      },
+      "home_assistant": {
+        "line": "A Home Assistant sensor, switch or lock changes state.",
+        "title": "When a home device changes"
       },
       "intro": "Instead of a time, start when something happens:",
       "mail": {
         "line": "Mail from a person or domain, or with a subject. The bot reads the headers, never the body.",
         "title": "When an email arrives"
+      },
+      "page": {
+        "line": "The text you pick on a page changes, such as a price or a status.",
+        "title": "When a web page changes"
       },
       "title": "When something happens",
       "webhook": {
@@ -1533,10 +1553,14 @@
     "toggle": "Turn {{name}} on or off",
     "what": {
       "anyone": "anyone",
+      "calendar": "{{minutes}} min before a calendar event",
+      "feed": "A new item in {{host}}",
       "file": "A file changes in {{path}}",
       "fileShort": "When a file changes",
+      "home_assistant": "{{entity}} changes",
       "mail": "An email from {{from}}",
       "mailShort": "When an email arrives",
+      "page": "Text changes on {{host}}",
       "webhook": "An app calls its signed address"
     }
   },
@@ -1984,8 +2008,11 @@
     "triggers": {
       "account": "Mailbox",
       "add": "Add a rule",
+      "anyCalendar": "The default calendar",
       "approvalHint": "Uses this bot’s permissions. Actions that need your approval wait and notify you.",
       "attachment": "Has an attachment",
+      "calendar": "Calendar",
+      "calendarHint": "Starts the bot once per event, up to a couple of minutes late. Events already inside the window when you turn this on, and all-day events, do not start it. Needs a connected calendar this bot may read.",
       "chooseAccount": "Choose a mailbox",
       "chooseHook": "Choose a webhook",
       "close": "Close builder",
@@ -1998,12 +2025,15 @@
       "duringQuiet": "During quiet hours",
       "edit": "Edit rule",
       "end": "Until",
+      "entity": "Entity",
       "equals": "Address is",
       "exampleDraft": "Prepare a reply for me to review.",
       "exampleNotify": "Tell me only if action is needed.",
       "exampleSummary": "Summarize what needs my attention.",
       "existingHint": "Already set up. Open to add quiet hours and limits; saving starts it off.",
+      "feedHint": "An RSS or Atom address. The first check only notes the items that exist; later new items start the bot with their title, link and a short summary.",
       "folder": "Folder / label",
+      "haHint": "Needs Home Assistant connected and this bot allowed to use it. Checked about once a minute, so very quick back-and-forth changes can be missed.",
       "hook": "Signed webhook",
       "hookHint": "Create a signed address below, then link it here. Linked calls follow this rule instead of its original instruction.",
       "limitSummary": "{{hour}} / hour · {{day}} / day",
@@ -2012,29 +2042,34 @@
       "mail": "A mail arrives",
       "mailHint": "IMAP mailboxes only. Reads headers, never the body. First check starts watching new mail.",
       "manageHooks": "Signed addresses",
+      "minutesBefore": "Minutes before it starts",
       "name": "Name",
       "off": "Off",
+      "pageHint": "The page is fetched politely, at most every 15 minutes, and never from this computer’s own network. The first check only notes the current text.",
       "per_day": "Runs per day",
       "per_hour": "Runs per hour",
       "poll": "Check every (seconds)",
+      "pollMinutes": "Check every (minutes, at least 15)",
       "preview": "Show what the bot receives",
       "previewHint": "Exact instruction and protected event text, capped for size. No run starts and no tools are used.",
       "queueError": "Too many events are waiting. Narrow the filters, then turn this rule on again.",
       "quietHours": "Quiet hours",
       "remove": "Remove rule",
       "runError": "The last run did not finish or the queue is full. Check activity and filters, then turn this on again.",
-      "sample": "Sample subject or call text",
+      "sample": "Sample subject, call or event text",
       "sampleMatches": "This sample matches the filters.",
       "sampleMisses": "This sample does not match the filters.",
       "save": "Save changes",
       "saveOff": "Save · starts off",
       "schedule": "Schedule",
       "scheduleHint": "Example: 0 9 * * * Europe/Berlin (every day at 09:00). Minimum five minutes apart.",
+      "selector": "Part of the page to watch (CSS selector)",
+      "selectorHint": "For example #price, h1.title or .stock. Only the text of what it picks is compared. If the selector stops finding anything, the rule pauses instead of reporting a change.",
       "sender": "Sender",
       "senderError": "The sender filter is not an address or a domain, so this rule is off and matches nothing. Enter an exact address (ann@example.com) or a domain (example.com), then turn it on again.",
       "senderMatch": "Sender rule",
       "should": "The bot should",
-      "sourceError": "Mailbox checks failed repeatedly. Check the connection and permissions, then turn this on again.",
+      "sourceError": "Checks of the source failed repeatedly. Check the connection, address and permissions, then turn this on again.",
       "start": "From",
       "subject": "Subject contains (optional)",
       "test": "Test with a sample",
@@ -2043,9 +2078,16 @@
       "time": "On a schedule",
       "timezone": "Time zone",
       "title": "When something happens",
+      "toState": "Only when it becomes (optional)",
+      "toStateHint": "For example on, off, home or unlocked. Empty means any change.",
+      "url": "Web address",
       "useQuiet": "Keep this bot quiet overnight",
       "webhook": "A webhook is called",
-      "when": "When"
+      "when": "When",
+      "when_calendar": "A calendar event is about to start",
+      "when_feed": "A new item appears in a feed",
+      "when_home_assistant": "A Home Assistant device changes",
+      "when_page": "Text on a web page changes"
     },
     "untitled": "New chat",
     "upcoming": {

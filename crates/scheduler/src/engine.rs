@@ -1015,13 +1015,12 @@ async fn poll_one(
             state.trigger_errors = 0;
         } else {
             state.trigger_errors = state.trigger_errors.saturating_add(1);
-            watch.next_poll_ms = now.saturating_add(match trigger {
-                crate::Trigger::Email { .. } => crate::watch::EMAIL_POLL_MS,
-                _ => crate::watch::FILE_POLL_MS,
-            });
+            watch.next_poll_ms = now.saturating_add(crate::watch::default_poll_ms(trigger));
         }
+        // An owner rule sets its own cadence, also after a failed check: a source that is
+        // down must not be asked again every few seconds.
         if let Some((rule, _)) = inner.store.registry(schedule.id)?
-            && let crate::registry::TriggerSource::Mail { poll_seconds, .. } = rule.source
+            && let Some(poll_seconds) = rule.source.poll_seconds()
         {
             watch.next_poll_ms = now.saturating_add(
                 i64::try_from(poll_seconds)

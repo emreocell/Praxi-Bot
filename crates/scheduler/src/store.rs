@@ -368,7 +368,7 @@ impl ScheduleStore {
     pub fn list_due(&self, now_ms: i64) -> Result<Vec<Schedule>> {
         let conn = self.conn();
         let mut st = conn.prepare(&format!(
-            "{SCHEDULE_SELECT} WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook') \
+            "{SCHEDULE_SELECT} WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email','feed','page_change','calendar','home_assistant')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook') \
              AND next_run_at_ms <= ?1 ORDER BY next_run_at_ms ASC, id ASC"
         ))?;
         let rows = st.query_map([now_ms], schedule_row)?;
@@ -382,7 +382,7 @@ impl ScheduleStore {
     pub fn nearest_next_run_at(&self) -> Result<Option<i64>> {
         let min_ts: Option<i64> = self.conn().query_row(
             "SELECT MIN(next_run_at_ms) FROM schedules \
-             WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook')",
+             WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email','feed','page_change','calendar','home_assistant')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook')",
             [],
             |r| r.get(0),
         )?;
@@ -550,7 +550,7 @@ impl ScheduleStore {
             ));
         }
         let has_source: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM schedule_triggers WHERE schedule_id=?1 AND json_extract(trigger_json,'$.kind') IN ('file_watch','email')) OR EXISTS(SELECT 1 FROM trigger_registry WHERE schedule_id=?1)",
+            "SELECT EXISTS(SELECT 1 FROM schedule_triggers WHERE schedule_id=?1 AND json_extract(trigger_json,'$.kind') IN ('file_watch','email','feed','page_change','calendar','home_assistant')) OR EXISTS(SELECT 1 FROM trigger_registry WHERE schedule_id=?1)",
             [definition.id.to_string()],
             |row| row.get(0),
         )?;

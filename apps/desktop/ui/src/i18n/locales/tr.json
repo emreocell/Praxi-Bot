@@ -1433,7 +1433,11 @@
       "noHooks": "Bu botun henüz imzalı adresi yok. Aşağıdaki “İmzalı adresler”den bir tane oluştur, sonra burada seç.",
       "shouldPlaceholder": "Örneğin: özetle, yalnızca bugün yanıtlamam gerekiyorsa haber ver.",
       "title": {
+        "calendar": "Bir takvim etkinliğinden önce",
+        "feed": "Bir akışta yeni öğe çıktığında",
+        "home_assistant": "Bir ev cihazı değiştiğinde",
         "mail": "Bir e-posta geldiğinde",
+        "page": "Bir web sayfası değiştiğinde",
         "time": "Belirli bir saatte",
         "webhook": "Bir uygulama haber verdiğinde"
       }
@@ -1451,14 +1455,30 @@
     },
     "empty": "Henüz kendiliğinden çalışan bir şey yok. Yukarıya ne zaman ve ne yapacağını yaz; örneğin “Her pazartesi 8:00'de haftamı planla”.",
     "events": {
+      "calendar": {
+        "line": "Bir takvim etkinliği başlamak üzeredir; bot sizi hazırlayabilir.",
+        "title": "Bir takvim etkinliğinden önce"
+      },
+      "feed": {
+        "line": "Bir blog, haber ya da sürüm akışına (RSS veya Atom) yeni öğe eklenir.",
+        "title": "Bir akışta yeni öğe çıktığında"
+      },
       "file": {
         "line": "Bir klasöre dosya eklenince ya da dosya değişince. Sohbette iste (“İndirilenler'e yeni fatura gelince klasörüne taşı”); bot önce klasör iznini sorar.",
         "title": "Bir dosya geldiğinde"
+      },
+      "home_assistant": {
+        "line": "Bir Home Assistant sensörü, anahtarı ya da kilidi durum değiştirir.",
+        "title": "Bir ev cihazı değiştiğinde"
       },
       "intro": "Belirli bir saat yerine bir şey olunca başlasın:",
       "mail": {
         "line": "Bir kişiden, bir alan adından ya da bir konuyla gelen posta. Bot yalnızca başlıkları okur, gövdeyi okumaz.",
         "title": "Bir e-posta geldiğinde"
+      },
+      "page": {
+        "line": "Sayfada seçtiğiniz metin, örneğin bir fiyat ya da durum, değişir.",
+        "title": "Bir web sayfası değiştiğinde"
       },
       "title": "Bir şey olduğunda",
       "webhook": {
@@ -1533,10 +1553,14 @@
     "toggle": "{{name}} açılsın ya da kapansın",
     "what": {
       "anyone": "herkes",
+      "calendar": "Takvim etkinliğinden {{minutes}} dk önce",
+      "feed": "{{host}} adresinde yeni öğe",
       "file": "{{path}} içinde bir dosya değişince",
       "fileShort": "Bir dosya değişince",
+      "home_assistant": "{{entity}} değişir",
       "mail": "E-posta · gönderen: {{from}}",
       "mailShort": "Bir e-posta gelince",
+      "page": "{{host}} sayfasında metin değişir",
       "webhook": "Bir uygulama imzalı adresini çağırınca"
     }
   },
@@ -1984,8 +2008,11 @@
     "triggers": {
       "account": "Posta kutusu",
       "add": "Kural ekle",
+      "anyCalendar": "Varsayılan takvim",
       "approvalHint": "Bu botun izinleri geçerlidir. Onayınız gereken işlemler bekler ve size bildirilir.",
       "attachment": "Eki varsa",
+      "calendar": "Takvim",
+      "calendarHint": "Botu her etkinlik için bir kez, birkaç dakikaya kadar gecikmeyle başlatır. Bunu açtığınızda zaten bu aralığa girmiş etkinlikler ve tüm gün süren etkinlikler botu başlatmaz. Bu botun okuyabildiği bağlı bir takvim gerekir.",
       "chooseAccount": "Posta kutusu seçin",
       "chooseHook": "Webhook seçin",
       "close": "Düzenleyiciyi kapat",
@@ -1998,12 +2025,15 @@
       "duringQuiet": "Sessiz saatlerde",
       "edit": "Kuralı düzenle",
       "end": "Bitiş",
+      "entity": "Varlık",
       "equals": "Adresi şu olan",
       "exampleDraft": "İncelemem için bir yanıt taslağı hazırla.",
       "exampleNotify": "Yalnızca işlem gerekiyorsa bana haber ver.",
       "exampleSummary": "İlgilenmem gerekenleri özetle.",
       "existingHint": "Önceden ayarlanmış. Sessiz saat ve sınır eklemek için açın; kaydedince kapalı başlar.",
+      "feedHint": "Bir RSS ya da Atom adresi. İlk kontrol yalnızca mevcut öğeleri not eder; sonradan çıkan yeni öğeler botu başlığı, bağlantısı ve kısa özetiyle başlatır.",
       "folder": "Klasör / etiket",
+      "haHint": "Home Assistant’ın bağlı olması ve bu bota izin verilmesi gerekir. Yaklaşık dakikada bir kontrol edilir; çok hızlı gidip gelen değişiklikler kaçabilir.",
       "hook": "İmzalı webhook",
       "hookHint": "Aşağıda imzalı bir adres oluşturup buraya bağlayın. Bağlanan çağrılar önceki talimat yerine bu kurala uyar.",
       "limitSummary": "{{hour}} / saat · {{day}} / gün",
@@ -2012,29 +2042,34 @@
       "mail": "Bir e-posta geldiğinde",
       "mailHint": "Yalnızca IMAP posta kutuları. Gövdeyi değil, başlıkları okur. İlk kontrol yeni postaları izlemeyi başlatır.",
       "manageHooks": "İmzalı adresler",
+      "minutesBefore": "Başlamadan kaç dakika önce",
       "name": "Ad",
       "off": "Kapalı",
+      "pageHint": "Sayfa nazikçe, en sık 15 dakikada bir getirilir ve bu bilgisayarın kendi ağından asla getirilmez. İlk kontrol yalnızca o anki metni not eder.",
       "per_day": "Günlük çalıştırma",
       "per_hour": "Saatlik çalıştırma",
       "poll": "Kontrol aralığı (saniye)",
+      "pollMinutes": "Kontrol aralığı (dakika, en az 15)",
       "preview": "Botun alacağı metni göster",
       "previewHint": "Boyutu sınırlanmış, tam talimat ve korumalı olay metni. Çalıştırma başlamaz, araç kullanılmaz.",
       "queueError": "Çok fazla olay bekliyor. Filtreleri daraltıp bu kuralı yeniden açın.",
       "quietHours": "Sessiz saatler",
       "remove": "Kuralı kaldır",
       "runError": "Son çalıştırma tamamlanmadı veya kuyruk dolu. Etkinliği ve filtreleri kontrol edip yeniden açın.",
-      "sample": "Örnek konu veya çağrı metni",
+      "sample": "Örnek konu, çağrı veya olay metni",
       "sampleMatches": "Bu örnek filtrelere uyuyor.",
       "sampleMisses": "Bu örnek filtrelere uymuyor.",
       "save": "Değişiklikleri kaydet",
       "saveOff": "Kaydet · kapalı başlar",
       "schedule": "Zamanlama",
       "scheduleHint": "Örnek: 0 9 * * * Europe/Istanbul (her gün 09.00). En az beş dakika arayla.",
+      "selector": "Sayfada izlenecek bölüm (CSS seçici)",
+      "selectorHint": "Örneğin #price, h1.title ya da .stock. Yalnızca seçtiği bölümün metni karşılaştırılır. Seçici hiçbir şey bulamaz olursa kural, değişiklik bildirmek yerine duraklar.",
       "sender": "Gönderen",
       "senderError": "Gönderen filtresi bir adres ya da alan adı değil; bu yüzden kural kapalı ve hiçbir postayla eşleşmiyor. Tam bir adres (ann@example.com) ya da alan adı (example.com) girip yeniden açın.",
       "senderMatch": "Gönderen kuralı",
       "should": "Bot şunu yapsın",
-      "sourceError": "Posta kutusu kontrolleri art arda başarısız oldu. Bağlantıyı ve izinleri kontrol edip yeniden açın.",
+      "sourceError": "Kaynak kontrolleri art arda başarısız oldu. Bağlantıyı, adresi ve izinleri kontrol edip yeniden açın.",
       "start": "Başlangıç",
       "subject": "Konu şunu içeriyorsa (isteğe bağlı)",
       "test": "Örnekle dene",
@@ -2043,9 +2078,16 @@
       "time": "Belirli bir zamanda",
       "timezone": "Saat dilimi",
       "title": "Bir şey olduğunda",
+      "toState": "Yalnızca şu duruma geçince (isteğe bağlı)",
+      "toStateHint": "Örneğin on, off, home ya da unlocked. Boş bırakırsanız her değişiklik sayılır.",
+      "url": "Web adresi",
       "useQuiet": "Bu bot geceleri sessiz kalsın",
       "webhook": "Bir webhook çağrıldığında",
-      "when": "Ne zaman"
+      "when": "Ne zaman",
+      "when_calendar": "Bir takvim etkinliği başlamak üzereyken",
+      "when_feed": "Bir akışta yeni öğe çıktığında",
+      "when_home_assistant": "Bir Home Assistant cihazı değiştiğinde",
+      "when_page": "Bir web sayfasındaki metin değiştiğinde"
     },
     "untitled": "Yeni sohbet",
     "upcoming": {

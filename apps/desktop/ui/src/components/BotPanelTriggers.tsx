@@ -1,12 +1,12 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { EmailAccount, IncomingWebhook } from "../api/types";
+import type { CalendarAccount, EmailAccount, IncomingWebhook } from "../api/types";
 import { accountsForBot } from "../lib/botMail";
 import { DEFAULT_SIMPLE, simpleSpec } from "../lib/scheduleBuilder";
 import { specLabel } from "../lib/schedules";
 import { humanLine } from "../lib/humanError";
-import { clockTime, dailyTime, minutes, triggerInput, triggerSpec, type BotTrigger, type TriggerInput, type TriggerPreview, type TriggerSource } from "../lib/triggers";
+import { EVENT_KINDS, WEB_MIN_POLL_SECONDS, clockTime, dailyTime, minutes, newSource, sampleEvent, triggerInput, triggerSpec, type BotTrigger, type TriggerInput, type TriggerKind, type TriggerPreview, type TriggerSource } from "../lib/triggers";
 import { useDaemon } from "../state/DaemonContext";
 import { useToast } from "./Toast";
 import styles from "./BotPanelTriggers.module.css";
@@ -21,7 +21,7 @@ export interface TriggerEdit {
 }
 
 /**
- * The rule builder of the Automation tab: when (mail / webhook / time), what the bot should do,
+ * The rule builder of the Automation tab: when (mail / webhook / feed / page / calendar / Home Assistant / time), what the bot should do,
  * then the optional parts folded (quiet hours, limits, a dry run). The list lives in
  * `BotPanelAutomation`; this is only the form.
  */
@@ -33,6 +33,7 @@ export function TriggerBuilder({ botId, start, onClose, onSaved }: { botId: stri
   const { editing, adopting } = start;
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [hooks, setHooks] = useState<IncomingWebhook[]>([]);
+  const [calendars, setCalendars] = useState<CalendarAccount[]>([]);
   const [preview, setPreview] = useState<TriggerPreview | null>(null);
   const [sample, setSample] = useState("");
   const [busy, setBusy] = useState(false);
@@ -43,8 +44,9 @@ export function TriggerBuilder({ botId, start, onClose, onSaved }: { botId: stri
   useEffect(() => {
     if (!client) return;
     let live = true;
-    void Promise.allSettled([client.listEmailAccounts(), client.listIncomingWebhooks(botId)]).then(([mail, webhooks]) => {
+    void Promise.allSettled([client.listEmailAccounts(), client.listIncomingWebhooks(botId), client.listCalendarAccounts()]).then(([mail, webhooks, calendar]) => {
       if (!live) return;
+      setCalendars(calendar.status === "fulfilled" ? calendar.value : []);
       setAccounts(mail.status === "fulfilled" ? accountsForBot(mail.value, botId) : []);
       setHooks(webhooks.status === "fulfilled" ? webhooks.value : []);
       setMailError(mail.status === "rejected" ? humanLine(mail.reason) : null);
@@ -78,8 +80,8 @@ export function TriggerBuilder({ botId, start, onClose, onSaved }: { botId: stri
       <div className={styles.row}><h4 className={styles.formTitle} ref={titleRef} tabIndex={-1}>{heading}</h4><button type="button" className={styles.iconButton} aria-label={tr("close")} title={tr("close")} onClick={onClose}><X aria-hidden="true" /></button></div>
       {start.lastError && <p role="alert" className={styles.error}>{tr(start.lastError === "source" ? "sourceError" : start.lastError === "sender" ? "senderError" : start.lastError === "queue" ? "queueError" : "runError")}</p>}
       {adopting && <p className={styles.note}>{tr("existingHint")}</p>}
-      <label className={styles.field}>{tr("when")}<select value={source.kind} data-testid="trigger-kind" onChange={e => setSource(e.target.value === "mail" ? { kind: "mail", account: "", folder: "INBOX", own_address: "", poll_seconds: 120 } : e.target.value === "webhook" ? { kind: "webhook", id: "" } : { kind: "time", spec: { cron: `0 9 * * * ${Intl.DateTimeFormat().resolvedOptions().timeZone}` } })}>
-        <option value="mail">{tr("mail")}</option><option value="webhook">{tr("webhook")}</option><option value="time">{tr("time")}</option></select></label>
+      <label className={styles.field}>{tr("when")}<select value={source.kind} data-testid="trigger-kind" onChange={e => setSource(newSource(e.target.value as TriggerKind))}>
+        {[...EVENT_KINDS, "time" as const].map(k => <option key={k} value={k}>{tr(k === "mail" || k === "webhook" || k === "time" ? k : `when_${k}`)}</option>)}</select></label>
       {source.kind === "mail" && <>
         {mailError && <p role="alert" className={styles.error}>{mailError}</p>}
         <label className={styles.field}>{tr("account")}<select required value={source.account} onChange={e => { const a = accounts.find(a => a.name === e.target.value); setSource({ ...source, account: e.target.value, own_address: a?.address ?? "" }); }}><option value="">{tr("chooseAccount")}</option>{accounts.filter(a => a.provider === "imap_smtp").map(a => <option key={a.name} value={a.name}>{a.address}</option>)}</select></label>
@@ -94,6 +96,22 @@ export function TriggerBuilder({ botId, start, onClose, onSaved }: { botId: stri
         </details>
       </>}
       {source.kind === "webhook" && <>{hookError && <p role="alert" className={styles.error}>{hookError}</p>}<label className={styles.field}>{tr("hook")}<select required value={source.id} onChange={e => setSource({ ...source, id: e.target.value })}><option value="">{tr("chooseHook")}</option>{hooks.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}</select></label><p className={styles.note}>{hooks.length ? tr("hookHint") : t("automation.builder.noHooks")}</p></>}
+      {(source.kind === "feed" || source.kind === "page") && <>
+        <label className={styles.field}>{tr("url")}<input required type="url" maxLength={2048} value={source.url} placeholder="https://example.com/feed.xml" data-testid="trigger-url" onChange={e => setSource({ ...source, url: e.target.value })} /></label>
+        {source.kind === "page" && <label className={styles.field}>{tr("selector")}<input required maxLength={256} value={source.selector} placeholder="#price" data-testid="trigger-selector" onChange={e => setSource({ ...source, selector: e.target.value })} /><span className={styles.note}>{tr("selectorHint")}</span></label>}
+        <p className={styles.note}>{tr(source.kind === "feed" ? "feedHint" : "pageHint")}</p>
+        <label className={styles.field}>{tr("pollMinutes")}<input type="number" min={WEB_MIN_POLL_SECONDS / 60} max={1440} value={Math.round(source.poll_seconds / 60)} onChange={e => setSource({ ...source, poll_seconds: Number(e.target.value) * 60 })} /></label>
+      </>}
+      {source.kind === "calendar" && <>
+        <label className={styles.field}>{tr("calendar")}<select value={source.account ?? ""} onChange={e => setSource({ ...source, account: e.target.value || null })}><option value="">{tr("anyCalendar")}</option>{calendars.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}</select></label>
+        <label className={styles.field}>{tr("minutesBefore")}<input required type="number" min={1} max={1440} value={source.minutes_before} data-testid="trigger-minutes" onChange={e => setSource({ ...source, minutes_before: Number(e.target.value) })} /></label>
+        <p className={styles.note}>{tr("calendarHint")}</p>
+      </>}
+      {source.kind === "home_assistant" && <>
+        <label className={styles.field}>{tr("entity")}<input required maxLength={128} value={source.entity_id} placeholder="binary_sensor.front_door" data-testid="trigger-entity" onChange={e => setSource({ ...source, entity_id: e.target.value })} /></label>
+        <label className={styles.field}>{tr("toState")}<input maxLength={255} value={source.to_state ?? ""} placeholder="on" onChange={e => setSource({ ...source, to_state: e.target.value || null })} /><span className={styles.note}>{tr("toStateHint")}</span></label>
+        <p className={styles.note}>{tr("haHint")}</p>
+      </>}
       {source.kind === "time" && <>
         {daily && <div className={styles.pair}><label className={styles.field}>{tr("dailyAt")}<input type="time" required value={daily.time} onChange={e => { const spec=simpleSpec({ ...DEFAULT_SIMPLE, time:e.target.value }, daily.zone); if(spec) setSource({ kind:"time",spec }); }} /></label>
         <label className={styles.field}>{tr("timezone")}<input required value={daily.zone} onChange={e => { const spec=simpleSpec({ ...DEFAULT_SIMPLE,time:daily.time },e.target.value); if(spec) setSource({ kind:"time",spec }); }} /></label></div>}
@@ -119,7 +137,7 @@ export function TriggerBuilder({ botId, start, onClose, onSaved }: { botId: stri
           setBusy(true);
           const mail = source.kind === "mail";
           const sender = draft.config.filters.sender_match === "domain" ? `person@${draft.config.filters.sender.replace(/^@/, "")}` : draft.config.filters.sender;
-          const event = mail ? { uid: 1, from: sender, from_addr: sender.toLowerCase(), subject: sample || draft.config.filters.subject, automation_headers: {}, has_attachment: true } : { body: sample, received_at: 0 };
+          const event = mail ? { uid: 1, from: sender, from_addr: sender.toLowerCase(), subject: sample || draft.config.filters.subject, automation_headers: {}, has_attachment: true } : sampleEvent(source, sample);
           void client.previewTrigger(botId, { instruction: draft.instruction, config: draft.config, sample: event }).then(setPreview).catch(e => toast.show(humanLine(e), "danger")).finally(() => setBusy(false));
         }}>{tr("preview")}</button>
         {preview && <><p className={styles.note}>{tr(preview.matches ? "sampleMatches" : "sampleMisses")}</p><pre className={styles.preview} data-testid="trigger-preview">{preview.text}</pre></>}

@@ -202,6 +202,14 @@ fn child_text(n: Node<'_, '_>, local: &str) -> Option<String> {
     child(n, local).and_then(text_of)
 }
 
+fn feed_text_char_ok(c: char) -> bool {
+    !c.is_control()
+        && !matches!(
+            c,
+            '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}'
+        )
+}
+
 /// Strip markup from a feed text field and collapse whitespace.
 fn plain(s: &str) -> String {
     let text = if s.contains('<') {
@@ -212,7 +220,12 @@ fn plain(s: &str) -> String {
     } else {
         s.to_string()
     };
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    text.chars()
+        .filter(|&c| feed_text_char_ok(c))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn abs(base: Option<&Url>, link: &str) -> String {

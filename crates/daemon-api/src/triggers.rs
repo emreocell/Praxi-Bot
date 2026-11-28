@@ -167,6 +167,33 @@ fn validate(s: &AppState, bot: BotId, input: &TriggerInput) -> Result<Rule, ApiE
                 .ok_or_else(|| ApiError::not_found("webhook"))?;
         }
         TriggerSource::Time { .. } => {}
+        TriggerSource::Feed { .. } => {
+            s.agent()
+                .validate_schedule_web_poll(bot)
+                .map_err(unavailable_source)?;
+        }
+        TriggerSource::Page { selector, .. } => {
+            web_tools::watch::check_selector(selector).map_err(|_| {
+                bad_trigger("write the selector as CSS, for example #price or h1.title")
+            })?;
+            s.agent()
+                .validate_schedule_web_poll(bot)
+                .map_err(unavailable_source)?;
+        }
+        TriggerSource::Calendar { .. } => {
+            s.agent()
+                .validate_schedule_read(bot, "calendar_list_events", &Value::Null)
+                .map_err(|_| {
+                    unavailable_source("connect a calendar first, and allow this bot to read it")
+                })?;
+        }
+        TriggerSource::HomeAssistant { .. } => {
+            s.agent()
+                .validate_schedule_read(bot, "ha_get_state", &Value::Null)
+                .map_err(|_| {
+                    unavailable_source("connect Home Assistant first, and allow this bot to use it")
+                })?;
+        }
     }
     Ok(rule)
 }

@@ -902,7 +902,9 @@
   {
     "doc": "triggers.md",
     "title": "When something happens",
-    "headings": [],
+    "headings": [
+      "Feeds, web pages, calendar events and Home Assistant"
+    ],
     "summary": "Open a bot's panel, choose Automation, then When something happens."
   },
   {

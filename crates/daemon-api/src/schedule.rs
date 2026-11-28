@@ -417,6 +417,17 @@ async fn poll_trigger(
     poll_trigger_with_rule(agent, storage, bot, id, trigger, None).await
 }
 
+#[cfg(test)]
+pub(crate) async fn poll_trigger_for_tests(
+    agent: &AgentLoop,
+    storage: &Storage,
+    bot: BotId,
+    id: protocol::TaskId,
+    trigger: &scheduler::Trigger,
+) -> scheduler::Result<Vec<scheduler::watch::Observation>> {
+    poll_trigger(agent, storage, bot, id, trigger).await
+}
+
 async fn poll_trigger_with_rule(
     agent: &AgentLoop,
     storage: &Storage,
@@ -485,8 +496,72 @@ async fn poll_trigger_with_rule(
                 email_observations(&output, from_filter, subject_filter.as_deref())
             }
         }
+        scheduler::Trigger::Feed { url } => {
+            authorize_web_poll(agent, bot, id)?;
+            crate::trigger_sources::feed_observations(crate::trigger_sources::web_fetcher(), url)
+                .await
+        }
+        scheduler::Trigger::PageChange { url, selector } => {
+            authorize_web_poll(agent, bot, id)?;
+            crate::trigger_sources::page_observations(
+                crate::trigger_sources::web_fetcher(),
+                url,
+                selector,
+            )
+            .await
+        }
+        scheduler::Trigger::Calendar {
+            account,
+            minutes_before,
+        } => calendar_poll(agent, bot, id, account.as_deref(), *minutes_before).await,
+        scheduler::Trigger::HomeAssistant { entity_id, .. } => {
+            let output = agent
+                .schedule_read_host(bot, id)
+                .call_tool("ha_get_state", serde_json::json!({"entity_id": entity_id}))
+                .await
+                .map_err(exec_err)?;
+            crate::trigger_sources::ha_observation(&output, entity_id)
+        }
         scheduler::Trigger::Webhook { .. } => Err(exec_err("webhooks are not polled")),
     }
+}
+
+async fn calendar_poll(
+    agent: &AgentLoop,
+    bot: BotId,
+    id: protocol::TaskId,
+    account: Option<&str>,
+    minutes_before: u32,
+) -> scheduler::Result<Vec<scheduler::watch::Observation>> {
+    let now = storage::now_ms();
+    let iso = |ms: i64| {
+        chrono::DateTime::from_timestamp_millis(ms)
+            .unwrap_or_default()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    // One extra minute: the connector lists what overlaps the range, we filter exactly.
+    let mut input = serde_json::json!({
+        "limit": 100,
+        "from": iso(now),
+        "to": iso(now.saturating_add((i64::from(minutes_before) + 1) * 60_000)),
+    });
+    if let Some(account) = account {
+        input["account"] = account.into();
+    }
+    let output = agent
+        .schedule_read_host(bot, id)
+        .call_tool("calendar_list_events", input)
+        .await
+        .map_err(exec_err)?;
+    crate::trigger_sources::calendar_observations(&output, now, minutes_before)
+}
+
+fn authorize_web_poll(
+    agent: &AgentLoop,
+    bot: BotId,
+    id: protocol::TaskId,
+) -> scheduler::Result<()> {
+    agent.authorize_schedule_web_poll(bot, id).map_err(exec_err)
 }
 
 fn email_observations(
@@ -652,6 +727,14 @@ pub(crate) async fn validate_trigger(
             .await
             .map(|_| ())
             .map_err(|_| "file watch requires an allowed, bounded workspace directory".into()),
+        // Feeds, pages, calendars and Home Assistant are created in "When something happens"
+        // (the owner's rule), never as a bare schedule trigger.
+        scheduler::Trigger::Feed { .. }
+        | scheduler::Trigger::PageChange { .. }
+        | scheduler::Trigger::Calendar { .. }
+        | scheduler::Trigger::HomeAssistant { .. } => {
+            Err("create this in “When something happens” on the bot's Automation tab".into())
+        }
     }
 }
 

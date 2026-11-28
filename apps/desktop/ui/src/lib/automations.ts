@@ -7,7 +7,7 @@ import type { Schedule, ScheduleHistoryEntry } from "../api/types";
 import { historyStatusTone, sortSchedules, specLabel, type SpecLabel } from "./schedules.ts";
 import type { BotTrigger } from "./triggers.ts";
 
-export type AutomationKind = "time" | "mail" | "webhook" | "file";
+export type AutomationKind = "time" | "mail" | "webhook" | "file" | "feed" | "page" | "calendar" | "home_assistant";
 
 export type AutomationRow =
   | { key: string; kind: AutomationKind; name: string; enabled: boolean; schedule: Schedule; trigger?: undefined }

@@ -8,7 +8,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 
 | Sayfa | Ne anlatır |
 | --- | --- |
-| [Bir şey olduğunda](triggers.md) | E-posta veya imzalı çağrıyla botu uyandırma. |
+| [Bir şey olduğunda](triggers.md) | E-posta, imzalı çağrı, akış, web sayfası, takvim veya Home Assistant ile botu uyandırma. |
 | [5 dakikada başlangıç](getting-started.md) | Kur, ücretsiz anahtar al, ilk sohbetini yap, bot nedir öğren. |
 | [Diğer asistanlardan içe aktarma](import-from-assistants.md) | Claude, Cursor, VS Code ve diğer kurulumları Praxi'ye taşıma. |
 | [Botunu güvende tut](keep-your-bot-safe.md) | İzin seviyeleri, onaylar ve bilgisayarından ne çıkar. |

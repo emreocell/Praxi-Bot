@@ -491,6 +491,34 @@ pub enum Trigger {
         /// Shared secret used to verify `HMAC-SHA256(secret, body)`.
         secret: String,
     },
+    /// Poll an RSS/Atom feed; a new item starts a run. Owner rules only.
+    Feed {
+        /// `http(s)` feed address chosen by the owner; checked again by the SSRF guard on every fetch.
+        url: String,
+    },
+    /// Poll a web page; a change of the selected text starts a run. Owner rules only.
+    PageChange {
+        /// `http(s)` page address chosen by the owner.
+        url: String,
+        /// CSS selector of the text to watch.
+        selector: String,
+    },
+    /// A calendar event starts within `minutes_before` minutes. Owner rules only.
+    Calendar {
+        /// Configured calendar name; `None` means the only/default one.
+        #[serde(default)]
+        account: Option<String>,
+        /// Lead time, 1 to 1440 minutes.
+        minutes_before: u32,
+    },
+    /// A Home Assistant entity changes state. Owner rules only.
+    HomeAssistant {
+        /// Entity to watch, e.g. `binary_sensor.front_door`.
+        entity_id: String,
+        /// Only changes to this state start a run (any change when `None`).
+        #[serde(default)]
+        to_state: Option<String>,
+    },
 }
 
 /// Filesystem events supported by the bounded polling watcher.
@@ -509,7 +537,51 @@ fn sender_filter_ok(f: &str) -> bool {
     protocol::sender::sender_rule_ok(f)
 }
 
+/// Visible text only: no control or invisible characters, bounded length.
+fn plain_text_ok(text: &str, cap: usize) -> bool {
+    !text.trim().is_empty()
+        && text.chars().count() <= cap
+        && !text
+            .chars()
+            .any(|c| c.is_control() || protocol::approval_text::is_hidden(c))
+}
+
+/// An `http(s)` address without credentials. The SSRF guard that decides whether the
+/// host may be contacted runs at fetch time, not here.
+#[must_use]
+pub fn watch_url_ok(url: &str) -> bool {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"));
+    let Some(rest) = rest else { return false };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    plain_text_ok(url, 2048)
+        && !url.contains(char::is_whitespace)
+        && !authority.is_empty()
+        && !authority.contains('@')
+}
+
 impl Trigger {
+    /// `true` for sources the scheduler polls (everything but a signed webhook).
+    #[must_use]
+    pub const fn is_polled(&self) -> bool {
+        !matches!(self, Self::Webhook { .. })
+    }
+
+    /// `true` for the sources only the owner may define in "When something happens":
+    /// they reach beyond the computer (feeds, pages) or into connectors, so the schedule
+    /// tools and the schedule API refuse them.
+    #[must_use]
+    pub const fn is_owner_source(&self) -> bool {
+        matches!(
+            self,
+            Self::Feed { .. }
+                | Self::PageChange { .. }
+                | Self::Calendar { .. }
+                | Self::HomeAssistant { .. }
+        )
+    }
+
     /// Validate definition bounds, independently of the host's permission policy.
     ///
     /// # Errors
@@ -517,6 +589,27 @@ impl Trigger {
     pub fn validate(&self) -> Result<()> {
         let valid = match self {
             Self::Webhook { secret } => !secret.is_empty(),
+            Self::Feed { url } => watch_url_ok(url),
+            Self::PageChange { url, selector } => watch_url_ok(url) && plain_text_ok(selector, 256),
+            Self::Calendar {
+                account,
+                minutes_before,
+            } => {
+                (1..=1440).contains(minutes_before)
+                    && account
+                        .as_ref()
+                        .is_none_or(|a| a.is_empty() || plain_text_ok(a, 256))
+            }
+            Self::HomeAssistant {
+                entity_id,
+                to_state,
+            } => {
+                plain_text_ok(entity_id, 128)
+                    && !entity_id.contains(char::is_whitespace)
+                    && to_state
+                        .as_ref()
+                        .is_none_or(|s| s.is_empty() || plain_text_ok(s, 255))
+            }
             Self::FileWatch {
                 path,
                 glob,

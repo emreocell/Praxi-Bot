@@ -1,4 +1,4 @@
-import { CalendarClock, ChevronRight, Clock3, ShieldCheck, FolderOpen, Mail, type LucideIcon, Rocket, RotateCcw, Sparkles, Webhook } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, Clock3, FileText, Home, ShieldCheck, FolderOpen, Mail, type LucideIcon, Rocket, RotateCcw, Rss, Sparkles, Webhook } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Schedule, ScheduleHistoryEntry } from "../api/types";
@@ -10,7 +10,7 @@ import { simpleProblem, simpleSpec } from "../lib/scheduleBuilder";
 import { setScheduleIntent } from "../lib/scheduleIntent";
 import { suggestScheduleNotify, writeScheduleNotify } from "../lib/scheduleNotify";
 import { affectsSchedules, buildInput, emptyDraft, toggleInput } from "../lib/schedules";
-import { newTrigger, triggerInput, type BotTrigger } from "../lib/triggers";
+import { newSource, newTrigger, triggerInput, type BotTrigger } from "../lib/triggers";
 import { useDaemon } from "../state/DaemonContext";
 import { BotPanelWebhooks } from "./BotPanelWebhooks";
 import { TriggerBuilder, type TriggerEdit } from "./BotPanelTriggers";
@@ -18,7 +18,10 @@ import { Switch } from "./SettingsUi";
 import { useToast } from "./Toast";
 import styles from "./BotPanelAutomation.module.css";
 
-const ICONS: Record<AutomationKind, LucideIcon> = { time: Clock3, mail: Mail, webhook: Webhook, file: FolderOpen };
+const ICONS: Record<AutomationKind, LucideIcon> = { time: Clock3, mail: Mail, webhook: Webhook, file: FolderOpen, feed: Rss, page: FileText, calendar: CalendarDays, home_assistant: Home };
+/** The event kinds offered as one-tap cards; the file watcher is explained separately (it starts from the chat). */
+const EVENT_CARDS = ["mail", "webhook", "feed", "page", "calendar", "home_assistant"] as const;
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 /**
@@ -151,10 +154,18 @@ export function BotPanelAutomation({
         ? t("automation.what.mail", { from: tr.config.filters.sender || t("automation.what.anyone") })
         : source.kind === "webhook"
           ? t("automation.what.webhook")
-          : (() => {
-              const label = localSpecLabel(source.spec, (ms) => formatWhen(ms, i18n.language), i18n.language, LOCAL_TZ);
-              return t(label.i18nKey, label.values);
-            })();
+          : source.kind === "feed"
+            ? t("automation.what.feed", { host: hostOf(source.url) })
+            : source.kind === "page"
+              ? t("automation.what.page", { host: hostOf(source.url) })
+              : source.kind === "calendar"
+                ? t("automation.what.calendar", { minutes: source.minutes_before })
+                : source.kind === "home_assistant"
+                  ? t("automation.what.home_assistant", { entity: source.entity_id })
+                  : (() => {
+                      const label = localSpecLabel(source.spec, (ms) => formatWhen(ms, i18n.language), i18n.language, LOCAL_TZ);
+                      return t(label.i18nKey, label.values);
+                    })();
     if (tr.last_error) return { what, state: t("automation.state.attention"), tone: "danger" };
     if (!tr.enabled) return { what, state: tr.origin === "rule" ? t("automation.state.off") : t("automation.state.setUp"), tone: "muted" };
     if (tr.last_fired_at_ms) return { what, state: t("automation.state.lastFired", { when: when(tr.last_fired_at_ms) }), tone: "muted" };
@@ -274,7 +285,7 @@ export function BotPanelAutomation({
         <h4 className={styles.label}>{t("automation.events.title")}</h4>
         <p className={styles.muted}>{t("automation.events.intro")}</p>
         <ul className={styles.kinds}>
-          {(["mail", "webhook"] as const).map((kind) => {
+          {EVENT_CARDS.map((kind) => {
             const Icon = ICONS[kind];
             return (
               <li key={kind}>
@@ -286,7 +297,7 @@ export function BotPanelAutomation({
                   onClick={() => {
                     const draft = newTrigger();
                     openBuilder({
-                      draft: kind === "webhook" ? { ...draft, config: { ...draft.config, source: { kind: "webhook", id: "" } } } : draft,
+                      draft: kind === "mail" ? draft : { ...draft, config: { ...draft.config, source: newSource(kind) } },
                       editing: null,
                       adopting: false
                     });
