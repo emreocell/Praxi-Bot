@@ -68,14 +68,64 @@ pub fn supported_target() -> Option<&'static str> {
     }
 }
 
+/// Data-directory name for extracted Node.js runtimes (`runtimes/node-v22.…`).
+pub const RUNTIMES_DIR: &str = "runtimes";
+
+/// Folder name under [`RUNTIMES_DIR`] where `npm install -g` lands when Praxi bootstraps Node.
+pub const NPM_GLOBAL_DIR: &str = "npm-global";
+
 fn runtimes_dir(data: &Path) -> PathBuf {
-    data.join("runtimes")
+    data.join(RUNTIMES_DIR)
 }
 
 /// npm's user-level global prefix (inside the data directory, never a system path).
 #[must_use]
 pub fn npm_prefix(data: &Path) -> PathBuf {
-    runtimes_dir(data).join("npm-global")
+    runtimes_dir(data).join(NPM_GLOBAL_DIR)
+}
+
+/// Relative path segments from the data directory to the bootstrap npm global `bin` folder.
+pub const RUNTIMES_NPM_GLOBAL_BIN: [&str; 3] = ["runtimes", NPM_GLOBAL_DIR, "bin"];
+
+/// The `bin` directory where a bootstrap `npm install -g` puts coding CLIs.
+#[must_use]
+pub fn npm_global_bin_dir(data: &Path) -> PathBuf {
+    RUNTIMES_NPM_GLOBAL_BIN
+        .iter()
+        .fold(data.to_path_buf(), |path, part| path.join(part))
+}
+
+/// Extra `PATH` directories the Linux installer and daemon should share when they exist.
+#[must_use]
+pub fn service_path_extras(data: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![data.join(".local/bin"), npm_global_bin_dir(data)];
+    if let Some(node_bin) = node_bin_dir(data) {
+        dirs.push(node_bin);
+    }
+    dirs
+}
+
+/// Bootstrap runtime folders that exist on disk but are missing from this process's `PATH`.
+#[must_use]
+pub fn missing_service_path_entries(data: &Path) -> Vec<PathBuf> {
+    let path = std::env::var_os("PATH")
+        .map(|val| std::env::split_paths(&val).collect::<Vec<_>>())
+        .unwrap_or_default();
+    service_path_extras(data)
+        .into_iter()
+        .filter(|dir| dir.is_dir() && !path_on(path.iter(), dir))
+        .collect()
+}
+
+fn path_on<'a>(mut path: impl Iterator<Item = &'a PathBuf>, dir: &Path) -> bool {
+    let canon = std::fs::canonicalize(dir).ok();
+    path.any(|entry| {
+        entry == dir
+            || canon
+                .as_ref()
+                .zip(std::fs::canonicalize(entry).ok())
+                .is_some_and(|(a, b)| a == &b)
+    })
 }
 
 /// The installed runtime's `bin` directory, when one is installed and complete.

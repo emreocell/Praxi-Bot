@@ -784,10 +784,15 @@ fn cli_state(provider_id: &str, detected: Option<&[cli_provider::DetectedCli]>) 
             "{provider_id}: CLI is installed but signed out; sign in with `{}`",
             sign_in_command(engine)
         )),
-        Some(d) if !d.runnable => CliState::Problem(format!(
-            "{provider_id}: CLI cannot run turns ({})",
-            d.detail.as_deref().unwrap_or("not runnable")
-        )),
+        Some(d)
+            if !d.runnable
+                && !cli_provider::engine_spec(engine).is_some_and(cli_provider::CliEngineSpec::can_enable) =>
+        {
+            CliState::Problem(format!(
+                "{provider_id}: CLI cannot run turns ({})",
+                d.detail.as_deref().unwrap_or("not runnable")
+            ))
+        }
         Some(d) if d.auth == AuthState::SignedIn => {
             CliState::Ready(format!("{provider_id}: CLI ready"))
         }
@@ -972,7 +977,11 @@ const MIN_NODE_MAJOR: u32 = 18;
 /// is only a problem on a server set up by the installer (`server`), where nobody can install one
 /// without root; elsewhere the CLIs are optional and a missing Node.js is neutral.
 #[must_use]
-pub fn check_node_runtime(tc: &cli_provider::node_runtime::Toolchain, server: bool) -> Check {
+pub fn check_node_runtime(
+    tc: &cli_provider::node_runtime::Toolchain,
+    server: bool,
+    data_dir: Option<&Path>,
+) -> Check {
     const ID: &str = "node_runtime";
     const N: &str = "node / npm";
     let show = |p: &Option<std::path::PathBuf>| {
@@ -1040,15 +1049,26 @@ pub fn check_node_runtime(tc: &cli_provider::node_runtime::Toolchain, server: bo
             ),
         );
     }
-    Check::ok(
-        ID,
-        N,
-        format!(
-            "node {version} at {}, npm at {}; global installs go to {prefix}",
-            node.display(),
-            npm.display()
-        ),
-    )
+    let detail = format!(
+        "node {version} at {}, npm at {}; global installs go to {prefix}",
+        node.display(),
+        npm.display()
+    );
+    if server {
+        let missing = data_dir
+            .map(cli_provider::node_runtime::missing_service_path_entries)
+            .filter(|m| !m.is_empty());
+        if let Some(missing) = missing {
+            let names: Vec<_> = missing.iter().map(|p| p.display().to_string()).collect();
+            return Check::warn(
+                ID,
+                N,
+                format!("{detail}; the service PATH is missing {}", names.join(", ")),
+                "restore PATH from the Praxi installer (re-run with --update) or add the missing folders to the systemd unit; a drop-in must not replace the whole PATH",
+            );
+        }
+    }
+    Check::ok(ID, N, detail)
 }
 
 /// `model catalog`: the catalog loads and knows the default model.

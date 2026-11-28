@@ -91,10 +91,42 @@ fn outside_working_dir_as(
     home: Option<&Path>,
 ) -> bool {
     let private = || home.is_some_and(|h| private_home_program(euid, path, real, h));
+    let data = || {
+        crate::node_runtime::registered_data_dir()
+            .is_some_and(|data| private_data_program(euid, path, real, data))
+    };
     if cwd.parent().is_none() {
-        return SYSTEM_DIRS.iter().any(|d| real.starts_with(d)) || private();
+        return SYSTEM_DIRS.iter().any(|d| real.starts_with(d)) || private() || data();
     }
-    !real.starts_with(cwd) || (home == Some(cwd) && private())
+    !real.starts_with(cwd) || (home == Some(cwd) && private()) || data()
+}
+
+/// Programs Praxi installs under its data directory (`runtimes/npm-global/bin`, the bootstrap
+/// Node.js `bin`, …) when the working directory is that data folder or `/`.
+#[cfg(unix)]
+fn private_data_program(euid: u32, path: &Path, real: &Path, data: &Path) -> bool {
+    let Ok(data) = std::fs::canonicalize(data) else {
+        return false;
+    };
+    if real == data || !real.starts_with(&data) {
+        return false;
+    }
+    let named = match (path.parent(), path.file_name()) {
+        (Some(dir), Some(name)) => std::fs::canonicalize(dir).map(|d| d.join(name)),
+        _ => return false,
+    };
+    let Ok(named) = named else {
+        return false;
+    };
+    let in_bin_dir = [crate::node_runtime::npm_global_bin_dir(&data)]
+        .into_iter()
+        .chain(crate::node_runtime::node_bin_dir(&data))
+        .any(|rel| {
+            std::fs::canonicalize(&rel).is_ok_and(|bin| {
+                bin.starts_with(&data) && (named.starts_with(&bin) || real.starts_with(&bin))
+            })
+        });
+    in_bin_dir && owned_private_chain(euid, &data, real)
 }
 
 /// A program in the service user's own home that is safe to run although the working directory
@@ -480,6 +512,47 @@ mod tests {
             &real,
             &h.home,
             Some(&h.home)
+        ));
+    }
+
+    /// CLIs under `<data>/runtimes/npm-global/bin` count when the service home is the data folder.
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_npm_bins_under_the_data_folder_are_trusted() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let outer = std::fs::canonicalize(tmp.path()).unwrap();
+        let data = outer.join("data");
+        let bin = data.join("runtimes/npm-global/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let cli = bin.join("opencode");
+        std::fs::write(&cli, b"fixture").unwrap();
+        let euid = rustix::process::geteuid().as_raw();
+        for dir in [
+            &outer,
+            &data,
+            &data.join("runtimes"),
+            &data.join("runtimes/npm-global"),
+            &bin,
+        ] {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750)).unwrap();
+        }
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let real = std::fs::canonicalize(&cli).unwrap();
+        crate::node_runtime::register_data_dir(&data);
+        assert!(outside_working_dir_as(
+            euid,
+            &cli,
+            &real,
+            &data,
+            Some(&data)
+        ));
+        assert!(outside_working_dir_as(
+            euid,
+            &cli,
+            &real,
+            Path::new("/"),
+            Some(&data)
         ));
     }
 

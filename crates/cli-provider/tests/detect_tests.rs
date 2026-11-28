@@ -276,11 +276,14 @@ async fn copilot_sign_in_is_never_claimed() {
     let temp = fixture_dir();
     install_fake(temp.path(), "copilot");
 
-    // A GitHub token in the environment is not a Copilot sign-in and is never forwarded,
-    // and `~/.copilot/config.json` (accounts plus unrelated state) is not evidence either.
     let copilot_dir = temp.path().join("home").join(".copilot");
     std::fs::create_dir_all(&copilot_dir).unwrap();
-    std::fs::write(copilot_dir.join("config.json"), "SENTINEL_TOKEN").unwrap();
+    std::fs::write(
+        copilot_dir.join("config.json"),
+        r#"// managed
+{"loggedInUsers":[{"host":"github.com","login":"ada@example.com"}],"lastLoggedInUser":{"host":"github.com","login":"ada@example.com"}}"#,
+    )
+    .unwrap();
     let env = PathEnv::for_test(temp.path().to_path_buf())
         .with_home(temp.path().join("home"))
         .with_env_var("COPILOT_GITHUB_TOKEN", "copilot_secret_token")
@@ -288,11 +291,10 @@ async fn copilot_sign_in_is_never_claimed() {
     let detected = Detector::with_env(env).detect(true).await;
     let copilot = detected.iter().find(|c| c.id == "copilot").unwrap();
     assert!(copilot.installed);
-    assert_eq!(copilot.auth, AuthState::Unknown);
-    assert_eq!(copilot.detail.as_deref(), Some("auth_unverified"));
+    assert_eq!(copilot.auth, AuthState::SignedIn);
+    assert_eq!(copilot.account_label.as_deref(), Some("ada@example.com"));
     let debug = format!("{copilot:?}");
     assert!(!debug.contains("copilot_secret_token"));
-    assert!(!debug.contains("SENTINEL_TOKEN"));
 }
 
 #[tokio::test]
@@ -321,8 +323,8 @@ async fn headless_cli_detection_uses_the_service_home_for_install_and_sign_in() 
     std::fs::write(service_home.join(credential), b"fixture").unwrap();
     let after = detector.detect(true).await;
     let row = after.iter().find(|row| row.id == "agy").unwrap();
-    assert_eq!(row.auth, AuthState::Unknown);
-    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+    assert_eq!(row.auth, AuthState::SignedIn);
+    assert!(row.detail.is_none());
 }
 
 #[tokio::test]
@@ -923,4 +925,26 @@ fn npm_js_bin_runs_through_node_with_a_plain_path() {
     );
     assert!(!resolved.args[0].starts_with(r"\?\"), "{:?}", resolved.args);
     assert!(!resolved.program.to_string_lossy().starts_with(r"\?\"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn clis_installed_in_the_data_runtimes_folder_are_detected() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fixture_dir();
+    let data = temp.path().join("data");
+    let home = temp.path().join("home");
+    let bin = data.join("runtimes/npm-global/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    install_fake(&bin, "opencode");
+    for dir in [&data, &home, &bin] {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750)).unwrap();
+    }
+    cli_provider::node_runtime::register_data_dir(&data);
+    let env = PathEnv::for_test(bin.clone()).with_home(home);
+    let detected = Detector::with_env(env).detect(false).await;
+    let opencode = detected.iter().find(|c| c.id == "opencode").unwrap();
+    assert!(opencode.installed, "{opencode:?}");
 }

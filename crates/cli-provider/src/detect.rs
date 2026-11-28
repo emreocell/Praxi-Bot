@@ -1751,14 +1751,33 @@ impl Detector {
         cli
     }
 
-    /// Antigravity has no auth-status command. Inspect its dedicated token path.
+    /// Antigravity has no auth-status command. Its live sign-in is the encrypted store and the
+    /// oauth token file it writes during login (never read).
     async fn probe_agy(&self) -> DetectedCli {
-        let file = self
-            .env
-            .home_dir
-            .as_ref()
-            .map(|home| home.join(".gemini/antigravity-cli/antigravity-oauth-token"));
-        self.probe_credential_path("agy", file, true).await
+        let (mut cli, resolved) = self.probe_engine_version("agy").await;
+        if !cli.installed || resolved.is_none() || cli.detail.is_some() {
+            return cli;
+        }
+        let Some(home) = self.env.home_dir.as_ref() else {
+            cli.detail = Some("auth_unverified".to_owned());
+            return cli;
+        };
+        match agy_auth_state(home) {
+            AgyAuth::SignedIn(label) => {
+                cli.auth = AuthState::SignedIn;
+                cli.account_label = label;
+                cli.detail = None;
+            }
+            AgyAuth::SignedOut => {
+                cli.auth = AuthState::SignedOut;
+                cli.detail = None;
+            }
+            AgyAuth::Unverified => {
+                cli.auth = AuthState::Unknown;
+                cli.detail = Some("auth_unverified".to_owned());
+            }
+        }
+        cli
     }
 
     /// Vibe's shared dotenv can exist without a Mistral key, and Vibe also has a keyring.
@@ -1811,8 +1830,28 @@ impl Detector {
     /// command. A GitHub token in the environment is not evidence of a Copilot plan.
     async fn probe_copilot(&self) -> DetectedCli {
         let (mut cli, resolved) = self.probe_engine_version("copilot").await;
-        if cli.installed && resolved.is_some() && cli.detail.is_none() {
-            cli.detail = Some("auth_unverified".to_owned());
+        if !cli.installed || resolved.is_none() || cli.detail.is_some() {
+            return cli;
+        }
+        let config = self
+            .env
+            .home_dir
+            .as_ref()
+            .map(|home| home.join(".copilot").join("config.json"));
+        match config.as_deref().and_then(copilot_auth_from_config) {
+            Some((auth, label)) => {
+                cli.auth = auth;
+                cli.account_label = label;
+                cli.detail = None;
+            }
+            None if config.is_some_and(|p| p.is_file()) => {
+                cli.auth = AuthState::Unknown;
+                cli.detail = Some("auth_unparsed".to_owned());
+            }
+            None => {
+                cli.auth = AuthState::SignedOut;
+                cli.detail = None;
+            }
         }
         cli
     }
@@ -1871,6 +1910,114 @@ impl Detector {
 
         cli
     }
+}
+
+const COPILOT_CONFIG_MAX_BYTES: u64 = 65_536;
+
+/// Remove `//` line comments outside JSON strings (Copilot's `config.json` is JSONC).
+fn strip_jsonc_line_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    let mut escape = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+            out.push(c);
+            continue;
+        }
+        if c == '/' && chars.peek() == Some(&'/') {
+            while chars.next().is_some_and(|ch| ch != '\n') {}
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn copilot_auth_from_config(path: &Path) -> Option<(AuthState, Option<String>)> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > COPILOT_CONFIG_MAX_BYTES {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&strip_jsonc_line_comments(&text)).ok()?;
+    let login = parsed
+        .get("lastLoggedInUser")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|obj| obj.get("login"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| bound_label(s, 160));
+    let signed_in = parsed
+        .get("loggedInUsers")
+        .is_some_and(|users| match users {
+            serde_json::Value::Array(items) => !items.is_empty(),
+            serde_json::Value::Object(map) => !map.is_empty(),
+            _ => false,
+        })
+        || login.is_some();
+    Some(if signed_in {
+        (AuthState::SignedIn, login)
+    } else {
+        (AuthState::SignedOut, None)
+    })
+}
+
+enum AgyAuth {
+    SignedIn(Option<String>),
+    SignedOut,
+    Unverified,
+}
+
+fn agy_auth_state(home: &Path) -> AgyAuth {
+    let dir = home.join(".gemini/antigravity-cli");
+    let token = dir.join("antigravity-oauth-token");
+    let store = dir.join("authstore.enc");
+    let has =
+        |path: &Path| std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() > 0);
+    if has(&token) || has(&store) {
+        let label = agy_account_label(&dir.join("auth.json"));
+        return AgyAuth::SignedIn(label);
+    }
+    match (std::fs::metadata(&token), std::fs::metadata(&store)) {
+        (Err(e), Err(f))
+            if e.kind() == std::io::ErrorKind::NotFound
+                && f.kind() == std::io::ErrorKind::NotFound =>
+        {
+            AgyAuth::SignedOut
+        }
+        _ => AgyAuth::Unverified,
+    }
+}
+
+fn agy_account_label(auth_json: &Path) -> Option<String> {
+    let meta = std::fs::metadata(auth_json).ok()?;
+    if !meta.is_file() || meta.len() > COPILOT_CONFIG_MAX_BYTES {
+        return None;
+    }
+    let text = std::fs::read_to_string(auth_json).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&text).ok()?;
+    for key in ["email", "account", "user"] {
+        if let Some(label) = parsed
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .and_then(|s| bound_label(s, 160))
+        {
+            return Some(label);
+        }
+    }
+    None
 }
 
 /// `codex login status` prints one line: "Logged in using ..." or "Not logged in".

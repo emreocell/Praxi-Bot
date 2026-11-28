@@ -20,6 +20,15 @@ fn cli(
 }
 
 #[test]
+fn native_only_clis_are_ready_when_installed_and_signed_in() {
+    let detected = [cli("agy", true, cli_provider::AuthState::SignedIn, false)];
+    assert!(matches!(
+        cli_state("cli:agy", Some(&detected)),
+        CliState::Ready(_)
+    ));
+}
+
+#[test]
 fn table_rendering_is_unchanged_for_ok_warn_fail() {
     // Snapshot of the `bot doctor` table as it printed before the checks
     // moved into this module.
@@ -672,6 +681,7 @@ fn node_runtime_check_names_where_global_installs_go() {
     let c = check_node_runtime(
         &toolchain("v22.23.5", "/var/lib/praxi/.npm-global", Some(true)),
         true,
+        None,
     );
     assert_eq!(c.status, Status::Ok);
     assert_eq!(c.id, "node_runtime");
@@ -689,7 +699,7 @@ fn node_runtime_check_names_where_global_installs_go() {
     );
     // Writability is unknown (not Unix): not a finding.
     assert_eq!(
-        check_node_runtime(&toolchain("v22.23.5", "/x", None), true).status,
+        check_node_runtime(&toolchain("v22.23.5", "/x", None), true, None).status,
         Status::Ok
     );
 }
@@ -700,6 +710,7 @@ fn node_runtime_check_catches_the_prefix_that_needs_root() {
     let c = check_node_runtime(
         &toolchain("v22.23.5", "/opt/praxi-nodejs", Some(false)),
         true,
+        None,
     );
     assert_eq!(c.status, Status::Warn);
     assert!(
@@ -716,9 +727,9 @@ fn node_runtime_check_warns_when_the_registry_is_not_the_pinned_one_on_a_server(
     let mut tc = toolchain("v22.23.5", "/var/lib/praxi/.npm-global", Some(true));
     // The installer's own pin, in any spelling, is fine.
     tc.registry = Some("https://registry.npmjs.org".into());
-    assert_eq!(check_node_runtime(&tc, true).status, Status::Ok);
+    assert_eq!(check_node_runtime(&tc, true, None).status, Status::Ok);
     tc.registry = Some("https://registry.evil.example/".into());
-    let c = check_node_runtime(&tc, true);
+    let c = check_node_runtime(&tc, true, None);
     assert_eq!(c.status, Status::Warn);
     assert!(
         c.detail.contains("https://registry.evil.example/")
@@ -729,13 +740,13 @@ fn node_runtime_check_warns_when_the_registry_is_not_the_pinned_one_on_a_server(
     let hint = c.hint.unwrap();
     assert!(hint.contains("registry"), "{hint}");
     // A desktop computer's own mirror is its owner's business.
-    assert_eq!(check_node_runtime(&tc, false).status, Status::Ok);
+    assert_eq!(check_node_runtime(&tc, false, None).status, Status::Ok);
 }
 
 #[test]
 fn node_runtime_check_is_only_a_warning_for_what_is_actually_missing_on_a_server() {
     let missing = cli_provider::node_runtime::Toolchain::default();
-    let c = check_node_runtime(&missing, true);
+    let c = check_node_runtime(&missing, true, None);
     assert_eq!(c.status, Status::Warn);
     assert!(
         c.detail.contains("node: not found; npm: not found"),
@@ -744,15 +755,18 @@ fn node_runtime_check_is_only_a_warning_for_what_is_actually_missing_on_a_server
     );
     assert!(c.hint.unwrap().contains("--update"));
     // A desktop computer does not need it: neutral.
-    assert_eq!(check_node_runtime(&missing, false).status, Status::Skipped);
+    assert_eq!(
+        check_node_runtime(&missing, false, None).status,
+        Status::Skipped
+    );
     // node without npm is just as unusable for installs.
     let mut half = toolchain("v22.23.5", "/x", Some(true));
     half.npm = None;
-    let c = check_node_runtime(&half, true);
+    let c = check_node_runtime(&half, true, None);
     assert_eq!(c.status, Status::Warn);
     assert!(c.detail.contains("npm: not found"), "{}", c.detail);
     // Too old for the CLIs.
-    let c = check_node_runtime(&toolchain("v16.20.2", "/x", Some(true)), false);
+    let c = check_node_runtime(&toolchain("v16.20.2", "/x", Some(true)), false, None);
     assert_eq!(c.status, Status::Warn);
     assert!(c.detail.contains("too old"), "{}", c.detail);
 }

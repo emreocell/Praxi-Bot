@@ -345,6 +345,7 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         Box::new(move || doctor::check_cli_accounts(det.as_deref().map(Vec::as_slice), &cli_ctx)),
     );
     let node_env = s.detector().environment().clone();
+    let data_for_node = data_dir.clone();
     add(
         "node_runtime",
         "node / npm",
@@ -352,6 +353,7 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
             doctor::check_node_runtime(
                 &cli_provider::node_runtime::probe(&node_env),
                 cli_provider::identity::installed_as_service(),
+                Some(data_for_node.as_path()),
             )
         }),
     );

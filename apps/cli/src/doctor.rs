@@ -107,6 +107,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_node_runtime(
             &cli_provider::node_runtime::probe(&cli_provider::PathEnv::from_ambient()),
             cli_provider::identity::installed_as_service(),
+            Some(env.data_dir),
         ),
         core::check_peer_link(env.data_dir, &live_link(env)),
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
