@@ -772,10 +772,9 @@ async fn sign_out_revokes_at_google_and_disconnect_forgets_the_client_with_the_l
     assert_eq!(rig.state.lock().token_requests.len(), 2);
     let kept = rig.stored_tokens("google-calendar").unwrap();
 
-    assert_eq!(
-        rig.host.auth_logout("google-gmail").await.unwrap(),
-        McpAuthState::SignedOut
-    );
+    let logout = rig.host.auth_logout("google-gmail").await.unwrap();
+    assert_eq!(logout.state, McpAuthState::SignedOut);
+    assert!(logout.remote_revoked);
     assert!(rig.stored_tokens("google-gmail").is_none());
     assert!(
         rig.registry

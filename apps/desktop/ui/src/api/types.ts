@@ -568,6 +568,7 @@ export type FillGrantInfo = S["FillGrantDto"];
 export type McpTransport = S["McpTransportKind"];
 export type McpStatus = S["McpStatus"];
 export type McpAuthState = S["McpAuthState"];
+export type McpAuthLogoutDto = S["McpAuthLogoutDto"];
 export type McpAuthStart = S["McpAuthStart"];
 export type McpTestResult = S["McpTestResult"];
 export type McpServer = S["McpServerDto"];

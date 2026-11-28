@@ -14,10 +14,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use daemon_api::mcp::{
-    McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto, McpCatalogOAuthClientDto,
-    McpCatalogTestDto, McpErrorKind as ErrorKindDto, McpFolderDto, McpOAuthConfig,
-    McpRequiredSecretDto, McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpTestResult,
-    McpToolChangeDto, McpToolDto, McpTransportInput, McpTransportKind, McpTransportObject,
+    McpAuthLogoutDto, McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto,
+    McpCatalogOAuthClientDto, McpCatalogTestDto, McpErrorKind as ErrorKindDto, McpFolderDto,
+    McpOAuthConfig, McpRequiredSecretDto, McpServerChanged, McpServerDto, McpServerInput,
+    McpStatus, McpTestResult, McpToolChangeDto, McpToolDto, McpTransportInput, McpTransportKind,
+    McpTransportObject,
 };
 use daemon_api::mcp_import::{BundleApproval, ImportValues};
 use daemon_api::{McpControl, McpControlError};
@@ -728,6 +729,10 @@ fn map_err(e: McpError) -> McpControlError {
     e.into()
 }
 
+fn remote_revocation_ok(outcome: mcp_bridge::RemoteRevokeOutcome) -> bool {
+    !matches!(outcome, mcp_bridge::RemoteRevokeOutcome::Failed)
+}
+
 fn import_secret_reference(reference: &str) -> bool {
     reference
         .strip_prefix("mcp/import-")
@@ -1327,13 +1332,25 @@ impl McpControl for McpHost {
         )
     }
 
-    async fn auth_logout(&self, name: &str) -> Result<McpAuthState, McpControlError> {
-        let mut flows = self.auth_flows.lock().await;
+    async fn auth_logout(&self, name: &str) -> Result<McpAuthLogoutDto, McpControlError> {
         self.check_http(name)?;
-        abort_sign_in(&mut flows, name).await;
-        self.manager.sign_out(name).await.map_err(map_err)?;
+        {
+            let mut flows = self.auth_flows.lock().await;
+            abort_sign_in(&mut flows, name).await;
+        }
+        let outcome = self.manager.sign_out(name).await.map_err(map_err)?;
+        if outcome.remote_revocation == mcp_bridge::RemoteRevokeOutcome::Failed {
+            support_logs::tracing::warn!(
+                target: "praxi_support",
+                reason = "component_warning",
+                "warning: MCP server {name}: the provider could not be asked to revoke the sign-in; revoke it manually at the provider if needed"
+            );
+        }
         self.announce(name);
-        Ok(McpAuthState::SignedOut)
+        Ok(McpAuthLogoutDto {
+            state: McpAuthState::SignedOut,
+            remote_revoked: remote_revocation_ok(outcome.remote_revocation),
+        })
     }
     fn list(&self) -> Vec<McpServerDto> {
         let all: Vec<McpServerConfig> = self.configs.lock().values().cloned().collect();
@@ -1475,21 +1492,34 @@ impl McpControl for McpHost {
     }
 
     async fn remove(&self, name: &str) -> Result<(), McpControlError> {
-        let mut flows = self.auth_flows.lock().await;
-        abort_sign_in(&mut flows, name).await;
+        let import = {
+            let _op = self.ops.lock().await;
+            self.check_writable()?;
+            let cfg = self.config_of(name)?;
+            cfg.import.clone()
+        };
+        {
+            let mut flows = self.auth_flows.lock().await;
+            abort_sign_in(&mut flows, name).await;
+        }
         // The sign-in goes with the server: forgotten here and ended at the
         // provider (not under the operations lock: that is a network call).
         if self
             .config_of(name)
             .is_ok_and(|cfg| matches!(cfg.transport, McpTransport::Http { .. }))
+            && let Ok(outcome) = self.manager.sign_out(name).await
+            && outcome.remote_revocation == mcp_bridge::RemoteRevokeOutcome::Failed
         {
-            let _ = self.manager.sign_out(name).await;
+            support_logs::tracing::warn!(
+                target: "praxi_support",
+                reason = "component_warning",
+                "warning: MCP server {name}: the provider could not be asked to revoke the sign-in; revoke it manually at the provider if needed"
+            );
         }
         let old = {
             let _op = self.ops.lock().await;
-            self.check_writable()?;
-            let cfg = self.config_of(name)?;
-            if let Some(import) = &cfg.import {
+            if let Some(import) = import.as_ref() {
+                let cfg = self.config_of(name)?;
                 return self.remove_import(&cfg, import).await;
             }
             self.persist(|m| {
@@ -2073,7 +2103,10 @@ mod tests {
         // Logout forgets the credential and the tools.
         assert_eq!(
             host.auth_logout("remote").await.unwrap(),
-            McpAuthState::SignedOut
+            McpAuthLogoutDto {
+                state: McpAuthState::SignedOut,
+                remote_revoked: true,
+            }
         );
         assert!(store.get("mcp/remote/oauth").unwrap().is_none());
         assert!(registry.get("mcp:remote/echo").is_none());
@@ -2594,7 +2627,10 @@ mod tests {
                 "logout" => {
                     assert_eq!(
                         host.auth_logout("remote").await.unwrap(),
-                        McpAuthState::SignedOut
+                        McpAuthLogoutDto {
+                            state: McpAuthState::SignedOut,
+                            remote_revoked: true,
+                        }
                     );
                 }
                 "cancel" => {

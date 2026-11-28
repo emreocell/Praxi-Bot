@@ -575,6 +575,15 @@ pub enum McpAuthState {
     AuthRequired,
 }
 
+/// `POST /v1/mcp/servers/{name}/auth/logout` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpAuthLogoutDto {
+    pub state: McpAuthState,
+    /// The provider confirmed revocation. When `false`, sign-out here succeeded
+    /// but the owner may need to revoke access at the provider manually.
+    pub remote_revoked: bool,
+}
+
 /// Body of `POST /v1/mcp/servers/{name}/auth/callback`.
 #[derive(Clone, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -792,7 +801,7 @@ pub trait McpControl: Send + Sync {
     /// Cancel pending sign-in, delete credentials and disconnect.
     /// # Errors
     /// Unknown server or secret-store failure.
-    async fn auth_logout(&self, _name: &str) -> Result<McpAuthState, McpControlError> {
+    async fn auth_logout(&self, _name: &str) -> Result<McpAuthLogoutDto, McpControlError> {
         Err(McpControlError::Invalid("OAuth is unavailable".into()))
     }
     /// Mask secrets in `text` with the daemon's production redactor before it

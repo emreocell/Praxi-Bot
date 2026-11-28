@@ -1095,8 +1095,12 @@ function AppsDialog({
       }}
       onSignOut={() =>
         void run(s.name, async () => {
-          await client?.logoutMcpAuth(s.name);
-          toast.show(t("apps.auth.signedOutToast", { name: s.name }), "info");
+          const result = await client?.logoutMcpAuth(s.name);
+          if (result && !result.remote_revoked) {
+            toast.show(t("apps.auth.signedOutRemoteRevokeFailed", { name: s.name }), "info");
+          } else {
+            toast.show(t("apps.auth.signedOutToast", { name: s.name }), "info");
+          }
           await reload();
         })
       }

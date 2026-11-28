@@ -808,6 +808,7 @@ impl Modify for Security {
         mcp::McpCatalogOAuthClientDto,
         mcp::McpCatalogTestDto,
         mcp::McpAuthState,
+        mcp::McpAuthLogoutDto,
         mcp::McpCatalogEntryDto,
         mcp::McpCatalogInstallDto,
         mcp::McpErrorKind,

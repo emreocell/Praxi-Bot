@@ -14821,7 +14821,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/McpAuthState"
+                  "$ref": "#/components/schemas/McpAuthLogoutDto"
                 }
               }
             }
@@ -33962,6 +33962,23 @@
           }
         },
         "additionalProperties": false
+      },
+      "McpAuthLogoutDto": {
+        "type": "object",
+        "description": "`POST /v1/mcp/servers/{name}/auth/logout` result.",
+        "required": [
+          "state",
+          "remote_revoked"
+        ],
+        "properties": {
+          "remote_revoked": {
+            "type": "boolean",
+            "description": "The provider confirmed revocation. When `false`, sign-out here succeeded\nbut the owner may need to revoke access at the provider manually."
+          },
+          "state": {
+            "$ref": "#/components/schemas/McpAuthState"
+          }
+        }
       },
       "McpAuthStart": {
         "type": "object",

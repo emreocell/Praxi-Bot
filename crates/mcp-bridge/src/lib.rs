@@ -76,7 +76,10 @@ pub use config::{
 };
 pub use diagnostics::ExternalRedactor;
 pub use error::{McpError, McpErrorKind, Result, runtime_install_hint};
-pub use manager::{Backoff, McpManager, McpPolicy, McpServerHandle, ServerSnapshot, ServerStatus};
+pub use manager::{
+    Backoff, McpManager, McpPolicy, McpServerHandle, RemoteRevokeOutcome, ServerSnapshot,
+    ServerStatus, SignOutResult,
+};
 pub use pins::{FilePinStore, MemoryPinStore, PinStore, ToolChange, ToolPin};
 pub use roots::{
     FS_SERVER_PACKAGE, PathGuard, canonicalize_filesystem_args, filesystem_roots, root_problem,

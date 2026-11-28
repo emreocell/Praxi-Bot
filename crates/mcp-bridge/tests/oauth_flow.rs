@@ -489,7 +489,7 @@ async fn a_sign_in_is_sent_only_to_its_own_server_and_waiting_for_one_is_not_a_f
     assert_eq!(store.list_names().unwrap(), Vec::<String>::new());
 
     // Signing out removes the secret.
-    assert!(!manager.sign_out("a").await.unwrap());
+    assert!(!manager.sign_out("a").await.unwrap().had_credentials);
     manager.shutdown().await;
     server_a.abort();
     server_b.abort();
@@ -633,7 +633,7 @@ async fn sign_out_during_a_blocked_refresh_leaves_no_credentials() {
     .unwrap();
     // Now the rotated tokens arrive.
     gate.add_permits(1);
-    assert!(signing_out.await.unwrap().unwrap());
+    assert!(signing_out.await.unwrap().unwrap().had_credentials);
     let connected = connecting.await.unwrap();
     assert!(
         matches!(connected, Err(McpError::AuthRequired(_))),
@@ -939,8 +939,41 @@ async fn a_dynamically_registered_secret_survives_a_restart_for_refresh() {
         Some(DCR_SECRET)
     );
     assert!(registry.get("mcp:dcr/echo").is_some());
-    assert!(second.sign_out("dcr").await.unwrap());
+    assert!(second.sign_out("dcr").await.unwrap().had_credentials);
     assert!(!store.0.lock().contains_key("mcp/dcr/oauth-client"));
     second.shutdown().await;
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sign_out_posts_only_the_token_to_the_issuer_revocation_endpoint() {
+    let (base, seen, server) = fake_authorization_server(true).await;
+    let store = Arc::new(MemoryStore::default());
+    let manager = McpManager::new(tool_registry::ToolRegistry::new()).with_secret_store(store);
+    assert!(matches!(
+        manager
+            .add_server(http_config("revoke", format!("{base}/mcp")))
+            .await,
+        Err(McpError::AuthRequired(_))
+    ));
+    finish_sign_in(
+        manager.start_sign_in("revoke", options()).await.unwrap(),
+        &base,
+        &seen,
+    )
+    .await;
+    let outcome = manager.sign_out("revoke").await.unwrap();
+    assert!(outcome.had_credentials);
+    assert_eq!(
+        outcome.remote_revocation,
+        mcp_bridge::RemoteRevokeOutcome::Revoked
+    );
+    let revokes = seen.lock().revoke_requests.clone();
+    assert_eq!(revokes.len(), 1);
+    assert_eq!(revokes[0].get("token").map(String::as_str), Some(REFRESH));
+    assert!(!revokes[0].contains_key("client_secret"));
+    assert!(!revokes[0].contains_key("client_id"));
+    assert!(!revokes[0].contains_key("token_type_hint"));
+    manager.shutdown().await;
     server.abort();
 }

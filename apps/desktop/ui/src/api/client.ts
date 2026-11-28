@@ -132,6 +132,7 @@ import type {
   ComposioTest,
   ComposioStatus,
   McpCatalogEntry,
+  McpAuthLogoutDto,
   McpAuthState,
   McpAuthStart,
   McpTestResult,
@@ -1827,7 +1828,7 @@ export class ApiClient {
   mcpAuthStatus(name: string): Promise<McpAuthState> {
     return this.request("GET", `/mcp/servers/${encodeURIComponent(name)}/auth/status`);
   }
-  logoutMcpAuth(name: string): Promise<McpAuthState> {
+  logoutMcpAuth(name: string): Promise<McpAuthLogoutDto> {
     return this.request("POST", `/mcp/servers/${encodeURIComponent(name)}/auth/logout`);
   }
   /** Store a secret (write-only: the daemon never returns the value). */

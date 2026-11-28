@@ -10403,6 +10403,15 @@ export interface components {
             /** @description The full address the browser was redirected to (`http://127.0.0.1:<port>/callback?...`). */
             redirect_url: string;
         };
+        /** @description `POST /v1/mcp/servers/{name}/auth/logout` result. */
+        McpAuthLogoutDto: {
+            /**
+             * @description The provider confirmed revocation. When `false`, sign-out here succeeded
+             *     but the owner may need to revoke access at the provider manually.
+             */
+            remote_revoked: boolean;
+            state: components["schemas"]["McpAuthState"];
+        };
         /** @description Browser destination for a user-started, five-minute sign-in. */
         McpAuthStart: {
             authorization_url: string;
@@ -23870,7 +23879,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["McpAuthState"];
+                    "application/json": components["schemas"]["McpAuthLogoutDto"];
                 };
             };
             404: {
