@@ -3964,8 +3964,9 @@ impl AgentLoop {
     }
 
     /// Fold the older part of a long chat into its rolling summary (background task, see
-    /// `summary`). Cheap when the chat is under the thresholds: one count query.
-    fn enqueue_summary(&self, run: &storage::Run) {
+    /// `summary`). Cheap when the chat is under the thresholds: one count query. The chat is
+    /// claimed here, before the task exists: a second turn that ends meanwhile spawns nothing.
+    pub(crate) fn enqueue_summary(&self, run: &storage::Run) {
         let Some(chat) = run.chat_id else {
             return;
         };
@@ -3975,6 +3976,9 @@ impl AgentLoop {
         {
             return;
         }
+        let Some(claim) = crate::summary::claim(&self.sh, chat) else {
+            return;
+        };
         let Ok(ctx) = self.sh.ctx(run) else {
             return;
         };
@@ -3982,7 +3986,7 @@ impl AgentLoop {
         let activity = crate::usage::Activity::new(&sh, run.id);
         let handle = tokio::spawn(async move {
             let _activity = activity;
-            crate::summary::run(sh, ctx).await;
+            crate::summary::run(sh, ctx, claim).await;
         });
         let mut bg = self.sh.bg.lock();
         bg.retain(|h| !h.is_finished());
