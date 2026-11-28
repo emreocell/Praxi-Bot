@@ -45,6 +45,45 @@ class CheckGithubActionsPinsTests(unittest.TestCase):
             self.assertEqual(len(errors), 1)
             self.assertIn("checkout@v4", errors[0])
 
+    def test_branch_style_pins_must_match_across_workflows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.yml").write_text(
+                "jobs:\n  j:\n    steps:\n"
+                "      - uses: dtolnay/rust-toolchain@"
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # stable (2026-01-01)\n",
+                encoding="utf-8",
+            )
+            (root / "b.yml").write_text(
+                "jobs:\n  j:\n    steps:\n"
+                "      - uses: dtolnay/rust-toolchain@"
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # stable (2026-02-01)\n",
+                encoding="utf-8",
+            )
+            errors = self.mod.check_workflows(root)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("dtolnay/rust-toolchain", errors[0])
+            self.assertIn("one commit SHA", errors[0])
+
+    def test_branch_style_pins_may_differ_from_version_comments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / "ci.yml"
+            wf.write_text(
+                "\n".join(
+                    [
+                        "jobs:",
+                        "  j:",
+                        "    steps:",
+                        "      - uses: actions/checkout@"
+                        "cccccccccccccccccccccccccccccccccccccccc # v4.2.2",
+                        "      - uses: actions/checkout@"
+                        "dddddddddddddddddddddddddddddddddddddddd # v4.3.0",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(self.mod.check_workflows(wf.parent), [])
+
     def test_real_workflows_are_fully_pinned(self):
         errors = self.mod.check_workflows(ROOT / ".github" / "workflows")
         self.assertEqual(errors, [], "\n".join(errors))
