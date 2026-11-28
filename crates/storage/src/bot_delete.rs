@@ -153,6 +153,27 @@ fn parse_cleanup(
     })
 }
 
+/// Record what a deleted bot left outside the database, in the delete's own transaction.
+fn write_marker(tx: &Transaction<'_>, c: &BotDeleteCleanup) -> Result<()> {
+    let files = json!({
+        "run_ids": c.run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "chat_ids": c.chat_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "webhook_ids": c.webhook_ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
+    });
+    tx.execute(
+        "INSERT OR REPLACE INTO bot_delete_cleanup (bot_id, user_id, name, detail_json, delete_inbox, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            c.bot_id.to_string(),
+            c.user_id.to_string(),
+            &c.name,
+            serde_json::to_string(&files)?,
+            c.delete_inbox,
+            now_ms()
+        ],
+    )?;
+    Ok(())
+}
+
 const CLEANUP_COLS: &str = "bot_id, user_id, name, detail_json, delete_inbox";
 
 impl Storage {
@@ -277,35 +298,18 @@ impl Storage {
             "INSERT INTO audit_log (user_id, run_id, actor, action, detail_json, ts_ms) VALUES (?1, NULL, ?2, 'bot.deleted', ?3, ?4)",
             params![user.to_string(), actor, serde_json::to_string(&detail)?, now_ms()],
         )?;
-        let files = json!({
-            "run_ids": run_ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
-            "chat_ids": chat_ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
-            "webhook_ids": webhook_ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
-        });
-        tx.execute(
-            "INSERT OR REPLACE INTO bot_delete_cleanup (bot_id, user_id, name, detail_json, delete_inbox, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                &bid,
-                user.to_string(),
-                &name,
-                serde_json::to_string(&files)?,
-                delete_inbox,
-                now_ms()
-            ],
-        )?;
+        let cleanup = BotDeleteCleanup {
+            user_id: user,
+            bot_id: bot,
+            name,
+            delete_inbox,
+            run_ids: run_ids.into_iter().map(RunId).collect(),
+            chat_ids: chat_ids.into_iter().map(ChatId).collect(),
+            webhook_ids,
+        };
+        write_marker(&tx, &cleanup)?;
         tx.commit()?;
-        Ok(Some(BotCascade {
-            removed,
-            cleanup: BotDeleteCleanup {
-                user_id: user,
-                bot_id: bot,
-                name,
-                delete_inbox,
-                run_ids: run_ids.into_iter().map(RunId).collect(),
-                chat_ids: chat_ids.into_iter().map(ChatId).collect(),
-                webhook_ids,
-            },
-        }))
+        Ok(Some(BotCascade { removed, cleanup }))
     }
 
     /// The unfinished cleanup of a deleted bot, if any.

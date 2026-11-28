@@ -752,6 +752,6 @@ async fn a_refused_inbox_delete_keeps_the_account_for_a_retry() {
     let out = f.host.forget_bot_mailboxes(BOT_A, true).await.unwrap();
     assert_eq!(out.removed, ["own"]);
     assert_eq!(out.inboxes_deleted, ["helper@agentmail.to"]);
-    assert!(f.host.list().is_empty());
+    assert_eq!(f.host.list().len(), 0);
     assert!(secret(&f, "email/own/api_key").is_none());
 }

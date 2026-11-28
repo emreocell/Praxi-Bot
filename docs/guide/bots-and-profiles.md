@@ -255,6 +255,7 @@ shows what goes first, then asks for the bot's name. Make an
   a link is left alone and reported.
 - **If a cleanup step fails** after the bot is gone, the app says which and offers "Try again"
   (`DELETE /v1/bots/{id}` again does the same; the report lists it in `cleanup_pending`).
+  The daemon also tries once more by itself the next time it starts.
 - **Mailboxes:** an account only this bot used is removed from the app with its stored
   password or key. An account other bots share is not removed: it passes to the first of
   them and keeps the same sharing, minus the deleted bot. The AgentMail inbox itself is kept

@@ -149,6 +149,7 @@ pub use auth::{
     OWNER_KEY_FILE_NAME, TOKEN_FILE_NAME, TokenInfo, load_or_create_owner_key,
     load_or_create_token, read_owner_key, read_token, token_path,
 };
+pub use bot_delete_routes::spawn_pending_cleanups;
 pub use calendar::{CalendarControl, CalendarControlError};
 pub use cli_login::record_cli_install_pin;
 pub use components::{ComponentControl, ComponentError};

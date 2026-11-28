@@ -948,6 +948,32 @@ async fn a_failing_cleanup_step_is_reported_and_the_same_request_finishes_it() {
     assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
 }
 
+/// A cleanup left over when the daemon stopped is finished at the next start, without the
+/// owner (the gone bot has no "try again" left to click); one that still fails stays marked.
+#[tokio::test]
+async fn the_daemon_start_finishes_a_cleanup_a_delete_left() {
+    let (t, bot, chat, run, _mail) = busy_bot().await;
+    let id = bot_id(&bot);
+    inject(id, Fault::Step(BotDeleteStep::Files), true);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.json()["cleanup_pending"], json!(["files"]));
+    // Still failing: tried, kept for later.
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        1
+    );
+    assert!(storage::event_log_path(&t.state.data_dir(), run).exists());
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_some());
+    inject(id, Fault::Step(BotDeleteStep::Files), false);
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        0
+    );
+    assert!(!storage::event_log_path(&t.state.data_dir(), run).exists());
+    assert!(!t.state.data_dir().join("attachments").join(&chat).exists());
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+}
+
 /// While a bot is being deleted nothing new starts for it: no chat, no mission, no mailbox share.
 #[tokio::test]
 async fn a_bot_being_deleted_gets_no_new_chat_mission_or_mailbox() {

@@ -17,7 +17,8 @@
 //!    grants, memories and chat search text, event logs and attachments (never through a link),
 //!    webhook secrets, schedules, MCP/app/channel links. A cleanup marker, written in the commit,
 //!    stays until every step is done; a step that fails is reported (`cleanup_pending`) and
-//!    retried by `DELETE /v1/bots/{id}` again.
+//!    retried by `DELETE /v1/bots/{id}` again, and once when the daemon starts
+//!    ([`spawn_pending_cleanups`]).
 //! 4. **Mailboxes last.** Accounts only this bot could use are removed (shared ones pass to the
 //!    first bot they were shared with); with `delete_inbox=true` the `AgentMail` inbox goes at
 //!    the provider, only if it is still the bot's alone, decided under the mail host's lock.
@@ -554,6 +555,45 @@ async fn retry_cleanup(
     Ok(Some(cleaned.report(left.name.clone())))
 }
 
+/// How long after the daemon starts the cleanups a delete left are retried (the mail host, MCP
+/// servers and channels are wired by then).
+const PENDING_CLEANUP_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Retry, once at daemon start, the cleanups bot deletes left (a failing step, or the daemon
+/// stopped half way): the bot is gone from the list, so the owner has nothing to click "try
+/// again" on. The same steps as `DELETE /v1/bots/{id}` on a gone bot, with the `delete_inbox` the
+/// owner chose then. Safe to call once at daemon start.
+pub fn spawn_pending_cleanups(state: AppState) {
+    if state.safe_mode() {
+        return;
+    }
+    tokio::spawn(async move {
+        tokio::time::sleep(PENDING_CLEANUP_DELAY).await;
+        finish_pending_cleanups(&state).await;
+    });
+}
+
+/// Every unfinished cleanup of this owner's deleted bots, retried once. Returns how many are
+/// still unfinished.
+pub(crate) async fn finish_pending_cleanups(s: &AppState) -> usize {
+    let pending = match s.storage().bot_delete_cleanups() {
+        Ok(list) => list,
+        Err(e) => {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: warning: could not read the bot delete markers: {e}");
+            return 0;
+        }
+    };
+    let mut left = 0;
+    for c in pending.into_iter().filter(|c| c.user_id == s.user_id()) {
+        s.storage().retire_bot(c.bot_id);
+        let cleaned = clean_up(s, &c, true, None).await;
+        if !cleaned.pending.is_empty() {
+            left += 1;
+        }
+    }
+    left
+}
+
 /// What the cleanup removed, and the steps that did not finish.
 #[derive(Default)]
 struct Cleaned {
@@ -611,28 +651,10 @@ async fn clean_up(
         created_at_ms: 0,
     };
 
-    // Knowledge index and grants, under the bot's knowledge authority (done already, right
-    // after the commit, unless this is a retry).
+    // Knowledge index and grants (done already, right after the commit, unless this is a retry).
     let knowledge = match knowledge {
         Some(done) => done,
-        None => {
-            let authority = crate::knowledge::authority_lock(s, c.bot_id)
-                .lock_owned()
-                .await;
-            match crate::knowledge::worker_permit(s.data_dir()) {
-                Err(e) => Err(e.message().to_owned()),
-                Ok(permit) => {
-                    let state = s.clone();
-                    let gone = bot.clone();
-                    crate::knowledge::blocking_with_permit(permit, move || {
-                        let _authority = authority;
-                        Ok(remove_knowledge(&state, &gone))
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(e.message().to_owned()))
-                }
-            }
-        }
+        None => remove_knowledge_again(s, &bot).await,
     };
     out.step(BotDeleteStep::Knowledge, knowledge);
 
@@ -657,20 +679,7 @@ async fn clean_up(
     })();
     out.step(BotDeleteStep::Files, files);
 
-    // The signing secrets of its webhooks live in the secret store.
-    let secrets = (|| {
-        fault(c.bot_id, Fault::Step(BotDeleteStep::Secrets)).map_err(|e| e.to_string())?;
-        let Some(store) = s.secret_store() else {
-            return Ok(());
-        };
-        for hook in &c.webhook_ids {
-            store
-                .delete(&crate::incoming_webhook::secret_name(*hook))
-                .map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    })();
-    out.step(BotDeleteStep::Secrets, secrets);
+    out.step(BotDeleteStep::Secrets, remove_webhook_secrets(s, c));
 
     if missions_left {
         let missions = (|| {
@@ -742,6 +751,37 @@ async fn clean_up(
         support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: warning: could not clear the bot delete marker: {e}");
     }
     out
+}
+
+/// The signing secrets of the bot's webhooks, which live in the secret store.
+fn remove_webhook_secrets(s: &AppState, c: &BotDeleteCleanup) -> Result<(), String> {
+    fault(c.bot_id, Fault::Step(BotDeleteStep::Secrets)).map_err(|e| e.to_string())?;
+    let Some(store) = s.secret_store() else {
+        return Ok(());
+    };
+    for hook in &c.webhook_ids {
+        store
+            .delete(&crate::incoming_webhook::secret_name(*hook))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// [`remove_knowledge`] on a retry, under the bot's knowledge authority and a worker permit.
+async fn remove_knowledge_again(s: &AppState, bot: &Bot) -> Result<(), String> {
+    let authority = crate::knowledge::authority_lock(s, bot.id)
+        .lock_owned()
+        .await;
+    let permit =
+        crate::knowledge::worker_permit(s.data_dir()).map_err(|e| e.message().to_owned())?;
+    let state = s.clone();
+    let gone = bot.clone();
+    crate::knowledge::blocking_with_permit(permit, move || {
+        let _authority = authority;
+        Ok(remove_knowledge(&state, &gone))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.message().to_owned()))
 }
 
 /// The bot's knowledge grants and index. Blocking; call holding its knowledge authority and a
