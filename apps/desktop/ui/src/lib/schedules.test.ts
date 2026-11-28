@@ -426,14 +426,19 @@ test("editing a zoned cron schedule keeps its zone instead of showing UTC", () =
   assert.deepEqual(buildInput(d, undefined, s).spec, { cron: "0 9 * * * Europe/Istanbul" });
 });
 
-test("parsePayload reads a standing order and keeps it on edit", () => {
+test("parsePayload reads a standing order and builds it on edit", () => {
   assert.deepEqual(
     parsePayload({
       kind: "standing_order",
       checklist: "Is the disk under 90%?",
       max_runs_per_day: 12
     }),
-    { kind: "standing_order", checklist: "Is the disk under 90%?" }
+    {
+      kind: "standing_order",
+      checklist: "Is the disk under 90%?",
+      max_runs_per_day: 12,
+      active_hours: undefined
+    }
   );
   assert.deepEqual(parsePayload({ kind: "standing_order" }), { kind: "unknown" });
   const payload = {
@@ -442,8 +447,19 @@ test("parsePayload reads a standing order and keeps it on edit", () => {
     active_hours: { start: "08:00", end: "22:00", timezone: "Europe/Istanbul" },
     max_runs_per_day: 12
   };
-  const editing = sched({ payload });
-  const draft = { ...draftFromSchedule(editing), prompt: "" };
+  const editing = sched({ payload, origin: "user" });
+  const draft = draftFromSchedule(editing, "Europe/Istanbul");
+  assert.equal(draft.taskKind, "standing_order");
   assert.equal(validateDraft(draft, editing), null);
+  assert.deepEqual(buildInput(draft, null, editing).payload, payload);
+});
+
+test("a bot-made standing order keeps its payload on edit", () => {
+  const payload = { kind: "standing_order", checklist: "x", max_runs_per_day: 3 };
+  const editing = sched({ payload, origin: "bot" });
+  const draft = {
+    ...draftFromSchedule(editing),
+    standing: { ...draftFromSchedule(editing).standing, checklist: "changed" }
+  };
   assert.deepEqual(buildInput(draft, null, editing).payload, payload);
 });

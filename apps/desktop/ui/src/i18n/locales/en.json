@@ -6751,7 +6751,12 @@
       },
       "invalid": {
         "bot": "Pick a bot.",
+        "checklist": "Write the checklist.",
         "cron": "Enter a cron expression.",
+        "hoursEnd": "Enter an end time like 22:00 (not the same as the start).",
+        "hoursStart": "Enter a start time like 08:00.",
+        "hoursTz": "Pick a known timezone for active hours.",
+        "maxRuns": "Runs per day must be between 1 and 288.",
         "name": "Give the schedule a name.",
         "prompt": "Write what the bot should do.",
         "text": "Describe when it should run."
@@ -6782,7 +6787,7 @@
         "problems": "Only if something goes wrong"
       },
       "payloadKept": "This schedule runs a workflow or tool; that part stays unchanged.",
-      "payloadKeptStanding": "This schedule is a standing order: it stays quiet unless something needs you. Its checklist, active hours and daily limit stay unchanged here.",
+      "payloadKeptStanding": "This standing order was made by a bot after you approved it. You cannot change its checklist here.",
       "preview": "Preview",
       "prompt": "Prompt",
       "promptHint": "What the bot is asked to do each time.",
@@ -6791,6 +6796,23 @@
         "date": "Pick the day it should run.",
         "past": "That time has already passed. Pick a later one.",
         "time": "Pick a time like 09:00."
+      },
+      "standing": {
+        "activeHours": "Only during certain hours",
+        "checklist": "Checklist",
+        "checklistHint": "What the bot checks each run. It only tells you when something needs you.",
+        "from": "From",
+        "hoursHint": "May cross midnight (end is exclusive). Outside this window, scheduled firings are skipped. Run now still works.",
+        "hoursZone": "Active-hours timezone",
+        "maxRuns": "Runs per day",
+        "maxRunsHint": "Default 24, maximum 288 (one every five minutes).",
+        "to": "To"
+      },
+      "taskKind": {
+        "label": "What kind of task?",
+        "prompt": "Ask the bot each time",
+        "standing": "Standing order (tells you only when something needs you)",
+        "standingHint": "Each run ends with OK (no notice) or NEEDS_OWNER (you are told)."
       },
       "text": "Schedule in words",
       "textHint": "English or Turkish. Times use {{tz}}.",
@@ -6864,6 +6886,14 @@
         "seconds_one": "Every second"
       },
       "unknown": "Custom schedule"
+    },
+    "standing": {
+      "runsToday": "{{runs}} / {{cap}} runs today",
+      "verdict": {
+        "needs_owner": "Last: needs you",
+        "ok": "Last: all clear",
+        "unclear": "Last: unclear answer"
+      }
     },
     "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
     "title": "Scheduled tasks",

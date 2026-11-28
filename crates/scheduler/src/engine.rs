@@ -269,6 +269,7 @@ impl Scheduler {
             &fired,
             None,
             now_ms,
+            false,
         )
         .await
         .map(|_| ())
@@ -730,6 +731,7 @@ fn spawn_direct_execution(inner: &Arc<Inner>, schedule: Schedule, guard: InFligh
             &schedule,
             None,
             inner.clock.wall_ms(),
+            true,
         )
         .await
         {
@@ -758,6 +760,7 @@ fn spawn_retry_execution(
             &schedule,
             Some((due_ms, attempt)),
             inner.clock.wall_ms(),
+            false,
         )
         .await;
         if let Err(error) = &outcome {
@@ -828,6 +831,7 @@ fn spawn_timer_executions(
                 &schedule,
                 Some((due_ms, 0)),
                 inner.clock.wall_ms(),
+                false,
             )
             .await;
             if let Err(error) = &outcome {
@@ -853,7 +857,12 @@ pub(crate) enum Dispatch {
 /// Whether a standing order may fire now: inside its active hours and under today's cap.
 /// Read-only, so a gated firing leaves the check state, queued events and the count alone;
 /// ask it before any of those is touched. Other payloads always may run.
-fn standing_order_open(store: &ScheduleStore, schedule: &Schedule, now: i64) -> Result<bool> {
+fn standing_order_open(
+    store: &ScheduleStore,
+    schedule: &Schedule,
+    now: i64,
+    bypass_hours: bool,
+) -> Result<bool> {
     let Payload::StandingOrder {
         active_hours,
         max_runs_per_day,
@@ -863,6 +872,7 @@ fn standing_order_open(store: &ScheduleStore, schedule: &Schedule, now: i64) -> 
         return Ok(true);
     };
     if let Some(hours) = active_hours
+        && !bypass_hours
         && !hours.contains(now)?
     {
         return Ok(false);
@@ -873,7 +883,7 @@ fn standing_order_open(store: &ScheduleStore, schedule: &Schedule, now: i64) -> 
 
 /// [`standing_order_open`] for the poll loop, where one broken row must not stop the rest.
 fn gate_open(inner: &Inner, schedule: &Schedule, now: i64) -> bool {
-    standing_order_open(&inner.store, schedule, now).unwrap_or_else(|error| {
+    standing_order_open(&inner.store, schedule, now, false).unwrap_or_else(|error| {
         tracing::error!(schedule_id = %schedule.id, %error, "standing order gate unreadable");
         false
     })
@@ -933,6 +943,7 @@ pub(crate) async fn execute_checked(
     schedule: &Schedule,
     occurrence: Option<(i64, u32)>,
     now: i64,
+    bypass_standing_hours: bool,
 ) -> Result<Dispatch> {
     // A schedule that moved to a server never fires here, whichever ingress asked.
     if store.frozen_for(schedule.id)?.is_some() {
@@ -940,7 +951,7 @@ pub(crate) async fn execute_checked(
     }
     // Before the precheck (which advances its change hash) and the registry (which empties its
     // queue): a gated firing must lose nothing.
-    if !standing_order_open(store, schedule, now)? {
+    if !standing_order_open(store, schedule, now, bypass_standing_hours)? {
         note_gated(store, schedule, occurrence);
         return Ok(Dispatch::Skipped);
     }
@@ -1067,11 +1078,16 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
             let result = poll_one(&inner, &schedule, &trigger, state, now).await;
             drop(slot);
             let result = match result {
-                Ok(Some(fired)) => {
-                    execute_checked(&inner.store, inner.executor.as_ref(), &fired, None, now)
-                        .await
-                        .map(|_| ())
-                }
+                Ok(Some(fired)) => execute_checked(
+                    &inner.store,
+                    inner.executor.as_ref(),
+                    &fired,
+                    None,
+                    now,
+                    false,
+                )
+                .await
+                .map(|_| ()),
                 Ok(None) => Ok(()),
                 Err(error) => Err(error),
             };

@@ -17,7 +17,7 @@ test("the schedule editor is one flow: sentence, example chips, when, bot and na
     'data-testid="schedule-when-summary"',
     'data-testid="schedule-bot"',
     'data-testid="schedule-name"',
-    'data-testid="schedule-prompt"',
+    "schedule-task-kind-${kind",
     'data-testid="schedule-advanced"'
   ].map((id) => form.indexOf(id));
   assert.ok(order.every((at) => at > 0), String(order));
@@ -32,7 +32,13 @@ test("the examples are small chips, not a row of big cards", () => {
 
 test("the notify choice, time zone, cron and missed-run rules live in the folded section", () => {
   const fold = form.indexOf('data-testid="schedule-advanced"');
-  for (const part of ["data-testid={`schedule-notify-${c}`}", "<TimezonePicker", "schedules.form.kind.cron", "schedules.form.misfire\"", "schedules.enabled"]) {
+  for (const part of [
+    "data-testid={`schedule-notify-${c}`}",
+    't("schedules.form.tz")',
+    "schedules.form.kind.cron",
+    "schedules.form.misfire\"",
+    "schedules.enabled"
+  ]) {
     assert.ok(form.indexOf(part) > fold, part);
   }
   // The fold says what it holds, and "Change time zone" next to the summary opens it.
@@ -48,6 +54,7 @@ test("same backend: the form still saves through createSchedule / updateSchedule
 
 test("every editor text exists in English and Turkish", () => {
   const keys = new Set([...form.matchAll(/t\("(scheduleEditor\.[a-zA-Z.]+)"/g)].map((m) => m[1]));
+  for (const k of form.matchAll(/t\("(schedules\.form\.[a-zA-Z.]+)"/g)) keys.add(k[1]);
   for (const k of ["daily", "weekdays", "weekly", "monthly", "once", "onceNoDate"]) keys.add(`scheduleEditor.summary.${k}`);
   assert.ok(keys.size >= 10);
   for (const lang of ["en", "tr"]) {

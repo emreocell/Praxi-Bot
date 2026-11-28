@@ -72,5 +72,5 @@ test("overview entry points and bot-specific settings and schedule actions stay 
   assert.match(app, /onSettings=\{\(botId\) => go\(\{ kind: "bot", botId, edit: true/);
   assert.match(app, /onSchedule=\{\(botId\) => go\(\{ kind: "schedules", botId/);
   assert.match(read("../state/PaletteHost.tsx"), /const SCREENS[\s\S]+"myBots"/);
-  assert.match(read("../views/SchedulesView.tsx"), /emptyDraft\(bots.find\(\(b\) => b.id === initialBotId\)/);
+  assert.match(read("../views/SchedulesView.tsx"), /emptyDraft\([\s\S]*initialBotId/);
 });

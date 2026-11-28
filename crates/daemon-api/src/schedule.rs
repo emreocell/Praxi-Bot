@@ -675,6 +675,28 @@ pub(crate) async fn validate_trigger(
     }
 }
 
+/// Last assistant line of a finished standing-order run as `ok`, `needs_owner` or `unclear`.
+pub(crate) fn standing_verdict_of_run(storage: &Storage, run: &storage::Run) -> Option<String> {
+    if !matches!(run.state.as_str(), "succeeded") {
+        return None;
+    }
+    let chat = run.chat_id?;
+    let (messages, _) = storage
+        .list_messages_bounded(chat, None, 40, 256 * 1024)
+        .ok()?;
+    let last = messages
+        .into_iter()
+        .filter(|m| {
+            m.role == "assistant" && m.run_id == Some(run.id) && !m.content.trim().is_empty()
+        })
+        .max_by_key(|m| m.created_at_ms)?;
+    Some(match scheduler::StandingVerdict::parse(&last.content) {
+        scheduler::StandingVerdict::Ok => "ok".to_owned(),
+        scheduler::StandingVerdict::NeedsOwner(_) => "needs_owner".to_owned(),
+        scheduler::StandingVerdict::Unclear => "unclear".to_owned(),
+    })
+}
+
 #[cfg(test)]
 mod c225_tests {
     use super::*;

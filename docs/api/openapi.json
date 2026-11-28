@@ -38894,6 +38894,24 @@
           "spec": {
             "description": "When it fires: `{\"cron\": \"0 9 * * 1-5 Europe/Istanbul\"}`,\n`{\"every\": {\"seconds\": 600}}` or `{\"at\": {\"unix_ms\": 1767225600000}}`."
           },
+          "standing_max_runs_per_day": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Standing order: daily run cap from its payload.",
+            "minimum": 0
+          },
+          "standing_runs_today": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Standing order: runs already started today (in the counter's calendar day).",
+            "minimum": 0
+          },
           "trigger": {
             "description": "Non-webhook trigger definition; never includes webhook secrets."
           }
@@ -38949,6 +38967,13 @@
             ],
             "format": "uuid",
             "description": "Linked run id, if a run was created."
+          },
+          "standing_verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Standing order: `ok`, `needs_owner` or `unclear` from the last assistant line of the run."
           },
           "started_at_ms": {
             "type": [

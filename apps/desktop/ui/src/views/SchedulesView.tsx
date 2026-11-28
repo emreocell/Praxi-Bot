@@ -82,8 +82,11 @@ import {
   sortSchedules,
   specLabel,
   toggleInput,
-  validateDraft
+  validateDraft,
+  type ScheduleTaskKind,
+  keepsPayload
 } from "../lib/schedules";
+import { lastStandingVerdict } from "../lib/standingOrder";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./SchedulesView.module.css";
 
@@ -518,6 +521,15 @@ function ScheduleRow({
   const label = localSpecLabel(s.spec, (ms) => fmt(ms, zone), i18n.language, LOCAL_TZ);
   const payload = parsePayload(s.payload);
   const last = lastOutcome(history);
+  const standingVerdict = payload.kind === "standing_order" ? lastStandingVerdict(history) : null;
+  const standingRuns =
+    payload.kind === "standing_order" &&
+    s.standing_runs_today !== null &&
+    s.standing_runs_today !== undefined &&
+    s.standing_max_runs_per_day !== null &&
+    s.standing_max_runs_per_day !== undefined
+      ? { runs: s.standing_runs_today, cap: s.standing_max_runs_per_day }
+      : null;
   const primary = primaryAction(s, last);
   const nextRuns = s.next_runs_ms ?? [];
   const visibleHistory = filterScheduleHistory(history, filter);
@@ -564,6 +576,19 @@ function ScheduleRow({
                 <i aria-hidden="true" />
                 {lastLine}
               </span>
+              {standingRuns ? (
+                <span data-testid="schedule-standing-runs">
+                  {t("schedules.standing.runsToday", {
+                    runs: standingRuns.runs,
+                    cap: standingRuns.cap
+                  })}
+                </span>
+              ) : null}
+              {standingVerdict ? (
+                <span data-testid="schedule-standing-verdict">
+                  {t(`schedules.standing.verdict.${standingVerdict}`)}
+                </span>
+              ) : null}
               {(s.missed_occurrences ?? 0) > 0 ? (
                 <span data-testid="schedule-missed">{t("automation.missedCount", { count: s.missed_occurrences ?? 0 })}</span>
               ) : null}
@@ -1097,8 +1122,18 @@ function ScheduleForm({
   const { client, bots } = useDaemon();
   const [draft, setDraft] = useState<ScheduleDraft>(() =>
     editing
-      ? draftFromSchedule(editing)
-      : { ...emptyDraft(bots.find((b) => b.id === initialBotId)?.id ?? bots[0]?.id ?? ""), tz: LOCAL_TZ }
+      ? draftFromSchedule(editing, LOCAL_TZ)
+      : {
+          ...emptyDraft(
+            bots.find((b) => b.id === initialBotId)?.id ?? bots[0]?.id ?? "",
+            LOCAL_TZ
+          ),
+          tz: LOCAL_TZ,
+          standing: {
+            ...emptyDraft("", LOCAL_TZ).standing,
+            activeHoursTz: LOCAL_TZ
+          }
+        }
   );
   const [preview, setPreview] = useState<{
     key: string;
@@ -1122,7 +1157,7 @@ function ScheduleForm({
     setNotifyState(c);
   };
   const suggested = suggestScheduleNotify(
-    draft.prompt,
+    draft.taskKind === "standing_order" ? draft.standing.checklist : draft.prompt,
     draft.kind === "simple" && draft.simple.freq === "once"
   );
   useEffect(() => {
@@ -1212,9 +1247,7 @@ function ScheduleForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const keepsPayload =
-    editing !== undefined &&
-    parsePayload(editing.payload).kind !== "agent_prompt";
+  const payloadLocked = editing !== undefined && keepsPayload(editing);
   const selectedTz = draft.tz ?? LOCAL_TZ;
 
   const fmt = (ms: number, tz?: string) => formatRunPreview(ms, i18n.language, tz);
@@ -1682,7 +1715,7 @@ function ScheduleForm({
           </label>
         </div>
 
-        {keepsPayload ? (
+        {payloadLocked ? (
           <p className={formStyles.hint}>
             {t(
               parsePayload(editing?.payload).kind === "standing_order"
@@ -1691,21 +1724,137 @@ function ScheduleForm({
             )}
           </p>
         ) : (
-          <label className={formStyles.field}>
-            <span className={formStyles.label}>
-              {t("scheduleEditor.whatToDo")}
-            </span>
-            <textarea
-              className={formStyles.textarea}
-              value={draft.prompt}
-              placeholder={t("scheduleEditor.whatPlaceholder")}
-              data-testid="schedule-prompt"
-              onChange={(e) => patch({ prompt: e.target.value })}
-            />
-            <span className={formStyles.hint}>
-              {t("schedules.form.promptHint")}
-            </span>
-          </label>
+          <>
+            <fieldset className={styles.fieldset}>
+              <legend className={formStyles.label}>{t("schedules.form.taskKind.label")}</legend>
+              <div className={styles.chipRow} role="radiogroup" aria-label={t("schedules.form.taskKind.label")}>
+                {(["agent_prompt", "standing_order"] as const).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.taskKind === kind}
+                    className={styles.chip}
+                    data-testid={`schedule-task-kind-${kind === "agent_prompt" ? "prompt" : "standing"}`}
+                    onClick={() => patch({ taskKind: kind as ScheduleTaskKind })}
+                  >
+                    {t(`schedules.form.taskKind.${kind === "agent_prompt" ? "prompt" : "standing"}`)}
+                  </button>
+                ))}
+              </div>
+              {draft.taskKind === "standing_order" ? (
+                <span className={formStyles.hint}>{t("schedules.form.taskKind.standingHint")}</span>
+              ) : null}
+            </fieldset>
+            {draft.taskKind === "agent_prompt" ? (
+              <label className={formStyles.field}>
+                <span className={formStyles.label}>{t("scheduleEditor.whatToDo")}</span>
+                <textarea
+                  className={formStyles.textarea}
+                  value={draft.prompt}
+                  placeholder={t("scheduleEditor.whatPlaceholder")}
+                  data-testid="schedule-prompt"
+                  onChange={(e) => patch({ prompt: e.target.value })}
+                />
+                <span className={formStyles.hint}>{t("schedules.form.promptHint")}</span>
+              </label>
+            ) : (
+              <div className={styles.formPair} data-testid="schedule-standing-fields">
+                <label className={formStyles.field}>
+                  <span className={formStyles.label}>{t("schedules.form.standing.checklist")}</span>
+                  <textarea
+                    className={formStyles.textarea}
+                    value={draft.standing.checklist}
+                    data-testid="schedule-standing-checklist"
+                    onChange={(e) =>
+                      patch({ standing: { ...draft.standing, checklist: e.target.value } })
+                    }
+                  />
+                  <span className={formStyles.hint}>{t("schedules.form.standing.checklistHint")}</span>
+                </label>
+                <div className={styles.formPair}>
+                  <label className={formStyles.field}>
+                    <span className={formStyles.label}>{t("schedules.form.standing.maxRuns")}</span>
+                    <input
+                      className={formStyles.input}
+                      type="number"
+                      min={1}
+                      max={288}
+                      value={draft.standing.maxRunsPerDay}
+                      data-testid="schedule-standing-max-runs"
+                      onChange={(e) =>
+                        patch({
+                          standing: {
+                            ...draft.standing,
+                            maxRunsPerDay: Number(e.target.value)
+                          }
+                        })
+                      }
+                    />
+                    <span className={formStyles.hint}>{t("schedules.form.standing.maxRunsHint")}</span>
+                  </label>
+                  <label className={formStyles.field}>
+                    <span className={formStyles.label}>
+                      <Switch
+                        checked={draft.standing.activeHoursEnabled}
+                        label={t("schedules.form.standing.activeHours")}
+                        onChange={(checked) =>
+                          patch({
+                            standing: { ...draft.standing, activeHoursEnabled: checked }
+                          })
+                        }
+                      />
+                    </span>
+                  </label>
+                </div>
+                {draft.standing.activeHoursEnabled ? (
+                  <div className={styles.formPair}>
+                    <label className={formStyles.field}>
+                      <span className={formStyles.label}>{t("schedules.form.standing.from")}</span>
+                      <input
+                        className={formStyles.input}
+                        value={draft.standing.activeHoursStart}
+                        inputMode="numeric"
+                        pattern="[0-9]{2}:[0-9]{2}"
+                        data-testid="schedule-standing-hours-start"
+                        onChange={(e) =>
+                          patch({
+                            standing: { ...draft.standing, activeHoursStart: e.target.value }
+                          })
+                        }
+                      />
+                    </label>
+                    <label className={formStyles.field}>
+                      <span className={formStyles.label}>{t("schedules.form.standing.to")}</span>
+                      <input
+                        className={formStyles.input}
+                        value={draft.standing.activeHoursEnd}
+                        inputMode="numeric"
+                        pattern="[0-9]{2}:[0-9]{2}"
+                        data-testid="schedule-standing-hours-end"
+                        onChange={(e) =>
+                          patch({
+                            standing: { ...draft.standing, activeHoursEnd: e.target.value }
+                          })
+                        }
+                      />
+                    </label>
+                    <label className={formStyles.field}>
+                      <span className={formStyles.label}>{t("schedules.form.standing.hoursZone")}</span>
+                      <TimezonePicker
+                        value={draft.standing.activeHoursTz}
+                        allowEmpty={false}
+                        onChange={(tz) =>
+                          patch({ standing: { ...draft.standing, activeHoursTz: tz || LOCAL_TZ } })
+                        }
+                      />
+                      <span className={formStyles.hint}>{t("schedules.form.standing.hoursHint")}</span>
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </>
         )}
 
         <details

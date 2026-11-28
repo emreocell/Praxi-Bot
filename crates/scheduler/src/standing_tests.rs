@@ -417,7 +417,7 @@ async fn a_firing_outside_the_hours_or_over_the_cap_starts_nothing() {
     let fire = |at| {
         let (store, exec, s) = (&store, &exec, &s);
         async move {
-            crate::engine::execute_checked(store, exec.as_ref(), s, None, at)
+            crate::engine::execute_checked(store, exec.as_ref(), s, None, at, false)
                 .await
                 .unwrap()
         }
@@ -453,9 +453,10 @@ async fn other_payloads_are_not_gated() {
     .unwrap();
     store.insert(&s).unwrap();
     for _ in 0..30 {
-        let out = crate::engine::execute_checked(&store, exec.as_ref(), &s, None, utc_ms(3, 0))
-            .await
-            .unwrap();
+        let out =
+            crate::engine::execute_checked(&store, exec.as_ref(), &s, None, utc_ms(3, 0), false)
+                .await
+                .unwrap();
         assert_eq!(out, crate::engine::Dispatch::Ran);
     }
 }
@@ -698,7 +699,7 @@ async fn a_gated_firing_leaves_the_precheck_state_alone() {
         input: json!({}),
     });
     store.insert(&s).unwrap();
-    let go = |at| crate::engine::execute_checked(&store, &exec, &s, None, at);
+    let go = |at| crate::engine::execute_checked(&store, &exec, &s, None, at, false);
 
     // Night: no check ran, no hash moved, nothing was counted as skipped by the check.
     assert_eq!(go(utc_ms(3, 0)).await.unwrap(), Skipped);
@@ -879,7 +880,7 @@ async fn a_start_that_never_began_gives_its_slot_back() {
     let store = ScheduleStore::open_in_memory().unwrap();
     let s = stored(&store, order(None, 2));
     let exec = Offline(Mutex::new(true));
-    let go = || crate::engine::execute_checked(&store, &exec, &s, None, utc_ms(9, 0));
+    let go = || crate::engine::execute_checked(&store, &exec, &s, None, utc_ms(9, 0), false);
     // Offline for as long as it likes: no slot is burned.
     for _ in 0..5 {
         assert!(go().await.is_err());
@@ -904,7 +905,7 @@ impl ScheduleExecutor for Broken {
 async fn a_run_that_began_and_failed_keeps_its_slot() {
     let store = ScheduleStore::open_in_memory().unwrap();
     let s = stored(&store, order(None, 2));
-    let go = || crate::engine::execute_checked(&store, &Broken, &s, None, utc_ms(9, 0));
+    let go = || crate::engine::execute_checked(&store, &Broken, &s, None, utc_ms(9, 0), false);
     assert!(go().await.is_err());
     assert_eq!(store.standing_order_runs(s.id, "2026-06-10").unwrap(), 1);
 }
@@ -916,7 +917,7 @@ async fn a_stale_definition_takes_no_slot_even_when_it_wins_the_race_to_launch()
     let s = stored(&store, order(None, 2));
     // The owner disables it while the firing is in flight.
     store.set_enabled(s.id, false, None).unwrap();
-    let out = crate::engine::execute_checked(&store, &exec, &s, None, utc_ms(9, 0))
+    let out = crate::engine::execute_checked(&store, &exec, &s, None, utc_ms(9, 0), false)
         .await
         .unwrap();
     assert_eq!(out, crate::engine::Dispatch::Skipped);

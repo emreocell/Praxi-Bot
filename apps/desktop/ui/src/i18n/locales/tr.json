@@ -6751,7 +6751,12 @@
       },
       "invalid": {
         "bot": "Bir bot seç.",
+        "checklist": "Kontrol listesini yaz.",
         "cron": "Bir cron ifadesi gir.",
+        "hoursEnd": "Bitiş saatini gir (ör. 22:00; başlangıçla aynı olmasın).",
+        "hoursStart": "Başlangıç saatini gir (ör. 08:00).",
+        "hoursTz": "Etkin saatler için bilinen bir saat dilimi seç.",
+        "maxRuns": "Günlük çalışma sayısı 1 ile 288 arasında olmalı.",
         "name": "Zamanlamaya bir ad ver.",
         "prompt": "Botun ne yapacağını yaz.",
         "text": "Ne zaman çalışacağını yaz."
@@ -6782,7 +6787,7 @@
         "problems": "Sadece bir sorun olursa"
       },
       "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
-      "payloadKeptStanding": "Bu zamanlama bir kalıcı talimat: sana bir şey gerekmedikçe sessiz kalır. Kontrol listesi, etkin saatler ve günlük sınır burada değişmez.",
+      "payloadKeptStanding": "Bu kalıcı talimatı bir bot, onayından sonra oluşturdu. Kontrol listesini burada değiştiremezsin.",
       "preview": "Önizle",
       "prompt": "İstem",
       "promptHint": "Bottan her seferinde yapması istenen şey.",
@@ -6791,6 +6796,23 @@
         "date": "Çalışacağı günü seçin.",
         "past": "Bu zaman geçti. Daha ileri bir zaman seçin.",
         "time": "09:00 gibi bir saat seçin."
+      },
+      "standing": {
+        "activeHours": "Yalnızca belirli saatlerde",
+        "checklist": "Kontrol listesi",
+        "checklistHint": "Bot her çalışmada bunu kontrol eder. Yalnızca bir şey gerekince haber verir.",
+        "from": "Başlangıç",
+        "hoursHint": "Gece yarısını geçebilir (bitiş hariçtir). Bu pencere dışında zamanlanmış tetiklemeler atlanır. Şimdi çalıştır yine de çalışır.",
+        "hoursZone": "Etkin saat dilimi",
+        "maxRuns": "Günde kaç kez",
+        "maxRunsHint": "Varsayılan 24, en fazla 288 (beş dakikada bir).",
+        "to": "Bitiş"
+      },
+      "taskKind": {
+        "label": "Ne tür bir görev?",
+        "prompt": "Her seferinde bota sor",
+        "standing": "Kalıcı talimat (yalnızca bir şey gerekince haber verir)",
+        "standingHint": "Her çalışma OK (bildirim yok) ya da NEEDS_OWNER (haber alırsın) ile biter."
       },
       "text": "Zamanlama cümlesi",
       "textHint": "Türkçe ya da İngilizce. Saatler {{tz}} diliminde.",
@@ -6864,6 +6886,14 @@
         "seconds_one": "Her saniye"
       },
       "unknown": "Özel zamanlama"
+    },
+    "standing": {
+      "runsToday": "Bugün {{runs}} / {{cap}} çalışma",
+      "verdict": {
+        "needs_owner": "Son: senden bir şey istiyor",
+        "ok": "Son: sorun yok",
+        "unclear": "Son: net yanıt yok"
+      }
     },
     "subtitle": "Botlarının zamanlayıcıyla yaptığı işler: her sabah, her saat ya da bir kez.",
     "title": "Zamanlanmış görevler",

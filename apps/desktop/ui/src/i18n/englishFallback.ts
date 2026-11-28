@@ -15,6 +15,14 @@ export function usesEnglishFallback(locale: string, key: string): boolean {
     key === "modelPicker.setUpCli" ||
     // Standing orders (quiet checks), English and Turkish first.
     key === "schedules.form.payloadKeptStanding" ||
-    key === "schedules.payload.standingOrder"
+    key === "schedules.payload.standingOrder" ||
+    key.startsWith("schedules.standing.") ||
+    key.startsWith("schedules.form.taskKind.") ||
+    key.startsWith("schedules.form.standing.") ||
+    key === "schedules.form.invalid.checklist" ||
+    key === "schedules.form.invalid.maxRuns" ||
+    key === "schedules.form.invalid.hoursStart" ||
+    key === "schedules.form.invalid.hoursEnd" ||
+    key === "schedules.form.invalid.hoursTz"
   );
 }

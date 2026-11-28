@@ -1113,6 +1113,12 @@ pub struct ScheduleDto {
     /// Next up to 5 upcoming firing timestamps (Unix epoch ms).
     #[serde(default)]
     pub next_runs_ms: Vec<i64>,
+    /// Standing order: runs already started today (in the counter's calendar day).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing_runs_today: Option<u32>,
+    /// Standing order: daily run cap from its payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing_max_runs_per_day: Option<u32>,
 }
 
 /// Body of `POST /v1/schedules` and `PUT /v1/schedules/{id}`.
@@ -1232,6 +1238,9 @@ pub struct ScheduleHistoryEntryDto {
     pub error: Option<String>,
     /// Whether this occurrence can be retried via `POST /v1/schedules/{id}/occurrences/{due_ms}/retry`.
     pub retryable: bool,
+    /// Standing order: `ok`, `needs_owner` or `unclear` from the last assistant line of the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing_verdict: Option<String>,
 }
 
 /// Answer of `POST /v1/schedules/{id}/run-now` and `POST /v1/webhooks/{id}`:

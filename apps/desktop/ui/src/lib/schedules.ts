@@ -8,6 +8,13 @@ import {
   DEFAULT_SIMPLE,
   type SimpleSchedule
 } from "./scheduleBuilder.ts";
+import {
+  buildStandingPayload,
+  DEFAULT_MAX_RUNS_PER_DAY,
+  standingFromPayload,
+  type StandingOrderFields,
+  validateStanding
+} from "./standingOrder.ts";
 
 /** `ScheduleDto::spec`: when a schedule fires. */
 export type ScheduleSpec =
@@ -20,8 +27,15 @@ export type SchedulePayload =
   | { kind: "agent_prompt"; text: string }
   | { kind: "workflow"; name: string; params?: unknown }
   | { kind: "tool"; name: string; input?: unknown }
-  | { kind: "standing_order"; checklist: string }
+  | {
+      kind: "standing_order";
+      checklist: string;
+      active_hours?: { start: string; end: string; timezone: string };
+      max_runs_per_day: number;
+    }
   | { kind: "unknown" };
+
+export type ScheduleTaskKind = "agent_prompt" | "standing_order";
 
 export type MisfirePolicy = "skip" | "run_once" | "run_all";
 
@@ -69,7 +83,23 @@ export function parsePayload(raw: unknown): SchedulePayload {
     return { kind: "tool", name: raw.name, input: raw.input };
   }
   if (raw.kind === "standing_order" && typeof raw.checklist === "string") {
-    return { kind: "standing_order", checklist: raw.checklist };
+    const max =
+      typeof raw.max_runs_per_day === "number" && Number.isFinite(raw.max_runs_per_day)
+        ? Math.trunc(raw.max_runs_per_day)
+        : DEFAULT_MAX_RUNS_PER_DAY;
+    const ah = raw.active_hours;
+    let active_hours: { start: string; end: string; timezone: string } | undefined;
+    if (typeof ah === "object" && ah !== null) {
+      const h = ah as Record<string, unknown>;
+      if (
+        typeof h.start === "string" &&
+        typeof h.end === "string" &&
+        typeof h.timezone === "string"
+      ) {
+        active_hours = { start: h.start, end: h.end, timezone: h.timezone };
+      }
+    }
+    return { kind: "standing_order", checklist: raw.checklist, max_runs_per_day: max, active_hours };
   }
   return { kind: "unknown" };
 }
@@ -270,13 +300,25 @@ export interface ScheduleDraft {
   cron: string;
   tz?: string;
   prompt: string;
+  /** What the schedule does when you create or edit it. */
+  taskKind: ScheduleTaskKind;
+  standing: StandingOrderFields;
   enabled: boolean;
   misfire: MisfirePolicy;
   /** Seconds a missed run may still be caught up (`0` = no limit). */
   catchupWindow: number;
 }
 
-export function emptyDraft(botId: string): ScheduleDraft {
+const DEFAULT_STANDING = (localTz: string): StandingOrderFields => ({
+  checklist: "",
+  activeHoursEnabled: false,
+  activeHoursStart: "08:00",
+  activeHoursEnd: "22:00",
+  activeHoursTz: localTz,
+  maxRunsPerDay: DEFAULT_MAX_RUNS_PER_DAY
+});
+
+export function emptyDraft(botId: string, localTz = "UTC"): ScheduleDraft {
   return {
     name: "",
     botId,
@@ -285,19 +327,23 @@ export function emptyDraft(botId: string): ScheduleDraft {
     text: "",
     cron: "",
     prompt: "",
+    taskKind: "agent_prompt",
+    standing: DEFAULT_STANDING(localTz),
     enabled: true,
     misfire: "skip",
     catchupWindow: 0
   };
 }
 
-export function draftFromSchedule(s: Schedule): ScheduleDraft {
+export function draftFromSchedule(s: Schedule, localTz = "UTC"): ScheduleDraft {
   const spec = parseSpec(s.spec);
   const payload = parsePayload(s.payload);
   // The stored zone rides as a sixth word of the cron: show it in the zone picker, not as "UTC".
   const zoned = spec && "cron" in spec ? splitCronZone(spec.cron) : null;
   const misfire =
     MISFIRE_POLICIES.find((m) => m === s.misfire_policy) ?? "skip";
+  const taskKind: ScheduleTaskKind =
+    payload.kind === "standing_order" ? "standing_order" : "agent_prompt";
   return {
     name: s.name,
     botId: s.bot_id,
@@ -307,19 +353,33 @@ export function draftFromSchedule(s: Schedule): ScheduleDraft {
     cron: zoned ? zoned.cron : "",
     ...(zoned?.tz ? { tz: zoned.tz } : {}),
     prompt: payload.kind === "agent_prompt" ? payload.text : "",
+    taskKind,
+    standing: standingFromPayload(s.payload, localTz),
     enabled: s.enabled,
     misfire,
     catchupWindow: s.catchup_window_secs ?? 0
   };
 }
 
-export type DraftError = "name" | "bot" | "text" | "cron" | "prompt";
+export type DraftError =
+  | "name"
+  | "bot"
+  | "text"
+  | "cron"
+  | "prompt"
+  | "checklist"
+  | "maxRuns"
+  | "hoursStart"
+  | "hoursEnd"
+  | "hoursTz";
 
-/** Whether an edit keeps the stored payload (a workflow, tool or standing-order payload is not editable here). */
-function keepsPayload(editing?: Schedule): boolean {
-  return (
-    editing !== undefined && parsePayload(editing.payload).kind !== "agent_prompt"
-  );
+/** Payloads only owners may edit here; bot-made standing orders stay read-only. */
+export function keepsPayload(editing?: Schedule): boolean {
+  if (editing === undefined) return false;
+  const kind = parsePayload(editing.payload).kind;
+  if (kind === "agent_prompt") return false;
+  if (kind === "standing_order") return editing.origin === "bot";
+  return true;
 }
 
 /** The first problem of a draft, or `null`. */
@@ -339,8 +399,11 @@ export function validateDraft(
   if (d.kind === "cron" && d.cron.trim() === "") {
     return "cron";
   }
-  if (!keepsPayload(editing) && d.prompt.trim() === "") {
+  if (!keepsPayload(editing) && d.taskKind === "agent_prompt" && d.prompt.trim() === "") {
     return "prompt";
+  }
+  if (!keepsPayload(editing) && d.taskKind === "standing_order") {
+    return validateStanding(d.standing);
   }
   return null;
 }
@@ -382,7 +445,9 @@ export function buildInput(
   const payload =
     editing && keepsPayload(editing)
       ? editing.payload
-      : { kind: "agent_prompt", text: d.prompt.trim() };
+      : d.taskKind === "standing_order"
+        ? buildStandingPayload(d.standing)
+        : { kind: "agent_prompt", text: d.prompt.trim() };
   return {
     bot_id: d.botId,
     name: d.name.trim(),

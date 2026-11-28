@@ -12453,6 +12453,16 @@ export interface components {
              *     `{"every": {"seconds": 600}}` or `{"at": {"unix_ms": 1767225600000}}`.
              */
             spec: unknown;
+            /**
+             * Format: int32
+             * @description Standing order: daily run cap from its payload.
+             */
+            standing_max_runs_per_day?: number | null;
+            /**
+             * Format: int32
+             * @description Standing order: runs already started today (in the counter's calendar day).
+             */
+            standing_runs_today?: number | null;
             /** @description Non-webhook trigger definition; never includes webhook secrets. */
             trigger?: unknown;
         };
@@ -12482,6 +12492,8 @@ export interface components {
              * @description Linked run id, if a run was created.
              */
             run_id?: string | null;
+            /** @description Standing order: `ok`, `needs_owner` or `unclear` from the last assistant line of the run. */
+            standing_verdict?: string | null;
             /**
              * Format: int64
              * @description When the run started (Unix ms), if it started.

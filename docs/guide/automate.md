@@ -9,11 +9,16 @@ A **scheduled job** lets a bot do something by itself at the times you choose. F
 3. In **In your own words**, write the job in one sentence and press **Fill in**. Or click one of the small **Examples** chips. It fills in the form. You can change everything afterwards.
 4. Under **When** choose **Once**, **Every day**, **Weekdays**, **Every week**, **Every month** or **Other**, then pick the time. One line sums it up, for example "Every weekday at 09:00, Istanbul". **Next 5 runs** unfolds the next times. Check that this is what you meant.
 5. Pick the **Bot** and check the **Name**.
-6. Check **What should the bot do?** This is what the bot is asked to do each time. Write it in your own words.
-7. **More options** holds **Tell me when it ran** (**Every time**, **Only if something goes wrong** or **Never**), the time zone and the rarer settings. It is folded; its title shows what is chosen.
-8. Press **Create**.
+6. Under **What kind of task?** choose **Ask the bot each time** (a normal prompt) or **Standing order** (a checklist the bot works through; it only tells you when something needs you). Standing orders support an optional daily active-hours window and a **Runs per day** cap.
+7. Check **What should the bot do?** or the **Checklist**, depending on the kind you picked.
+8. **More options** holds **Tell me when it ran** (**Every time**, **Only if something goes wrong** or **Never**), the time zone and the rarer settings. It is folded; its title shows what is chosen.
+9. Press **Create**.
 
 ![The New scheduled task window, with When, At what time? and Next 5 runs](images/en/new-schedule.webp)
+
+For a **standing order**, pick that kind in the form and fill in the checklist. The list shows **runs today / cap** and the **last verdict** (all clear, needs you, or unclear). **Run now** still runs outside active hours (the daily cap still applies).
+
+![Standing order fields in the schedule editor](images/en/schedule-standing.webp)
 
 ## Three examples you can copy
 

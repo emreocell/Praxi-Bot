@@ -1696,9 +1696,10 @@ async fn retry_that_did_not_run_is_recorded_failed_not_succeeded() {
     // The schedule moves to a server before the retry starts: the engine
     // skips it, which must not read as success.
     assert!(store.freeze(sched.id, "host").unwrap());
-    let outcome = crate::engine::execute_checked(&store, exec.as_ref(), &sched, Some((due, 0)), t0)
-        .await
-        .unwrap();
+    let outcome =
+        crate::engine::execute_checked(&store, exec.as_ref(), &sched, Some((due, 0)), t0, false)
+            .await
+            .unwrap();
     assert_eq!(outcome, crate::engine::Dispatch::Skipped);
     assert_eq!(exec.count(), 0);
     scheduler.shutdown().await;

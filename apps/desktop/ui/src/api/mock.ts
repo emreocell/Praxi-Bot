@@ -324,6 +324,31 @@ const SCHEDULES = [
     payload: { kind: "agent_prompt", text: "Gelen kutumu kontrol et ve yanıt bekleyenleri özetle." }
   },
   {
+    id: "sch-standing",
+    origin: "user",
+    author: "owner",
+    revision: 1,
+    bot_id: ATLAS,
+    name: "Yedek ve gelen kutusu",
+    enabled: true,
+    has_webhook: false,
+    created_at_ms: NOW,
+    last_run_at_ms: MOCK_NOW - 2_000_000,
+    next_run_at_ms: MOCK_NOW + 1_800_000,
+    next_runs_ms: [1, 2, 3, 4, 5].map((h) => MOCK_NOW + h * 1_800_000),
+    missed_occurrences: 0,
+    misfire_policy: "skip",
+    spec: { every: { seconds: 1800 } },
+    standing_runs_today: 2,
+    standing_max_runs_per_day: 12,
+    payload: {
+      kind: "standing_order",
+      checklist: "Yedek disk %90'ın altında mı? Yanıtsız acil müşteri maili var mı?",
+      active_hours: { start: "08:00", end: "22:00", timezone: "Europe/Istanbul" },
+      max_runs_per_day: 12
+    }
+  },
+  {
     id: "sch-5",
     origin: "bot",
     author: "bot",

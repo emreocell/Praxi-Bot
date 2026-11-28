@@ -74,6 +74,17 @@ const screens = [
   { name: 'add-server-wizard', expect: '[data-testid=add-server-live]', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }] },
   { name: 'add-server-choose', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }, { click: '[data-testid=add-server-next]', optional: true }] },
   { name: 'schedule-builder', expect: '[data-testid=schedule-sentence]', query: 'screen=schedules', act: [{ click: '[data-testid=schedules-empty-new], [data-testid=schedules-new]', optional: true }, { clickText: /new schedule/i, optional: true }] },
+  {
+    name: 'schedule-standing',
+    height: 1280,
+    query: 'screen=schedules',
+    expect: '[data-testid=schedule-standing-fields]',
+    act: [
+      { click: '[data-testid=schedules-empty-new], [data-testid=schedules-new]', optional: true },
+      { clickText: /^(New schedule|Yeni zamanlama)/, optional: true },
+      { click: '[data-testid=schedule-task-kind-standing]' }
+    ]
+  },
   { name: 'run-timeline', expect: '[role=dialog]', query: 'screen=changes', act: [{ click: '[data-testid=run-timeline]' }] },
   { name: 'live-viewer', expect: '[data-testid=live-viewer]', query: 'screen=chat&panel=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }] },
   { name: 'live-viewer-terminals', expect: '[data-testid=live-viewer-terminals]', query: 'screen=chat&panel=1&lvTerm=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }] },

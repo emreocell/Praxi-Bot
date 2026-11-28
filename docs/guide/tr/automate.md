@@ -9,11 +9,16 @@
 3. **Bir örnekle başla** altında bir örneğe tıkla. Form dolar. Sonra her şeyi değiştirebilirsin.
 4. **Ne sıklıkla?** altında **Bir kez**, **Her gün**, **Hafta içi**, **Her hafta**, **Her ay** ya da **Diğer**'i seç.
 5. **Saat kaçta?** altında saati seç. Praxi kullandığı saat dilimini gösterir. Ayrıca **Sonraki 5 çalışma**'yı gösterir. Bunun istediğin şey olduğunu kontrol et.
-6. **İstem**'i kontrol et. Botun her seferinde yapması istenen şey budur. Kendi sözlerinle yaz.
-7. **Çalışınca bana haber ver** altında **Her seferinde**, **Sadece bir sorun olursa** ya da **Hiçbir zaman**'ı seç.
-8. **Oluştur**'a bas.
+6. **Ne tür bir görev?** altında **Her seferinde bota sor** ya da **Kalıcı talimat** (kontrol listesi; yalnızca bir şey gerekince haber verir) seç. Kalıcı talimatta isteğe bağlı **etkin saatler** ve **Günde kaç kez** sınırı vardır.
+7. Seçtiğin türe göre **İstem** ya da **Kontrol listesi**'ni doldur.
+8. **Çalışınca bana haber ver** altında **Her seferinde**, **Sadece bir sorun olursa** ya da **Hiçbir zaman**'ı seç.
+9. **Oluştur**'a bas.
 
 ![Ne zaman, Saat kaçta? ve Sonraki 5 çalışma bölümleriyle Yeni zamanlanmış görev penceresi](../images/tr/new-schedule.webp)
+
+**Kalıcı talimat** için formda bu türü seç ve kontrol listesini yaz. Listede **bugünkü çalışma / sınır** ve **son karar** görünür. **Şimdi çalıştır**, etkin saatler dışında da çalışır (günlük sınır geçerlidir).
+
+![Zamanlama düzenleyicisinde kalıcı talimat alanları](../images/tr/schedule-standing.webp)
 
 ## Kopyalayabileceğin üç örnek
 
