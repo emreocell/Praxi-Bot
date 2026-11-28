@@ -7,6 +7,8 @@
 pub enum ReplyClass {
     /// A delivery-status report explicitly says delivery failed permanently.
     HardBounce,
+    /// A delivery-status report explicitly says delivery is temporarily delayed.
+    SoftBounce,
     /// An unquoted line asks to stop future messages.
     Stop,
     /// An automatic response indicates the sender is away.
@@ -32,15 +34,24 @@ pub fn classify_reply(subject: &str, body: &str, auto_submitted: Option<&str>) -
         }
         lines.push(line.to_lowercase());
     }
-    // DSNs use Action and Status fields; requiring both avoids treating a temporary
-    // failure or ordinary conversation mentioning a bounce as a permanent failure.
-    let failed = lines.iter().any(|l| l.trim() == "action: failed");
-    let permanent = lines.iter().any(|l| {
-        l.strip_prefix("status:")
-            .is_some_and(|s| s.trim().starts_with("5."))
-    });
-    if failed && permanent {
-        return ReplyClass::HardBounce;
+    // Each RFC 3464 recipient has its own field block. Never combine the action
+    // for one recipient with another recipient's status.
+    let mut bounce = None;
+    for block in lines.split(String::is_empty) {
+        let failed = block.iter().any(|line| line == "action: failed");
+        let delayed = block.iter().any(|line| line == "action: delayed");
+        let status = block
+            .iter()
+            .find_map(|line| line.strip_prefix("status:").map(str::trim));
+        if failed && status.is_some_and(|value| value.starts_with("5.")) {
+            return ReplyClass::HardBounce;
+        }
+        if delayed && status.is_some_and(|value| value.starts_with("4.")) {
+            bounce = Some(ReplyClass::SoftBounce);
+        }
+    }
+    if let Some(class) = bounce {
+        return class;
     }
     if lines.iter().any(|l| {
         matches!(
@@ -100,11 +111,31 @@ mod tests {
         );
         assert_eq!(
             classify_reply("", "Action: delayed\nStatus: 4.2.0", None),
-            ReplyClass::Other
+            ReplyClass::SoftBounce
         );
         assert_eq!(
             classify_reply("", "Action: failed\nStatus: 4.2.0", None),
             ReplyClass::Other
+        );
+    }
+
+    #[test]
+    fn delivery_status_fields_from_different_recipients_do_not_mix() {
+        assert_eq!(
+            classify_reply(
+                "",
+                "Action: failed\nStatus: 4.2.0\n\nAction: delayed\nStatus: 5.1.1",
+                None
+            ),
+            ReplyClass::Other
+        );
+        assert_eq!(
+            classify_reply(
+                "",
+                "Action: delayed\nStatus: 4.2.0\n\nAction: failed\nStatus: 5.1.1",
+                None
+            ),
+            ReplyClass::HardBounce
         );
     }
 
