@@ -1895,6 +1895,54 @@ async fn firecrawl_scrape_checks_input_and_final_url_before_returning_content() 
 }
 
 #[tokio::test]
+async fn firecrawl_scrape_honours_include_links_and_list_links_independently() {
+    let server = MockServer::start().await;
+    let mut c = cfg(DefaultUrlPolicy::default());
+    c.search.firecrawl_url = Some(server.uri());
+    c.search.firecrawl_scrape.enabled = true;
+    c.search.firecrawl_scrape.allow_self_hosted = true;
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    Mock::given(method("POST"))
+        .and(path("/v2/scrape"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
+            "data": {
+                "markdown": "Read [example](https://example.com/link).",
+                "html": "<p>Read <a href=\"https://example.com/link\">example</a>.</p>",
+                "links": ["https://example.com/link"],
+                "metadata": {"url": "https://example.com/"}
+            }
+        })))
+        .mount(&server)
+        .await;
+    for (include_links, list_links) in [(true, false), (false, false), (false, true)] {
+        let out = call(&reg, "web_extract", json!({
+            "url": "https://example.com/", "include_links": include_links, "list_links": list_links
+        })).await.unwrap();
+        let result = text(&out);
+        assert_eq!(
+            result.contains("[example](https://example.com/link)"),
+            include_links
+        );
+        assert_eq!(
+            result.contains("## Links\n- https://example.com/link"),
+            list_links
+        );
+        assert!(result.contains("example"));
+    }
+    let requests = server.received_requests().await.unwrap();
+    for (request, formats) in requests.iter().zip([
+        json!(["markdown"]),
+        json!(["html"]),
+        json!(["html", "links"]),
+    ]) {
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["formats"], formats);
+    }
+}
+
+#[tokio::test]
 async fn firecrawl_self_hosted_scrape_requires_explicit_opt_in() {
     let server = MockServer::start().await;
     let mut c = cfg(DefaultUrlPolicy::default());

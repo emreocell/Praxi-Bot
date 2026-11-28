@@ -540,10 +540,15 @@ impl FirecrawlScrape {
                 .headers
                 .push(("Authorization".into(), format!("Bearer {}", token.expose())));
         }
-        let formats = if input.list_links.unwrap_or(false) {
-            vec!["markdown", "links"]
+        let format = if input.include_links.unwrap_or(true) {
+            "markdown"
         } else {
-            vec!["markdown"]
+            "html"
+        };
+        let formats = if input.list_links.unwrap_or(false) {
+            vec![format, "links"]
+        } else {
+            vec![format]
         };
         let request = json!({"url": wanted.as_str(), "formats": formats, "onlyMainContent": !input.full_page.unwrap_or(false)});
         let page = self
@@ -596,11 +601,24 @@ impl FirecrawlScrape {
             final_url.get_or_insert(url);
         }
         let final_url = final_url.ok_or_else(bad_url)?;
-        let mut body = data
-            .get("markdown")
+        let content = data
+            .get(format)
             .and_then(Value::as_str)
-            .ok_or_else(|| ToolError::Execution("Firecrawl returned no page content".into()))?
-            .to_owned();
+            .ok_or_else(|| ToolError::Execution("Firecrawl returned no page content".into()))?;
+        let mut body = if format == "html" {
+            html_to_markdown(
+                content,
+                Some(&final_url),
+                &ExtractOptions {
+                    include_links: false,
+                    full_page: true,
+                    ..ExtractOptions::default()
+                },
+            )
+            .markdown
+        } else {
+            content.to_owned()
+        };
         let max_chars = input.max_chars.unwrap_or(60_000).max(200);
         let cut = if let Some((idx, _)) = body.char_indices().nth(max_chars) {
             body.truncate(idx);
