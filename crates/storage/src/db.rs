@@ -834,7 +834,6 @@ impl Storage {
         if active > 0 {
             return Err(StorageError::Conflict("chat has an active run".into()));
         }
-        tx.execute("DELETE FROM chat_summaries WHERE chat_id = ?1", [&cid])?;
         tx.execute("DELETE FROM messages WHERE chat_id = ?1", [&cid])?;
         tx.execute("UPDATE runs SET chat_id = NULL WHERE chat_id = ?1", [&cid])?;
         let n = tx.execute("DELETE FROM chats WHERE id = ?1", [&cid])?;
@@ -980,13 +979,11 @@ impl Storage {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         for id in ids {
-            // A summary that holds a message the context now drops (or restores) no longer
-            // says what the chat says: drop it; a new one is written when the chat grows.
+            // Any edit, regenerate or restore in a chat drops its summary, wherever the message
+            // sits: no cursor comparison can then misjudge which side of the summary it is on.
+            // A new summary is written when the chat grows again.
             tx.execute(
-                "DELETE FROM chat_summaries WHERE chat_id IN (SELECT s.chat_id FROM messages m \
-                 JOIN chat_summaries s ON s.chat_id = m.chat_id WHERE m.id = ?1 \
-                 AND (m.created_at_ms < s.covered_until_ms \
-                      OR (m.created_at_ms = s.covered_until_ms AND m.id <= s.covered_until_id)))",
+                "DELETE FROM chat_summaries WHERE chat_id = (SELECT chat_id FROM messages WHERE id = ?1)",
                 [id.to_string()],
             )?;
             tx.execute(
@@ -3109,14 +3106,80 @@ mod tests {
     }
 
     #[test]
-    fn superseding_a_summarised_message_drops_the_summary_but_a_newer_one_keeps_it() {
+    fn any_supersede_or_restore_in_the_chat_drops_its_summary() {
         let f = fx();
         let ids = dialogue(&f, 6);
+        // A message after the cursor, the one on it, one before it, a restore.
+        for (range, superseded) in [(4..6, true), (2..3, true), (0..1, true), (4..6, false)] {
+            f.st.put_chat_summary(&summary_of(&f, &ids, 2)).unwrap();
+            f.st.set_messages_superseded(&ids[range], superseded)
+                .unwrap();
+            assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_none());
+        }
+        // Another chat's edit leaves it alone.
         f.st.put_chat_summary(&summary_of(&f, &ids, 2)).unwrap();
-        f.st.set_messages_superseded(&ids[4..], true).unwrap();
+        f.st.set_messages_superseded(&[Uuid::from_u128(999)], true)
+            .unwrap();
         assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_some());
-        f.st.set_messages_superseded(&ids[2..3], true).unwrap();
-        assert!(f.st.get_chat_summary(f.chat.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_cursor_orders_the_same_in_sql_and_in_rust() {
+        let f = fx();
+        // Random ids, many sharing a millisecond: SQL sorts the id as text, Rust as bytes.
+        let scattered = |i: u64| {
+            // splitmix64, twice: ids spread over every byte.
+            let mix = |mut z: u64| {
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                z ^ (z >> 31)
+            };
+            let seed = i.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            Uuid::from_u128((u128::from(mix(seed)) << 64) | u128::from(mix(!seed)))
+        };
+        let mut msgs: Vec<(i64, Uuid)> = (0..200)
+            .map(|i| {
+                let id = scattered(u64::try_from(i).unwrap());
+                f.st.insert_message(&Message {
+                    id,
+                    user_id: f.user.id,
+                    chat_id: f.chat.id,
+                    run_id: None,
+                    role: "user".into(),
+                    content: "x".into(),
+                    created_at_ms: i / 50,
+                    exposure_untrusted: false,
+                    exposure_private: false,
+                    exposure_sources: Vec::new(),
+                })
+                .unwrap();
+                (i / 50, id)
+            })
+            .collect();
+        msgs.sort();
+        let listed: Vec<(i64, Uuid)> =
+            f.st.list_dialogue_after(f.chat.id, None, 1000)
+                .unwrap()
+                .iter()
+                .map(|m| (m.created_at_ms, m.id))
+                .collect();
+        assert_eq!(listed, msgs);
+        for at in [0, 37, 49, 50, 120, 199] {
+            let after: Vec<(i64, Uuid)> =
+                f.st.list_dialogue_after(f.chat.id, Some(msgs[at]), 1000)
+                    .unwrap()
+                    .iter()
+                    .map(|m| (m.created_at_ms, m.id))
+                    .collect();
+            assert_eq!(after, msgs[at + 1..]);
+            assert!(after.iter().all(|m| crate::sorts_after(*m, msgs[at])));
+            assert_eq!(
+                f.st.dialogue_size_after(f.chat.id, Some(msgs[at]), None)
+                    .unwrap()
+                    .0,
+                199 - at
+            );
+        }
     }
 
     #[test]

@@ -74,7 +74,19 @@ fn summary_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSummary> {
 }
 
 /// Where a chat's messages stand: the cursor of a summary, `(created_at_ms, id)`.
+///
+/// The one ordering of a chat's messages: by `created_at_ms`, then by `id`. SQL compares the
+/// id as the lower-case hyphenated text every row is written with (`Uuid::to_string`), Rust
+/// compares the `Uuid` bytes; for that text both orders are the same (see
+/// [`sorts_after`]), so a cursor taken from either side means the same message.
 pub type Cursor = (i64, Uuid);
+
+/// Whether `message` sorts after `cursor` in the chat's one ordering (the Rust side of the
+/// `created_at_ms > ?ms OR (created_at_ms = ?ms AND id > ?id)` filter).
+#[must_use]
+pub fn sorts_after(message: Cursor, cursor: Cursor) -> bool {
+    message > cursor
+}
 
 impl ChatSummary {
     /// The cursor after which messages are not summarised.

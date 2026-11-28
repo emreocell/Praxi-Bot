@@ -1,10 +1,11 @@
 -- Rolling summary of the older part of a long chat (one row per chat). The summarised messages
 -- stay in `messages` (searchable, exportable, untouched); this row only replaces them in the
 -- model context. `covered_until_*` is the (created_at_ms, id) cursor of the newest summarised
--- message: context = this summary + the messages after the cursor.
+-- message: context = this summary + the messages after the cursor. The row goes with its chat
+-- (and its owner): an older binary never sees it, it refuses a newer schema (`SchemaTooNew`).
 CREATE TABLE chat_summaries (
-    chat_id            TEXT PRIMARY KEY REFERENCES chats(id),
-    user_id            TEXT NOT NULL REFERENCES users(id),
+    chat_id            TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     content            TEXT NOT NULL,
     covered_until_ms   INTEGER NOT NULL,
     covered_until_id   TEXT NOT NULL,

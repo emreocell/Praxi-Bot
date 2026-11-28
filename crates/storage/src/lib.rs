@@ -15,7 +15,7 @@ pub mod migrate;
 pub mod paths;
 pub mod records;
 
-pub use chat_summary::{ChatSummary, Cursor};
+pub use chat_summary::{ChatSummary, Cursor, sorts_after};
 pub use db::{SearchFilter, SkillAssignmentLookup, Storage, is_valid_skill_name, now_ms};
 pub use error::{Result, StorageError};
 pub use event_log::{EventLogWriter, event_log_path, read_event_log};
