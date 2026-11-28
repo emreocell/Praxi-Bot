@@ -24,7 +24,7 @@ import {
   TrendingDown,
   Zap
 } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type Ref, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
 import { ApiError } from "../api/client";
@@ -34,7 +34,7 @@ import type {
   ScheduleHistoryEntry
 } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
-import { Switch } from "../components/SettingsUi";
+import { Switch, SwitchField } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
 import { botHasFullAccess, botView } from "../lib/botProfile";
 import { POLICY_CHANGED_EVENT } from "./settings/SafetyLevelsCard";
@@ -56,6 +56,7 @@ import {
   suggestScheduleNotify,
   writeScheduleNotify
 } from "../lib/scheduleNotify";
+import { weekdayName, whenSummary, zoneCity } from "../lib/scheduleSummary";
 import { type ScheduleTemplate, templateText } from "../lib/scheduleTemplates";
 import {
   affectsSchedules,
@@ -81,8 +82,11 @@ import {
   sortSchedules,
   specLabel,
   toggleInput,
-  validateDraft
+  validateDraft,
+  type ScheduleTaskKind,
+  keepsPayload
 } from "../lib/schedules";
+import { lastStandingVerdict } from "../lib/standingOrder";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./SchedulesView.module.css";
 
@@ -120,12 +124,18 @@ const ALL_TIMEZONES: string[] = Array.from(
 function TimezonePicker({
   value,
   allowEmpty,
-  onChange
+  inputRef,
+  onChange,
+  ariaLabel,
+  testId = "schedule-tz"
 }: {
+  inputRef?: Ref<HTMLInputElement>;
   value: string;
   /** `true`: an empty field means UTC (a 5-field cron). */
   allowEmpty: boolean;
   onChange: (tz: string) => void;
+  ariaLabel?: string;
+  testId?: string;
 }) {
   const { t } = useTranslation();
   const listId = useId();
@@ -138,15 +148,16 @@ function TimezonePicker({
   return (
     <>
       <input
+        ref={inputRef}
         className={formStyles.input}
         list={listId}
         value={text}
         spellCheck={false}
         autoComplete="off"
-        aria-label={t("schedules.form.tz")}
+        aria-label={ariaLabel ?? t("schedules.form.tz")}
         aria-invalid={!valid}
         placeholder={t("schedules.form.tzSearch")}
-        data-testid="schedule-tz"
+        data-testid={testId}
         onChange={(e) => {
           setText(e.target.value);
           const v = e.target.value.trim();
@@ -514,6 +525,15 @@ function ScheduleRow({
   const label = localSpecLabel(s.spec, (ms) => fmt(ms, zone), i18n.language, LOCAL_TZ);
   const payload = parsePayload(s.payload);
   const last = lastOutcome(history);
+  const standingVerdict = payload.kind === "standing_order" ? lastStandingVerdict(history) : null;
+  const standingRuns =
+    payload.kind === "standing_order" &&
+    s.standing_runs_today !== null &&
+    s.standing_runs_today !== undefined &&
+    s.standing_max_runs_per_day !== null &&
+    s.standing_max_runs_per_day !== undefined
+      ? { runs: s.standing_runs_today, cap: s.standing_max_runs_per_day }
+      : null;
   const primary = primaryAction(s, last);
   const nextRuns = s.next_runs_ms ?? [];
   const visibleHistory = filterScheduleHistory(history, filter);
@@ -560,6 +580,19 @@ function ScheduleRow({
                 <i aria-hidden="true" />
                 {lastLine}
               </span>
+              {standingRuns ? (
+                <span data-testid="schedule-standing-runs">
+                  {t("schedules.standing.runsToday", {
+                    runs: standingRuns.runs,
+                    cap: standingRuns.cap
+                  })}
+                </span>
+              ) : null}
+              {standingVerdict ? (
+                <span data-testid="schedule-standing-verdict">
+                  {t(`schedules.standing.verdict.${standingVerdict}`)}
+                </span>
+              ) : null}
               {(s.missed_occurrences ?? 0) > 0 ? (
                 <span data-testid="schedule-missed">{t("automation.missedCount", { count: s.missed_occurrences ?? 0 })}</span>
               ) : null}
@@ -567,9 +600,11 @@ function ScheduleRow({
             <p className={`${styles.rowDoes} ${styles.clamp}`}>
               {payload.kind === "agent_prompt"
                 ? payload.text
-                : payload.kind === "unknown"
-                  ? t("schedules.payload.unknown")
-                  : t(`schedules.payload.${payload.kind}`, { name: payload.name })}
+                : payload.kind === "standing_order"
+                  ? t("schedules.payload.standingOrder", { text: payload.checklist })
+                  : payload.kind === "unknown"
+                    ? t("schedules.payload.unknown")
+                    : t(`schedules.payload.${payload.kind}`, { name: payload.name })}
             </p>
           </div>
           <div className={styles.rowControls}>
@@ -1091,8 +1126,18 @@ function ScheduleForm({
   const { client, bots } = useDaemon();
   const [draft, setDraft] = useState<ScheduleDraft>(() =>
     editing
-      ? draftFromSchedule(editing)
-      : { ...emptyDraft(bots.find((b) => b.id === initialBotId)?.id ?? bots[0]?.id ?? ""), tz: LOCAL_TZ }
+      ? draftFromSchedule(editing, LOCAL_TZ)
+      : {
+          ...emptyDraft(
+            bots.find((b) => b.id === initialBotId)?.id ?? bots[0]?.id ?? "",
+            LOCAL_TZ
+          ),
+          tz: LOCAL_TZ,
+          standing: {
+            ...emptyDraft("", LOCAL_TZ).standing,
+            activeHoursTz: LOCAL_TZ
+          }
+        }
   );
   const [preview, setPreview] = useState<{
     key: string;
@@ -1116,7 +1161,7 @@ function ScheduleForm({
     setNotifyState(c);
   };
   const suggested = suggestScheduleNotify(
-    draft.prompt,
+    draft.taskKind === "standing_order" ? draft.standing.checklist : draft.prompt,
     draft.kind === "simple" && draft.simple.freq === "once"
   );
   useEffect(() => {
@@ -1206,9 +1251,7 @@ function ScheduleForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const keepsPayload =
-    editing !== undefined &&
-    parsePayload(editing.payload).kind !== "agent_prompt";
+  const payloadLocked = editing !== undefined && keepsPayload(editing);
   const selectedTz = draft.tz ?? LOCAL_TZ;
 
   const fmt = (ms: number, tz?: string) => formatRunPreview(ms, i18n.language, tz);
@@ -1342,6 +1385,40 @@ function ScheduleForm({
       ? (editing.next_runs_ms ?? [])
       : (activePreview?.next_runs_ms ?? []);
 
+  // The "when" summary: the easy builder's choice as one sentence ("Every weekday at 09:00,
+  // Istanbul"); for words, cron or a kept schedule, what the daemon read from them.
+  const whenLine = (() => {
+    if (draft.kind === "keep" && editing) {
+      const l = specLabel(editing.spec, (ms) => fmt(ms), i18n.language);
+      return t("schedules.form.keepHint", { spec: t(l.i18nKey, l.values) });
+    }
+    if (draft.kind === "simple") {
+      const said = whenSummary(draft.simple, selectedTz, i18n.language);
+      return said ? t(said.key, said.values) : t("schedules.form.simpleProblem.time");
+    }
+    if (activePreview) {
+      const l = specLabel(activePreview.spec, (ms) => fmt(ms), i18n.language);
+      return t(l.i18nKey, l.values);
+    }
+    return draft.kind === "natural"
+      ? `${t("schedules.form.customHint")} ${t("schedules.form.textHint", { tz: selectedTz })}`
+      : t("schedules.form.cronHint");
+  })();
+  const firstRunAt = draft.kind === "keep" ? editing?.next_run_at_ms : activePreview?.next_run_at_ms;
+  const firstRunLine =
+    draft.kind === "keep" || activePreview
+      ? firstRunAt !== null && firstRunAt !== undefined
+        ? t("schedules.form.firstRun", { when: fmt(firstRunAt, draft.kind === "keep" ? undefined : selectedTz) })
+        : t("schedules.form.noFirstRun")
+      : null;
+  // "More options" holds the time zone: "Change" next to the summary opens it there.
+  const [moreOpen, setMoreOpen] = useState(draft.kind === "cron");
+  const zoneRef = useRef<HTMLInputElement | null>(null);
+  const openZone = () => {
+    setMoreOpen(true);
+    requestAnimationFrame(() => zoneRef.current?.focus());
+  };
+
   // The form opens above the list: bring it into view and put the keyboard on its title.
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const sentenceId = useId();
@@ -1401,15 +1478,11 @@ function ScheduleForm({
             <span className={formStyles.hint} role="status" data-testid="schedule-sentence-note">
               {sentenceNote ?? t("automation.form.sentenceHint")}
             </span>
-          </div>
-        ) : null}
-
-        {!editing ? (
-          <div className={formStyles.field}>
-            <span className={formStyles.label}>
-              {t("schedules.form.templates.title")}
-            </span>
-            <div className={styles.templateRow}>
+            {/* The examples are a row of small chips, not a wall of cards: one click fills the form. */}
+            <div className={styles.exampleRow} role="group" aria-labelledby={`${sentenceId}-examples`} data-testid="schedule-examples">
+              <span className={styles.exampleLabel} id={`${sentenceId}-examples`}>
+                {t("scheduleEditor.examples")}
+              </span>
               {TEMPLATES.map((tpl) => {
                 const x = templateText(tpl, i18n.language);
                 const Icon = TEMPLATE_ICONS[tpl.icon] ?? Sun;
@@ -1417,55 +1490,19 @@ function ScheduleForm({
                   <button
                     key={tpl.id}
                     type="button"
-                    className={styles.template}
+                    className={styles.exampleChip}
+                    title={x.blurb}
                     data-testid={`schedule-template-${tpl.id}`}
                     onClick={() => applyTemplate(tpl)}
                   >
-                    <span className={styles.templateName}>
-                      <Icon size={16} aria-hidden="true" />
-                      {x.name}
-                    </span>
-                    <span className={styles.templateBlurb}>{x.blurb}</span>
+                    <Icon aria-hidden="true" />
+                    {x.name}
                   </button>
                 );
               })}
             </div>
-            <span className={formStyles.hint}>
-              {t("schedules.form.templates.hint")}
-            </span>
           </div>
         ) : null}
-
-        <label className={formStyles.field}>
-          <span className={formStyles.label}>{t("schedules.form.name")}</span>
-          <input
-            className={formStyles.input}
-            value={draft.name}
-            aria-required="true"
-            onChange={(e) => patch({ name: e.target.value })}
-          />
-        </label>
-
-        <label className={formStyles.field}>
-          <span className={formStyles.label}>{t("schedules.bot")}</span>
-          <select
-            className={formStyles.select}
-            value={draft.botId}
-            disabled={editing !== undefined}
-            onChange={(e) => patch({ botId: e.target.value })}
-          >
-            {bots.map((b) => (
-              <option key={b.id} value={b.id}>
-                {botView(b).name}
-              </option>
-            ))}
-          </select>
-          {editing ? (
-            <span className={formStyles.hint}>
-              {t("schedules.form.botFixed")}
-            </span>
-          ) : null}
-        </label>
 
         <fieldset className={styles.fieldset}>
           <legend className={formStyles.label}>
@@ -1510,123 +1547,83 @@ function ScheduleForm({
             })}
           </div>
 
-          {draft.kind === "keep" && editing ? (
-            <p className={formStyles.hint}>
-              {(() => {
-                const l = specLabel(editing.spec, (ms) => fmt(ms), i18n.language);
-                return t("schedules.form.keepHint", {
-                  spec: t(l.i18nKey, l.values)
-                });
-              })()}
-            </p>
-          ) : null}
-
-          {draft.kind !== "keep" ? (
-            <label className={formStyles.field}>
-              <span className={formStyles.label}>{t("schedules.form.tz")}</span>
-              <TimezonePicker
-                value={draft.tz ?? ""}
-                allowEmpty={draft.kind === "cron"}
-                onChange={(tz) => patch({ tz })}
-              />
-              {draft.kind === "cron" ? (
-                <span className={formStyles.hint}>
-                  {t("schedules.form.tzCronHint")}
-                </span>
-              ) : null}
-            </label>
-          ) : null}
-
           {draft.kind === "simple" ? (
-            <div className={formStyles.field}>
-              <div className={formStyles.row}>
-                {draft.simple.freq === "once" ? (
-                  <label className={formStyles.field}>
-                    <span className={formStyles.label}>
-                      {t("schedules.form.date")}
-                    </span>
-                    <input
-                      type="date"
-                      className={formStyles.input}
-                      value={draft.simple.date}
-                      onChange={(e) =>
-                        patchSimple({
-                          date: e.target.value
-                        })
-                      }
-                    />
-                  </label>
-                ) : null}
-                {draft.simple.freq === "weekly" ? (
-                  <label className={formStyles.field}>
-                    <span className={formStyles.label}>
-                      {t("schedules.form.weekday")}
-                    </span>
-                    <select
-                      className={formStyles.select}
-                      value={draft.simple.weekday}
-                      onChange={(e) =>
-                        patchSimple({
-                          weekday: Number(e.target.value)
-                        })
-                      }
-                    >
-                      {[1, 2, 3, 4, 5, 6, 0].map((d) => (
-                        <option key={d} value={d}>
-                          {new Date(
-                            Date.UTC(2024, 0, 7 + d)
-                          ).toLocaleDateString(i18n.language, {
-                            weekday: "long",
-                            timeZone: "UTC"
-                          })}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {draft.simple.freq === "monthly" ? (
-                  <label className={formStyles.field}>
-                    <span className={formStyles.label}>
-                      {t("schedules.form.monthDay")}
-                    </span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={28}
-                      className={formStyles.input}
-                      value={draft.simple.monthDay}
-                      onChange={(e) =>
-                        patchSimple({
-                          monthDay: Number(e.target.value)
-                        })
-                      }
-                    />
-                    <span className={formStyles.hint}>
-                      {t("schedules.form.monthDayHint")}
-                    </span>
-                  </label>
-                ) : null}
-                <label className={formStyles.field}>
+            <div className={styles.whenRow}>
+              {draft.simple.freq === "once" ? (
+                <label className={styles.whenField}>
                   <span className={formStyles.label}>
-                    {t("schedules.form.time")}
+                    {t("schedules.form.date")}
                   </span>
                   <input
-                    type="time"
+                    type="date"
                     className={formStyles.input}
-                    value={draft.simple.time}
+                    value={draft.simple.date}
                     onChange={(e) =>
                       patchSimple({
-                        time: e.target.value
+                        date: e.target.value
                       })
                     }
                   />
                 </label>
-              </div>
-              <span className={formStyles.hint}>
-                {t("schedules.form.tzShown", {
-                  tz: selectedTz
-                })}
-              </span>
+              ) : null}
+              {draft.simple.freq === "weekly" ? (
+                <label className={styles.whenField}>
+                  <span className={formStyles.label}>
+                    {t("schedules.form.weekday")}
+                  </span>
+                  <select
+                    className={formStyles.select}
+                    value={draft.simple.weekday}
+                    onChange={(e) =>
+                      patchSimple({
+                        weekday: Number(e.target.value)
+                      })
+                    }
+                  >
+                    {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+                      <option key={d} value={d}>
+                        {weekdayName(d, i18n.language)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {draft.simple.freq === "monthly" ? (
+                <label className={styles.whenField}>
+                  <span className={formStyles.label}>
+                    {t("schedules.form.monthDay")}
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={28}
+                    className={formStyles.input}
+                    value={draft.simple.monthDay}
+                    title={t("schedules.form.monthDayHint")}
+                    onChange={(e) =>
+                      patchSimple({
+                        monthDay: Number(e.target.value)
+                      })
+                    }
+                  />
+                </label>
+              ) : null}
+              <label className={styles.whenField}>
+                <span className={formStyles.label}>
+                  {t("schedules.form.time")}
+                </span>
+                <input
+                  type="time"
+                  className={formStyles.input}
+                  value={draft.simple.time}
+                  data-testid="schedule-time"
+                  onChange={(e) =>
+                    patchSimple({
+                      time: e.target.value
+                    })
+                  }
+                />
+              </label>
             </div>
           ) : null}
 
@@ -1649,46 +1646,29 @@ function ScheduleForm({
                   {t("schedules.form.preview")}
                 </Button>
               </div>
-              {!activePreview ? (
-                <span className={formStyles.hint}>
-                  {t("schedules.form.customHint")}{" "}
-                  {t("schedules.form.textHint", {
-                    tz: selectedTz
-                  })}
-                </span>
-              ) : null}
             </div>
           ) : null}
 
-          {activePreview ||
-          (draft.kind === "keep" && previewRuns.length > 0) ? (
-            <div
-              className={styles.previewBox}
-              role="status"
-              data-testid="schedule-preview"
-            >
-              {activePreview ? (
-                <p className={formStyles.success}>
-                  {(() => {
-                    const l = specLabel(activePreview.spec, (ms) => fmt(ms), i18n.language);
-                    const next = activePreview.next_run_at_ms;
-                    return `${t(l.i18nKey, l.values)} · ${
-                      next !== null && next !== undefined
-                        ? t("schedules.form.firstRun", {
-                            when: fmt(next)
-                          })
-                        : t("schedules.form.noFirstRun")
-                    }`;
-                  })()}
-                </p>
-              ) : null}
+          {/* One readable line for the choice above, then the first run; the next runs fold. */}
+          <div className={styles.whenSummary} role="status" data-testid="schedule-preview">
+            <Clock3 className={styles.whenIcon} aria-hidden="true" />
+            <div className={styles.whenLines}>
+              <p className={styles.whenText} data-testid="schedule-when-summary">
+                {whenLine}
+                {draft.kind !== "keep" ? (
+                  <button type="button" className={styles.linkButton} onClick={openZone} data-testid="schedule-change-zone">
+                    {t("scheduleEditor.changeZone")}
+                  </button>
+                ) : null}
+              </p>
+              {firstRunLine ? <p className={formStyles.hint}>{firstRunLine}</p> : null}
               {previewRuns.length > 0 ? (
-                <>
-                  <span className={styles.runsTitle}>
+                <details className={styles.nextRuns}>
+                  <summary>
                     {t("schedules.form.nextRunsTitle", {
                       tz: draft.kind === "keep" ? LOCAL_TZ : selectedTz
                     })}
-                  </span>
+                  </summary>
                   <ol className={styles.previewList}>
                     {previewRuns.slice(0, 5).map((ms) => (
                       <li key={ms}>
@@ -1699,69 +1679,255 @@ function ScheduleForm({
                       </li>
                     ))}
                   </ol>
-                </>
-              ) : (
-                <p className={formStyles.hint}>
-                  {t("schedules.nextRunsEmpty")}
-                </p>
-              )}
+                </details>
+              ) : null}
             </div>
-          ) : null}
-        </fieldset>
-
-        {keepsPayload ? (
-          <p className={formStyles.hint}>{t("schedules.form.payloadKept")}</p>
-        ) : (
-          <label className={formStyles.field}>
-            <span className={formStyles.label}>
-              {t("schedules.form.prompt")}
-            </span>
-            <textarea
-              className={formStyles.textarea}
-              value={draft.prompt}
-              onChange={(e) => patch({ prompt: e.target.value })}
-            />
-            <span className={formStyles.hint}>
-              {t("schedules.form.promptHint")}
-            </span>
-          </label>
-        )}
-
-        <fieldset className={styles.fieldset}>
-          <legend className={formStyles.label}>
-            {t("schedules.form.notify.label")}
-          </legend>
-          <div
-            className={styles.chipRow}
-            role="radiogroup"
-            aria-label={t("schedules.form.notify.label")}
-          >
-            {SCHEDULE_NOTIFY_CHOICES.map((c) => (
-              <button
-                key={c}
-                type="button"
-                role="radio"
-                aria-checked={notify === c}
-                className={styles.chip}
-                data-testid={`schedule-notify-${c}`}
-                onClick={() => setNotify(c)}
-              >
-                {t(`schedules.form.notify.${c}`)}
-              </button>
-            ))}
           </div>
-          <span className={formStyles.hint}>
-            {t("schedules.form.notify.hint")}
-          </span>
         </fieldset>
+
+        <div className={styles.formPair}>
+          <label className={formStyles.field}>
+            <span className={formStyles.label}>{t("schedules.bot")}</span>
+            <select
+              className={formStyles.select}
+              value={draft.botId}
+              disabled={editing !== undefined}
+              data-testid="schedule-bot"
+              onChange={(e) => patch({ botId: e.target.value })}
+            >
+              {bots.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {botView(b).name}
+                </option>
+              ))}
+            </select>
+            {editing ? (
+              <span className={formStyles.hint}>
+                {t("schedules.form.botFixed")}
+              </span>
+            ) : null}
+          </label>
+          <label className={formStyles.field}>
+            <span className={formStyles.label}>{t("schedules.form.name")}</span>
+            <input
+              className={formStyles.input}
+              value={draft.name}
+              aria-required="true"
+              data-testid="schedule-name"
+              onChange={(e) => patch({ name: e.target.value })}
+            />
+          </label>
+        </div>
+
+        {payloadLocked ? (
+          <p className={formStyles.hint}>
+            {t(
+              parsePayload(editing?.payload).kind === "standing_order"
+                ? "schedules.form.payloadKeptStanding"
+                : "schedules.form.payloadKept"
+            )}
+          </p>
+        ) : (
+          <>
+            <fieldset className={styles.fieldset}>
+              <legend className={formStyles.label}>{t("schedules.form.taskKind.label")}</legend>
+              <div className={styles.chipRow} role="radiogroup" aria-label={t("schedules.form.taskKind.label")}>
+                {(["agent_prompt", "standing_order"] as const).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.taskKind === kind}
+                    className={styles.chip}
+                    data-testid={`schedule-task-kind-${kind === "agent_prompt" ? "prompt" : "standing"}`}
+                    onClick={() => patch({ taskKind: kind as ScheduleTaskKind })}
+                  >
+                    {t(`schedules.form.taskKind.${kind === "agent_prompt" ? "prompt" : "standing"}`)}
+                  </button>
+                ))}
+              </div>
+              {draft.taskKind === "standing_order" ? (
+                <span className={formStyles.hint}>{t("schedules.form.taskKind.standingHint")}</span>
+              ) : null}
+            </fieldset>
+            {draft.taskKind === "agent_prompt" ? (
+              <label className={formStyles.field}>
+                <span className={formStyles.label}>{t("scheduleEditor.whatToDo")}</span>
+                <textarea
+                  className={formStyles.textarea}
+                  value={draft.prompt}
+                  placeholder={t("scheduleEditor.whatPlaceholder")}
+                  data-testid="schedule-prompt"
+                  onChange={(e) => patch({ prompt: e.target.value })}
+                />
+                <span className={formStyles.hint}>{t("schedules.form.promptHint")}</span>
+              </label>
+            ) : (
+              <div data-testid="schedule-standing-fields">
+                <label className={formStyles.field}>
+                  <span className={formStyles.label}>{t("schedules.form.standing.checklist")}</span>
+                  <textarea
+                    className={formStyles.textarea}
+                    value={draft.standing.checklist}
+                    data-testid="schedule-standing-checklist"
+                    onChange={(e) =>
+                      patch({ standing: { ...draft.standing, checklist: e.target.value } })
+                    }
+                  />
+                  <span className={formStyles.hint}>{t("schedules.form.standing.checklistHint")}</span>
+                </label>
+                <label className={formStyles.field}>
+                  <span className={formStyles.label}>{t("schedules.form.standing.maxRuns")}</span>
+                  <input
+                    className={formStyles.input}
+                    type="number"
+                    min={1}
+                    max={288}
+                    value={draft.standing.maxRunsPerDay}
+                    data-testid="schedule-standing-max-runs"
+                    onChange={(e) =>
+                      patch({
+                        standing: {
+                          ...draft.standing,
+                          maxRunsPerDay: Number(e.target.value)
+                        }
+                      })
+                    }
+                  />
+                  <span className={formStyles.hint}>{t("schedules.form.standing.maxRunsHint")}</span>
+                </label>
+                <SwitchField
+                  checked={draft.standing.activeHoursEnabled}
+                  label={t("schedules.form.standing.activeHours")}
+                  testId="schedule-standing-active-hours"
+                  onChange={(checked) =>
+                    patch({
+                      standing: { ...draft.standing, activeHoursEnabled: checked }
+                    })
+                  }
+                />
+                {draft.standing.activeHoursEnabled ? (
+                  <div className={styles.formPair}>
+                    <label className={formStyles.field}>
+                      <span className={formStyles.label}>{t("schedules.form.standing.from")}</span>
+                      <input
+                        className={formStyles.input}
+                        value={draft.standing.activeHoursStart}
+                        inputMode="numeric"
+                        pattern="[0-9]{2}:[0-9]{2}"
+                        data-testid="schedule-standing-hours-start"
+                        onChange={(e) =>
+                          patch({
+                            standing: { ...draft.standing, activeHoursStart: e.target.value }
+                          })
+                        }
+                      />
+                    </label>
+                    <label className={formStyles.field}>
+                      <span className={formStyles.label}>{t("schedules.form.standing.to")}</span>
+                      <input
+                        className={formStyles.input}
+                        value={draft.standing.activeHoursEnd}
+                        inputMode="numeric"
+                        pattern="[0-9]{2}:[0-9]{2}"
+                        data-testid="schedule-standing-hours-end"
+                        onChange={(e) =>
+                          patch({
+                            standing: { ...draft.standing, activeHoursEnd: e.target.value }
+                          })
+                        }
+                      />
+                    </label>
+                    <label className={formStyles.field}>
+                      <span className={formStyles.label}>{t("schedules.form.standing.hoursZone")}</span>
+                      <TimezonePicker
+                        value={draft.standing.activeHoursTz}
+                        allowEmpty={false}
+                        ariaLabel={t("schedules.form.standing.hoursZone")}
+                        testId="schedule-standing-tz"
+                        onChange={(tz) =>
+                          patch({ standing: { ...draft.standing, activeHoursTz: tz || LOCAL_TZ } })
+                        }
+                      />
+                      <span className={formStyles.hint}>{t("schedules.form.standing.hoursHint")}</span>
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </>
+        )}
 
         <details
           className={styles.advanced}
-          open={draft.kind === "cron"}
+          open={moreOpen}
+          onToggle={(e) => setMoreOpen(e.currentTarget.open)}
           data-testid="schedule-advanced"
         >
-          <summary>{t("schedules.form.advanced")}</summary>
+          <summary>
+            <span>{t("scheduleEditor.more")}</span>
+            <span className={styles.moreLine}>
+              {t("scheduleEditor.moreLine", {
+                notify: t(`schedules.form.notify.${notify}`),
+                zone: zoneCity(selectedTz)
+              })}
+            </span>
+          </summary>
           <div className={styles.advancedBody}>
+            <fieldset className={styles.fieldset}>
+              <legend className={formStyles.label}>
+                {t("schedules.form.notify.label")}
+              </legend>
+              <div
+                className={styles.chipRow}
+                role="radiogroup"
+                aria-label={t("schedules.form.notify.label")}
+              >
+                {SCHEDULE_NOTIFY_CHOICES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    role="radio"
+                    aria-checked={notify === c}
+                    className={styles.chip}
+                    data-testid={`schedule-notify-${c}`}
+                    onClick={() => setNotify(c)}
+                  >
+                    {t(`schedules.form.notify.${c}`)}
+                  </button>
+                ))}
+              </div>
+              <span className={formStyles.hint}>
+                {t("schedules.form.notify.hint")}
+              </span>
+            </fieldset>
+
+            {draft.kind !== "keep" ? (
+              <label className={formStyles.field}>
+                <span className={formStyles.label}>{t("schedules.form.tz")}</span>
+                <TimezonePicker
+                  inputRef={zoneRef}
+                  value={draft.tz ?? ""}
+                  allowEmpty={draft.kind === "cron"}
+                  onChange={(tz) => patch({ tz })}
+                />
+                {draft.kind === "cron" ? (
+                  <span className={formStyles.hint}>
+                    {t("schedules.form.tzCronHint")}
+                  </span>
+                ) : null}
+              </label>
+            ) : null}
+
+            <label className={styles.toggle}>
+              <input
+                type="checkbox"
+                checked={draft.enabled}
+                onChange={(e) => patch({ enabled: e.target.checked })}
+              />
+              <span>{t("schedules.enabled")}</span>
+            </label>
+
             <span className={formStyles.hint}>
               {t("schedules.form.advancedHint")}
             </span>
@@ -1851,15 +2017,6 @@ function ScheduleForm({
             ) : null}
           </div>
         </details>
-
-        <label className={styles.toggle}>
-          <input
-            type="checkbox"
-            checked={draft.enabled}
-            onChange={(e) => patch({ enabled: e.target.checked })}
-          />
-          <span>{t("schedules.enabled")}</span>
-        </label>
 
         {problem ? (
           <p className={formStyles.error} role="alert">

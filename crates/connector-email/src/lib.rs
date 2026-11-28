@@ -9,25 +9,29 @@
 //!   `STARTTLS` for SMTP) and certificates are always verified.
 //! - Credentials are [`secret_store::SecretRef`]s resolved only when connecting.
 //!
-//! Entry points: [`tools`] / [`register`]. Wiring into `builtin-tools` is a
+//! Entry points: [`register`] (which builds tools from the `tools` module). Wiring into `builtin-tools` is a
 //! follow-up. IMAP folder selectors accept Unicode or a complete modified
 //! UTF-7 wire name. LIST names are decoded and capped for display and may not
 //! be exact selectors: if a display name looks like modified UTF-7, pass the
 //! original wire name to disambiguate.
 
+mod address;
 pub mod agentmail;
 pub mod attachment;
 pub mod channel;
 pub mod config;
 pub mod connector;
 mod cred;
+pub mod dsn;
 pub mod error;
 pub mod guard;
 pub mod imap;
 pub mod imap_provider;
+pub mod inbound;
 pub mod message;
 pub mod probe;
 pub mod provider;
+pub mod reply_classification;
 pub mod smtp;
 mod tls;
 pub mod tools;
@@ -46,11 +50,15 @@ pub use config::{
     SmtpSettings, normalize_sender, validate_account_name, validate_host,
 };
 pub use connector::{
-    ATTACHMENTS_DIR_NAME, EmailConnector, MAX_ATTACHMENT_BYTES, SavedAttachment, Scoped,
-    SearchResult,
+    ATTACHMENTS_DIR_NAME, EmailConnector, MAX_ATTACHMENT_BYTES, MissionResolver, SavedAttachment,
+    Scoped, SearchResult,
 };
+pub use dsn::{DeliveryStatus, DsnRecipient};
 pub use error::{EmailError, ProviderError};
-pub use guard::{GuardReport, GuardSettings, MailGuard, OptOut, SendLogEntry, Warning};
+pub use guard::{
+    BudgetBlock, GuardReport, GuardSettings, InboundAction, InboundMail, InboundOutcome, MailGuard,
+    OptOut, SendLogEntry, SoftBounce, Warning,
+};
 pub use imap::{FolderInfo, SearchQuery};
 pub use imap_provider::ImapSmtpProvider;
 pub use message::{AttachmentInfo, MessageDetail, MessageSummary};

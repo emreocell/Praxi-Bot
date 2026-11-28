@@ -67,10 +67,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0018_schedule_author",
         include_str!("../migrations/0018_schedule_author.sql"),
     ),
+    (
+        "0019_standing_order_days",
+        include_str!("../migrations/0019_standing_order_days.sql"),
+    ),
 ];
 
 /// Schema version produced by the newest embedded migration.
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// Manual retries allowed per occurrence.
 pub const MAX_OCCURRENCE_RETRIES: u32 = 5;
@@ -130,6 +134,7 @@ impl ScheduleStore {
         conn.prepare("SELECT schedule_id, due_ms, revision, run_id, state FROM occurrences")?;
         conn.prepare("SELECT schedule_id,config_json,webhook_id,state_json FROM trigger_registry")?;
         conn.prepare("SELECT bot_id,fired_json FROM trigger_bot_rate")?;
+        conn.prepare("SELECT schedule_id, day, runs FROM standing_order_days")?;
         Ok(conn.query_row("PRAGMA user_version", [], |row| row.get(0))?)
     }
 
@@ -174,7 +179,7 @@ impl ScheduleStore {
         })
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -227,6 +232,8 @@ impl ScheduleStore {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         schedule.spec.validate()?;
+        schedule.payload.validate()?;
+        owner_only_payload(&schedule.payload, schedule.origin)?;
         if let Some(precheck) = &schedule.precheck {
             precheck.validate()?;
         }
@@ -276,6 +283,8 @@ impl ScheduleStore {
     /// Fails if `schedule.spec` is invalid or on SQLite/JSON errors.
     pub fn upsert(&self, schedule: &Schedule) -> Result<()> {
         schedule.spec.validate()?;
+        schedule.payload.validate()?;
+        owner_only_payload(&schedule.payload, schedule.origin)?;
         if let Some(precheck) = &schedule.precheck {
             precheck.validate()?;
         }
@@ -290,6 +299,7 @@ impl ScheduleStore {
                 Some(schedule.enabled),
                 storage::now_ms(),
                 None,
+                false,
             )?;
         } else {
             tx.execute(
@@ -368,7 +378,7 @@ impl ScheduleStore {
     pub fn list_due(&self, now_ms: i64) -> Result<Vec<Schedule>> {
         let conn = self.conn();
         let mut st = conn.prepare(&format!(
-            "{SCHEDULE_SELECT} WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook') \
+            "{SCHEDULE_SELECT} WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email','feed','page_change','calendar','home_assistant')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook') \
              AND next_run_at_ms <= ?1 ORDER BY next_run_at_ms ASC, id ASC"
         ))?;
         let rows = st.query_map([now_ms], schedule_row)?;
@@ -382,7 +392,7 @@ impl ScheduleStore {
     pub fn nearest_next_run_at(&self) -> Result<Option<i64>> {
         let min_ts: Option<i64> = self.conn().query_row(
             "SELECT MIN(next_run_at_ms) FROM schedules \
-             WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook')",
+             WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND NOT EXISTS (SELECT 1 FROM schedule_triggers t WHERE t.schedule_id = schedules.id AND json_extract(t.trigger_json, '$.kind') IN ('file_watch','email','feed','page_change','calendar','home_assistant')) AND NOT EXISTS (SELECT 1 FROM trigger_registry r WHERE r.schedule_id=schedules.id AND json_extract(r.config_json, '$.source.kind')='webhook')",
             [],
             |r| r.get(0),
         )?;
@@ -401,6 +411,7 @@ impl ScheduleStore {
     /// Fails if the specification is invalid or on SQLite/JSON errors.
     pub fn update_definition(&self, schedule: &Schedule) -> Result<bool> {
         schedule.spec.validate()?;
+        schedule.payload.validate()?;
         if let Some(precheck) = &schedule.precheck {
             precheck.validate()?;
         }
@@ -412,6 +423,7 @@ impl ScheduleStore {
             Some(schedule.enabled),
             storage::now_ms(),
             Some(schedule.revision),
+            false,
         )?;
         tx.commit()?;
         drop(conn);
@@ -471,7 +483,7 @@ impl ScheduleStore {
         }
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let edited = edit_in(&tx, definition, enabled, now_ms, None)?;
+        let edited = edit_in(&tx, definition, enabled, now_ms, None, false)?;
         tx.commit()?;
         drop(conn);
         self.notify();
@@ -550,7 +562,7 @@ impl ScheduleStore {
             ));
         }
         let has_source: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM schedule_triggers WHERE schedule_id=?1 AND json_extract(trigger_json,'$.kind') IN ('file_watch','email')) OR EXISTS(SELECT 1 FROM trigger_registry WHERE schedule_id=?1)",
+            "SELECT EXISTS(SELECT 1 FROM schedule_triggers WHERE schedule_id=?1 AND json_extract(trigger_json,'$.kind') IN ('file_watch','email','feed','page_change','calendar','home_assistant')) OR EXISTS(SELECT 1 FROM trigger_registry WHERE schedule_id=?1)",
             [definition.id.to_string()],
             |row| row.get(0),
         )?;
@@ -567,6 +579,7 @@ impl ScheduleStore {
             enabled,
             now_ms,
             strict.then_some(definition.revision),
+            definition.origin == ScheduleOrigin::User,
         )?;
         if edited.is_some()
             && let Some(t) = trigger
@@ -1391,6 +1404,105 @@ impl ScheduleStore {
         tx.commit()?;
         Ok(true)
     }
+
+    /// Count one run of a standing order against its daily cap, in the same transaction that
+    /// checks the schedule still exists at `revision`. Returns `false`, counting nothing, when
+    /// the row was deleted, disabled or edited since the caller read it, or when `day`
+    /// already has `cap` runs. Earlier days are forgotten.
+    ///
+    /// # Errors
+    /// Database error.
+    pub fn claim_standing_order_run(
+        &self,
+        id: TaskId,
+        revision: i64,
+        day: &str,
+        cap: u32,
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let id = id.to_string();
+        let current: Option<i64> = tx
+            .query_row(
+                "SELECT revision FROM schedules WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if current != Some(revision) {
+            return Ok(false);
+        }
+        tx.execute(
+            "DELETE FROM standing_order_days WHERE schedule_id = ?1 AND day < ?2",
+            params![id, day],
+        )?;
+        let runs: u32 = tx
+            .query_row(
+                "SELECT runs FROM standing_order_days WHERE schedule_id = ?1 AND day = ?2",
+                params![id, day],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+        if runs >= cap {
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO standing_order_days (schedule_id, day, runs) VALUES (?1, ?2, 1) \
+             ON CONFLICT(schedule_id, day) DO UPDATE SET runs = runs + 1",
+            params![id, day],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Give back a slot taken by [`Self::claim_standing_order_run`] for a run that never
+    /// started.
+    ///
+    /// # Errors
+    /// Database error.
+    pub fn release_standing_order_run(&self, id: TaskId, day: &str) -> Result<()> {
+        self.conn().execute(
+            "UPDATE standing_order_days SET runs = runs - 1 \
+             WHERE schedule_id = ?1 AND day = ?2 AND runs > 0",
+            params![id.to_string(), day],
+        )?;
+        Ok(())
+    }
+
+    /// Record that a standing order's active hours or daily cap turned an occurrence away:
+    /// it did not run, and it is not a success.
+    ///
+    /// # Errors
+    /// Database error.
+    pub fn note_standing_gated(&self, id: TaskId, due_ms: i64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE occurrences SET state = 'missed', note = ?3 \
+             WHERE schedule_id = ?1 AND due_ms = ?2 AND state = 'dispatched'",
+            params![
+                id.to_string(),
+                due_ms,
+                "Skipped: outside this standing order's active hours, or its daily limit was reached."
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Runs a standing order has started on `day`.
+    ///
+    /// # Errors
+    /// Database error.
+    pub fn standing_order_runs(&self, id: TaskId, day: &str) -> Result<u32> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT runs FROM standing_order_days WHERE schedule_id = ?1 AND day = ?2",
+                params![id.to_string(), day],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
 }
 
 fn write_trigger_in(conn: &Connection, id: TaskId, trigger: Option<&Trigger>) -> Result<()> {
@@ -1457,16 +1569,28 @@ fn prune_history(conn: &Connection, id: TaskId) -> Result<()> {
 /// Apply a definition to the CURRENT row and re-arm its timer in the caller's
 /// transaction. `expected_revision` rejects a stale caller (`None` result).
 /// Returns the fresh row and its previous enabled state.
+/// Every edit of a stored definition goes through here, so this is where a payload is
+/// validated for all update paths. `takes_over` is true when the caller hands the row to the
+/// owner right after (origin becomes `user`).
 fn edit_in(
     conn: &Connection,
     definition: &Schedule,
     enabled: Option<bool>,
     now_ms: i64,
     expected_revision: Option<i64>,
+    takes_over: bool,
 ) -> Result<Option<(Schedule, bool)>> {
+    definition.payload.validate()?;
     let Some(current) = get_schedule(conn, definition.id)? else {
         return Ok(None);
     };
+    let origin_after = if takes_over {
+        ScheduleOrigin::User
+    } else {
+        current.origin
+    };
+    owner_only_payload(&definition.payload, definition.origin)?;
+    owner_only_payload(&definition.payload, origin_after)?;
     if current.bot_id != definition.bot_id {
         return Err(SchedulerError::InvalidSpec(
             "the bot of a schedule cannot be changed".into(),
@@ -1487,6 +1611,17 @@ fn edit_in(
     update_definition_in(conn, &edited)?;
     set_next_run_after_edit_in(conn, current.id, next_revision, next)?;
     Ok(get_schedule(conn, current.id)?.map(|schedule| (schedule, was_enabled)))
+}
+
+/// A standing order is an owner's instruction that runs unattended and decides what the owner
+/// hears: a bot may not create, edit or hold one.
+fn owner_only_payload(payload: &Payload, origin: ScheduleOrigin) -> Result<()> {
+    if matches!(payload, Payload::StandingOrder { .. }) && origin == ScheduleOrigin::Bot {
+        return Err(SchedulerError::InvalidSpec(
+            "a bot cannot make or change a standing order".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn arm_from(spec: &ScheduleSpec, now_ms: i64) -> Result<Option<i64>> {

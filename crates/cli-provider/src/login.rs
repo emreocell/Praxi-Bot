@@ -16,7 +16,7 @@
 //! * The engines below have no headless-friendly mode of their own, so they run on a pseudo
 //!   terminal (`pty_session`): the CLI believes a person is typing, we read what it prints.
 //!   `cursor-agent login` and `qodercli login` print a sign-in link and finish by themselves
-//!   (qoder, read from npm package 1.1.99: "Login successful! Welcome, <name>."); `kimi login`
+//!   (qoder, read from npm package 1.1.99: "Login successful! Welcome, …"); `kimi login`
 //!   prints a device link and a one-time code (read from npm package 2.8.1); `kiro-cli login
 //!   --license free --use-device-flow` prints a device link and code (Kiro docs); `agy` signs in
 //!   on its first run (vendor docs; no login subcommand in `agy --help`) and `opencode auth
@@ -469,8 +469,8 @@ fn account_pattern() -> &'static regex::Regex {
     })
 }
 
-/// The account the CLI says it signed in as, from its success line (`Welcome, <name>.`,
-/// `Already logged in as <name>.`, `Logged in as <name>`). Bounded and printable only; `None`
+/// The account the CLI says it signed in as, from its success line (`Welcome, …`,
+/// `Already logged in as …`, `Logged in as …`). Bounded and printable only; `None`
 /// when the CLI does not name one.
 #[must_use]
 pub fn parse_account(output: &str) -> Option<String> {

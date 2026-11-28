@@ -332,10 +332,8 @@ export async function flows(ctx) {
   });
   await run(s, 'create a second bot from the New-bot modal', async (page) => {
     await page.getByRole('button', { name: /new bot/i }).first().click();
-    // Three steps: how to start (blank), name and look, what it can do (then Create).
-    await page.getByTestId('new-bot-start-blank').click();
+    // One page: name it, (what it should do: the general helper), the access level, Create.
     await page.getByTestId('new-bot-name').fill('Nova');
-    await page.getByTestId('new-bot-next').click();
     await page.getByTestId('new-bot-access-read-and-draft').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
@@ -343,10 +341,8 @@ export async function flows(ctx) {
   // Created here, early: the New-bot modal's Create stays disabled in the later part of a full run (Auto brain unresolved).
   await run(s, 'a Full-level bot is created', async (page) => {
     await page.getByRole('button', { name: /new bot/i }).first().click();
-    // Three steps: how to start (blank), name and look, what it can do (then Create).
-    await page.getByTestId('new-bot-start-blank').click();
+    // One page: name it, (what it should do: the general helper), the access level, Create.
     await page.getByTestId('new-bot-name').fill('Fulla');
-    await page.getByTestId('new-bot-next').click();
     await page.getByTestId('new-bot-access-full').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
@@ -458,7 +454,7 @@ export async function flows(ctx) {
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByTestId('settings-nav-models').click();
     await page.getByTestId('api-key-paste').waitFor(T);
-    await page.getByTestId('detected-accounts-block').waitFor(T);
+    await page.getByTestId('coding-clis-block').waitFor(T);
     await page.getByText('stub', { exact: false }).first().waitFor(T);
     await page.keyboard.press('Escape');
   });
@@ -524,26 +520,15 @@ export async function flows(ctx) {
     }
     await page.keyboard.press('Escape');
   });
-  await run(s, 'mission: start from the bot panel form', async (page) => {
+  await run(s, 'mission: /mission starts a mission card in chat', async (page) => {
+    // Always switch to Fulla (the Full-level bot): gotoChat keeps whatever chat is open, which may be Atlas's.
     await page.locator('[class*="railItem"]', { hasText: 'Fulla' }).first().click();
     await openFirstChat(page);
-    if (!(await page.getByTestId('bot-panel').isVisible().catch(() => false))) {
-      await page.getByTestId('bot-chip').click();
-      await page.getByTestId('bot-panel').waitFor(T);
-    }
-    const start = page.getByTestId('mission-start');
-    if (!(await start.count())) throw new Error('mission start form missing (missions disabled?)');
-    await start.locator('summary').click();
-    await start.locator('textarea').fill('Smoke mission: list workspace files');
-    await start.getByRole('button', { name: /start/i }).click();
-    await page.getByTestId('mission-card').first().waitFor(T);
     const composer = page.locator('[data-composer-input]');
-    await composer.fill('/mission List workspace files again');
-    await page.getByTestId('composer-menu').waitFor({ timeout: 5000 }).catch(() => null);
-    if (await page.getByTestId('composer-menu').getByRole('option', { name: /mission|görev/i }).count()) {
-      await composer.press('Enter');
-      if ((await page.getByTestId('mission-card').count()) < 1) throw new Error('/mission did not start a mission card');
-    }
+    await composer.fill('/mission Smoke mission: list workspace files');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /^send$/i }).click();
+    await page.getByTestId('mission-started-card').first().waitFor(T);
   });
   await run(s, 'add-server wizard opens and validates input without SSH', async (page) => {
     await page.getByTestId('computer-picker').click();

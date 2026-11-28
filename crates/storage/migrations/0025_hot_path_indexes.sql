@@ -3,5 +3,5 @@
 --  * audit rows by run and action (the end-of-run usage summary),
 --  * audit rows by user, action and time (spend-limit checks before every model call).
 CREATE INDEX idx_messages_run ON messages(run_id, role, created_at_ms);
-CREATE INDEX idx_audit_run ON audit_log(run_id, action, user_id);
-CREATE INDEX idx_audit_user_action ON audit_log(user_id, action, ts_ms);
+CREATE INDEX idx_audit_run ON audit_log(run_id, action, user_id) WHERE run_id IS NOT NULL;
+CREATE INDEX idx_audit_user_action ON audit_log(user_id, action, ts_ms) WHERE action = 'usage';

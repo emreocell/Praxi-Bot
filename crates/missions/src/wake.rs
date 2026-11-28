@@ -57,6 +57,21 @@ pub enum WaitSpec {
         /// Its name, for the owner's screen.
         name: String,
     },
+    /// A recurrence rule (`FREQ=...`); fires at each occurrence until the series ends.
+    Every {
+        /// RFC 5545 `RRULE` (ASCII, checked by [`crate::recur`]).
+        rrule: String,
+        /// IANA time zone for local wall time; omitted means UTC.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
+        /// Series anchor (`DTSTART`), Unix ms.
+        dtstart_ms: i64,
+    },
+    /// A child run (subagent or helper) finishes.
+    Child {
+        /// The waiting child's run id.
+        run_id: String,
+    },
 }
 
 impl WaitSpec {
@@ -67,6 +82,8 @@ impl WaitSpec {
             Self::After => "after",
             Self::Mail { .. } => "mail",
             Self::Webhook { .. } => "webhook",
+            Self::Every { .. } => "every",
+            Self::Child { .. } => "child",
         }
     }
 
@@ -77,6 +94,8 @@ impl WaitSpec {
             Self::After => "a timer".to_owned(),
             Self::Mail { filter } => format!("a mail {}", filter.describe()),
             Self::Webhook { name, .. } => format!("the webhook \"{}\"", clip(name, 60)),
+            Self::Every { rrule, .. } => format!("the schedule \"{}\"", clip(rrule, 60)),
+            Self::Child { run_id } => format!("helper run {}", clip(run_id, 36)),
         }
     }
 }
@@ -255,6 +274,10 @@ pub enum WakeReason {
     Mail,
     /// The webhook was called.
     Webhook,
+    /// A recurrence rule fired.
+    Schedule,
+    /// A child run finished.
+    Child,
 }
 
 impl WakeReason {
@@ -265,6 +288,8 @@ impl WakeReason {
             Self::Timer => "timer",
             Self::Mail => "mail",
             Self::Webhook => "webhook",
+            Self::Schedule => "schedule",
+            Self::Child => "child",
         }
     }
 
@@ -275,6 +300,8 @@ impl WakeReason {
             "timer" => Self::Timer,
             "mail" => Self::Mail,
             "webhook" => Self::Webhook,
+            "schedule" => Self::Schedule,
+            "child" => Self::Child,
             _ => return None,
         })
     }
@@ -313,6 +340,11 @@ pub struct Wake {
 /// What one look into a mailbox asks.
 #[derive(Debug, Clone, Copy)]
 pub struct MailCheck<'a> {
+    /// The mission the wait belongs to.
+    pub mission_id: &'a str,
+    /// Mail that arrived before this moment (Unix ms) is not the awaited one, whatever the
+    /// wait's own start says: an out-of-office notice the wait was already put off for.
+    pub not_before_ms: i64,
     /// The mission's bot: only its own mail identity is looked into.
     pub bot_id: &'a str,
     /// Which mail.
@@ -329,7 +361,17 @@ pub struct MailHit {
     /// Sender, subject, time, one-time codes and the judged links, already cleaned and capped.
     /// Untrusted: it comes from a stranger.
     pub summary: Value,
+    /// The mail says the person is away and the wait should go on until then (Unix ms) instead
+    /// of waking the item: set only for a mail matched to a mail we sent. The wait gives up no
+    /// earlier than this; a hit after [`MAX_MAIL_DEFERS`] earlier ones wakes the item anyway.
+    pub follow_up_at_ms: Option<i64>,
+    /// The mail's own id (`Message-ID` or the provider's). A notice the wait was already put off
+    /// for is recognised by it, whatever its (untrusted) `Date` says. `None`: no id to go by.
+    pub message_id: Option<String>,
 }
+
+/// How often one mail wait is put off for an out-of-office reply before the mail wakes the item.
+pub const MAX_MAIL_DEFERS: u32 = 3;
 
 /// Looks into the bot's own mailbox once. The daemon implements it over the mail connector;
 /// tests implement it with a fake inbox.
@@ -356,6 +398,23 @@ pub trait WakeChecks: Send + Sync {
     /// # Errors
     /// Why not, in a sentence for the model.
     fn webhook(&self, bot_id: &str, trigger_id: &str) -> Result<String, String>;
+
+    /// `child_run_id` is a run in flight that belongs to `parent_run_id`. Returns a short label
+    /// for the owner UI.
+    ///
+    /// # Errors
+    /// Why not, in a sentence for the model.
+    fn child_run(&self, parent_run_id: &str, child_run_id: &str) -> Result<String, String> {
+        let _ = (parent_run_id, child_run_id);
+        Err("waiting for a helper is not available here".into())
+    }
+}
+
+/// When a child run a mission was waiting for finishes, the runtime delivers it here.
+pub trait ChildWakeSink: Send + Sync {
+    /// `summary` is untrusted: the child's final text. When `mission_id` is set, only that
+    /// mission's waits are woken.
+    fn deliver(&self, child_run_id: &str, summary: &str, mission_id: Option<&str>);
 }
 
 /// Clean text that came from the outside before it is stored in a wake: control characters

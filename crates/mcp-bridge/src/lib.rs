@@ -45,7 +45,9 @@
 //! ```
 //!
 //! Large tool sets are meant to be fronted by `agent-router`'s discovery
-//! meta-tools rather than shown to the model directly.
+//! meta-tools rather than shown to the model directly. The owner can search the
+//! official MCP Registry ([`registry`]) and install signed `.mcpb` bundles
+//! ([`mcpb`]); flat form elicitation from a server is normalized in `form`.
 
 mod catalog;
 mod client;
@@ -76,7 +78,10 @@ pub use config::{
 };
 pub use diagnostics::ExternalRedactor;
 pub use error::{McpError, McpErrorKind, Result, runtime_install_hint};
-pub use manager::{Backoff, McpManager, McpPolicy, McpServerHandle, ServerSnapshot, ServerStatus};
+pub use manager::{
+    Backoff, McpManager, McpPolicy, McpServerHandle, RemoteRevokeOutcome, ServerSnapshot,
+    ServerStatus, SignOutResult,
+};
 pub use pins::{FilePinStore, MemoryPinStore, PinStore, ToolChange, ToolPin};
 pub use roots::{
     FS_SERVER_PACKAGE, PathGuard, canonicalize_filesystem_args, filesystem_roots, root_problem,

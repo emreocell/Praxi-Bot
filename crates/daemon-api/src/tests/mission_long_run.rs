@@ -413,7 +413,11 @@ impl MailProbe for FakeInbox {
             .lock()
             .clone()
             .filter(|(at, _)| *at <= req.now_ms)
-            .map(|(_, summary)| MailHit { summary }))
+            .map(|(_, summary)| MailHit {
+                summary,
+                follow_up_at_ms: None,
+                message_id: None,
+            }))
     }
 }
 

@@ -70,7 +70,7 @@ impl AppState {
 /// `(method, pattern)` of every route that changes authority, secrets,
 /// providers or keys, installs or runs software, pairs devices, takes over
 /// control or DECIDES an approval (card 262). One table, one middleware
-/// ([`owner_gate`]): a holder of only the general API token (a CLI engine, an
+/// (`owner_gate`): a holder of only the general API token (a CLI engine, an
 /// MCP client, a script) is refused with `owner_key_required`.
 ///
 /// Pattern segments: `{}` is one segment, a trailing `*` is the rest of the
@@ -377,6 +377,14 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     // caller chooses: a token holder must not run it
     ("POST", "/v1/web/search/test"),
     ("PUT", "/v1/voice"),
+    // A live conversation opens the microphone's audio to a paid cloud service and spends the
+    // stored Gemini key: the owner's own action, never a token's or a paired phone's.
+    ("POST", "/v1/voice/live"),
+    ("DELETE", "/v1/voice/live/{}"),
+    ("POST", "/v1/voice/live/{}/audio"),
+    ("POST", "/v1/voice/live/{}/tool"),
+    ("POST", "/v1/voice/live/{}/note"),
+    ("POST", "/v1/chats/{}/voice-transcript"),
     // downloads hundreds of MB onto the owner's disk
     ("POST", "/v1/voice/local/install"),
     // Connected REST APIs: the list shows base URLs and credential names, and every change
@@ -389,6 +397,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/openapi-apps/{}"),
     ("DELETE", "/v1/openapi-apps/{}"),
     ("POST", "/v1/openapi-apps/{}/refresh"),
+    ("POST", "/v1/voice/synthesize"),
     // Account identities, the catalog and its logos, and action discovery are for the confirmed
     // owner: the app lists they feed are owner-only, and no phone or node shows them.
     ("GET", "/v1/composio"),
@@ -509,7 +518,7 @@ pub const TOKEN_OK_ROUTES: &[(&str, &str)] = &[
 /// Routes of [`OWNER_ROUTES`] that EVERY paired device (phone or desktop) may
 /// still call without being the owner's administrator: what a device does for
 /// the owner every day. Everything else in [`OWNER_ROUTES`] is refused to a
-/// paired peer (see [`peer_may_call`]) unless it is the administrator desktop
+/// paired peer (see `peer_may_call`) unless it is the administrator desktop
 /// of a host, which is the owner (`peer.rs`, `admin_desktop_never`).
 ///
 /// * deciding an approval or a question (audited as `peer.decision_requested`);

@@ -135,6 +135,8 @@ pub enum Refusal {
     Drag,
     /// A key could not be confirmed released after a send.
     ReleaseUnconfirmed,
+    /// A window of Praxi itself (the app, its approval cards, the daemon).
+    PraxiItself,
 }
 
 impl Refusal {
@@ -158,6 +160,7 @@ impl Refusal {
             Self::RemoteControl => "remote_control",
             Self::Drag => "drag",
             Self::ReleaseUnconfirmed => "release_unconfirmed",
+            Self::PraxiItself => "praxi_itself",
         }
     }
 
@@ -189,6 +192,7 @@ impl Refusal {
             Self::RemoteControl => "the program is a remote-desktop or virtual-machine viewer",
             Self::Drag => "dragging is never covered by a task-wide permission",
             Self::ReleaseUnconfirmed => "a key could not be confirmed released",
+            Self::PraxiItself => "the window belongs to Praxi itself",
         }
     }
 }
@@ -449,6 +453,115 @@ pub fn judge(target: &InputTarget) -> Option<Refusal> {
     None
 }
 
+/// Window classes of credential and consent surfaces (the Windows credential
+/// prompt, the UAC consent window, the secure-desktop host). Lower case.
+const CREDENTIAL_CLASSES: &[&str] = &[
+    "credential dialog xaml host",
+    "credentialuibroker",
+    "$$$secure ui desktop window",
+    "consentuiwindow",
+];
+
+/// Whether the window class is a credential or UAC consent surface.
+#[must_use]
+pub fn credential_class(class: &str) -> bool {
+    let c = class.trim().to_ascii_lowercase();
+    CREDENTIAL_CLASSES.contains(&c.as_str())
+}
+
+/// Program stems that are Praxi's own: the daemon (`bot`) and the desktop app
+/// (`bot-desktop`). Anything with `praxi` in its file name counts too.
+const PRAXI_STEMS: &[&str] = &["bot", "bot-desktop"];
+
+/// Whether this program or window is Praxi itself: this very process, a program
+/// named like it, or a window whose title names Praxi. The title is a heuristic
+/// that fails toward refusing more.
+#[must_use]
+pub fn is_praxi_itself(identity: &ProcessIdentity, title: &str) -> bool {
+    let stem = identity.program_stem();
+    (identity.pid != 0 && identity.pid == std::process::id())
+        || stem.contains("praxi")
+        || PRAXI_STEMS.contains(&stem.as_str())
+        || title.to_lowercase().contains("praxi")
+}
+
+/// Why a window operation (minimise, move, close, ...) on this window is refused
+/// whatever the owner approved. No input is sent, so the input rules of [`judge`]
+/// that are about where keys may go (terminals, browsers, command apps, remote
+/// viewers, password fields) do not apply: those windows can be minimised or
+/// moved. What stays off limits:
+///
+/// * a window whose program or elevation cannot be established (the owner's own
+///   account only: an elevated or unreadable program is refused);
+/// * Praxi itself;
+/// * a system shell, a credential or UAC surface, a packaged-app frame host and
+///   a password manager;
+/// * closing a dialog or an owned popup (`#32770`, a modal box): it asks the
+///   owner something, so the answer is theirs.
+///
+/// Whether the window is a payment surface is decided by the caller, which knows
+/// the owner's money rules.
+#[must_use]
+pub fn window_op_refusal(target: &InputTarget, op: crate::window::WindowOp) -> Option<Refusal> {
+    if !target.identity.is_complete() {
+        return Some(Refusal::NoIdentity);
+    }
+    if target.elevated != Some(false) {
+        return Some(Refusal::Elevated);
+    }
+    if is_praxi_itself(&target.identity, &target.title) {
+        return Some(Refusal::PraxiItself);
+    }
+    if credential_class(&target.class) {
+        return Some(Refusal::SystemSurface);
+    }
+    if let r @ Some(Refusal::SystemSurface | Refusal::PasswordManager) =
+        program_refusal(&target.identity.image_path)
+    {
+        return r;
+    }
+    if op == crate::window::WindowOp::Close {
+        // A failed class lookup is not an ordinary class: closing is refused.
+        if target.class.trim().is_empty() {
+            return Some(Refusal::NoIdentity);
+        }
+        if target.owned || class_refusal(&target.class) == Some(Refusal::Dialog) {
+            return Some(Refusal::Dialog);
+        }
+    }
+    None
+}
+
+/// The recheck a backend runs right before it asks the window system for a window
+/// operation: `now` is the window's facts read at this moment. With a `guard`, the
+/// window must still belong to the program the approval was shown for; whatever the
+/// guard, the window must still pass [`window_op_refusal`]. `now == None` (the
+/// facts could not be read) is a refusal when there is a guard and otherwise leaves
+/// the decision to the caller, which has already judged the window.
+///
+/// # Errors
+/// The [`Refusal`] to report; the operation must not be sent.
+pub fn check_window_op(
+    guard: Option<&ActGuard>,
+    now: Option<&InputTarget>,
+    op: crate::window::WindowOp,
+) -> Result<(), Refusal> {
+    if let Some(guard) = guard {
+        let Some(now) = now else {
+            return Err(Refusal::NoIdentity);
+        };
+        if !guard.expect.same_program(&now.identity) {
+            return Err(if now.identity.is_complete() {
+                Refusal::ForegroundChanged
+            } else {
+                Refusal::NoIdentity
+            });
+        }
+    }
+    now.and_then(|t| window_op_refusal(t, op))
+        .map_or(Ok(()), Err)
+}
+
 /// The recheck a backend runs right before it sends input: the window that
 /// would receive it must be the granted program and must still pass [`judge`].
 ///
@@ -487,6 +600,192 @@ mod tests {
             password_focus: false,
             owned: false,
         }
+    }
+
+    #[test]
+    fn window_operations_skip_input_rules_but_keep_system_and_credential_programs_off_limits() {
+        use crate::window::WindowOp;
+        // A terminal, a browser and an editor may be minimised, moved or closed: no input is sent.
+        for (path, class) in [
+            ("C:\\Windows\\System32\\cmd.exe", "ConsoleWindowClass"),
+            (
+                "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+                "MozillaWindowClass",
+            ),
+            ("C:\\Windows\\notepad.exe", "Notepad"),
+        ] {
+            for op in [
+                WindowOp::Minimize,
+                WindowOp::Move { x: 1, y: 1 },
+                WindowOp::Close,
+            ] {
+                assert_eq!(
+                    window_op_refusal(&target(path, class), op),
+                    None,
+                    "{path} {op:?}"
+                );
+            }
+        }
+        let mut elevated = target("C:\\Windows\\notepad.exe", "Notepad");
+        elevated.elevated = None;
+        assert_eq!(
+            window_op_refusal(&elevated, WindowOp::Minimize),
+            Some(Refusal::Elevated)
+        );
+        elevated.elevated = Some(true);
+        assert_eq!(
+            window_op_refusal(&elevated, WindowOp::Minimize),
+            Some(Refusal::Elevated)
+        );
+        let mut unnamed = target("C:\\Windows\\notepad.exe", "Notepad");
+        unnamed.identity.start_time = 0;
+        assert_eq!(
+            window_op_refusal(&unnamed, WindowOp::Close),
+            Some(Refusal::NoIdentity)
+        );
+        assert_eq!(
+            window_op_refusal(
+                &target("C:\\Program Files\\KeePass\\KeePass.exe", "WindowsForms10"),
+                WindowOp::Move { x: 0, y: 0 }
+            ),
+            Some(Refusal::PasswordManager)
+        );
+        assert_eq!(
+            window_op_refusal(
+                &target("C:\\Windows\\SystemApps\\SearchHost.exe", "Class"),
+                WindowOp::Close
+            ),
+            Some(Refusal::SystemSurface)
+        );
+    }
+
+    #[test]
+    fn a_dialog_is_never_closed_but_may_be_moved() {
+        use crate::window::WindowOp;
+        let save = target("C:\\Windows\\notepad.exe", "#32770");
+        assert_eq!(
+            window_op_refusal(&save, WindowOp::Close),
+            Some(Refusal::Dialog)
+        );
+        assert_eq!(window_op_refusal(&save, WindowOp::Minimize), None);
+        let mut popup = target("C:\\x\\app.exe", "MyCustomDialog");
+        popup.owned = true;
+        assert_eq!(
+            window_op_refusal(&popup, WindowOp::Close),
+            Some(Refusal::Dialog)
+        );
+        assert_eq!(
+            window_op_refusal(&popup, WindowOp::Move { x: 5, y: 5 }),
+            None
+        );
+        // A failed class lookup is not an ordinary class: closing is refused.
+        let blank = target("C:\\x\\app.exe", "");
+        assert_eq!(
+            window_op_refusal(&blank, WindowOp::Close),
+            Some(Refusal::NoIdentity)
+        );
+    }
+
+    #[test]
+    fn credential_and_uac_surfaces_take_no_window_operation_at_all() {
+        use crate::window::WindowOp;
+        for class in [
+            "Credential Dialog Xaml Host",
+            "CredentialUIBroker",
+            "$$$Secure UI Desktop Window",
+            "ConsentUIWindow",
+        ] {
+            for op in [
+                WindowOp::Close,
+                WindowOp::Minimize,
+                WindowOp::Move { x: 0, y: 0 },
+            ] {
+                assert_eq!(
+                    window_op_refusal(&target("C:\\x\\app.exe", class), op),
+                    Some(Refusal::SystemSurface),
+                    "{class} {op:?}"
+                );
+            }
+        }
+        // The UAC consent program is on the system-surface list by name.
+        assert_eq!(
+            window_op_refusal(
+                &target("C:\\Windows\\System32\\consent.exe", "Class"),
+                WindowOp::Close
+            ),
+            Some(Refusal::SystemSurface)
+        );
+    }
+
+    #[test]
+    fn praxi_itself_is_never_managed() {
+        use crate::window::WindowOp;
+        let own = target("C:\\x\\anything.exe", "Class");
+        let mut own_pid = own.clone();
+        own_pid.identity.pid = std::process::id();
+        for t in [
+            own_pid,
+            target("C:\\Program Files\\Praxi-Bot\\Praxi-Bot.exe", "Class"),
+            target("C:\\Program Files\\Praxi-Bot\\bot-desktop.exe", "Class"),
+            target("/usr/local/bin/bot", "Class"),
+            {
+                let mut t = own.clone();
+                t.title = "Praxi-Bot - approvals".into();
+                t
+            },
+        ] {
+            for op in [WindowOp::Minimize, WindowOp::Close] {
+                assert_eq!(
+                    window_op_refusal(&t, op),
+                    Some(Refusal::PraxiItself),
+                    "{t:?} {op:?}"
+                );
+            }
+        }
+        assert_eq!(window_op_refusal(&own, WindowOp::Minimize), None);
+    }
+
+    #[test]
+    fn the_window_is_rechecked_right_before_the_operation() {
+        use crate::window::WindowOp;
+        let t = target("C:\\Windows\\notepad.exe", "Notepad");
+        let g = ActGuard {
+            expect: t.identity.clone(),
+        };
+        assert_eq!(
+            check_window_op(Some(&g), Some(&t), WindowOp::Minimize),
+            Ok(())
+        );
+        // The window now belongs to another program (same pid, new start time).
+        let mut other = t.clone();
+        other.identity.start_time += 1;
+        assert_eq!(
+            check_window_op(Some(&g), Some(&other), WindowOp::Minimize),
+            Err(Refusal::ForegroundChanged)
+        );
+        // Facts that cannot be read are a refusal under a guard.
+        assert_eq!(
+            check_window_op(Some(&g), None, WindowOp::Close),
+            Err(Refusal::NoIdentity)
+        );
+        // The same program, but it turned into a dialog since the approval.
+        let mut dialog = t.clone();
+        dialog.class = "#32770".into();
+        assert_eq!(
+            check_window_op(Some(&g), Some(&dialog), WindowOp::Close),
+            Err(Refusal::Dialog)
+        );
+        assert_eq!(
+            check_window_op(Some(&g), Some(&dialog), WindowOp::Minimize),
+            Ok(())
+        );
+        // No guard: the window is still judged.
+        let mut keepass = t;
+        keepass.identity.image_path = "C:\\KeePass\\KeePass.exe".into();
+        assert_eq!(
+            check_window_op(None, Some(&keepass), WindowOp::Minimize),
+            Err(Refusal::PasswordManager)
+        );
     }
 
     #[test]

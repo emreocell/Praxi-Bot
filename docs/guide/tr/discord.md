@@ -39,11 +39,36 @@ Komutlar `!` ile başlar (`/` işareti de düz metin olarak gönderilirse çalı
 | `!bots` | Botlarınızı listeler |
 | `!use <ad>` | Bu sohbetin konuşacağı botu seçer |
 | `!stop` | Çalışan görevi durdurur |
-| `!status` | Kaç görev çalıştığını ve onayınızı beklediğini gösterir |
+| `!gorevler`, `!gorev <id>`, `!duraklat <id>`, `!surdur <id>`, `!durdur <id>`, `!gorev yeni <metin>` | Görevlerinizi yönetin ([aşağıya bakın](#görevleri-telefondan-yönetin)); İngilizce adları da çalışır: `!missions`, `!mission`, `!pause`, `!resume`, `!stop`, `!mission new` |
+| `!status` ya da `!durum` | Sunucu sağlığı, botlarınız, çalışan görevler, duruma göre görevler ve onayınızı bekleyenler |
 | `!lang en`, `!lang tr`, `!lang de` | Botun kendi mesajlarının dili |
 | `!allow` / `!disallow` | Sunucu kanalında: botun orada size cevap vermesine izin ver / vazgeç (yalnızca sahip) |
 | `!help` | Kısa yardım |
 | diğer her şey | Seçili bota gönderilir |
+
+## Görevleri telefondan yönetin
+
+Botla olan **özel sohbetinizde** görevleri yalnızca siz listeleyebilir, okuyabilir, duraklatabilir, sürdürebilir,
+durdurabilir ve yeni görev başlatabilirsiniz. Komutlar [Telegram](telegram.md#görevleri-telefondan-yönet) ile aynıdır,
+başına `!` gelir:
+
+| Mesaj | Ne yapar |
+| --- | --- |
+| `!gorevler` | Görevlerinizi 8 karakterlik id'leri, durumları ve `biten/toplam` ile listeler |
+| `!gorev <id>` | Ayrıntılar ve son rapor |
+| `!duraklat <id>`, `!surdur <id>` | Duraklatır ya da sürdürür |
+| `!durdur <id>` | Görevi kalıcı olarak durdurur; **Durdur** düğmesiyle (ya da **Devam etsin** ile) onaylarsınız |
+| `!gorev yeni <metin>` | Bu sohbetin kullandığı botta görev başlatır; botun Tam (Full) düzeyde olması gerekir |
+| `!durum` | Sağlık, botlar, çalışanlar, görevler |
+
+İngilizce adları da çalışır: `!missions`, `!mission <id>`, `!pause`, `!resume`, `!stop <id>`, `!mission new <text>`,
+`!status`. Tek başına `!stop` çalışan görevi durdurmaya devam eder.
+
+Bu komutlar izin verdiğiniz bir **sunucu kanalında çalışmaz** (özel sohbeti kullanmanız söylenir) ve Discord'da
+iletilen mesajlar yok sayılır. Dakikada en fazla 20 komut ve 10 dakikada 3 yeni görev. Discord'dan başlattığınız bir
+hedef, uygulamada yazılmış gibi değil, bir Discord sohbet mesajı gibi sayılır: içinde andığınız siteler önceden
+onaylanmış olmaz. Bir görevin yazdıkları, Discord biçimlendirmesi, bağlantıları ve anmaları zararsız hâle
+getirilerek gösterilir.
 
 İzin verilen bir sunucu kanalında yazdığınız **her** mesaj bota gider; bu yüzden
 yalnızca bunun için ayırdığınız bir kanal seçin.

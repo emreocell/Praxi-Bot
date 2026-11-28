@@ -52,6 +52,20 @@ e-posta gönderemez, dosya silemez ya da paylaşamaz, etkinlik değiştiremez. O
 kurallarına bağlıdır ([Güvenlik modeli](security.md)): bir Google uygulaması etiketlerine
 **güvenilmeyen** biri olarak başlar; **Yönet** altında değiştirmedikçe her eylem önce sorar.
 
+## Botun e-posta göndermesine ya da etkinlik oluşturmasına izin verme
+
+Yazma izni senin kararındır ve üç adımda verilir; hiçbir şey kendiliğinden genişlemez.
+
+1. `mcp.toml` içinde (aşağıya bak) yazma aracını uygulamanın `tool_allow` listesine, ilgili izni de
+   `scopes` listesine ekle (örneğin `https://www.googleapis.com/auth/gmail.send` ya da
+   `https://www.googleapis.com/auth/calendar.events`).
+2. **Yönet → Çıkış yap**, sonra yeniden **Oturum aç**: Google'ın sayfasında onayladığın izinler
+   giriş sırasında belirlenir; bunu yapana kadar Google yazma isteğini reddeder (izinler yetersiz
+   diyen bir 403).
+3. Araç **Yönet** altında “hiç onaylamadığın bir araç” olarak görünür; onay düğmesine basana kadar
+   kapalı kalır. Sonra olağan onay kurallarına bağlıdır: uygulamaya güvenmediysen her gönderme ya da
+   yeni etkinlik yine önce sorar.
+
 ## Praxi bir sunucuda
 
 Praxi bir sunucuda çalışıyorsa aynı şekilde giriş yap. Sayfa tarayıcında açılır, masaüstü
@@ -78,9 +92,11 @@ sunucu için bir şey kaydetmen gerekmez.
 
 ## Çıkış ve kaldırma
 
-**Yönet → Çıkış yap**, Praxi'nin çalıştığı bilgisayardaki kayıtlı girişi siler; **Bağlantıyı kes**
-uygulamayı kaldırır. Praxi'nin erişimini Google tarafında da kaldırmak için Google hesabının
-**Güvenlik → Üçüncü taraf erişimi** bölümünde oluşturduğun istemciyi kaldır.
+**Yönet → Çıkış yap**, Praxi'nin çalıştığı bilgisayardaki kayıtlı girişi siler ve Google'dan da
+girişi bitirmesini ister. **Bağlantıyı kes** aynısını yapar ve uygulamayı kayıtlı girişiyle birlikte
+kaldırır. Google'a bildirmek elinden geleni yapma esasına dayanır: Google'a ulaşılamazsa bile burada
+çıkış yapmış olursun. Praxi'nin Google tarafındaki erişimini kendin görmek ya da kaldırmak için
+Google hesabının **Güvenlik → Üçüncü taraf erişimi** bölümünde oluşturduğun istemciyi kaldır.
 
 Tüm Google uygulamaları tek bir istemci sırrını paylaşır. **Bağlantıyı kes** adımı **Kayıtlı istemci
 sırrını da sil** seçeneğini sunar; başka bir Google uygulaması sırrı kullanmıyorsa işaretli gelir ve

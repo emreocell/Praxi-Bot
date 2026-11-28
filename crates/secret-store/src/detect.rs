@@ -237,10 +237,10 @@ const SCAN_CONTEXT: usize = 4 * 1024;
 /// Find suspected secrets in `text`. Results are sorted by start and do not
 /// overlap; a known shape wins over a labelled match on the same bytes.
 ///
-/// Pure and local. The text is read in [`SCAN_WINDOW`] pieces (a candidate
+/// Pure and local. The text is read in fixed-size windows (a candidate
 /// belongs to the piece that holds its first byte), so the work is linear in
 /// the length of `text` and no part of a long text goes unscanned. A shape
-/// longer than [`SCAN_CONTEXT`] that crosses a window edge is cut at the
+/// longer than the scan context that crosses a window edge is cut at the
 /// window's far edge, so its tail stays; no real credential is that long.
 #[must_use]
 pub fn detect_secrets(text: &str) -> Vec<SecretCandidate> {

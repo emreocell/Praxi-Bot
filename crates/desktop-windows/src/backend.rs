@@ -5,7 +5,7 @@ use std::sync::{Arc, mpsc};
 use async_trait::async_trait;
 use desktop_api::{
     ActGuard, Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError,
-    Image, InputTarget, LiveViewOptions, Quality, Refusal, Region, Snapshot, WindowInfo,
+    Image, InputTarget, LiveViewOptions, Quality, Refusal, Region, Snapshot, WindowInfo, WindowOp,
     live_view::DesktopViewTarget,
     snapshot::{AppSpec, Pid},
 };
@@ -13,7 +13,8 @@ use futures::channel::oneshot;
 use parking_lot::Mutex as SyncMutex;
 
 use crate::{
-    capture, identity, live_view_win::open_windows_live_view_target, uia::Worker, winlist,
+    capture, clipboard, identity, live_view_win::open_windows_live_view_target, uia::Worker,
+    winlist,
 };
 
 type Job = Box<dyn FnOnce(&mut Worker) + Send>;
@@ -160,8 +161,14 @@ impl DesktopBackend for WindowsBackend {
     }
 
     async fn focus_target(&self, window_id: u64) -> Result<Option<InputTarget>, DesktopError> {
-        self.run(move |_| Ok(identity::top_level_facts(winlist::hwnd_from_id(window_id))))
-            .await
+        // A window whose program cannot be identified is an error, not "this backend
+        // cannot tell": nothing is managed or focused unidentified.
+        self.run(move |_| {
+            identity::top_level_facts(winlist::hwnd_from_id(window_id))
+                .map(Some)
+                .ok_or_else(|| DesktopError::GuardRefused(Refusal::NoIdentity.why().into()))
+        })
+        .await
     }
 
     async fn focus(&self, window_id: u64, guard: Option<ActGuard>) -> Result<(), DesktopError> {
@@ -181,6 +188,36 @@ impl DesktopBackend for WindowsBackend {
             .await;
         self.notify_live_view();
         res
+    }
+
+    async fn window_op(
+        &self,
+        window_id: u64,
+        op: WindowOp,
+        guard: Option<ActGuard>,
+    ) -> Result<(), DesktopError> {
+        let res = self
+            .run(move |_| {
+                let hwnd = winlist::hwnd_from_id(window_id);
+                // Right before the OS call: the same program as approved, and still a
+                // window that may be managed (not a dialog turned up since, not Praxi).
+                let now = identity::top_level_facts(hwnd);
+                desktop_api::guard::check_window_op(guard.as_ref(), now.as_ref(), op)
+                    .map_err(|r| DesktopError::GuardRefused(r.why().into()))?;
+                winlist::window_op(hwnd, op)
+            })
+            .await;
+        self.notify_live_view();
+        res
+    }
+
+    async fn clipboard_text(&self) -> Result<Option<String>, DesktopError> {
+        self.run(|_| clipboard::get_text()).await
+    }
+
+    async fn set_clipboard_text(&self, text: &str) -> Result<(), DesktopError> {
+        let text = text.to_owned();
+        self.run(move |_| clipboard::set_text(&text)).await
     }
 
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError> {

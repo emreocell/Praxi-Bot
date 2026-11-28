@@ -618,8 +618,6 @@
   },
   "approvalDock": {
     "counter": "Approval {{current}} of {{total}}",
-    "keyAllow": "Allow once",
-    "keyDeny": "Deny",
     "label": "Waiting for your approval",
     "next": "Next approval",
     "previous": "Previous approval"
@@ -2977,6 +2975,10 @@
         "hint": "Il est encore en train de lire vos fichiers. Réessayez dans un instant.",
         "title": "La base de connaissances est occupée"
       },
+      "live_voice_not_configured": {
+        "hint": "Ajoutez une clé Gemini dans Réglages → Général → Dictée vocale, puis appuyez de nouveau sur Parler.",
+        "title": "La voix en direct nécessite une clé Gemini"
+      },
       "login_busy": {
         "hint": "Terminez-la ou annulez-la, puis réessayez.",
         "title": "Une autre connexion est en cours sur le serveur"
@@ -3774,6 +3776,7 @@
       "slash": "Commandes slash (tapez / dans la zone de saisie)"
     },
     "intro": "Raccourcis pratiques lorsque l'application est ouverte.",
+    "liveVoiceEnd": "Terminer la conversation vocale en direct",
     "menuAccept": "Choisir l'élément en surbrillance",
     "menuDismiss": "Fermer le menu",
     "menuMove": "Parcourir le menu slash / mention",
@@ -3906,14 +3909,12 @@
       "none": "Le serveur n'a signalé aucune CLI de programmation.",
       "notInstalled": "Non installé.",
       "note": "Ce sont les outils propres au serveur. L'installation et la connexion se font sur {{name}}.",
-      "officialPage": "Installer {{name}} depuis la page officielle",
       "ready": "Prêt",
       "reinstall": "Réinstaller sur le serveur",
       "runOnServer": "Sur le serveur, exécutez :",
       "signIn": "Pour vous connecter, exécutez sur le serveur :",
       "signInNote": "La connexion affiche une adresse web sur le serveur (souvent avec un code). Ouvrez l'adresse sur cet ordinateur, connectez-vous et, si on vous le demande, collez le code dans le terminal du serveur. Les connexions de cet ordinateur ne sont jamais copiées vers le serveur.",
-      "signInOnServer": "Se connecter sur {{server}}",
-      "title": "CLI de programmation sur {{name}}"
+      "signInOnServer": "Se connecter sur {{server}}"
     },
     "hint": "sur {{name}}",
     "menu": {
@@ -4566,7 +4567,6 @@
     "hint": {
       "new": "nouveau"
     },
-    "howToInstall": "Comment l'installer",
     "install": "Installer {{name}}",
     "levels": {
       "high": "Élevé",
@@ -4579,7 +4579,6 @@
     "listFresh": "Mis à jour à l'instant",
     "noModels": "Saisissez un identifiant de modèle dans la recherche pour en utiliser un.",
     "none": "Aucun modèle",
-    "notOnServer": "{{name}} · pas encore sur {{server}}",
     "noteLocalClis": "Les CLI sous abonnement installés sur cet ordinateur sont utilisées quand un bot s'exécute sur « cet ordinateur ».",
     "otherId": "Utiliser « {{id}} » avec {{provider}}",
     "recommended": "Recommandé",
@@ -4656,7 +4655,6 @@
     "title": "Besoin de vous"
   },
   "newBot": {
-    "advanced": "Réglages avancés",
     "brain": "IA",
     "brainAuto": "Automatique",
     "brainHint": "Vous pourrez le changer plus tard dans la conversation",
@@ -4683,14 +4681,6 @@
       "star": "Étoile",
       "tri": "Triangle"
     },
-    "templates": {
-      "assistant": "Assistant",
-      "blank": "Vierge",
-      "coder": "Développeur",
-      "researcher": "Chercheur",
-      "social": "Social"
-    },
-    "templatesLabel": "Modèles",
     "title": "Nouveau bot"
   },
   "notify": {
@@ -5249,10 +5239,6 @@
         "past": "Cette heure est déjà passée. Choisissez-en une plus tardive.",
         "time": "Choisissez une heure comme 09:00."
       },
-      "templates": {
-        "hint": "Choisissez-en un pour remplir le formulaire. Vous pourrez ensuite tout modifier.",
-        "title": "Partir d'un exemple"
-      },
       "text": "Planification en toutes lettres",
       "textHint": "Anglais ou turc. Les heures utilisent {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -5260,7 +5246,6 @@
       "tz": "Fuseau horaire",
       "tzCronHint": "Utilisé si l'expression cron comporte 5 champs sans fuseau horaire.",
       "tzSearch": "Rechercher un fuseau horaire, p. ex. Europe/Istanbul",
-      "tzShown": "Les heures sont en {{tz}}.",
       "tzUnknown": "Fuseau horaire inconnu. Choisissez-en un dans la liste.",
       "weekday": "Quel jour de la semaine ?",
       "when": "Quand"
@@ -5620,14 +5605,11 @@
       },
       "detected": {
         "copied": "Commande copiée",
-        "copyCommand": "Copier la commande",
         "copyDetails": "Copier les détails",
         "description": "Les outils trouvés ici sont activés automatiquement quand vous êtes connecté. Si vous en désactivez un, il reste désactivé.",
         "detailsCopied": "Détails copiés",
-        "detailsToggle": "Détails",
         "detectError": "Impossible de vérifier les outils de programmation installés.",
         "dismissExpired": "Écarter l'approbation expirée",
-        "docs": "Documentation",
         "enabledToast": "{{name}} activé.",
         "experimentalChip": "Expérimental",
         "install": "Installer",
@@ -5642,16 +5624,12 @@
           "powershell_missing": "PowerShell est introuvable. Copiez la commande et exécutez-la dans votre terminal.",
           "timeout": "L'installation a dépassé dix minutes et a été arrêtée. Vérifiez la sortie avant de réessayer."
         },
-        "installLabel": "Commande d'installation",
         "installRunning": "Installation en cours… quitter cette section ne révoque pas une approbation déjà acceptée.",
         "installSummary": "Installer ou mettre à jour {{engine}}",
-        "loginLabel": "Se connecter avec",
-        "moreEngines": "Autres moteurs installables ({{count}})",
         "noteNative": "Fonctionne avec ses propres outils : choisissez-le dans les réglages « Moteur » d'un bot.",
         "noteUnsupported": "Praxi le détecte mais ne peut pas encore l'exécuter comme moteur.",
         "noteUnverified": "Commande non vérifiée : consultez la documentation du fournisseur, puis copiez-la et exécutez-la vous-même.",
         "offline": "Le service local n'est pas en cours d'exécution ; les outils de programmation détectés ne peuvent donc pas être affichés.",
-        "onThisComputer": "Sur cet ordinateur",
         "pathLabel": "Emplacement",
         "problem": "Cela n'a pas fonctionné.",
         "refresh": "Analyser à nouveau",
@@ -5664,8 +5642,7 @@
           "unsupported": "Pas encore pris en charge"
         },
         "termsNotice": "Les conditions de votre abonnement auprès du fournisseur s'appliquent ; vérifiez que l'utilisation automatisée du CLI est autorisée avant de l'activer.",
-        "title": "Trouvé sur cet ordinateur",
-        "toggle": "Utiliser {{name}}"
+        "title": "Trouvé sur cet ordinateur"
       },
       "keys": {
         "add": "Ajouter",
@@ -5745,6 +5722,7 @@
       "allGood": "Tout semble en ordre",
       "checkedAt": "Dernière vérification à {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Navigateur",
         "capabilities": "Capacités",
         "catalog_freshness": "Fraîcheur du catalogue de modèles",
@@ -5769,6 +5747,7 @@
       "description": "Vérifie pourquoi le bot pourrait ne pas fonctionner et corrige les problèmes courants.",
       "empty": "Aucune vérification n'a été renvoyée",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Installez Chrome, Edge ou Chromium (pas le paquet snap).",
         "catalog_freshness": "La liste de modèles sélectionnés date de plus de 90 jours ; mettez Praxi à jour ou exécutez `bot catalog check` pour consulter les modèles actuels.",
         "cli_accounts": "Ouvrez un terminal une fois et connectez-vous au CLI (par exemple `claude` ou `codex login`).",
@@ -5976,7 +5955,6 @@
       "ignored": "E-mails d'expéditeurs non autorisés ignorés : {{n}}",
       "needsSenders": "Ce canal fonctionnait sans liste d'expéditeurs autorisés : il ne transmet donc plus AUCUN e-mail au bot. Ajoutez, sous « Expéditeurs autorisés » dans les réglages de la boîte aux lettres ci-dessus, les adresses autorisées à écrire au bot (par exemple la vôtre). D'ici là, chaque e-mail reçu reste non lu dans la boîte.",
       "noAccount": "Ajoutez d'abord une boîte aux lettres ci-dessus.",
-      "noSenders": "La boîte aux lettres sélectionnée n'a aucun expéditeur autorisé : aucun e-mail n'atteindra donc le bot. Ajoutez votre propre adresse sous « Expéditeurs autorisés » dans les réglages de la boîte aux lettres ci-dessus.",
       "note": "Le courrier est écrit par d'autres personnes : le bot le traite donc comme une information, jamais comme des ordres. Par défaut, il ne voit que l'expéditeur, l'objet et les premières lignes. Les pièces jointes ne sont jamais ouvertes. Rien n'est envoyé, sauf si vous autorisez les réponses puis approuvez chacune d'elles ici.",
       "replies": "Laisser le bot suggérer des réponses (vous approuvez chacune avant son envoi)",
       "running": "En cours d'exécution",
@@ -6946,7 +6924,7 @@
       "listLabel": "Standing grants by vault item",
       "open": "Standing grants",
       "revoke": "Revoke",
-      "revokeAria": "Revoke the standing grant for {{name}} on {{origin}}",
+      "revokeAria": "{{action}} the standing grant for {{name}} on {{origin}}",
       "revoked": "Standing grant revoked",
       "seeGrants": "See standing grants",
       "since": "Since {{date}}",

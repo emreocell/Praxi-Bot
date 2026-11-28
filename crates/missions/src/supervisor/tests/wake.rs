@@ -2,14 +2,15 @@
 //! world, the real store, ledger, brief and supervisor run. Nothing sleeps for real except the
 //! loop test, which polls a few milliseconds.
 
+use chrono::{TimeZone, Timelike};
 use serde_json::{Value, json};
 
 use crate::model::Item;
 
 use super::*;
 use crate::wake::{
-    MailCheck, MailFilter, MailHit, MailProbe, NewWait, WAKE_RELEASES_PER_HOUR, WAKE_RETENTION_MS,
-    WaitSpec,
+    MAX_MAIL_DEFERS, MailCheck, MailFilter, MailHit, MailProbe, NewWait, WAKE_RELEASES_PER_HOUR,
+    WAKE_RETENTION_MS, WaitSpec,
 };
 
 const MIN: i64 = 60_000;
@@ -43,11 +44,19 @@ impl MailProbe for FakeInbox {
             .mails
             .lock()
             .iter()
-            .find(|(at, from, _)| {
-                *at <= req.now_ms && *at >= req.registered_at_ms - 2 * MIN && *from == wanted
+            .find(|(at, from, summary)| {
+                // `"skewed"`: its (untrusted) Date header reads far in the future, so every
+                // date test passes however often it is looked at.
+                (summary["skewed"] == true
+                    || (*at <= req.now_ms
+                        && *at >= req.registered_at_ms - 2 * MIN
+                        && *at >= req.not_before_ms))
+                    && *from == wanted
             })
             .map(|(_, _, summary)| MailHit {
                 summary: summary.clone(),
+                follow_up_at_ms: summary["follow_up_at_ms"].as_i64(),
+                message_id: summary["message_id"].as_str().map(str::to_owned),
             }))
     }
 }
@@ -758,4 +767,316 @@ async fn without_a_mailbox_probe_a_mail_wait_only_times_out() {
     assert_eq!(sup.wake_pass().await.unwrap().probes, 0);
     clock.0.fetch_add(31 * MIN, Ordering::SeqCst);
     assert_eq!(sup.wake_pass().await.unwrap().timed_out, 1);
+}
+
+fn every_wait(rrule: &str, dtstart_ms: i64, due: i64) -> NewWait {
+    NewWait {
+        item_key: "site-0.example".into(),
+        spec: WaitSpec::Every {
+            rrule: rrule.into(),
+            timezone: None,
+            dtstart_ms,
+        },
+        reason: "check again on schedule".into(),
+        due_at_ms: due,
+    }
+}
+
+#[tokio::test]
+async fn recurring_wake_fires_reschedules_and_fires_again() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    let anchor = w.clock.now_ms();
+    let first = crate::recur::next_due("FREQ=DAILY;INTERVAL=1", anchor, None, anchor - 1)
+        .unwrap()
+        .unwrap();
+    start_item(&w.store, &w.mission, "site-0.example");
+    w.store
+        .register_wait(
+            &w.mission,
+            &every_wait("FREQ=DAILY;INTERVAL=1", anchor, first),
+            anchor,
+        )
+        .unwrap();
+    w.store
+        .set_state(&w.mission, MissionState::Waiting, None, anchor)
+        .unwrap();
+    w.clock.0.store(first, Ordering::SeqCst);
+    assert_eq!(w.sup.wake_pass().await.unwrap().fired, 1);
+    let wait = w.store.active_waits(&w.mission).unwrap().remove(0);
+    assert!(wait.due_at_ms > first, "next occurrence scheduled");
+    w.clock.0.store(wait.due_at_ms, Ordering::SeqCst);
+    assert_eq!(w.sup.wake_pass().await.unwrap().fired, 1);
+}
+
+#[tokio::test]
+async fn recurring_wake_still_due_after_a_restart() {
+    let store = Arc::new(MissionStore::open_in_memory().unwrap());
+    let mission = new_mission(&store, Budgets::default(), sites(1));
+    let clock = Arc::new(ManualClock(AtomicI64::new(2_000_000)));
+    let anchor = 2_000_000;
+    let due = anchor + 60_000;
+    start_item(&store, &mission, "site-0.example");
+    store
+        .register_wait(&mission, &every_wait("FREQ=DAILY", anchor, due), anchor)
+        .unwrap();
+    store
+        .set_state(&mission, MissionState::Waiting, None, anchor)
+        .unwrap();
+    let no_op: Box<Script> = Box::new(|_, _, _| ok(0));
+    let sup = Supervisor::new(
+        Arc::clone(&store),
+        Arc::new(FakeRunner {
+            store: Arc::clone(&store),
+            script: no_op,
+            calls: AtomicU32::new(0),
+            briefs: Mutex::new(vec![]),
+            announced: Mutex::new(vec![]),
+            cancelled: Mutex::new(vec![]),
+            ready: Mutex::new(Ok(())),
+        }),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        SupervisorConfig::default(),
+        CancellationToken::new(),
+    );
+    clock.0.store(due + 1, Ordering::SeqCst);
+    assert_eq!(sup.wake_pass().await.unwrap().fired, 1);
+    let sup2 = Supervisor::new(
+        Arc::clone(&store),
+        Arc::new(FakeRunner {
+            store: Arc::clone(&store),
+            script: Box::new(|_, _, _| ok(0)),
+            calls: AtomicU32::new(0),
+            briefs: Mutex::new(vec![]),
+            announced: Mutex::new(vec![]),
+            cancelled: Mutex::new(vec![]),
+            ready: Mutex::new(Ok(())),
+        }),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        SupervisorConfig::default(),
+        CancellationToken::new(),
+    );
+    assert_eq!(sup2.wake_pass().await.unwrap().fired, 0);
+    let next = store.active_waits(&mission).unwrap()[0].due_at_ms;
+    clock.0.store(next, Ordering::SeqCst);
+    assert_eq!(sup2.wake_pass().await.unwrap().fired, 1);
+}
+
+#[test]
+fn weekly_recurrence_crosses_new_york_spring_forward() {
+    let tz = "America/New_York";
+    let zone: chrono_tz::Tz = tz.parse().unwrap();
+    let anchor = zone
+        .with_ymd_and_hms(2026, 3, 1, 9, 0, 0)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .timestamp_millis();
+    let before = zone
+        .with_ymd_and_hms(2026, 3, 7, 12, 0, 0)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .timestamp_millis();
+    let after = crate::recur::next_due("FREQ=DAILY;INTERVAL=1", anchor, Some(tz), before)
+        .unwrap()
+        .unwrap();
+    let local = chrono::DateTime::from_timestamp_millis(after)
+        .unwrap()
+        .with_timezone(&zone);
+    assert_eq!(local.date_naive().to_string(), "2026-03-08");
+    assert_eq!(local.hour(), 9);
+}
+
+#[test]
+fn weekly_recurrence_crosses_new_york_fall_back() {
+    let tz = "America/New_York";
+    let zone: chrono_tz::Tz = tz.parse().unwrap();
+    let anchor = zone
+        .with_ymd_and_hms(2026, 10, 1, 9, 0, 0)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .timestamp_millis();
+    let before = zone
+        .with_ymd_and_hms(2026, 10, 31, 12, 0, 0)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .timestamp_millis();
+    let occurrence = crate::recur::next_due("FREQ=DAILY;INTERVAL=1", anchor, Some(tz), before)
+        .unwrap()
+        .unwrap();
+    let local = chrono::DateTime::from_timestamp_millis(occurrence)
+        .unwrap()
+        .with_timezone(&zone);
+    assert_eq!(local.date_naive().to_string(), "2026-11-01");
+    assert_eq!(local.hour(), 9);
+}
+
+#[tokio::test]
+async fn recurring_wake_after_downtime_does_not_catch_up_storm() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    let anchor = w.clock.now_ms();
+    let first = anchor + 86_400_000;
+    start_item(&w.store, &w.mission, "site-0.example");
+    w.store
+        .register_wait(
+            &w.mission,
+            &every_wait("FREQ=DAILY;INTERVAL=1", anchor, first),
+            anchor,
+        )
+        .unwrap();
+    w.store
+        .set_state(&w.mission, MissionState::Waiting, None, anchor)
+        .unwrap();
+    let late = first + 5 * 86_400_000;
+    w.clock.0.store(late, Ordering::SeqCst);
+    assert_eq!(w.sup.wake_pass().await.unwrap().fired, 1);
+    let wait = w.store.active_waits(&w.mission).unwrap().remove(0);
+    assert!(
+        wait.due_at_ms > late,
+        "next due is after now, not the missed instant: {}",
+        wait.due_at_ms
+    );
+    assert_eq!(w.sup.wake_pass().await.unwrap().fired, 0);
+}
+
+#[tokio::test]
+async fn done_item_cancels_a_recurring_wait() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    let anchor = w.clock.now_ms();
+    let first = anchor + 60_000;
+    start_item(&w.store, &w.mission, "site-0.example");
+    w.store
+        .register_wait(&w.mission, &every_wait("FREQ=DAILY", anchor, first), anchor)
+        .unwrap();
+    w.clock.0.store(first, Ordering::SeqCst);
+    w.sup.wake_pass().await.unwrap();
+    set(
+        &w.store,
+        &w.mission,
+        "site-0.example",
+        ItemStatus::Done,
+        None,
+    );
+    assert_eq!(w.store.active_waits(&w.mission).unwrap(), Vec::new());
+}
+
+#[tokio::test]
+async fn child_run_wake_unparks_the_item() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    start_item(&w.store, &w.mission, "site-0.example");
+    w.store
+        .register_wait(
+            &w.mission,
+            &NewWait {
+                item_key: "site-0.example".into(),
+                spec: WaitSpec::Child {
+                    run_id: "child-run-1".into(),
+                },
+                reason: "helper".into(),
+                due_at_ms: w.clock.now_ms() + 3_600_000,
+            },
+            w.clock.now_ms(),
+        )
+        .unwrap();
+    w.store
+        .set_state(&w.mission, MissionState::Waiting, None, w.clock.now_ms())
+        .unwrap();
+    assert_eq!(
+        w.sup
+            .deliver_child_finished(Some(&w.mission), "child-run-1", "helper answer")
+            .unwrap(),
+        1
+    );
+    let item = w.store.items(&w.mission, None).unwrap()[0].clone();
+    assert_eq!(item.status, ItemStatus::Todo);
+}
+
+/// The person answered "out of office": the mission is not woken, the wait is put off (durably)
+/// until the follow-up time, and that same notice is not found again. The real answer then wakes
+/// the item; a chain of notices stops deferring after [`MAX_MAIL_DEFERS`].
+#[tokio::test]
+async fn an_out_of_office_notice_puts_the_wait_off_instead_of_waking_the_mission() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    w.sup.step(&w.mission).await.unwrap();
+    let wait = || w.store.active_waits(&w.mission).unwrap().remove(0);
+    let first_due = wait().due_at_ms;
+    let three_days = 3 * 24 * 60 * MIN;
+    let start = w.clock.now_ms();
+
+    w.inbox.deliver(
+        start + 5 * MIN,
+        "site-0.example",
+        json!({"message": {"subject": "Out of office"}, "follow_up_at_ms": start + three_days}),
+    );
+    w.advance(10 * MIN);
+    let pass = w.sup.wake_pass().await.unwrap();
+    assert_eq!((pass.fired, pass.released), (0, 0), "{pass:?}");
+    assert_eq!(w.state(), MissionState::Waiting);
+    assert_eq!(w.item("site-0.example").status, ItemStatus::Waiting);
+    let d = wait();
+    assert_eq!(d.due_at_ms, start + three_days);
+    assert!(d.due_at_ms > first_due);
+    assert_eq!(w.store.wait_deferral(d.id).unwrap().1, 1);
+
+    // The same notice is not found again, and the wait does not give up at the old time.
+    w.advance(30 * MIN);
+    let pass = w.sup.wake_pass().await.unwrap();
+    assert_eq!((pass.fired, pass.timed_out), (0, 0), "{pass:?}");
+    assert_eq!(w.state(), MissionState::Waiting);
+
+    // The real answer a day later wakes the item.
+    w.advance(24 * 60 * MIN);
+    w.inbox.deliver(
+        w.clock.now_ms() - MIN,
+        "site-0.example",
+        json!({"message": {"subject": "Re: Hello"}}),
+    );
+    let pass = w.sup.wake_pass().await.unwrap();
+    assert_eq!((pass.fired, pass.released), (1, 1), "{pass:?}");
+    assert_eq!(w.item("site-0.example").status, ItemStatus::Todo);
+}
+
+/// A notice whose `Date` header is ahead of the clock matches every look. It counts once: it
+/// neither burns the deferrals nor wakes the mission, and a real answer still gets through.
+#[tokio::test]
+async fn an_out_of_office_notice_dated_in_the_future_is_deferred_for_once_only() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    w.sup.step(&w.mission).await.unwrap();
+    let wait = || w.store.active_waits(&w.mission).unwrap().remove(0);
+    let start = w.clock.now_ms();
+    w.inbox.deliver(
+        start + 5 * MIN,
+        "site-0.example",
+        json!({
+            "message": {"subject": "Out of office"},
+            "follow_up_at_ms": start + 3 * 24 * 60 * MIN,
+            "message_id": "ooo-1@example",
+            "skewed": true,
+        }),
+    );
+    let mut fired = 0;
+    for _ in 0..(MAX_MAIL_DEFERS + 3) {
+        w.advance(10 * MIN);
+        fired += w.sup.wake_pass().await.unwrap().fired;
+    }
+    assert_eq!(fired, 0, "the same notice never wakes the mission");
+    assert_eq!(w.state(), MissionState::Waiting);
+    let d = wait();
+    assert_eq!(w.store.wait_deferral(d.id).unwrap().1, 1, "counted once");
+    assert_eq!(w.store.deferred_mail_ids(d.id).unwrap(), ["ooo-1@example"]);
+}
+
+#[tokio::test]
+async fn a_chain_of_out_of_office_notices_cannot_park_an_item_for_ever() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    w.sup.step(&w.mission).await.unwrap();
+    let mut fired = 0;
+    for i in 0..=MAX_MAIL_DEFERS {
+        w.advance(10 * MIN);
+        w.inbox.deliver(
+            w.clock.now_ms() - MIN,
+            "site-0.example",
+            json!({"message": {"subject": "Out of office"}, "follow_up_at_ms": w.clock.now_ms() + 10 * MIN}),
+        );
+        fired += w.sup.wake_pass().await.unwrap().fired;
+        assert_eq!(fired, u32::from(i == MAX_MAIL_DEFERS), "notice {i}");
+    }
 }

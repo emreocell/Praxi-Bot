@@ -618,8 +618,6 @@
   },
   "approvalDock": {
     "counter": "Approval {{current}} of {{total}}",
-    "keyAllow": "Allow once",
-    "keyDeny": "Deny",
     "label": "Waiting for your approval",
     "next": "Next approval",
     "previous": "Previous approval"
@@ -2870,6 +2868,10 @@
         "hint": "It is still reading your files. Try again in a moment.",
         "title": "The knowledge base is busy"
       },
+      "live_voice_not_configured": {
+        "hint": "Add a Gemini key in Settings → General → Voice dictation, then press Talk again.",
+        "title": "Live voice needs a Gemini key"
+      },
       "login_busy": {
         "hint": "Finish or cancel it, then try again.",
         "title": "Another sign-in is running on the server"
@@ -3663,6 +3665,7 @@
       "slash": "Slash commands (type / in the composer)"
     },
     "intro": "Handy shortcuts while the app is open.",
+    "liveVoiceEnd": "End the live voice conversation",
     "menuAccept": "Pick the highlighted item",
     "menuDismiss": "Close the menu",
     "menuMove": "Move through the slash / mention menu",
@@ -3795,14 +3798,12 @@
       "none": "The server reported no coding CLIs.",
       "notInstalled": "Not installed.",
       "note": "These are the server's own tools. Installing and signing in happens on {{name}}.",
-      "officialPage": "Install {{name}} from the official page",
       "ready": "Ready",
       "reinstall": "Reinstall on server",
       "runOnServer": "On the server run:",
       "signIn": "To sign in, run on the server:",
       "signInNote": "Signing in shows a web address on the server (often with a code). Open the address on this computer, sign in there and, if asked, paste the code into the server's terminal. Sign-ins on this computer are never copied to the server.",
-      "signInOnServer": "Sign in on {{server}}",
-      "title": "Coding CLIs on {{name}}"
+      "signInOnServer": "Sign in on {{server}}"
     },
     "hint": "on {{name}}",
     "menu": {
@@ -4455,7 +4456,6 @@
     "hint": {
       "new": "new"
     },
-    "howToInstall": "How to install",
     "install": "Install {{name}}",
     "levels": {
       "high": "High",
@@ -4468,7 +4468,6 @@
     "listFresh": "Updated just now",
     "noModels": "Type a model id in the search to use one.",
     "none": "No model",
-    "notOnServer": "{{name}} · not on {{server}} yet",
     "noteLocalClis": "Subscription CLIs on this computer are used when a bot runs on \"this computer\".",
     "otherId": "Use \"{{id}}\" with {{provider}}",
     "recommended": "Recommended",
@@ -4544,7 +4543,6 @@
     "title": "Needs you"
   },
   "newBot": {
-    "advanced": "Advanced settings",
     "brain": "IA",
     "brainAuto": "Automático",
     "brainHint": "Você pode mudar isso depois no chat",
@@ -4571,14 +4569,6 @@
       "star": "Star",
       "tri": "Triangle"
     },
-    "templates": {
-      "assistant": "Assistant",
-      "blank": "Blank",
-      "coder": "Coder",
-      "researcher": "Researcher",
-      "social": "Social"
-    },
-    "templatesLabel": "Templates",
     "title": "New bot"
   },
   "notify": {
@@ -5137,10 +5127,6 @@
         "past": "That time has already passed. Pick a later one.",
         "time": "Pick a time like 09:00."
       },
-      "templates": {
-        "hint": "Pick one to fill in the form. You can change everything afterwards.",
-        "title": "Start from an example"
-      },
       "text": "Schedule in words",
       "textHint": "English or Turkish. Times use {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
@@ -5148,7 +5134,6 @@
       "tz": "Timezone",
       "tzCronHint": "Used if the cron expression has 5 fields without a timezone.",
       "tzSearch": "Search a timezone, e.g. Europe/Istanbul",
-      "tzShown": "Times are in {{tz}}.",
       "tzUnknown": "Not a known timezone. Pick one from the list.",
       "weekday": "On which day of the week?",
       "when": "When"
@@ -5508,14 +5493,11 @@
       },
       "detected": {
         "copied": "Command copied",
-        "copyCommand": "Copy command",
         "copyDetails": "Copy details",
         "description": "Tools found here are switched on automatically when you are signed in. Switch one off and it stays off.",
         "detailsCopied": "Details copied",
-        "detailsToggle": "Details",
         "detectError": "Could not check installed coding tools.",
         "dismissExpired": "Dismiss expired approval",
-        "docs": "Docs",
         "enabledToast": "{{name}} enabled.",
         "experimentalChip": "Experimental",
         "install": "Install",
@@ -5530,16 +5512,12 @@
           "powershell_missing": "PowerShell could not be found. Copy the command and run it in your terminal.",
           "timeout": "Installation exceeded ten minutes and was stopped. Check the output before retrying."
         },
-        "installLabel": "Install command",
         "installRunning": "Installing… leaving this section does not revoke an accepted approval.",
         "installSummary": "Install or update {{engine}}",
-        "loginLabel": "Sign in with",
-        "moreEngines": "More engines you can install ({{count}})",
         "noteNative": "Runs with its own tools: choose it in a bot's Engine settings.",
         "noteUnsupported": "Praxi detects it but cannot run it as an engine yet.",
         "noteUnverified": "Unverified command: check the vendor docs, then copy and run it yourself.",
         "offline": "The local service is not running, so detected coding tools cannot be shown.",
-        "onThisComputer": "On this computer",
         "pathLabel": "Location",
         "problem": "That did not work.",
         "refresh": "Rescan",
@@ -5552,8 +5530,7 @@
           "unsupported": "Not supported yet"
         },
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "title": "Found on this computer",
-        "toggle": "Use {{name}}"
+        "title": "Found on this computer"
       },
       "keys": {
         "add": "Add",
@@ -5633,6 +5610,7 @@
       "allGood": "Everything looks fine",
       "checkedAt": "Last checked at {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Browser",
         "capabilities": "Capabilities",
         "catalog_freshness": "Model catalog freshness",
@@ -5657,6 +5635,7 @@
       "description": "Checks why the bot might not be working and fixes common problems.",
       "empty": "No checks were returned",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Install Chrome, Edge or Chromium (not the snap package).",
         "catalog_freshness": "The curated model list is over 90 days old; update Praxi or run `bot catalog check` to review current models.",
         "cli_accounts": "Open a terminal once and sign in to the CLI (for example `claude` or `codex login`).",
@@ -5864,7 +5843,6 @@
       "ignored": "Mails from senders who are not allowed were ignored: {{n}}",
       "needsSenders": "This channel was running without a list of allowed senders, so it now passes NO mail to the bot. Add the addresses that may write to the bot (for example your own) under \"Allowed senders\" in the mailbox settings above. Until then every incoming mail stays unread in the mailbox.",
       "noAccount": "Add a mailbox above first.",
-      "noSenders": "The selected mailbox has no allowed senders, so no mail will reach the bot. Add your own address under \"Allowed senders\" in the mailbox settings above.",
       "note": "Mail is written by other people, so the bot treats it as information, never as orders. By default it only sees the sender, the subject and the first few lines. Attachments are never opened. Nothing is sent unless you allow replies and then approve each one here.",
       "replies": "Let the bot suggest replies (you approve every one before it is sent)",
       "running": "Running",
@@ -6834,7 +6812,7 @@
       "listLabel": "Standing grants by vault item",
       "open": "Standing grants",
       "revoke": "Revoke",
-      "revokeAria": "Revoke the standing grant for {{name}} on {{origin}}",
+      "revokeAria": "{{action}} the standing grant for {{name}} on {{origin}}",
       "revoked": "Standing grant revoked",
       "seeGrants": "See standing grants",
       "since": "Since {{date}}",

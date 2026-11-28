@@ -147,7 +147,7 @@ Araç adları yerleşik adlardır, örneğin `fs_read`, `fs_write`, `shell_run`,
 | Tarayıcı | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_forward`, `browser_reload`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_upload`, `browser_downloads`, `browser_attach`, `browser_eval` |
 | Web (salt okunur, tarayıcısız) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (bkz. [Web araçları](web.md)) |
 | Zamanlamalar (yalnızca Genel hazır ayar) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (bkz. [Zamanlanmış görevler](scheduled-tasks.md)) |
-| Masaüstü (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
+| Masaüstü (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_open`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
 | Betikler | `script_run` |
 | Ajan içi | `ask_user`, `todo_write`, `spawn_subagent` |
 | Beceriler ve iş akışları | `skill_list`, `skill_read`, `skill_write`, `skill_hint`, `workflow_list`, `workflow_run` |
@@ -328,8 +328,9 @@ taşıyor gibi görünüyorsa dışa aktarma reddedilir.
 - **Şablon galerisi.** Yeni bot penceresi yerleşik şablonlar sunar (Araştırmacı, Gelen kutusu
   ayıklama, Günlük özet, Yazılımcı, Aile yardımcısı); adları İngilizce, Türkçe ve Almancadır.
   Bunlar `crates/daemon-api/templates/` içinde aynı biçimde veri dosyalarıdır; bir test her
-  şablonun ayrıştığını ve bir üst sınır altında içe aktarıldığını denetler. Aynı önizlemeden
-  geçerler.
+  şablonun ayrıştığını ve bir üst sınır altında içe aktarıldığını denetler. Birini seçip
+  **Oluştur**'a basınca pencerede gösterilen erişim düzeyiyle içe aktarılır (bir şablon
+  istediğinden fazlasını asla almaz); **Neyle geldiğini gör** önce aynı önizlemeyi açar.
 
 Dışa ve içe aktarma denetim kaydına yazılır (`profile.export`, `profile.import`). Eşleşmiş
 cihazlar bu yollara ulaşamaz.

@@ -7313,6 +7313,75 @@
         ]
       }
     },
+    "/v1/chats/{id}/voice-transcript": {
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Write a finished voice conversation into a chat as ordinary text messages (no run starts).",
+        "description": "`user` lines are what the owner said into their own microphone in their own session\n(speech-to-text), so they stay the owner's words. `assistant` lines are the voice model's\noutput, which can repeat what the bot fetched from the web or an e-mail, so they are stored as\nuntrusted content (source `gemini-live`): a later run that reads this chat is treated as having\nseen untrusted text and asks before it acts on it.",
+        "operationId": "save_transcript",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Chat id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceTranscriptInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTranscriptOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad transcript",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/components": {
       "get": {
         "tags": [
@@ -14752,7 +14821,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/McpAuthState"
+                  "$ref": "#/components/schemas/McpAuthLogoutDto"
                 }
               }
             }
@@ -20945,6 +21014,317 @@
         ]
       }
     },
+    "/v1/voice/live": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Open a live voice conversation. The response is an event stream (`data:` lines of JSON, one\n`type` field each): `ready`, then `audio`, `you`, `bot`, `turn_complete`, `interrupted`,\n`tool_call`, `tool_cancelled`, `reconnecting` and finally `ended`. Closing the response ends\nthe session. Owner only; one session at a time.",
+        "operationId": "open",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveOpenInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Server-sent events of the conversation",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "409": {
+            "description": "no Gemini key, or another conversation is open",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid live voice settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the voice service failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "voice is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}": {
+      "delete": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "End a conversation now.",
+        "operationId": "close",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Ended (or already gone)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}/audio": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Upload microphone audio (raw 16-bit little-endian PCM, 16 kHz, mono; up to one second).",
+        "operationId": "audio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          },
+          "400": {
+            "description": "bad audio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the session cannot take audio right now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}/note": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Pass an update to the voice model (the bot finished a task the owner was told to wait for).",
+        "operationId": "note",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveNote"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          },
+          "404": {
+            "description": "no such conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the session is gone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/live/{id}/tool": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Return the bot's answer to a `tool_call`.",
+        "operationId": "tool_result",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "session_id of the ready event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveToolResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the session is gone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/voice/local": {
       "get": {
         "tags": [
@@ -21037,12 +21417,114 @@
         ]
       }
     },
+    "/v1/voice/synthesize": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Synthesize speech on this computer (local owner only).",
+        "operationId": "synthesize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthesizeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid text or language",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "local owner required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "offline read-aloud is not installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "offline voice is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "offline synthesis failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "voice is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/voice/transcribe": {
       "post": {
         "tags": [
           "voice"
         ],
         "summary": "Transcribe a recording with the configured service (owner-triggered dictation).",
+        "description": "With `local_only` the daemon refuses (409) unless the provider is on-device, so the recording\nis never uploaded. A paired peer cannot use the host's on-device engine (403): decoding and\nrecognition burn the host's CPU for up to two minutes and would starve the owner's own dictation.",
         "operationId": "transcribe",
         "requestBody": {
           "content": {
@@ -21075,8 +21557,28 @@
               }
             }
           },
+          "403": {
+            "description": "on-device dictation is for the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "dictation is not set up",
+            "description": "dictation is not set up, or `local_only` and the provider is not on-device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "offline voice is busy",
             "content": {
               "application/json": {
                 "schema": {
@@ -25928,7 +26430,7 @@
           },
           "schedules": {
             "type": "boolean",
-            "description": "Also move the schedules and triggers of the moved bots (the local copies are then\ndisabled and marked \"moved to <server>\")."
+            "description": "Also move the schedules and triggers of the moved bots (the local copies are then\ndisabled and marked moved to the destination host)."
           },
           "separate": {
             "type": "array",
@@ -27413,10 +27915,22 @@
             "type": "boolean",
             "description": "Add the opt-out line to outgoing mail by default."
           },
+          "outreach_daily_budget": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hard daily budget per mailbox for outreach (mail an unattended bot or a mission\nsends): a send past it is refused. `0` = no budget. Default 20.",
+            "minimum": 0
+          },
+          "outreach_warmup_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days a mailbox with no sending history takes to ramp up to the budget (`0` = no ramp).\nDefault 14.",
+            "minimum": 0
+          },
           "same_recipient_days": {
             "type": "integer",
             "format": "int32",
-            "description": "Warn when a recipient got mail within this many days (`0` = no warning). Default 14.",
+            "description": "Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).",
             "minimum": 0
           },
           "verification_link_domains": {
@@ -27502,9 +28016,17 @@
             "type": "string",
             "description": "`address` or `domain`."
           },
+          "message_id": {
+            "type": "string",
+            "description": "The `Message-ID` of the mail we sent that the bounce or reply answered. Empty: none."
+          },
           "note": {
             "type": "string",
             "description": "The owner's note."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the program added it: `hard_bounce` (the address bounced for good) or `stop_reply`\n(the person answered STOP). Empty when the owner added it."
           },
           "value": {
             "type": "string",
@@ -32663,6 +33185,57 @@
           }
         }
       },
+      "LiveNote": {
+        "type": "object",
+        "description": "Body of `POST /v1/voice/live/{id}/note`.",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Plain text the voice model passes on."
+          }
+        }
+      },
+      "LiveOpenInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/voice/live`.",
+        "properties": {
+          "assistant_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the bot the owner is talking to."
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "UI language hint (ISO-639-1)."
+          }
+        }
+      },
+      "LiveToolResult": {
+        "type": "object",
+        "description": "Body of `POST /v1/voice/live/{id}/tool`.",
+        "required": [
+          "call_id",
+          "text"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "description": "`call_id` of the `tool_call` event."
+          },
+          "text": {
+            "type": "string",
+            "description": "The bot's final text, or why it could not do it."
+          }
+        }
+      },
       "LocalAdviceDto": {
         "type": "object",
         "description": "Advice for this machine. `recommended` null means \"no recommendation\".",
@@ -32932,6 +33505,17 @@
               "$ref": "#/components/schemas/LocalVoiceModelDto"
             },
             "description": "Models the owner can install."
+          },
+          "tts_model": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalVoiceModelDto",
+                "description": "Optional downloadable model for offline read-aloud."
+              }
+            ]
           },
           "vad_installed": {
             "type": "boolean",
@@ -33398,6 +33982,23 @@
           }
         },
         "additionalProperties": false
+      },
+      "McpAuthLogoutDto": {
+        "type": "object",
+        "description": "`POST /v1/mcp/servers/{name}/auth/logout` result.",
+        "required": [
+          "state",
+          "remote_revoked"
+        ],
+        "properties": {
+          "remote_revoked": {
+            "type": "boolean",
+            "description": "The provider confirmed revocation. When `false`, sign-out here succeeded\nbut the owner may need to revoke access at the provider manually."
+          },
+          "state": {
+            "$ref": "#/components/schemas/McpAuthState"
+          }
+        }
       },
       "McpAuthStart": {
         "type": "object",
@@ -33928,7 +34529,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Server name (the `<server>` of `mcp:<server>/<tool>`)."
+            "description": "Server name (the server segment of a qualified `mcp:…/…` tool name)."
           },
           "oauth": {
             "oneOf": [
@@ -34538,7 +35139,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Qualified tool name (`mcp:<server>/<tool>`)."
+            "description": "Qualified tool name (`mcp:server/tool`)."
           }
         }
       },
@@ -38311,7 +38912,7 @@
             "description": "Who created it: `user`, or `bot` (a bot's schedule tools, after you\napproved it). A bot may change only its own `bot` schedules."
           },
           "payload": {
-            "description": "What it does: `{\"kind\": \"agent_prompt\", \"text\": \"...\"}`,\n`{\"kind\": \"workflow\", \"name\": \"...\", \"params\": {}}` or\n`{\"kind\": \"tool\", \"name\": \"...\", \"input\": {}}`."
+            "description": "What it does: `{\"kind\": \"agent_prompt\", \"text\": \"...\"}`,\n`{\"kind\": \"workflow\", \"name\": \"...\", \"params\": {}}` or\n`{\"kind\": \"tool\", \"name\": \"...\", \"input\": {}}`, or a standing order that speaks only\nwhen something needs you: `{\"kind\": \"standing_order\", \"checklist\": \"...\",\n\"active_hours\": {\"start\": \"08:00\", \"end\": \"22:00\", \"timezone\": \"Europe/Istanbul\"},\n\"max_runs_per_day\": 24}` (`active_hours` optional; each run ends `OK`, which creates\nno notice, or `NEEDS_OWNER(reason)`, which does)."
           },
           "precheck": {
             "description": "Read-only deterministic condition, including full script source."
@@ -38329,6 +38930,24 @@
           },
           "spec": {
             "description": "When it fires: `{\"cron\": \"0 9 * * 1-5 Europe/Istanbul\"}`,\n`{\"every\": {\"seconds\": 600}}` or `{\"at\": {\"unix_ms\": 1767225600000}}`."
+          },
+          "standing_max_runs_per_day": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Standing order: daily run cap from its payload.",
+            "minimum": 0
+          },
+          "standing_runs_today": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Standing order: runs already started today (in the counter's calendar day).",
+            "minimum": 0
           },
           "trigger": {
             "description": "Non-webhook trigger definition; never includes webhook secrets."
@@ -38385,6 +39004,13 @@
             ],
             "format": "uuid",
             "description": "Linked run id, if a run was created."
+          },
+          "standing_verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Standing order: `ok`, `needs_owner` or `unclear` from the last assistant line of the run."
           },
           "started_at_ms": {
             "type": [
@@ -40092,6 +40718,24 @@
         },
         "additionalProperties": false
       },
+      "SynthesizeInput": {
+        "type": "object",
+        "description": "Text and app language for local synthesis (`POST /v1/voice/synthesize`).",
+        "required": [
+          "text",
+          "language"
+        ],
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "App language (BCP 47, e.g. `tr` or `en-US`)."
+          },
+          "text": {
+            "type": "string",
+            "description": "Plain text, at most 1,000 Unicode characters."
+          }
+        }
+      },
       "TakeoverAccepted": {
         "type": "object",
         "required": [
@@ -41042,7 +41686,10 @@
           "stt_key_set",
           "use_provider_key",
           "gemini_provider_key_available",
-          "stt_provider_key_available"
+          "stt_provider_key_available",
+          "live_model",
+          "live_voice",
+          "live_keep_audio"
         ],
         "properties": {
           "gemini_key_set": {
@@ -41056,6 +41703,18 @@
           "gemini_provider_key_available": {
             "type": "boolean",
             "description": "A Gemini provider with a key exists under Bots & models."
+          },
+          "live_keep_audio": {
+            "type": "boolean",
+            "description": "Keep the audio of live conversations on this computer (default off)."
+          },
+          "live_model": {
+            "type": "string",
+            "description": "Gemini Live model used for live voice conversations (e.g. `gemini-3.8-live`)."
+          },
+          "live_voice": {
+            "type": "string",
+            "description": "Prebuilt voice the live model speaks with (e.g. `Kore`)."
           },
           "local_model": {
             "type": "string",
@@ -41119,6 +41778,27 @@
             ],
             "description": "Gemini Live model name."
           },
+          "live_keep_audio": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Keep the audio of live conversations on this computer."
+          },
+          "live_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Gemini Live model for live voice conversations."
+          },
+          "live_voice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Prebuilt voice name for live voice conversations."
+          },
           "local_model": {
             "type": [
               "string",
@@ -41175,6 +41855,55 @@
           "gemini_live",
           "local_voice"
         ]
+      },
+      "VoiceTranscriptInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/chats/{id}/voice-transcript`.",
+        "required": [
+          "turns"
+        ],
+        "properties": {
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceTurn"
+            },
+            "description": "Lines in order."
+          }
+        }
+      },
+      "VoiceTranscriptOutput": {
+        "type": "object",
+        "description": "Result of `POST /v1/chats/{id}/voice-transcript`.",
+        "required": [
+          "saved"
+        ],
+        "properties": {
+          "saved": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Messages written.",
+            "minimum": 0
+          }
+        }
+      },
+      "VoiceTurn": {
+        "type": "object",
+        "description": "One line of a finished conversation.",
+        "required": [
+          "role",
+          "text"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "`user` (the owner) or `assistant` (the voice model)."
+          },
+          "text": {
+            "type": "string",
+            "description": "What was said."
+          }
+        }
       },
       "Warning": {
         "type": "string",

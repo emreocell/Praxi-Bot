@@ -48,3 +48,12 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 
 [target.'cfg(windows)'.dependencies]
 desktop-windows = { path = "../desktop-windows", version = "0.1.0" }
+
+[dev-dependencies]
+channel-api = { path = "../channel-api", version = "0.1.0" }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
+missions = { path = "../missions", version = "0.1.0" }
+reqwest.workspace = true
+tokio-util.workspace = true
+url.workspace = true

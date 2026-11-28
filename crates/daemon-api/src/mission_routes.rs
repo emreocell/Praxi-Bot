@@ -356,6 +356,9 @@ fn wait_dto(w: &missions::Wait) -> MissionWaitDto {
             None,
         ),
         missions::WaitSpec::Webhook { name, .. } => (None, None, None, Some(name.clone())),
+        missions::WaitSpec::Every { .. } | missions::WaitSpec::Child { .. } => {
+            (None, None, None, None)
+        }
     };
     MissionWaitDto {
         kind: w.spec.kind().to_owned(),
@@ -486,6 +489,19 @@ pub(crate) async fn get_mission(
     Ok(Json(detail(&s, &m)?))
 }
 
+/// The label of a mission goal typed in a bridge (`hint`: the `x-praxi-message-source` header).
+/// This route is owner-only and the bridges hold the owner key, so a goal from the paired
+/// Telegram or Discord user is that owner's own words on their channel: `telegram_owner` /
+/// `discord_owner`, which the approval and mission gates treat alike. Anything else, including a
+/// hint that already says `*_owner`, is the app's `owner`: a hint never names a label itself.
+fn goal_source(hint: Option<&str>) -> &'static str {
+    match hint {
+        Some("telegram") => "telegram_owner",
+        Some("discord") => "discord_owner",
+        _ => "owner",
+    }
+}
+
 /// Start a mission (owner only): the bot works through the goal alone, session after session,
 /// until it is done, a budget is used up or the owner stops it. The bot has to be on the Full
 /// level. The goal is stored verbatim; the audit entry `mission.created` holds ids only.
@@ -547,8 +563,15 @@ pub(crate) async fn create_mission(
     })?;
     // The goal is the one text of a mission that is the owner's own words (the route is
     // owner-only): named sites and typed URLs in it count for the approval code. The briefs the
-    // supervisor writes later are tagged `mission_brief` and never do.
-    s.storage().set_message_source(goal_message, "owner")?;
+    // supervisor writes later are tagged `mission_brief` and never do. A bridge says where the
+    // words were typed (`x-praxi-message-source`, as for a chat message) and the goal is labelled
+    // like that chat message would be: a hint can only lower the standing, never raise it.
+    let source = goal_source(
+        headers
+            .get("x-praxi-message-source")
+            .and_then(|v| v.to_str().ok()),
+    );
+    s.storage().set_message_source(goal_message, source)?;
     let m = store
         .create(
             &NewMission {

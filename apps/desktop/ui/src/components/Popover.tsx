@@ -155,6 +155,11 @@ export function Popover({
         return;
       }
       const all = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (role === "dialog" && all.length === 0) {
+        onClose();
+        anchor.current?.focus();
+        return;
+      }
       const first = all[0];
       const last = all[all.length - 1];
       const active = document.activeElement as HTMLElement | null;

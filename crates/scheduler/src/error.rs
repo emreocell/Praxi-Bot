@@ -65,6 +65,11 @@ pub enum SchedulerError {
     /// Schedule executor reported a failure.
     #[error("execution error: {0}")]
     Execution(String),
+
+    /// The executor failed before it started anything (no connection to the model, the
+    /// schedule changed while waiting). Nothing ran and nothing was spent.
+    #[error("execution error: {0}")]
+    NotStarted(String),
 }
 
 /// Result alias for `scheduler` operations.

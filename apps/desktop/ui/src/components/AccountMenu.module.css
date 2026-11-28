@@ -2,7 +2,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   min-width: var(--space-0);
   height: var(--size-control-lg);
@@ -60,6 +60,7 @@
 }
 
 .name {
+  flex: 1;
   min-width: var(--space-0);
   overflow: hidden;
   text-overflow: ellipsis;

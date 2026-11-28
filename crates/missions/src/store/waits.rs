@@ -10,8 +10,9 @@ use serde_json::{Value, json};
 use super::{MissionStore, bump, event, item_in, transition_in};
 use crate::error::{MissionError, Result};
 use crate::model::{
-    ItemStatus, MAX_ACTIVE_WAITS, MAX_TEXT_CHARS, MAX_WAITS_PER_ITEM, MissionState, clip,
+    Budgets, ItemStatus, MAX_ACTIVE_WAITS, MAX_TEXT_CHARS, MAX_WAITS_PER_ITEM, MissionState, clip,
 };
+use crate::recur;
 use crate::wake::{
     MAX_PENDING_WAKES, MAX_REASON_CHARS, NewWait, Wait, WaitSpec, WaitState, Wake, WakeReason,
     clean_external,
@@ -69,6 +70,27 @@ fn wake_of(row: &Row<'_>) -> rusqlite::Result<Wake> {
 const WAKE_COLS: &str = "w.id, w.mission_id, w.wait_id, w.item_key, w.reason, w.payload_json, w.created_at_ms, \
     (SELECT x.reason FROM mission_waits x WHERE x.id = w.wait_id), \
     (SELECT x.spec_json FROM mission_waits x WHERE x.id = w.wait_id)";
+
+fn mission_deadline_ms(tx: &Transaction<'_>, mission_id: &str) -> rusqlite::Result<i64> {
+    tx.query_row(
+        "SELECT started_at_ms, budgets_json FROM missions WHERE id = ?1",
+        [mission_id],
+        |r| {
+            let started: i64 = r.get(0)?;
+            let budgets: String = r.get(1)?;
+            let budgets: Budgets = serde_json::from_str(&budgets).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            Ok(started.saturating_add(
+                i64::try_from(budgets.max_minutes.saturating_mul(60_000)).unwrap_or(i64::MAX),
+            ))
+        },
+    )
+}
 
 /// The wait ends because the item left it: nobody watches it any more.
 pub(super) fn cancel_item_waits(tx: &Transaction<'_>, id: &str, key: &str, now: i64) -> Result<()> {
@@ -128,6 +150,25 @@ fn wait_in(tx: &Transaction<'_>, wait_id: i64) -> Result<Wait> {
     .ok_or_else(|| MissionError::NotFound(format!("wait {wait_id}")))
 }
 
+/// Most out-of-office notice ids remembered per wait (a wait is put off only a few times).
+const MAX_DEFERRED_IDS: usize = 16;
+/// Longest id remembered.
+const MAX_DEFERRED_ID_CHARS: usize = 300;
+
+/// The remembered ids of a wait's out-of-office notices; empty when none (or unreadable).
+fn deferred_ids_in(conn: &rusqlite::Connection, wait_id: i64) -> Result<Vec<String>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT deferred_ids FROM mission_waits WHERE id = ?1",
+            [wait_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(raw
+        .and_then(|r| serde_json::from_str(&r).ok())
+        .unwrap_or_default())
+}
+
 /// The state of a mission, read inside a transaction.
 fn state_in(tx: &Transaction<'_>, id: &str) -> Result<MissionState> {
     let state: String = tx
@@ -176,6 +217,13 @@ impl MissionStore {
                 "item {:?} already has {MAX_WAITS_PER_ITEM} waits",
                 item.key
             )));
+        }
+        if matches!(&new.spec, WaitSpec::Every { .. }) {
+            tx.execute(
+                "UPDATE mission_waits SET state = 'cancelled', ended_at_ms = ?3 \
+                 WHERE mission_id = ?1 AND item_key = ?2 AND kind = 'every' AND state = 'waiting'",
+                params![id, item.key, now],
+            )?;
         }
         let kind = new.spec.kind();
         tx.execute(
@@ -255,7 +303,7 @@ impl MissionStore {
     /// SQLite failure.
     pub fn due_timers(&self, now: i64) -> Result<Vec<Wait>> {
         self.waits_where(
-            "w.kind = 'after' AND w.due_at_ms <= ?1",
+            "w.kind IN ('after', 'every') AND w.due_at_ms <= ?1",
             now,
             "w.due_at_ms, w.id",
             i64::MAX,
@@ -268,7 +316,7 @@ impl MissionStore {
     /// SQLite failure.
     pub fn expired_waits(&self, now: i64) -> Result<Vec<Wait>> {
         self.waits_where(
-            "w.kind IN ('mail', 'webhook') AND w.due_at_ms <= ?1",
+            "w.kind IN ('mail', 'webhook', 'child') AND w.due_at_ms <= ?1",
             now,
             "w.due_at_ms, w.id",
             i64::MAX,
@@ -315,6 +363,88 @@ impl MissionStore {
         Ok(stmt
             .query_map(params![now, limit], wait_of)?
             .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A mail wait whose awaited person is away: the wait goes on, but gives up no earlier than
+    /// `follow_up_ms` (a later give-up time stays as it is), and mail from before `now_ms` is no
+    /// longer the awaited reply. `message_id` (the notice's own id) is remembered, so the same
+    /// notice is never counted again even when its `Date` header reads later than `now_ms`. The
+    /// item stays parked and no wake is recorded; the pause is durable (it is the wait's own
+    /// row). Returns `false` when nothing was changed: the wait already ended, or it was put off
+    /// `max_defers` times before (then the mail wakes the item).
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn defer_mail_wait(
+        &self,
+        wait_id: i64,
+        follow_up_ms: i64,
+        now_ms: i64,
+        max_defers: u32,
+        message_id: Option<&str>,
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let w = wait_in(&tx, wait_id)?;
+        if w.state != WaitState::Waiting || !matches!(w.spec, WaitSpec::Mail { .. }) {
+            return Ok(false);
+        }
+        let mut ids = deferred_ids_in(&tx, wait_id)?;
+        if let Some(id) = message_id.filter(|id| !id.is_empty()) {
+            if ids.iter().any(|d| d == id) {
+                // Already counted: neither a second defer nor a wake.
+                return Ok(true);
+            }
+            ids.push(id.chars().take(MAX_DEFERRED_ID_CHARS).collect());
+            // A wait is put off a handful of times at most; keep the newest ids regardless.
+            let skip = ids.len().saturating_sub(MAX_DEFERRED_IDS);
+            ids.drain(..skip);
+        }
+        let changed = tx.execute(
+            "UPDATE mission_waits SET due_at_ms = MAX(due_at_ms, ?2), not_before_ms = ?3, \
+             defers = defers + 1, deferred_ids = ?5 \
+             WHERE id = ?1 AND state = 'waiting' AND defers < ?4",
+            params![
+                wait_id,
+                follow_up_ms,
+                now_ms,
+                i64::from(max_defers),
+                serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_owned())
+            ],
+        )?;
+        if changed == 0 {
+            return Ok(false);
+        }
+        event(
+            &tx,
+            &w.mission_id,
+            now_ms,
+            "wait_deferred",
+            Some(&w.item_key),
+            &json!({"wait": wait_id, "follow_up_at_ms": follow_up_ms.max(w.due_at_ms), "why": "out_of_office"}),
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// The ids of the notices a wait was already put off for: see [`Self::defer_mail_wait`].
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn deferred_mail_ids(&self, wait_id: i64) -> Result<Vec<String>> {
+        deferred_ids_in(&self.conn(), wait_id)
+    }
+
+    /// `(not_before_ms, defers)` of a wait: see [`Self::defer_mail_wait`].
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn wait_deferral(&self, wait_id: i64) -> Result<(i64, u32)> {
+        Ok(self.conn().query_row(
+            "SELECT not_before_ms, defers FROM mission_waits WHERE id = ?1",
+            [wait_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
     }
 
     /// A look into the mailbox found nothing: the next one is not before `next_at_ms`. `error`
@@ -411,6 +541,104 @@ impl MissionStore {
             &json!({"wait": wait_id, "reason": reason.as_str()}),
         )?;
         bump(&tx, &w.mission_id, now)?;
+        let wake = tx.query_row(
+            &format!("SELECT {WAKE_COLS} FROM mission_wakes w WHERE w.id = ?1"),
+            [wake_id],
+            wake_of,
+        )?;
+        tx.commit()?;
+        Ok(Some(wake))
+    }
+
+    /// A recurrence rule fired: wake the item, then schedule the next occurrence or end the
+    /// wait when the series is finished.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn fire_recurring_wait(&self, wait_id: i64, now: i64) -> Result<Option<Wake>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let w = wait_in(&tx, wait_id)?;
+        if w.state != WaitState::Waiting {
+            return Ok(None);
+        }
+        let WaitSpec::Every {
+            rrule,
+            timezone,
+            dtstart_ms,
+        } = &w.spec
+        else {
+            return Ok(None);
+        };
+        let fired_at = w.due_at_ms;
+        let after_ms = fired_at.max(now);
+        let deadline = mission_deadline_ms(&tx, &w.mission_id)?;
+        let next_due = recur::next_due(rrule, *dtstart_ms, timezone.as_deref(), after_ms)
+            .map_err(MissionError::Invalid)?;
+        let item = item_in(&tx, &w.mission_id, &w.item_key)?;
+        if item.status == ItemStatus::Waiting {
+            tx.execute(
+                "UPDATE mission_items SET status = 'todo', updated_at_ms = ?3 WHERE mission_id = ?1 AND key = ?2",
+                params![w.mission_id, w.item_key, now],
+            )?;
+            tx.execute(
+                "UPDATE mission_waits SET state = 'cancelled', ended_at_ms = ?3 \
+                 WHERE mission_id = ?1 AND item_key = ?2 AND state = 'waiting' AND id != ?4",
+                params![w.mission_id, w.item_key, now, wait_id],
+            )?;
+            event(
+                &tx,
+                &w.mission_id,
+                now,
+                "item",
+                Some(&w.item_key),
+                &json!({"from": "waiting", "to": "todo", "by": "wake"}),
+            )?;
+        }
+        consume_item_wakes(&tx, &w.mission_id, &w.item_key, now)?;
+        tx.execute(
+            "UPDATE mission_wakes SET consumed_at_ms = ?2 WHERE mission_id = ?1 AND consumed_at_ms IS NULL \
+            AND id NOT IN (SELECT id FROM mission_wakes WHERE mission_id = ?1 AND consumed_at_ms IS NULL \
+            ORDER BY id DESC LIMIT ?3)",
+            params![
+                w.mission_id,
+                now,
+                i64::try_from(MAX_PENDING_WAKES.saturating_sub(1)).unwrap_or(i64::MAX)
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO mission_wakes (mission_id, wait_id, item_key, reason, payload_json, dedupe_key, created_at_ms) \
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+            params![
+                w.mission_id,
+                wait_id,
+                w.item_key,
+                WakeReason::Schedule.as_str(),
+                format!("wait:{wait_id}:{}", w.due_at_ms),
+                now
+            ],
+        )?;
+        let wake_id = tx.last_insert_rowid();
+        event(
+            &tx,
+            &w.mission_id,
+            now,
+            "wake",
+            Some(&w.item_key),
+            &json!({"wait": wait_id, "reason": WakeReason::Schedule.as_str()}),
+        )?;
+        bump(&tx, &w.mission_id, now)?;
+        if let Some(next) = next_due.filter(|n| *n <= deadline) {
+            tx.execute(
+                "UPDATE mission_waits SET due_at_ms = ?2 WHERE id = ?1 AND state = 'waiting'",
+                params![wait_id, next],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE mission_waits SET state = 'fired', ended_at_ms = ?2 WHERE id = ?1",
+                params![wait_id, now],
+            )?;
+        }
         let wake = tx.query_row(
             &format!("SELECT {WAKE_COLS} FROM mission_wakes w WHERE w.id = ?1"),
             [wake_id],
@@ -581,6 +809,44 @@ impl MissionStore {
             });
             if self
                 .fire_wait(w.id, WakeReason::Webhook, Some(&payload), now)?
+                .is_some()
+                && !woken.contains(&w.mission_id)
+            {
+                woken.push(w.mission_id.clone());
+            }
+        }
+        Ok(woken)
+    }
+
+    /// A child run a mission was waiting for finished. Returns the missions that were woken.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn deliver_child_finished(
+        &self,
+        mission_id: Option<&str>,
+        child_run_id: &str,
+        summary: &str,
+        now: i64,
+    ) -> Result<Vec<String>> {
+        let wants: Vec<Wait> = self.waits_where("w.kind = 'child'", now, "w.id", i64::MAX)?;
+        let child = child_run_id.trim();
+        let mut woken: Vec<String> = Vec::new();
+        for w in wants {
+            let WaitSpec::Child { run_id } = &w.spec else {
+                continue;
+            };
+            if run_id != child {
+                continue;
+            }
+            if mission_id.is_some_and(|id| w.mission_id != id) {
+                continue;
+            }
+            let payload = json!({
+                "summary": clean_external(summary, crate::model::MAX_WAKE_PAYLOAD_CHARS),
+            });
+            if self
+                .fire_wait(w.id, WakeReason::Child, Some(&payload), now)?
                 .is_some()
                 && !woken.contains(&w.mission_id)
             {

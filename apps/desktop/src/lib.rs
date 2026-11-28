@@ -1279,7 +1279,10 @@ pub fn run() {
     let popout_for_exit = Arc::clone(&popout_state);
 
     let context = tauri::generate_context!();
-    let (update_plugin, update_runtime) = update::init(&context.package_info().version.to_string());
+    let (update_plugin, update_runtime) = update::init(
+        &context.package_info().version.to_string(),
+        context.config().plugins.0.get("updater"),
+    );
 
     #[cfg(any(windows, target_os = "linux"))]
     let cold_link = deep_link::from_argv(&std::env::args_os().collect::<Vec<_>>());
@@ -2071,6 +2074,7 @@ mod acl_tests {
             csp,
             "default-src 'self'; script-src 'self'; style-src 'self'; \
              style-src-attr 'unsafe-inline'; img-src 'self' blob: data:; \
+             media-src 'self' blob:; \
              font-src 'self' data:; \
              connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; \
              object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"

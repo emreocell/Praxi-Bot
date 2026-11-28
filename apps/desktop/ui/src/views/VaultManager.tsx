@@ -632,7 +632,7 @@ export function VaultManager({ onManageEmail }: { onManageEmail: () => void }) {
         <div className={styles.body}>
           <div
             className={styles.listPane}
-            role="list"
+            role="group"
             aria-label={t("vault.listLabel")}
             onKeyDown={onListKeyDown}
           >
@@ -671,8 +671,8 @@ export function VaultManager({ onManageEmail }: { onManageEmail: () => void }) {
                 const title = siteLabelOf(item);
                 const sub = item.login_id?.trim() || item.origins[0] || item.name;
                 return (
-                  <div key={item.name} role="listitem">
                   <button
+                    key={item.name}
                     type="button"
                     aria-current={active ? "true" : undefined}
                     data-vault-row={item.name}
@@ -686,8 +686,8 @@ export function VaultManager({ onManageEmail }: { onManageEmail: () => void }) {
                         <span>{title}</span>
                         {item.bot_ids.length === 0 ? (
                           <span
-                            role="img"
                             className={styles.unscopedDot}
+                            role="img"
                             title={t("vault.noBotAssigned")}
                             aria-label={t("vault.noBotAssigned")}
                           />
@@ -697,7 +697,6 @@ export function VaultManager({ onManageEmail }: { onManageEmail: () => void }) {
                     </span>
                     <ChevronRight className={styles.rowChevron} aria-hidden="true" />
                   </button>
-                  </div>
                 );
               })
             )}

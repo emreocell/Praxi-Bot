@@ -1,6 +1,6 @@
 //! Monthly spending limit (per installation, default off).
 //!
-//! The limit is checked before every model call in [`crate::usage::CallGuard::start`],
+//! The limit is checked before every model call in `CallGuard::start` (`usage`),
 //! the one place all paid calls pass through (foreground, scheduled, subagent,
 //! memory and router calls alike). Month-to-date spend is the sum of the
 //! `cost_usd` the usage ledger recorded for calls that finished in the current

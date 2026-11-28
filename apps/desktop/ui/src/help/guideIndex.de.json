@@ -337,6 +337,12 @@
     "summary": "Beginne mit bot status. Der Befehl zeigt, ob der Hintergrunddienst (Daemon) läuft, ob dein Token akzeptiert wird und wie viele Genehmigungen auf dich warten. Wenn du kein Terminal benutzt, schau zuer…"
   },
   {
+    "doc": "de/voice-call.md",
+    "title": "Offline diktieren und vorlesen",
+    "headings": [],
+    "summary": "Die lokale Spracherkennung und Sprachausgabe in der Desktop-App brauchen nach der Einrichtung"
+  },
+  {
     "doc": "de/web-scraping.md",
     "title": "Web-Scraping-Zusatz (optional)",
     "headings": [

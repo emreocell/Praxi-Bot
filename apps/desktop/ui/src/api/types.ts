@@ -568,6 +568,7 @@ export type FillGrantInfo = S["FillGrantDto"];
 export type McpTransport = S["McpTransportKind"];
 export type McpStatus = S["McpStatus"];
 export type McpAuthState = S["McpAuthState"];
+export type McpAuthLogoutDto = S["McpAuthLogoutDto"];
 export type McpAuthStart = S["McpAuthStart"];
 export type McpTestResult = S["McpTestResult"];
 export type McpServer = S["McpServerDto"];
@@ -644,8 +645,35 @@ export type EmailGuardSettings = S["EmailGuardSettingsDto"];
 export type EmailOptOut = S["EmailOptOutDto"];
 export type EmailSendLogEntry = S["EmailSendLogDto"];
 
-export type VoiceConfig = S["VoiceConfigDto"];
-export type VoiceConfigInput = S["VoiceConfigInput"];
+/** Live voice settings (`/v1/voice`); intersected so the UI also builds against an older generated schema. */
+export interface LiveVoiceSettings {
+  live_model: string;
+  live_voice: string;
+  live_keep_audio: boolean;
+}
+export type VoiceConfig = S["VoiceConfigDto"] & LiveVoiceSettings;
+export type VoiceConfigInput = S["VoiceConfigInput"] & Partial<LiveVoiceSettings>;
+/** What the daemon sends on the live voice event stream (`POST /v1/voice/live`), one JSON object per event. */
+export type LiveVoiceEvent =
+  | { type: "ready"; session_id: string; model: string; input_rate: number; output_rate: number; max_seconds: number }
+  | { type: "audio"; data: string }
+  | { type: "you"; text: string }
+  | { type: "bot"; text: string }
+  | { type: "turn_complete" }
+  | { type: "interrupted" }
+  | { type: "tool_call"; call_id: string; request: string }
+  | { type: "tool_cancelled"; call_ids: string[] }
+  | { type: "reconnecting" }
+  | { type: "ended"; reason: "limit" | "idle" | "error" | "closed"; message?: string };
+export interface LiveVoiceOpenInput {
+  language?: string;
+  assistant_name?: string;
+}
+/** One line of a finished voice conversation, written into the chat as an ordinary message. */
+export interface VoiceTurn {
+  role: "user" | "assistant";
+  text: string;
+}
 export type LocalVoiceStatus = S["LocalVoiceStatusDto"];
 export type TranscribeInput = S["TranscribeInput"];
 export type TranscribeOutput = S["TranscribeOutput"];

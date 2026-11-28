@@ -73,6 +73,8 @@ impl From<IncomingMessage> for channel_api::IncomingMessage {
                 display_name: msg.username,
             },
             message_id: msg.message_id.map(|id| id.to_string()),
+            forwarded: msg.forwarded,
+            edited: false,
             kind: match msg.kind {
                 IncomingKind::Text(text) => channel_api::IncomingKind::Text(text),
                 IncomingKind::Unsupported(label) => channel_api::IncomingKind::Unsupported(label),

@@ -12,9 +12,9 @@
 //! result after the system browsers, and starts it only when the manifest still matches every
 //! file ([`register`] hands it that check); a marker file alone never makes a folder a browser.
 //!
-//! What the unpacked folder is guaranteed to be (checked by [`harden_install`] on top of what the
+//! What the unpacked folder is guaranteed to be (checked by `harden_install` on top of what the
 //! shared unpacker already refuses, and tested here): no path with `..` or an absolute path, no
-//! symlink or hard link, total size within [`UNPACKED_FACTOR`] times the archive, no setuid or
+//! symlink or hard link, total size within `UNPACKED_FACTOR` times the archive, no setuid or
 //! setgid or sticky bit, files `0o755` or `0o644`, folders `0o755`. A folder that breaks one of
 //! these is deleted and the install fails.
 //!

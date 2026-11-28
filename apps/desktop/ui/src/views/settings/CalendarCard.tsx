@@ -1,10 +1,11 @@
-import { CalendarPlus, CircleAlert, CircleCheck, Info, KeyRound, PlugZap, Trash2 } from "lucide-react";
+import { CalendarPlus, CircleAlert, CircleCheck, PlugZap, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Card } from "ui";
 import type { CalendarAccount, CalendarFound, CalendarTestReport } from "../../api/types";
-import formStyles from "../../components/Form.module.css";
-import { SettingGroup } from "../../components/SettingsUi";
+import { MoreInfo } from "../../components/ChoiceList";
+import { FormField, formStyles } from "../../components/SettingsForm";
+import { SettingGroup, SettingsDisclosure } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { humanLine } from "../../lib/humanError";
 import {
@@ -26,6 +27,7 @@ export function CalendarCard() {
   const [accounts, setAccounts] = useState<CalendarAccount[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
 
   const [preset, setPreset] = useState<CalendarPresetId>("icloud");
   const [server, setServer] = useState("");
@@ -42,6 +44,7 @@ export function CalendarCard() {
   const shownName = nameEdited ? name : suggestCalendarName(preset, existing);
   const shownUrl = urlEdited ? url : calendarPresetUrl(preset, { username, server });
   const needsServer = CALENDAR_PRESETS.find((p) => p.id === preset)?.needsServer ?? false;
+  const isOther = preset === "other";
 
   const refresh = useCallback(async () => {
     if (!client) {
@@ -64,6 +67,7 @@ export function CalendarCard() {
   const choosePreset = (id: CalendarPresetId) => {
     setPreset(id);
     setUrlEdited(false);
+    setAdvanced(id === "other");
     forgetResult();
   };
 
@@ -156,13 +160,15 @@ export function CalendarCard() {
   const ready =
     shownUrl.trim() !== "" && username.trim() !== "" && password !== "" && !busy && client !== null;
   const canSave = ready && isValidCalendarName(shownName);
+  const presetHint = t(`settingsModal.calendar.presets.${preset}.hintShort`, {
+    defaultValue: t(`settingsModal.calendar.presets.${preset}.hint`)
+  });
 
   return (
     <div className={styles.root} data-testid="calendar-card">
-      <p className={styles.note}>
-        <Info aria-hidden="true" />
-        <span>{t("settingsModal.calendar.note")}</span>
-      </p>
+      <MoreInfo testId="calendar-more">
+        <p>{t("settingsModal.calendar.note")}</p>
+      </MoreInfo>
 
       {loadError ? (
         <p className={formStyles.error} role="alert">
@@ -208,10 +214,14 @@ export function CalendarCard() {
         <form className={styles.card} onSubmit={(e) => void save(e)}>
           <h4 className={styles.subheading}>{t("settingsModal.calendar.addTitle")}</h4>
 
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="calendar-preset">
-              {t("settingsModal.calendar.serviceLabel")}
-            </label>
+          <FormField
+            id="calendar-preset"
+            label={t("settingsModal.calendar.serviceLabel")}
+            hint={presetHint}
+            helpTitle={t(`settingsModal.calendar.presets.${preset}.label`)}
+            helpBody={t(`settingsModal.calendar.presets.${preset}.hint`)}
+            width="md"
+          >
             <select
               id="calendar-preset"
               className={formStyles.select}
@@ -224,14 +234,17 @@ export function CalendarCard() {
                 </option>
               ))}
             </select>
-            <p className={formStyles.hint}>{t(`settingsModal.calendar.presets.${preset}.hint`)}</p>
-          </div>
+          </FormField>
 
           {needsServer ? (
-            <div className={formStyles.field}>
-              <label className={formStyles.label} htmlFor="calendar-server">
-                {t("settingsModal.calendar.serverLabel")}
-              </label>
+            <FormField
+              id="calendar-server"
+              label={t("settingsModal.calendar.serverLabel")}
+              hint={t("settingsModal.calendar.serverShort")}
+              helpTitle={t("settingsModal.calendar.serverLabel")}
+              helpBody={t("settingsModal.calendar.presets.nextcloud.hint")}
+              width="md"
+            >
               <input
                 id="calendar-server"
                 type="text"
@@ -244,97 +257,141 @@ export function CalendarCard() {
                   forgetResult();
                 }}
               />
-            </div>
+            </FormField>
           ) : null}
 
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="calendar-username">
-              {t("settingsModal.calendar.usernameLabel")}
-            </label>
-            <input
+          <div className={styles.pair}>
+            <FormField
               id="calendar-username"
-              type="text"
-              className={formStyles.input}
-              value={username}
-              autoComplete="off"
-              onChange={(e) => {
-                setUsername(e.target.value);
-                forgetResult();
-              }}
-            />
-          </div>
-
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="calendar-password">
-              {t("settingsModal.calendar.passwordLabel")}
-            </label>
-            <input
+              label={t("settingsModal.calendar.usernameLabel")}
+              width="md"
+            >
+              <input
+                id="calendar-username"
+                type="text"
+                className={formStyles.input}
+                value={username}
+                autoComplete="off"
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  forgetResult();
+                }}
+              />
+            </FormField>
+            <FormField
               id="calendar-password"
-              type="password"
-              className={formStyles.input}
-              value={password}
-              autoComplete="new-password"
-              onChange={(e) => {
-                setPassword(e.target.value);
-                forgetResult();
-              }}
-            />
-            <p className={formStyles.hint}>
-              <KeyRound aria-hidden="true" /> {t("settingsModal.calendar.passwordHint")}
-            </p>
+              label={t("settingsModal.calendar.passwordLabel")}
+              hint={t("settingsModal.calendar.passwordShort")}
+              helpTitle={t("settingsModal.calendar.passwordLabel")}
+              helpBody={t("settingsModal.calendar.passwordHint")}
+              width="md"
+            >
+              <input
+                id="calendar-password"
+                type="password"
+                className={formStyles.input}
+                value={password}
+                autoComplete="new-password"
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  forgetResult();
+                }}
+              />
+            </FormField>
           </div>
 
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="calendar-url">
-              {t("settingsModal.calendar.urlLabel")}
-            </label>
-            <input
+          {isOther ? (
+            <FormField
               id="calendar-url"
-              type="url"
-              className={formStyles.input}
-              value={shownUrl}
-              autoComplete="off"
-              onChange={(e) => {
-                setUrl(e.target.value);
-                setUrlEdited(true);
-                forgetResult();
-              }}
-            />
-            <p className={formStyles.hint}>{t("settingsModal.calendar.urlHint")}</p>
-          </div>
-
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="calendar-name">
-              {t("settingsModal.calendar.nameLabel")}
-            </label>
-            <input
-              id="calendar-name"
-              type="text"
-              className={formStyles.input}
-              value={shownName}
-              autoComplete="off"
-              onChange={(e) => {
-                setName(e.target.value);
-                setNameEdited(true);
-              }}
-            />
-            <p className={formStyles.hint}>{t("settingsModal.calendar.nameHint")}</p>
-          </div>
-
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="calendar-email">
-              {t("settingsModal.calendar.emailLabel")}
-            </label>
-            <input
-              id="calendar-email"
-              type="email"
-              className={formStyles.input}
-              value={email}
-              autoComplete="off"
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <p className={formStyles.hint}>{t("settingsModal.calendar.emailHint")}</p>
-          </div>
+              label={t("settingsModal.calendar.urlLabel")}
+              hint={t("settingsModal.calendar.urlShort")}
+              helpTitle={t("settingsModal.calendar.urlLabel")}
+              helpBody={t("settingsModal.calendar.urlHint")}
+            >
+              <input
+                id="calendar-url"
+                type="url"
+                className={formStyles.input}
+                value={shownUrl}
+                autoComplete="off"
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  setUrlEdited(true);
+                  forgetResult();
+                }}
+              />
+            </FormField>
+          ) : null}
+          <SettingsDisclosure
+            open={advanced}
+            count={isOther ? 2 : 3}
+            label={t("settingsModal.calendar.advanced")}
+            hint={t("settingsModal.calendar.advancedHint")}
+            testId="calendar-advanced"
+            onToggle={() => setAdvanced((o) => !o)}
+          >
+            {!isOther ? (
+              <FormField
+                id="calendar-url"
+                label={t("settingsModal.calendar.urlLabel")}
+                hint={t("settingsModal.calendar.urlShort")}
+                helpTitle={t("settingsModal.calendar.urlLabel")}
+                helpBody={t("settingsModal.calendar.urlHint")}
+              >
+                <input
+                  id="calendar-url"
+                  type="url"
+                  className={formStyles.input}
+                  value={shownUrl}
+                  autoComplete="off"
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setUrlEdited(true);
+                    forgetResult();
+                  }}
+                />
+              </FormField>
+            ) : null}
+            <div className={styles.pair}>
+              <FormField
+                id="calendar-name"
+                label={t("settingsModal.calendar.nameLabel")}
+                hint={t("settingsModal.calendar.nameShort")}
+                helpTitle={t("settingsModal.calendar.nameLabel")}
+                helpBody={t("settingsModal.calendar.nameHint")}
+                width="sm"
+              >
+                <input
+                  id="calendar-name"
+                  type="text"
+                  className={formStyles.input}
+                  value={shownName}
+                  autoComplete="off"
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setNameEdited(true);
+                  }}
+                />
+              </FormField>
+              <FormField
+                id="calendar-email"
+                label={t("settingsModal.calendar.emailLabel")}
+                hint={t("settingsModal.calendar.emailShort")}
+                helpTitle={t("settingsModal.calendar.emailLabel")}
+                helpBody={t("settingsModal.calendar.emailHint")}
+                width="md"
+              >
+                <input
+                  id="calendar-email"
+                  type="email"
+                  className={formStyles.input}
+                  value={email}
+                  autoComplete="off"
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </FormField>
+            </div>
+          </SettingsDisclosure>
 
           <div className={styles.actions}>
             <Button

@@ -1583,3 +1583,166 @@ async fn a_wait_is_taken_over_by_its_id_only_for_its_own_bot_and_account_until_s
     last.resume(&conn, owner("run-3", "own"), &id);
     assert_eq!(last.origin_of(&id, owner("run-3", "own")), None);
 }
+
+/// Every SMTP send carries a Message-ID we wrote ourselves, and the send log keeps that same
+/// id: it is what a reply's In-Reply-To or a bounce's returned headers will quote.
+#[tokio::test]
+async fn an_smtp_send_logs_the_message_id_it_wrote_into_the_mail() {
+    let (_imap, smtp, conn) = reply_rig().await;
+    let out = approve_then_call(
+        &conn,
+        "email_send",
+        json!({"to": ["ann@example.com"], "subject": "Hello", "body": "Hi"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["sent"], true, "{out}");
+    let raw = String::from_utf8(smtp.messages.lock().unwrap()[0].clone()).unwrap();
+    let entry = conn.guard().log(1).remove(0);
+    let logged = entry.message_id.clone();
+    assert!(logged.ends_with("@example.com"), "{logged}");
+    assert!(raw.contains(&format!("Message-ID: <{logged}>")), "{raw}");
+    assert_eq!(out["message_id"], logged.as_str());
+    // A reply quoting it is found again.
+    assert!(
+        conn.guard()
+            .find_sent(&entry.account, &format!("<{logged}>"), None)
+            .is_some()
+    );
+}
+
+/// A delivery report is read into fields, and the original Message-ID in its returned
+/// headers is the one we wrote.
+#[test]
+fn a_delivery_report_is_read_out_of_its_mime_parts() {
+    let raw = "From: MAILER-DAEMON@mx.example.net\r\nTo: me@example.com\r\nSubject: Undelivered\r\nMessage-ID: <dsn1@mx.example.net>\r\nIn-Reply-To: <sent1@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nYour message could not be delivered.\r\n--b1\r\nContent-Type: message/delivery-status\r\n\r\nReporting-MTA: dns; mx.example.net\r\n\r\nFinal-Recipient: rfc822; bob@example.org\r\nAction: failed\r\nStatus: 5.1.1\r\n\r\n--b1\r\nContent-Type: message/rfc822\r\n\r\nMessage-ID: <sent1@example.com>\r\nFrom: me@example.com\r\nTo: bob@example.org\r\nSubject: Hello\r\n\r\nHi\r\n--b1--\r\n";
+    let d = crate::message::parse_detail(1, raw.as_bytes(), true, None, 1000).unwrap();
+    assert_eq!(d.in_reply_to, ["sent1@example.com"]);
+    let dsn = d.delivery_status.expect("a delivery report");
+    assert!(dsn.structured);
+    assert_eq!(dsn.recipients[0].address(), Some("bob@example.org"));
+    assert!(dsn.recipients[0].is_permanent_failure());
+    assert_eq!(
+        dsn.original_message_id.as_deref(),
+        Some("sent1@example.com")
+    );
+}
+
+/// A `message/delivery-status` part on an ordinary mail (not a `multipart/report`) is no
+/// structured report, and neither is one with no such part at all.
+#[test]
+fn only_a_real_multipart_report_is_a_structured_delivery_report() {
+    let part = "Final-Recipient: rfc822; bob@example.org\r\nAction: failed\r\nStatus: 5.1.1\r\n\r\nMessage-ID: <sent1@example.com>\r\n";
+    let forged = format!(
+        "From: eve@attacker.test\r\nTo: me@example.com\r\nSubject: hi\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b1\r\nContent-Type: message/delivery-status\r\n\r\n{part}\r\n--b1--\r\n"
+    );
+    let d = crate::message::parse_detail(1, forged.as_bytes(), true, None, 1000).unwrap();
+    assert!(!d.delivery_status.expect("still read as text").structured);
+    let headers_only = format!(
+        "From: eve@attacker.test\r\nTo: me@example.com\r\nSubject: hi\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/rfc822-headers\r\n\r\n{part}\r\n--b1--\r\n"
+    );
+    let d = crate::message::parse_detail(1, headers_only.as_bytes(), true, None, 1000).unwrap();
+    assert!(!d.delivery_status.expect("still read as text").structured);
+}
+
+/// A reply listing thousands of ids keeps the newest ones, and a long id is cut.
+#[test]
+fn the_reply_ids_of_a_message_are_bounded() {
+    let refs: String = (0..3000)
+        .map(|i| format!("<r{i}@x>"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let raw = format!(
+        "From: ann@example.org\r\nTo: me@example.com\r\nSubject: Re: x\r\nIn-Reply-To: <a@x> <b@x> <c@x> <d@x> <e@x> <f@x> <g@x>\r\nReferences: {refs}\r\n\r\nhi\r\n"
+    );
+    let d = crate::message::parse_detail(1, raw.as_bytes(), true, None, 1000).unwrap();
+    assert!(d.references.len() <= 50 && d.in_reply_to.len() <= 5);
+    assert_eq!(d.references.last().map(String::as_str), Some("r2999@x"));
+}
+
+fn bounce_for(sent_id: &str, rcpt: &str, action: &str, status: &str) -> Vec<u8> {
+    format!(
+        "From: MAILER-DAEMON@mx.example.org\r\nTo: me@example.com\r\nSubject: Undelivered Mail\r\nMessage-ID: <dsn-{rcpt}@mx.example.net>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nCould not be delivered.\r\n--b1\r\nContent-Type: message/delivery-status\r\n\r\nReporting-MTA: dns; mx.example.net\r\n\r\nFinal-Recipient: rfc822; {rcpt}\r\nAction: {action}\r\nStatus: {status}\r\n\r\n--b1\r\nContent-Type: message/rfc822\r\n\r\nMessage-ID: <{sent_id}>\r\nFrom: me@example.com\r\nSubject: Hello\r\n\r\nHi\r\n--b1--\r\n"
+    )
+    .into_bytes()
+}
+
+/// The whole loop over a fake IMAP/SMTP server: send, get a hard bounce and a soft bounce back,
+/// sweep the inbox, and see the suppression list and the counter change; a bounce for a mail
+/// we never sent changes nothing.
+#[tokio::test]
+async fn a_sweep_of_the_inbox_turns_bounces_into_suppression_and_counts() {
+    let (imap, _smtp, conn) = reply_rig().await;
+    for to in ["gone@example.org", "slow@example.org"] {
+        let out = approve_then_call(
+            &conn,
+            "email_send",
+            json!({"to": [to], "subject": "Hello", "body": "Hi"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["sent"], true, "{out}");
+    }
+    let log = conn.guard().log(10);
+    let id_of = |to: &str| {
+        log.iter()
+            .find(|e| e.recipients == [to])
+            .unwrap()
+            .message_id
+            .clone()
+    };
+    imap.deliver(
+        "INBOX",
+        bounce_for(
+            &id_of("gone@example.org"),
+            "gone@example.org",
+            "failed",
+            "5.1.1",
+        ),
+    );
+    imap.deliver(
+        "INBOX",
+        bounce_for(
+            &id_of("slow@example.org"),
+            "slow@example.org",
+            "delayed",
+            "4.4.1",
+        ),
+    );
+    // A report about a mail this mailbox never sent.
+    imap.deliver(
+        "INBOX",
+        bounce_for(
+            "stranger@elsewhere.test",
+            "stray@example.org",
+            "failed",
+            "5.1.1",
+        ),
+    );
+    let guard = conn.guard();
+    let scoped = conn.scoped(Some(BOT));
+    let done = crate::inbound::sweep_reports(&scoped, &guard, "own").await;
+    assert_eq!(done.len(), 2, "{done:?}");
+    let list = guard.opt_outs();
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert_eq!(list[0].value, "gone@example.org");
+    assert_eq!(list[0].reason, "hard_bounce");
+    assert_eq!(list[0].message_id, id_of("gone@example.org"));
+    assert_eq!(guard.soft_bounces("slow@example.org"), 1);
+    // Again: the same reports change nothing.
+    crate::inbound::sweep_reports(&scoped, &guard, "own").await;
+    assert_eq!(guard.opt_outs().len(), 1);
+    assert_eq!(guard.soft_bounces("slow@example.org"), 1);
+    // The next send to the suppressed address is stopped by the opt-out guard.
+    let e = tool(&conn, "email_send")
+        .call(
+            &ctx(),
+            json!({"to": ["gone@example.org"], "subject": "Again", "body": "Hi"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        e.to_string().contains("opt-out") || e.to_string().contains("Only the owner"),
+        "{e}"
+    );
+}

@@ -40,6 +40,15 @@ pub(super) struct AttachmentWire {
 #[derive(Debug, Deserialize)]
 pub(super) struct MessageWire {
     pub message_id: String,
+    /// The thread the message is in.
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    /// `In-Reply-To` (one id, or a list: not documented as either, so both are read).
+    #[serde(default)]
+    pub in_reply_to: Option<Value>,
+    /// `References`.
+    #[serde(default)]
+    pub references: Option<Value>,
     #[serde(default)]
     pub labels: Vec<String>,
     #[serde(default)]
@@ -91,6 +100,24 @@ pub(super) fn parse<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, Email
 /// not at the 256 characters of other untrusted fields.
 pub(super) fn cap_id(id: &str) -> String {
     truncate_chars(id, super::MAX_ID_LEN).0
+}
+
+/// Message ids out of a JSON string (maybe several, separated by spaces) or list of strings,
+/// without angle brackets. Anything else is nothing.
+fn id_list(v: Option<&Value>) -> Vec<String> {
+    let texts: Vec<&str> = match v {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    texts
+        .into_iter()
+        .flat_map(str::split_whitespace)
+        .map(|id| id.trim_matches(['<', '>']))
+        .filter(|id| !id.is_empty())
+        .take(50)
+        .map(cap_id)
+        .collect()
 }
 
 fn has_label(m: &MessageWire, label: &str) -> bool {
@@ -181,7 +208,11 @@ impl MessageWire {
                 })
                 .collect(),
             reply_to: None,
-            references: Vec::new(),
+            references: id_list(self.references.as_ref()),
+            in_reply_to: id_list(self.in_reply_to.as_ref()),
+            thread_id: self.thread_id.as_deref().map(cap_id),
+            // The API gives no delivery-status part; the body text is read for one instead.
+            delivery_status: None,
             recipients: self
                 .to
                 .iter()

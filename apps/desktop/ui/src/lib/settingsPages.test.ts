@@ -13,6 +13,7 @@ import {
   highlightParts,
   isCardShown,
   metaOfCard,
+  pageUsesManualCardSave,
   PAGE_ALIASES,
   parsePage,
   resetPatch,
@@ -391,6 +392,12 @@ test("every page name, page description and group title has English and Turkish 
   // System and Connections describe what they hold now (no updates, no passwords).
   assert.ok(!/update/i.test(get(en, pageTextKey("system", "description")) as string));
   assert.ok(!/password/i.test(get(en, pageTextKey("connections", "description")) as string));
+});
+
+test("connections settings save on each card, not through the app store banner", () => {
+  assert.ok(pageUsesManualCardSave("connections"));
+  assert.ok(!pageUsesManualCardSave("general"));
+  assert.match(read("../views/SettingsModal.tsx"), /pageUsesManualCardSave\(page\)/);
 });
 
 test("the \"?\" of a card sits in its header and opens on hover and on click", () => {

@@ -5,11 +5,18 @@
 //! * an **opt-out line** appended in code to the body (the model never writes or removes it);
 //! * a **daily count** per account and a **same-recipient wait**.
 //!
-//! The count, the wait and the opt-out list are *soft* guards: [`MailGuard::check`] returns
-//! [`Warning`]s, never a refusal. Only the owner can send past a warning, by approving the card
-//! that shows it ("Send anyway"). The tool freezes the card it showed, warnings or not
+//! The count, the wait and the opt-out line are *soft* guards on Ask-level bots: [`MailGuard::check`]
+//! returns [`Warning`]s. Only the owner can send past one, by approving the card that shows it
+//! ("Send anyway"). On Full-level bots only the count and wait warnings are logged without blocking;
+//! all other warnings, including a dropped opt-out line, block. The tool freezes the card it showed, warnings or not
 //! ([`MailGuard::freeze`]) and a later call goes through past a warning only when it matches a
 //! frozen entry exactly ([`MailGuard::take_card`]). The model has no argument that can do this.
+//!
+//! On top of that (see [`outreach`]): replies and delivery reports are matched to the send log by
+//! the `Message-ID` we wrote (or the provider's thread id), a confident match can put an address on the
+//! suppression list (the opt-out list, with a reason and the message id), count a soft bounce or
+//! name a follow-up date after an out-of-office reply, and a per-mailbox daily budget with a
+//! warm-up ramp can refuse a send outright.
 //!
 //! State is a JSON settings file, a JSON opt-out file and an append-only JSONL send log under one
 //! directory (or memory only, for tests).
@@ -22,10 +29,22 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+mod outreach;
+pub(crate) use outreach::MAX_REFS;
+pub use outreach::{
+    BudgetBlock, InboundAction, InboundMail, InboundOutcome, OutreachState, SoftBounce,
+};
+
 /// Default: at most this many mails per account in a rolling 24 hours before a warning.
 pub const DEFAULT_DAILY_LIMIT: u32 = 20;
+/// Default: at most this many outreach mails per mailbox in a rolling 24 hours, once the warm-up is over.
+pub const DEFAULT_OUTREACH_BUDGET: u32 = 20;
+/// Default: days a new mailbox takes to ramp from [`WARMUP_START`] to the full budget.
+pub const DEFAULT_WARMUP_DAYS: u32 = 14;
+/// A new mailbox may send this many outreach mails on its first day (less when the budget is lower).
+pub const WARMUP_START: u32 = 5;
 /// Default: warn when the same recipient got a mail from the account in the last N days.
-pub const DEFAULT_SAME_RECIPIENT_DAYS: u32 = 14;
+pub const DEFAULT_SAME_RECIPIENT_DAYS: u32 = 0;
 /// How long a frozen warning set stays valid after the card was shown.
 const FREEZE_TTL: Duration = Duration::from_secs(30 * 60);
 /// Longest subject kept in the log.
@@ -67,6 +86,11 @@ pub struct GuardSettings {
     /// of them (or below it) counts as followable in `email_wait_for`. Normalised
     /// domain names, owner-set only; empty by default.
     pub verification_link_domains: Vec<String>,
+    /// Hard daily budget per mailbox for outreach (mail an unattended bot or a mission sends):
+    /// a send past it is refused, not just warned about. `0` turns the budget off.
+    pub outreach_daily_budget: u32,
+    /// Days a mailbox with no sending history takes to ramp up to the budget. `0` = no ramp.
+    pub outreach_warmup_days: u32,
 }
 
 /// Most owner-listed verification link domains.
@@ -80,6 +104,8 @@ impl Default for GuardSettings {
             opt_out_line: true,
             footer: String::new(),
             verification_link_domains: Vec::new(),
+            outreach_daily_budget: DEFAULT_OUTREACH_BUDGET,
+            outreach_warmup_days: DEFAULT_WARMUP_DAYS,
         }
     }
 }
@@ -98,7 +124,11 @@ impl GuardSettings {
         if self.footer.contains('\0') {
             return Err("the opt-out text contains an invalid character".into());
         }
-        if self.daily_limit > 100_000 || self.same_recipient_days > 3650 {
+        if self.daily_limit > 100_000
+            || self.same_recipient_days > 3650
+            || self.outreach_daily_budget > 100_000
+            || self.outreach_warmup_days > 365
+        {
             return Err("that limit is unreasonably large".into());
         }
         if self.verification_link_domains.len() > MAX_VERIFICATION_DOMAINS {
@@ -148,6 +178,12 @@ pub struct OptOut {
     /// Free note from the owner (why / where it came from).
     #[serde(default)]
     pub note: String,
+    /// Why the program added it: `hard_bounce` or `stop_reply`. Empty: the owner added it.
+    #[serde(default)]
+    pub reason: String,
+    /// The `Message-ID` of the mail we sent that the bounce or the reply answered. Empty: none.
+    #[serde(default)]
+    pub message_id: String,
 }
 
 /// One line of the send log.
@@ -169,8 +205,14 @@ pub struct SendLogEntry {
     pub recipients: Vec<String>,
     /// First characters of the subject.
     pub subject: String,
-    /// Provider message id or the server's reply line.
+    /// The `Message-ID` header we wrote (SMTP) or the message id the provider's API returned.
     pub message_id: String,
+    /// The provider's thread id, when its API gives one (`AgentMail`).
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    /// The mission whose session sent the mail, when it was one.
+    #[serde(default)]
+    pub mission_id: Option<String>,
     /// The opt-out line was in the mail.
     pub opt_out_line: bool,
     /// The owner approved past these warnings ("Send anyway"); empty = none were shown.
@@ -253,6 +295,8 @@ struct State {
     /// Domain entries (each also covers its subdomains).
     opt_domains: Vec<String>,
     log: Vec<SendLogEntry>,
+    /// Soft-bounce counts and warm-up starts (saved in `outreach-state.json`).
+    outreach: OutreachState,
     frozen: HashMap<String, Frozen>,
     /// Saved files that could not be read at start (set aside as `<name>.bad-<ts>`).
     load_errors: Vec<&'static str>,
@@ -333,7 +377,7 @@ pub struct AddressKeys {
 #[must_use]
 pub fn canonical_domain(d: &str) -> Option<String> {
     let d = d.trim().trim_end_matches('.');
-    if d.is_empty() || d.contains(['@', '/', '\\']) || d.contains(char::is_whitespace) {
+    if d.is_empty() || d.contains(['@', '/', '\\']) || crate::address::has_hidden_char(d) {
         return None;
     }
     idna::domain_to_ascii(d).ok().filter(|x| !x.is_empty())
@@ -350,7 +394,7 @@ pub fn canonical_address(s: &str) -> Option<AddressKeys> {
         _ => t,
     };
     let inner = inner.trim();
-    if inner.contains(char::is_whitespace) {
+    if crate::address::has_hidden_char(inner) {
         return None;
     }
     let (local, domain) = inner.rsplit_once('@')?;
@@ -611,6 +655,11 @@ impl MailGuard {
                 st.opt_out_locked = !set_aside;
             }
         }
+        match load_json::<OutreachState>(&dir, "outreach-state.json", |_| true) {
+            Loaded::Ok(o) => st.outreach = o,
+            Loaded::Missing => {}
+            Loaded::Bad { .. } => st.load_errors.push("outreach state"),
+        }
         // The newest `log_memory` entries, reaching back into moved-aside files when the active
         // one is short (right after a rotation).
         let keep = log_memory.max(1);
@@ -695,6 +744,22 @@ impl MailGuard {
     /// # Errors
     /// Invalid entry, list full, failed save.
     pub fn add_opt_out(&self, raw: &str, note: &str) -> Result<OptOut, String> {
+        self.add_suppression(raw, note, "", "")
+    }
+
+    /// Add an address or domain with the reason the program had for it (`hard_bounce`,
+    /// `stop_reply`) and the `Message-ID` of the mail it answered (idempotent: an entry
+    /// that is already there is kept as it is).
+    ///
+    /// # Errors
+    /// Invalid entry, list full, failed save.
+    pub fn add_suppression(
+        &self,
+        raw: &str,
+        note: &str,
+        reason: &str,
+        message_id: &str,
+    ) -> Result<OptOut, String> {
         let (value, kind) = normalize_opt_out(raw)?;
         let mut st = lock(&self.state);
         if st.opt_out_locked {
@@ -711,6 +776,8 @@ impl MailGuard {
             kind: kind.into(),
             added_at: now_secs(),
             note: note.chars().take(200).collect(),
+            reason: reason.chars().take(40).collect(),
+            message_id: message_id.chars().take(300).collect(),
         };
         let mut next = st.opt_outs.clone();
         next.push(entry.clone());
@@ -1012,6 +1079,8 @@ impl MailGuard {
             recipients: to.iter().map(|r| key_of(r).full).collect(),
             subject: subject.to_owned(),
             message_id: message_id.to_owned(),
+            thread_id: None,
+            mission_id: None,
             opt_out_line: false,
             overridden: Vec::new(),
         });
@@ -1025,6 +1094,8 @@ impl MailGuard {
         let line = serde_json::to_string(&entry).unwrap_or_default();
         {
             let mut st = lock(&self.state);
+            let (account, at) = (entry.account.clone(), entry.at);
+            self.note_first_send(&mut st, &account, at);
             st.log.push(entry);
             if st.log.len() > self.log_memory {
                 let extra = st.log.len() - self.log_memory;
@@ -1092,6 +1163,8 @@ mod tests {
             recipients: rcpt.iter().map(|s| (*s).to_owned()).collect(),
             subject: "=cmd".into(),
             message_id: "m1".into(),
+            thread_id: None,
+            mission_id: None,
             opt_out_line: true,
             overridden: vec![],
         }
@@ -1118,10 +1191,33 @@ mod tests {
     }
 
     #[test]
+    fn new_default_disables_repeat_wait_and_saved_setting_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            MailGuard::open(dir.path().to_path_buf())
+                .settings()
+                .same_recipient_days,
+            0
+        );
+        std::fs::write(
+            dir.path().join("guard-settings.json"),
+            r#"{"same_recipient_days":14}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            MailGuard::open(dir.path().to_path_buf())
+                .settings()
+                .same_recipient_days,
+            14
+        );
+    }
+
+    #[test]
     fn daily_limit_and_same_recipient_are_warnings_not_blocks() {
         let g = MailGuard::in_memory();
         let s = GuardSettings {
             daily_limit: 2,
+            same_recipient_days: 14,
             ..GuardSettings::default()
         };
         g.set_settings(s).unwrap();
@@ -1229,6 +1325,11 @@ mod tests {
             g.check(&facts(&["u@notblocked.org".into()], true)).codes(),
             Vec::<String>::new()
         );
+        g.set_settings(GuardSettings {
+            same_recipient_days: 14,
+            ..GuardSettings::default()
+        })
+        .unwrap();
         // same-recipient wait: a +tag variant of a logged mailbox is the same recipient
         g.record(entry(&["c@y.io"], now_secs()));
         let rep = g.check(&facts(&["C+news@y.io".into()], true));
@@ -1341,7 +1442,11 @@ mod tests {
             g.check_invite("work", &one("a@x.io")).codes(),
             vec!["daily_limit"]
         );
-        g.set_settings(GuardSettings::default()).unwrap();
+        g.set_settings(GuardSettings {
+            same_recipient_days: 14,
+            ..GuardSettings::default()
+        })
+        .unwrap();
         assert_eq!(g.check_invite("work", &one("a@x.io")).warnings, vec![]);
         assert_eq!(
             g.check(&facts(&one("a@x.io"), true)).codes(),

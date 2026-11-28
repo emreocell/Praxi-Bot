@@ -261,6 +261,12 @@ export function useOptionalDaemonClient(): ApiClient | null {
   return useContext(Ctx)?.client ?? null;
 }
 
+/** This computer's daemon, also while a paired host's chat is open. */
+export function useLocalDaemonClient(): ApiClient | null {
+  const daemon = useContext(Ctx);
+  return daemon?.localApi ?? (daemon?.client?.baseUrl === MOCK_BASE_URL ? daemon.client : null);
+}
+
 /** Everything a session reads from one daemon: its lists, events and health. */
 type DaemonData = Pick<
   DaemonContextValue,

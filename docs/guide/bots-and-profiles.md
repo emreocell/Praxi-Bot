@@ -152,7 +152,7 @@ wildcards. The built-in tool groups:
 | Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_forward`, `browser_reload`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_upload`, `browser_downloads`, `browser_attach`, `browser_eval` |
 | Web (read-only, no browser) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (see [Web tools](web.md)) |
 | Schedules (General preset only) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (see [Scheduled tasks](scheduled-tasks.md)) |
-| Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
+| Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_open`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
 | Scripts | `script_run` |
 | Agent-internal | `ask_user`, `todo_write`, `spawn_subagent` |
 | Skills and workflows | `skill_list`, `skill_read`, `skill_write`, `skill_hint`, `workflow_list`, `workflow_run` |
@@ -322,7 +322,10 @@ an export is refused when the persona looks like it holds a secret.
   (Researcher, Inbox triage, Daily briefing, Coder, Family helper) with English,
   Turkish and German names. They are data files in
   `crates/daemon-api/templates/` in the same format; a test checks that every
-  template parses and imports under a ceiling. They go through the same preview.
+  template parses and imports under a ceiling. Picking one and pressing
+  **Create** imports it under the access level shown in the dialog (a template
+  never gets more than it asks for); **See what it comes with** opens the same
+  preview first.
 
 Export and import are written to the audit log (`profile.export`,
 `profile.import`). Paired devices cannot reach these routes.

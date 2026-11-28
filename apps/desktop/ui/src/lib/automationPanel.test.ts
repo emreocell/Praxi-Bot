@@ -16,14 +16,16 @@ test("the Automation tab: one sentence to add, one list, the event kinds, then m
   order.unshift(panel.indexOf("<QuickCreate "));
   assert.ok(order.every((at) => at > 0), String(order));
   assert.deepEqual([...order].sort((a, b) => a - b), order);
-  // Mail and webhook open the builder; the file kind explains (the bot sets it up in chat).
-  assert.match(panel, /\(\["mail", "webhook"\] as const\)\.map/);
+  // Every event kind but the file watcher opens the builder; the file kind explains (the bot sets it up in chat).
+  assert.match(panel, /const EVENT_CARDS = \["mail", "webhook", "feed", "page", "calendar", "home_assistant"\] as const/);
+  assert.match(panel, /EVENT_CARDS\.map/);
 });
 
 test("every Automation text exists in English and Turkish", () => {
   const keys = new Set([...panel.matchAll(/t\("(automation\.[a-zA-Z.]+)"/g), ...schedules.matchAll(/t\("(automation\.[a-zA-Z.]+)"/g)].map((m) => m[1]));
-  for (const kind of ["mail", "webhook", "file"]) for (const part of ["title", "line"]) keys.add(`automation.events.${kind}.${part}`);
-  for (const k of ["mail", "webhook", "time"]) keys.add(`automation.builder.title.${k}`);
+  for (const kind of ["mail", "webhook", "file", "feed", "page", "calendar", "home_assistant"]) for (const part of ["title", "line"]) keys.add(`automation.events.${kind}.${part}`);
+  for (const k of ["mail", "webhook", "time", "feed", "page", "calendar", "home_assistant"]) keys.add(`automation.builder.title.${k}`);
+  for (const k of ["feed", "page", "calendar", "home_assistant"]) keys.add(`automation.what.${k}`);
   for (const k of ["today", "tomorrow", "yesterday"]) keys.add(`automation.day.${k}`);
   for (const k of ["ok", "failed", "missed", "running"]) keys.add(`automation.last.${k}`);
   for (const k of ["failed", "missed"]) keys.add(`automation.state.${k}`);

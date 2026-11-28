@@ -6,6 +6,10 @@ import {
   mentionHandle,
   appCommandFor,
   APP_COMMANDS,
+  LOCAL_COMMANDS,
+  MISSION_COMMAND,
+  missionCommandGoal,
+  missionCommandWord,
   parseSlashInput,
   SLASH_COMMANDS,
   unknownSlashCommand
@@ -115,4 +119,17 @@ test("a lone unknown /word is flagged, known commands, arguments and paths are n
   for (const ok of ["/new", "/stop", "/help", "/export", "/workflow", "/foobar with text", "/usr/bin/ls", "hello /foobar"]) {
     assert.equal(unknownSlashCommand(ok), null, ok);
   }
+});
+
+test("/mission and /görev carry the job; a lone one is known, not a paid model call", () => {
+  assert.equal(missionCommandGoal("/mission Sign up on 20 sites"), "Sign up on 20 sites");
+  assert.equal(missionCommandGoal("  /Görev 20 siteye kaydol\nve raporla "), "20 siteye kaydol\nve raporla");
+  assert.equal(missionCommandGoal("/gorev x"), "x");
+  assert.equal(missionCommandGoal("/mission"), "");
+  assert.equal(missionCommandGoal("/missions x"), null);
+  assert.equal(missionCommandGoal("start a mission"), null);
+  for (const lone of ["/mission", "/görev", "/gorev"]) assert.equal(unknownSlashCommand(lone), null, lone);
+  assert.equal(missionCommandWord("tr-TR"), "görev");
+  assert.equal(missionCommandWord("en"), "mission");
+  assert.ok(LOCAL_COMMANDS.includes(MISSION_COMMAND));
 });

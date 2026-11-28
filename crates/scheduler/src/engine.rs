@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Clock, SystemClock};
 use crate::error::{Result, SchedulerError};
-use crate::model::{AttemptRun, MisfirePolicy, Schedule, ScheduleSpec};
+use crate::model::{AttemptRun, MisfirePolicy, Payload, Schedule, ScheduleSpec};
 use crate::store::ScheduleStore;
 use crate::webhook::{PendingReplay, ReplayGuard, WebhookMeta, prepare_webhook};
 
@@ -269,6 +269,7 @@ impl Scheduler {
             &fired,
             None,
             now_ms,
+            false,
         )
         .await
         .map(|_| ())
@@ -311,7 +312,7 @@ impl Scheduler {
             return Err(SchedulerError::Busy(id.to_string()));
         };
         self.commit_replay(pending, now_ms)?;
-        spawn_direct_execution(&self.inner, fired, guard);
+        spawn_direct_execution(&self.inner, fired, guard, false);
         Ok(())
     }
 
@@ -336,7 +337,7 @@ impl Scheduler {
     /// # Errors
     /// [`SchedulerError::NotFound`] for an unknown id,
     /// [`SchedulerError::Busy`] while a run of `id` is in flight.
-    pub fn run_now(&self, id: TaskId) -> Result<()> {
+    pub fn run_now(&self, id: TaskId, bypass_standing_hours: bool) -> Result<()> {
         let mut schedule = self
             .inner
             .store
@@ -351,7 +352,7 @@ impl Scheduler {
         let now_ms = self.inner.clock.wall_ms();
         self.inner.store.touch_last_run(id, now_ms)?;
         schedule.last_run_at = Some(now_ms);
-        spawn_direct_execution(&self.inner, schedule, guard);
+        spawn_direct_execution(&self.inner, schedule, guard, bypass_standing_hours);
         Ok(())
     }
 
@@ -720,7 +721,12 @@ fn try_acquire_in_flight(inner: &Arc<Inner>, schedule: &Schedule) -> Option<InFl
     })
 }
 
-fn spawn_direct_execution(inner: &Arc<Inner>, schedule: Schedule, guard: InFlightGuard) {
+fn spawn_direct_execution(
+    inner: &Arc<Inner>,
+    schedule: Schedule,
+    guard: InFlightGuard,
+    bypass_standing_hours: bool,
+) {
     let inner = Arc::clone(inner);
     tokio::spawn(async move {
         let _guard = guard;
@@ -730,6 +736,7 @@ fn spawn_direct_execution(inner: &Arc<Inner>, schedule: Schedule, guard: InFligh
             &schedule,
             None,
             inner.clock.wall_ms(),
+            bypass_standing_hours,
         )
         .await
         {
@@ -758,6 +765,7 @@ fn spawn_retry_execution(
             &schedule,
             Some((due_ms, attempt)),
             inner.clock.wall_ms(),
+            false,
         )
         .await;
         if let Err(error) = &outcome {
@@ -828,6 +836,7 @@ fn spawn_timer_executions(
                 &schedule,
                 Some((due_ms, 0)),
                 inner.clock.wall_ms(),
+                false,
             )
             .await;
             if let Err(error) = &outcome {
@@ -850,6 +859,87 @@ pub(crate) enum Dispatch {
     Skipped,
 }
 
+/// Whether a standing order may fire now: inside its active hours and under today's cap.
+/// Read-only, so a gated firing leaves the check state, queued events and the count alone;
+/// ask it before any of those is touched. Other payloads always may run.
+fn standing_order_open(
+    store: &ScheduleStore,
+    schedule: &Schedule,
+    now: i64,
+    bypass_hours: bool,
+) -> Result<bool> {
+    let Payload::StandingOrder {
+        active_hours,
+        max_runs_per_day,
+        ..
+    } = &schedule.payload
+    else {
+        return Ok(true);
+    };
+    if let Some(hours) = active_hours
+        && !bypass_hours
+        && !hours.contains(now)?
+    {
+        return Ok(false);
+    }
+    let today = schedule.payload.day_key(now)?;
+    Ok(store.standing_order_runs(schedule.id, &today)? < *max_runs_per_day)
+}
+
+/// [`standing_order_open`] for the poll loop, where one broken row must not stop the rest.
+fn gate_open(inner: &Inner, schedule: &Schedule, now: i64) -> bool {
+    standing_order_open(&inner.store, schedule, now, false).unwrap_or_else(|error| {
+        tracing::error!(schedule_id = %schedule.id, %error, "standing order gate unreadable");
+        false
+    })
+}
+
+/// A firing a standing order's hours or cap turned away: nothing ran, and history says why
+/// instead of reading as a success.
+fn note_gated(store: &ScheduleStore, schedule: &Schedule, occurrence: Option<(i64, u32)>) {
+    if let Some((due, _)) = occurrence
+        && let Err(error) = store.note_standing_gated(schedule.id, due)
+    {
+        tracing::error!(schedule_id = %schedule.id, due, %error, "failed to note a gated firing");
+    }
+}
+
+/// Start the executor for `fired`. A standing order takes its daily slot here, in the same
+/// transaction that checks its revision, right before the executor is called; a start that
+/// fails before anything began ([`SchedulerError::NotStarted`], e.g. no connection to the
+/// model) gives the slot back.
+async fn launch(
+    store: &ScheduleStore,
+    executor: &dyn ScheduleExecutor,
+    fired: &Schedule,
+    occurrence: Option<(i64, u32)>,
+    now: i64,
+) -> Result<Dispatch> {
+    let slot = if let Payload::StandingOrder {
+        max_runs_per_day, ..
+    } = &fired.payload
+    {
+        let day = fired.payload.day_key(now)?;
+        if !store.claim_standing_order_run(fired.id, fired.revision, &day, *max_runs_per_day)? {
+            note_gated(store, fired, occurrence);
+            return Ok(Dispatch::Skipped);
+        }
+        Some(day)
+    } else {
+        None
+    };
+    let outcome = match occurrence {
+        Some((due, attempt)) => executor.execute_attempt(fired, due, attempt).await,
+        None => executor.execute(fired).await,
+    };
+    if let (Err(SchedulerError::NotStarted(_)), Some(day)) = (&outcome, &slot)
+        && let Err(error) = store.release_standing_order_run(fired.id, day)
+    {
+        tracing::error!(schedule_id = %fired.id, %error, "failed to give back a standing order slot");
+    }
+    outcome.map(|()| Dispatch::Ran)
+}
+
 /// Every ingress shares this no-run-before-precheck boundary. A stale definition
 /// cannot finish its check and start work after an owner edit or deletion.
 pub(crate) async fn execute_checked(
@@ -858,9 +948,16 @@ pub(crate) async fn execute_checked(
     schedule: &Schedule,
     occurrence: Option<(i64, u32)>,
     now: i64,
+    bypass_standing_hours: bool,
 ) -> Result<Dispatch> {
     // A schedule that moved to a server never fires here, whichever ingress asked.
     if store.frozen_for(schedule.id)?.is_some() {
+        return Ok(Dispatch::Skipped);
+    }
+    // Before the precheck (which advances its change hash) and the registry (which empties its
+    // queue): a gated firing must lose nothing.
+    if !standing_order_open(store, schedule, now, bypass_standing_hours)? {
+        note_gated(store, schedule, occurrence);
         return Ok(Dispatch::Skipped);
     }
     let mut fired = schedule.clone();
@@ -913,11 +1010,7 @@ pub(crate) async fn execute_checked(
         fired.external_input = Some(input);
     }
     // The tenth failed check still fails open; the next firing is paused.
-    let outcome = match occurrence {
-        Some((due, attempt)) => executor.execute_attempt(&fired, due, attempt).await,
-        None => executor.execute(&fired).await,
-    }
-    .map(|()| Dispatch::Ran);
+    let outcome = launch(store, executor, &fired, occurrence, now).await;
     if outcome.is_err() {
         store.registry_failed(schedule)?;
     }
@@ -932,6 +1025,10 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
         if let Some((_, state)) = inner.store.registry(schedule.id)?
             && !state.pending.is_empty()
         {
+            // Queued events wait for the hours and the cap; nothing is taken from the queue.
+            if !gate_open(inner, &schedule, now) {
+                continue;
+            }
             let Some(guard) = try_acquire_in_flight(inner, &schedule) else {
                 continue;
             };
@@ -947,7 +1044,9 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
                         .ok()
                         .flatten()
                         .is_some_and(|s| s.revision == fired.revision)
-                        && inner.executor.execute(&fired).await.is_err()
+                        && launch(&inner.store, inner.executor.as_ref(), &fired, None, now)
+                            .await
+                            .is_err()
                     {
                         let _ = inner.store.registry_failed(&fired);
                     }
@@ -960,6 +1059,10 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
             continue;
         };
         if matches!(trigger, crate::Trigger::Webhook { .. }) {
+            continue;
+        }
+        // Not polled while gated: what happens meanwhile is still there to see afterwards.
+        if !gate_open(inner, &schedule, now) {
             continue;
         }
         let state = inner.store.check_state(&schedule)?;
@@ -980,11 +1083,16 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
             let result = poll_one(&inner, &schedule, &trigger, state, now).await;
             drop(slot);
             let result = match result {
-                Ok(Some(fired)) => {
-                    execute_checked(&inner.store, inner.executor.as_ref(), &fired, None, now)
-                        .await
-                        .map(|_| ())
-                }
+                Ok(Some(fired)) => execute_checked(
+                    &inner.store,
+                    inner.executor.as_ref(),
+                    &fired,
+                    None,
+                    now,
+                    false,
+                )
+                .await
+                .map(|_| ()),
                 Ok(None) => Ok(()),
                 Err(error) => Err(error),
             };
@@ -1015,13 +1123,12 @@ async fn poll_one(
             state.trigger_errors = 0;
         } else {
             state.trigger_errors = state.trigger_errors.saturating_add(1);
-            watch.next_poll_ms = now.saturating_add(match trigger {
-                crate::Trigger::Email { .. } => crate::watch::EMAIL_POLL_MS,
-                _ => crate::watch::FILE_POLL_MS,
-            });
+            watch.next_poll_ms = now.saturating_add(crate::watch::default_poll_ms(trigger));
         }
+        // An owner rule sets its own cadence, also after a failed check: a source that is
+        // down must not be asked again every few seconds.
         if let Some((rule, _)) = inner.store.registry(schedule.id)?
-            && let crate::registry::TriggerSource::Mail { poll_seconds, .. } = rule.source
+            && let Some(poll_seconds) = rule.source.poll_seconds()
         {
             watch.next_poll_ms = now.saturating_add(
                 i64::try_from(poll_seconds)

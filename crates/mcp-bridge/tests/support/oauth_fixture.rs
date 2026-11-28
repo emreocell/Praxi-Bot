@@ -78,6 +78,10 @@ pub struct Seen {
     pub paths: Vec<String>,
     /// `Authorization` header of every request to the MCP endpoint itself.
     pub mcp_authorization: Vec<Option<String>>,
+    /// Decoded form of every `POST` to the revocation endpoint.
+    pub revoke_requests: Vec<BTreeMap<String, String>>,
+    /// When set, advertises this RFC 7009 endpoint (default `{base}/revoke`).
+    pub revocation_endpoint: Option<String>,
 }
 
 pub fn decode(raw: &str) -> String {
@@ -272,7 +276,17 @@ pub async fn fake_authorization_server(
                         if let Some(registration) = seen.lock().registration_endpoint.clone() {
                             metadata["registration_endpoint"] = serde_json::json!(registration);
                         }
+                        let revoke = seen
+                            .lock()
+                            .revocation_endpoint
+                            .clone()
+                            .unwrap_or_else(|| format!("{base}/revoke"));
+                        metadata["revocation_endpoint"] = serde_json::json!(revoke);
                         ("200 OK", metadata)
+                    } else if path == "/revoke" {
+                        let form = pairs(&body);
+                        seen.lock().revoke_requests.push(form);
+                        ("200 OK", serde_json::json!({}))
                     } else if path == "/register" && seen.lock().dcr_secret.is_some() {
                         let secret = seen.lock().dcr_secret.clone();
                         (

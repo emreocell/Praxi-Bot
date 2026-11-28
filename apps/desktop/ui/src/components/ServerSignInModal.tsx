@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
+import type { ApiClient } from "../api/client";
 import type { AdminCliEngine, AdminCliLogin } from "../api/types";
 import { humanError } from "../lib/humanError";
 import { openExternal } from "../lib/externalLink";
@@ -21,12 +22,15 @@ const ACTIVE = new Set<SignInPhase>(["starting", "needs_browser", "needs_code", 
 export function ServerSignInModal({
   open,
   engine,
+  client,
   serverName,
   onClose,
   onDone
 }: {
   open: boolean;
   engine: AdminCliEngine;
+  /** The server's own channel; never this computer's daemon (it would sign in on the wrong machine). */
+  client: ApiClient | null;
   serverName: string;
   onClose: () => void;
   onDone: () => void;
@@ -34,24 +38,26 @@ export function ServerSignInModal({
   const { t } = useTranslation();
   return (
     <Modal open={open} onClose={onClose} size="sm" label={t("serverSignIn.title", { name: engine.name, server: serverName })}>
-      {open ? <Content engine={engine} serverName={serverName} onClose={onClose} onDone={onDone} /> : null}
+      {open ? <Content engine={engine} client={client} serverName={serverName} onClose={onClose} onDone={onDone} /> : null}
     </Modal>
   );
 }
 
 function Content({
   engine,
+  client,
   serverName,
   onClose,
   onDone
 }: {
   engine: AdminCliEngine;
+  client: ApiClient | null;
   serverName: string;
   onClose: () => void;
   onDone: () => void;
 }) {
   const { t } = useTranslation();
-  const { client, refreshHome } = useDaemon();
+  const { refreshHome } = useDaemon();
   const [job, setJob] = useState<AdminCliLogin | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [manual, setManual] = useState<string | null>(null);

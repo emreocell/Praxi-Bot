@@ -233,9 +233,11 @@ when a heading names a command that no longer exists. Update the guide, or add a
 to the test's allow-list, in the same pull request.
 
 **Accessibility check.** `pnpm --dir apps/desktop/ui check:a11y` builds the mock bundle, opens about
-40 screens and states (home, chat, right panel, approval card, schedules, apps, dialogs, first-run
-wizard, every settings section; two themes, plus tr/de samples) in headless Chrome (`CHROME_BIN`) and
-runs [axe-core](https://github.com/dequelabs/axe-core) on each. It takes about 40 seconds, runs in the
+about 50 screens and states (home, chat, bot panel tabs, approval card, schedules, apps,
+notifications, vault, dialogs, first-run wizard, every settings section; clay/obsidian themes; English
+and Turkish on each screen, plus a German settings sample) in headless Chrome (`CHROME_BIN`) and
+runs [axe-core](https://github.com/dequelabs/axe-core) on each. A full run is several minutes (use
+`--budget=` to raise the cap on slow machines); it runs in the
 UI CI job and fails on any violation that is not in `apps/desktop/ui/scripts/a11y-allowlist.mjs`, and
 also on an allow-list entry that no longer matches (delete it once you fix the problem). Prefer fixing
 a violation (a name, a role, a heading level). If you cannot fix it now, add one entry

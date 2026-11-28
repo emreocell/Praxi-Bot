@@ -182,7 +182,7 @@ pub async fn handle_webhook(
         &WebhookMeta::default(),
         None,
     )?;
-    crate::engine::execute_checked(store, executor, &fired, None, storage::now_ms())
+    crate::engine::execute_checked(store, executor, &fired, None, storage::now_ms(), false)
         .await
         .map(|_| ())
 }

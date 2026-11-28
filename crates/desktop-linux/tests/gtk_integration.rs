@@ -51,7 +51,7 @@ from gi.repository import Gtk, GLib
 
 class TestWindow(Gtk.Window):
     def __init__(self):
-        super().__init__(title="Praxi GTK Test App")
+        super().__init__(title="GTK Test App")
         self.set_default_size(420, 240)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add(box)
@@ -108,18 +108,24 @@ fn prepare_headless_env() -> Option<std::process::Child> {
 #[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires xvfb-run, dbus-run-session, at-spi2-core, openbox, and python3-gi (GTK 3)"]
+#[allow(clippy::too_many_lines)] // One scripted session against a real GTK app.
 fn xvfb_gtk_test_app_roundtrip() {
     use std::time::{Duration, Instant};
 
     use desktop_api::{
-        Action, DesktopBackend, Quality, Region, Target, action::ClickMethod, render_snapshot,
-        snapshot::AppSpec,
+        Action, DesktopBackend, ElementOp, Quality, Region, Target, WindowOp, action::ClickMethod,
+        render_snapshot, snapshot::AppSpec,
     };
     use desktop_linux::LinuxBackend;
 
     let mut wm_child = prepare_headless_env();
 
-    futures::executor::block_on(async {
+    // The backend bounds its calls with tokio timeouts, so it needs a tokio runtime.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    runtime.block_on(async {
         let backend = LinuxBackend::new().expect("init LinuxBackend");
         let caps = backend.capabilities();
         assert_eq!(caps.platform, "linux");
@@ -139,7 +145,7 @@ fn xvfb_gtk_test_app_roundtrip() {
             let wins = backend.windows().await.expect("list windows");
             if let Some(w) = wins
                 .iter()
-                .find(|w| w.pid == pid || w.title.contains("Praxi GTK Test App"))
+                .find(|w| w.pid == pid || w.title.contains("GTK Test App"))
             {
                 window_id = Some(w.id);
                 break;
@@ -147,7 +153,7 @@ fn xvfb_gtk_test_app_roundtrip() {
             std::thread::sleep(Duration::from_millis(200));
         }
 
-        let win_id = window_id.expect("Praxi GTK Test App window did not appear on X11");
+        let win_id = window_id.expect("GTK Test App window did not appear on X11");
         backend
             .activate_window(win_id)
             .await
@@ -192,6 +198,73 @@ fn xvfb_gtk_test_app_roundtrip() {
             })
             .await
             .expect("Click on GTK button");
+
+        // The accessibility actions of the toolkit: set a check box, set it again (nothing
+        // to do), flip it, and read the state back each time.
+        let check_node = snap
+            .nodes
+            .iter()
+            .find(|n| n.role == "checkbox" && n.name.contains("Enable Option"))
+            .expect("expected Enable Option check box in snapshot");
+        let on_check = |op| Action::Element {
+            target: Target::ByIndex {
+                index: check_node.index,
+                generation: snap.generation,
+            },
+            op,
+        };
+        for (op, what) in [
+            (ElementOp::Toggle { state: Some(true) }, "switch on"),
+            (ElementOp::Toggle { state: Some(true) }, "already on"),
+            (ElementOp::Toggle { state: None }, "flip"),
+        ] {
+            let done = backend
+                .act(on_check(op))
+                .await
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert_eq!(done.verified, Some(true), "{what} was not read back");
+        }
+        let no_pattern = backend
+            .act(Action::Element {
+                target: Target::ByIndex {
+                    index: edit_node.index,
+                    generation: snap.generation,
+                },
+                op: ElementOp::Expand,
+            })
+            .await
+            .expect_err("a text field cannot be expanded");
+        assert!(
+            matches!(no_pattern, DesktopError::Unsupported(_)),
+            "{no_pattern}"
+        );
+
+        // Window management: a resize is a real change of the window's size.
+        backend
+            .window_op(
+                win_id,
+                WindowOp::Resize {
+                    width: 520,
+                    height: 330,
+                },
+                None,
+            )
+            .await
+            .expect("resize");
+        let mut resized = false;
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(100));
+            let wins = backend.windows().await.expect("list windows");
+            if wins
+                .iter()
+                .find(|w| w.id == win_id)
+                .is_some_and(|w| (w.bounds.width - 520.0).abs() <= 4.0)
+            {
+                resized = true;
+                break;
+            }
+        }
+        assert!(resized, "the window did not take the new size");
 
         std::thread::sleep(Duration::from_millis(300));
         let img = backend

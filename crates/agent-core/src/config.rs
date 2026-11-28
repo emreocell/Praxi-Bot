@@ -101,6 +101,51 @@ impl Default for Guards {
     }
 }
 
+/// Rolling summary of the older part of a long chat (see `summary`): when the messages the
+/// model would get pass a threshold, the oldest are condensed into one pinned note and only
+/// the recent ones stay verbatim. Everything is bounded: a round reads at most
+/// `max_input_bytes`, writes at most `max_summary_bytes`, and a chat is summarised again only
+/// after it has grown by about `trigger - keep` again. The per-bot switch is `history.summary`.
+#[derive(Debug, Clone)]
+pub struct HistorySummaryConfig {
+    /// Summarise once the chat holds this many unsummarised messages (`0`: never by count).
+    pub trigger_messages: usize,
+    /// ... or this many bytes of them (`0`: never by size).
+    pub trigger_bytes: usize,
+    /// The newest messages that stay verbatim (a round never folds them in).
+    pub keep_messages: usize,
+    /// ... and at most this many bytes of them.
+    pub keep_bytes: usize,
+    /// Most bytes of messages one round sends to the model (each message is also cut).
+    pub max_input_bytes: usize,
+    /// Longest summary text kept; the model is asked for less.
+    pub max_summary_bytes: usize,
+    /// Most rounds after one turn (a very long imported chat catches up over several turns).
+    pub max_rounds_per_turn: u32,
+    /// Wait after a failed round before the chat is tried again.
+    pub failure_cooldown: Duration,
+    /// Time limit of one summariser call.
+    pub call_timeout: Duration,
+}
+
+impl Default for HistorySummaryConfig {
+    fn default() -> Self {
+        Self {
+            // Under the 256 messages / 64 KiB the context window holds: the summary kicks in
+            // before anything scrolls out of it.
+            trigger_messages: 160,
+            trigger_bytes: 40 * 1024,
+            keep_messages: 40,
+            keep_bytes: 16 * 1024,
+            max_input_bytes: 48 * 1024,
+            max_summary_bytes: 6 * 1024,
+            max_rounds_per_turn: 2,
+            failure_cooldown: Duration::from_secs(30 * 60),
+            call_timeout: Duration::from_secs(120),
+        }
+    }
+}
+
 /// USD price per million tokens for a model.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModelPrice {
@@ -269,10 +314,8 @@ impl SharedRedactor {
     ) -> Result<(), secret_store::SecretError> {
         let mut r = Redactor::new();
         if let Some(s) = store {
-            for name in s.list_names()? {
-                if let Some(v) = s.get(&name)? {
-                    add_with_variants(&mut r, v.expose());
-                }
+            for value in s.all_values()? {
+                add_with_variants(&mut r, value.expose());
             }
         }
         for e in extra {
@@ -397,6 +440,8 @@ pub struct LoopConfig {
     pub redactor: Option<SharedRedactor>,
     /// Memory hook; `None` = no memory.
     pub memory: Option<MemoryConfig>,
+    /// Rolling summary of long chats.
+    pub history_summary: HistorySummaryConfig,
     /// Optional bounded pre-retrieval decision; `None` adds no automatic search.
     pub knowledge_decider: Option<Arc<dyn crate::KnowledgeDecider>>,
     /// How long a schedule-started run waits for an approval (or a question
@@ -418,7 +463,7 @@ pub struct LoopConfig {
     /// when that is set.
     pub secret_request_timeout: Duration,
     /// How long the form of a mission's `secret_request` stays open (default
-    /// [`DEFAULT_MISSION_SECRET_REQUEST_TIMEOUT`]). Nothing waits on it: the item is parked.
+    /// `DEFAULT_MISSION_SECRET_REQUEST_TIMEOUT`). Nothing waits on it: the item is parked.
     pub mission_secret_request_timeout: Duration,
     /// Handovers (a CAPTCHA, a one-time code) one run may ask the owner for
     /// (default [`DEFAULT_MAX_HANDOVERS_PER_RUN`]). A refused or cancelled one counts.
@@ -528,6 +573,7 @@ impl Default for LoopConfig {
             router_budget: Duration::from_secs(2),
             redactor: None,
             memory: None,
+            history_summary: HistorySummaryConfig::default(),
             knowledge_decider: None,
             schedule_approval_timeout: DEFAULT_SCHEDULE_APPROVAL_TIMEOUT,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,

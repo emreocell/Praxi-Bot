@@ -198,6 +198,7 @@ impl MailboxProvider for ImapSmtpProvider {
             smtp::send(&self.acct, &pw, msg).await
         })
         .await?;
+        // The Message-ID we wrote into the mail: replies and bounces name it.
         Ok(Receipt {
             id: response,
             thread_id: None,

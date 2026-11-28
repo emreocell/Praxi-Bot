@@ -207,6 +207,8 @@ impl Core {
             chat: ChatRef(format!("email:{folder}")),
             sender,
             message_id: Some(uid.to_string()),
+            forwarded: false,
+            edited: false,
             kind: IncomingKind::Text(text),
         }
     }
@@ -537,6 +539,8 @@ impl Core {
                 recipients,
                 subject: reply.subject.clone(),
                 message_id: receipt.id.clone(),
+                thread_id: receipt.thread_id.clone(),
+                mission_id: None,
                 opt_out_line: false,
                 overridden: Vec::new(),
             });

@@ -11,24 +11,24 @@ Regenerate with `python scripts/license_report.py` and verify in CI with
 
 ## Summary
 
-- Rust external crates: **935**
+- Rust external crates: **944**
 - Desktop UI production npm packages: **24**
 
 | Licence expression | Packages |
 | --- | ---: |
-| `MIT OR Apache-2.0` | 442 |
-| `MIT` | 225 |
+| `MIT OR Apache-2.0` | 444 |
+| `MIT` | 227 |
 | `Apache-2.0 OR MIT` | 98 |
 | `MIT/Apache-2.0` | 43 |
-| `Zlib OR Apache-2.0 OR MIT` | 23 |
+| `Zlib OR Apache-2.0 OR MIT` | 21 |
 | `Unicode-3.0` | 18 |
+| `Unlicense OR MIT` | 16 |
 | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | 14 |
-| `Apache-2.0` | 9 |
-| `Unlicense OR MIT` | 9 |
+| `Apache-2.0` | 10 |
 | `BSD-3-Clause` | 6 |
 | `ISC` | 6 |
-| `MPL-2.0` | 6 |
 | `MIT OR Apache-2.0 OR Zlib` | 5 |
+| `MPL-2.0` | 5 |
 | `Apache-2.0/MIT` | 4 |
 | `Unlicense/MIT` | 4 |
 | `(MIT OR Apache-2.0) AND Unicode-3.0` | 3 |
@@ -67,17 +67,16 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 
 | Package | Version | Ecosystem | Required notice | Repository |
 | --- | --- | --- | --- | --- |
-| `attohttpc` | `0.30.1` | cargo | `MPL-2.0` | [https://github.com/sbstp/attohttpc](https://github.com/sbstp/attohttpc) |
 | `cssparser` | `0.36.0` | cargo | `MPL-2.0` | [https://github.com/servo/rust-cssparser](https://github.com/servo/rust-cssparser) |
 | `cssparser-macros` | `0.6.1` | cargo | `MPL-2.0` | [https://github.com/servo/rust-cssparser](https://github.com/servo/rust-cssparser) |
 | `dtoa-short` | `0.3.5` | cargo | `MPL-2.0` | [https://github.com/upsuper/dtoa-short](https://github.com/upsuper/dtoa-short) |
-| `icu_collections` | `2.1.1` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_locale_core` | `2.1.1` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_normalizer` | `2.1.1` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_normalizer_data` | `2.1.1` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_properties` | `2.1.2` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_properties_data` | `2.1.2` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_provider` | `2.1.1` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_collections` | `2.4.0` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_locale_core` | `2.4.0` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_normalizer` | `2.4.0` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_normalizer_data` | `2.4.0` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_properties` | `2.4.0` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_properties_data` | `2.4.0` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_provider` | `2.4.0` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `jpeg-encoder` | `0.7.1` | cargo | `IJG` | [https://github.com/vstroebel/jpeg-encoder](https://github.com/vstroebel/jpeg-encoder) |
 | `litemap` | `0.8.3` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `option-ext` | `0.2.0` | cargo | `MPL-2.0` | [https://github.com/soc/option-ext.git](https://github.com/soc/option-ext.git) |
@@ -87,8 +86,8 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `unicode-ident` | `1.0.27` | cargo | `Unicode-3.0` | [https://github.com/dtolnay/unicode-ident](https://github.com/dtolnay/unicode-ident) |
 | `unicode-normalization` | `0.1.26` | cargo | `Unicode-3.0` | [https://github.com/unicode-rs/unicode-normalization](https://github.com/unicode-rs/unicode-normalization) |
 | `unicode-properties` | `0.1.5` | cargo | `Unicode-3.0` | [https://github.com/unicode-rs/unicode-properties](https://github.com/unicode-rs/unicode-properties) |
-| `webpki-root-certs` | `1.0.11` | cargo | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
-| `webpki-roots` | `1.0.11` | cargo | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
+| `webpki-root-certs` | `1.0.12` | cargo | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
+| `webpki-roots` | `1.0.12` | cargo | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
 | `writeable` | `0.6.4` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `yoke` | `0.8.4` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `yoke-derive` | `0.8.4` | cargo | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
@@ -109,12 +108,12 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `adler2` | `2.0.1` | `0BSD OR MIT OR Apache-2.0` | [https://github.com/oyvindln/adler2](https://github.com/oyvindln/adler2) |
 | `aead` | `0.5.2` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |
 | `aes` | `0.8.4` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/block-ciphers](https://github.com/RustCrypto/block-ciphers) |
-| `aes` | `0.9.2` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/block-ciphers](https://github.com/RustCrypto/block-ciphers) |
+| `aes` | `0.9.4` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/block-ciphers](https://github.com/RustCrypto/block-ciphers) |
 | `aes-gcm` | `0.10.3` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/AEADs](https://github.com/RustCrypto/AEADs) |
 | `aho-corasick` | `1.1.5` | `Unlicense OR MIT` | [https://github.com/BurntSushi/aho-corasick](https://github.com/BurntSushi/aho-corasick) |
 | `alloc-no-stdlib` | `2.0.4` | `BSD-3-Clause` | [https://github.com/dropbox/rust-alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) |
 | `alloc-stdlib` | `0.2.4` | `BSD-3-Clause` | [https://github.com/dropbox/rust-alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) |
-| `allocator-api2` | `0.2.21` | `MIT OR Apache-2.0` | [https://github.com/zakarumych/allocator-api2](https://github.com/zakarumych/allocator-api2) |
+| `allocator-api2` | `0.2.22` | `MIT OR Apache-2.0` | [https://github.com/zakarumych/allocator-api2](https://github.com/zakarumych/allocator-api2) |
 | `ambient-authority` | `0.0.2` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/sunfishcode/ambient-authority](https://github.com/sunfishcode/ambient-authority) |
 | `android_system_properties` | `0.1.6` | `MIT OR Apache-2.0` | [https://github.com/nical/android_system_properties](https://github.com/nical/android_system_properties) |
 | `anstream` | `1.0.0` | `MIT OR Apache-2.0` | [https://github.com/rust-cli/anstyle.git](https://github.com/rust-cli/anstyle.git) |
@@ -122,8 +121,8 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `anstyle-parse` | `1.0.0` | `MIT OR Apache-2.0` | [https://github.com/rust-cli/anstyle.git](https://github.com/rust-cli/anstyle.git) |
 | `anstyle-query` | `1.1.5` | `MIT OR Apache-2.0` | [https://github.com/rust-cli/anstyle.git](https://github.com/rust-cli/anstyle.git) |
 | `anstyle-wincon` | `3.0.11` | `MIT OR Apache-2.0` | [https://github.com/rust-cli/anstyle.git](https://github.com/rust-cli/anstyle.git) |
-| `anyhow` | `1.0.104` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/anyhow](https://github.com/dtolnay/anyhow) |
-| `arc-swap` | `1.9.3` | `MIT OR Apache-2.0` | [https://github.com/vorner/arc-swap](https://github.com/vorner/arc-swap) |
+| `anyhow` | `1.0.105` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/anyhow](https://github.com/dtolnay/anyhow) |
+| `arc-swap` | `1.9.5` | `MIT OR Apache-2.0` | [https://github.com/vorner/arc-swap](https://github.com/vorner/arc-swap) |
 | `argon2` | `0.5.3` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/password-hashes/tree/master/argon2](https://github.com/RustCrypto/password-hashes/tree/master/argon2) |
 | `arrayvec` | `0.7.8` | `MIT OR Apache-2.0` | [https://github.com/bluss/arrayvec](https://github.com/bluss/arrayvec) |
 | `asn1-rs` | `0.7.2` | `MIT OR Apache-2.0` | [https://github.com/rusticata/asn1-rs.git](https://github.com/rusticata/asn1-rs.git) |
@@ -133,7 +132,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `async-broadcast` | `0.7.2` | `MIT OR Apache-2.0` | [https://github.com/smol-rs/async-broadcast](https://github.com/smol-rs/async-broadcast) |
 | `async-channel` | `1.9.0` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/async-channel](https://github.com/smol-rs/async-channel) |
 | `async-channel` | `2.5.0` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/async-channel](https://github.com/smol-rs/async-channel) |
-| `async-compression` | `0.4.52` | `MIT OR Apache-2.0` | [https://github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |
+| `async-compression` | `0.4.54` | `MIT OR Apache-2.0` | [https://github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |
 | `async-executor` | `1.14.1` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/async-executor](https://github.com/smol-rs/async-executor) |
 | `async-imap` | `0.12.0` | `MIT OR Apache-2.0` | [https://github.com/async-email/async-imap](https://github.com/async-email/async-imap) |
 | `async-io` | `2.6.0` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/async-io](https://github.com/smol-rs/async-io) |
@@ -152,7 +151,6 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `atspi-common` | `0.14.0` | `Apache-2.0 OR MIT` | [https://github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |
 | `atspi-connection` | `0.14.0` | `Apache-2.0 OR MIT` | [https://github.com/odilia-app/atspi/](https://github.com/odilia-app/atspi/) |
 | `atspi-proxies` | `0.14.0` | `Apache-2.0 OR MIT` | [https://github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |
-| `attohttpc` | `0.30.1` | `MPL-2.0` | [https://github.com/sbstp/attohttpc](https://github.com/sbstp/attohttpc) |
 | `autocfg` | `1.5.1` | `Apache-2.0 OR MIT` | [https://github.com/cuviper/autocfg](https://github.com/cuviper/autocfg) |
 | `axum` | `0.8.9` | `MIT` | [https://github.com/tokio-rs/axum](https://github.com/tokio-rs/axum) |
 | `axum-core` | `0.5.6` | `MIT` | [https://github.com/tokio-rs/axum](https://github.com/tokio-rs/axum) |
@@ -168,7 +166,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `bitflags` | `1.3.2` | `MIT/Apache-2.0` | [https://github.com/bitflags/bitflags](https://github.com/bitflags/bitflags) |
 | `bitflags` | `2.13.2` | `MIT OR Apache-2.0` | [https://github.com/bitflags/bitflags](https://github.com/bitflags/bitflags) |
 | `blake2` | `0.10.6` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
-| `blake3` | `1.8.7` | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | [https://github.com/BLAKE3-team/BLAKE3](https://github.com/BLAKE3-team/BLAKE3) |
+| `blake3` | `1.8.8` | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | [https://github.com/BLAKE3-team/BLAKE3](https://github.com/BLAKE3-team/BLAKE3) |
 | `block-buffer` | `0.10.4` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `block-buffer` | `0.12.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `block-padding` | `0.3.3` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
@@ -177,12 +175,13 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `blocking` | `1.7.0` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/blocking](https://github.com/smol-rs/blocking) |
 | `brotli` | `8.0.4` | `BSD-3-Clause AND MIT` | [https://github.com/dropbox/rust-brotli](https://github.com/dropbox/rust-brotli) |
 | `brotli-decompressor` | `5.0.3` | `BSD-3-Clause/MIT` | [https://github.com/dropbox/rust-brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) |
-| `bstr` | `1.13.1` | `MIT OR Apache-2.0` | [https://github.com/BurntSushi/bstr](https://github.com/BurntSushi/bstr) |
-| `bumpalo` | `3.20.3` | `MIT OR Apache-2.0` | [https://github.com/fitzgen/bumpalo](https://github.com/fitzgen/bumpalo) |
+| `bs58` | `0.5.1` | `MIT/Apache-2.0` | [https://github.com/Nullus157/bs58-rs](https://github.com/Nullus157/bs58-rs) |
+| `bstr` | `1.14.0` | `MIT OR Apache-2.0` | [https://github.com/BurntSushi/bstr](https://github.com/BurntSushi/bstr) |
+| `bumpalo` | `3.20.4` | `MIT OR Apache-2.0` | [https://github.com/fitzgen/bumpalo](https://github.com/fitzgen/bumpalo) |
 | `bytemuck` | `1.25.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/Lokathor/bytemuck](https://github.com/Lokathor/bytemuck) |
 | `byteorder` | `1.5.0` | `Unlicense OR MIT` | [https://github.com/BurntSushi/byteorder](https://github.com/BurntSushi/byteorder) |
 | `byteorder-lite` | `0.1.0` | `Unlicense OR MIT` | [https://github.com/image-rs/byteorder-lite](https://github.com/image-rs/byteorder-lite) |
-| `bytes` | `1.12.1` | `MIT` | [https://github.com/tokio-rs/bytes](https://github.com/tokio-rs/bytes) |
+| `bytes` | `1.12.2` | `MIT` | [https://github.com/tokio-rs/bytes](https://github.com/tokio-rs/bytes) |
 | `cairo-rs` | `0.18.5` | `MIT` | [https://github.com/gtk-rs/gtk-rs-core](https://github.com/gtk-rs/gtk-rs-core) |
 | `cairo-sys-rs` | `0.18.2` | `MIT` | [https://github.com/gtk-rs/gtk-rs-core](https://github.com/gtk-rs/gtk-rs-core) |
 | `calamine` | `0.38.0` | `MIT` | [https://github.com/tafia/calamine](https://github.com/tafia/calamine) |
@@ -195,7 +194,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `cargo_toml` | `0.22.3` | `Apache-2.0 OR MIT` | [https://gitlab.com/lib.rs/cargo_toml](https://gitlab.com/lib.rs/cargo_toml) |
 | `cbc` | `0.1.2` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/block-modes](https://github.com/RustCrypto/block-modes) |
 | `cbc` | `0.2.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/block-modes](https://github.com/RustCrypto/block-modes) |
-| `cc` | `1.11.1` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |
+| `cc` | `1.12.0` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |
 | `cesu8` | `1.1.0` | `Apache-2.0/MIT` | [https://github.com/emk/cesu8-rs](https://github.com/emk/cesu8-rs) |
 | `cfb` | `0.7.3` | `MIT` | [https://github.com/mdsteele/rust-cfb](https://github.com/mdsteele/rust-cfb) |
 | `cfg-expr` | `0.15.8` | `MIT OR Apache-2.0` | [https://github.com/EmbarkStudios/cfg-expr](https://github.com/EmbarkStudios/cfg-expr) |
@@ -209,23 +208,23 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `chrono-tz` | `0.10.4` | `MIT OR Apache-2.0` | [https://github.com/chronotope/chrono-tz](https://github.com/chronotope/chrono-tz) |
 | `cipher` | `0.4.4` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |
 | `cipher` | `0.5.2` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |
-| `clap` | `4.6.7` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
-| `clap_builder` | `4.6.7` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
+| `clap` | `4.6.10` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
+| `clap_builder` | `4.6.10` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
 | `clap_complete` | `4.6.12` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
-| `clap_derive` | `4.6.7` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
-| `clap_lex` | `1.1.1` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
+| `clap_derive` | `4.6.9` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
+| `clap_lex` | `1.1.2` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
 | `clap_mangen` | `0.3.4` | `MIT OR Apache-2.0` | [https://github.com/clap-rs/clap](https://github.com/clap-rs/clap) |
 | `cmov` | `0.5.4` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `cobs` | `0.3.0` | `MIT OR Apache-2.0` | [https://github.com/jamesmunns/cobs.rs](https://github.com/jamesmunns/cobs.rs) |
 | `codepage` | `0.1.3` | `Apache-2.0 OR MIT` | [https://github.com/hsivonen/codepage](https://github.com/hsivonen/codepage) |
 | `colorchoice` | `1.0.5` | `MIT OR Apache-2.0` | [https://github.com/rust-cli/anstyle.git](https://github.com/rust-cli/anstyle.git) |
 | `combine` | `4.6.9` | `MIT` | [https://github.com/Marwes/combine](https://github.com/Marwes/combine) |
-| `compression-codecs` | `0.4.47` | `MIT OR Apache-2.0` | [https://github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |
+| `compression-codecs` | `0.4.49` | `MIT OR Apache-2.0` | [https://github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |
 | `compression-core` | `0.4.34` | `MIT OR Apache-2.0` | [https://github.com/Nullus157/async-compression](https://github.com/Nullus157/async-compression) |
 | `concurrent-queue` | `2.5.0` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/concurrent-queue](https://github.com/smol-rs/concurrent-queue) |
 | `console` | `0.16.6` | `MIT` | [https://github.com/console-rs/console](https://github.com/console-rs/console) |
-| `const-oid` | `0.10.2` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |
-| `constant_time_eq` | `0.4.2` | `CC0-1.0 OR MIT-0 OR Apache-2.0` | [https://github.com/cesarb/constant_time_eq](https://github.com/cesarb/constant_time_eq) |
+| `const-oid` | `0.10.3` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |
+| `constant_time_eq` | `0.6.2` | `CC0-1.0 OR MIT-0 OR Apache-2.0` | [https://codeberg.org/cesarb/constant_time_eq](https://codeberg.org/cesarb/constant_time_eq) |
 | `convert_case` | `0.10.0` | `MIT` | [https://github.com/rutrum/convert-case](https://github.com/rutrum/convert-case) |
 | `cookie` | `0.18.3` | `MIT OR Apache-2.0` | [https://github.com/SergioBenitez/cookie-rs](https://github.com/SergioBenitez/cookie-rs) |
 | `cordyceps` | `0.3.5` | `MIT` | [https://github.com/hawkw/mycelium](https://github.com/hawkw/mycelium) |
@@ -238,7 +237,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `cpubits` | `0.1.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `cpufeatures` | `0.2.17` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `cpufeatures` | `0.3.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
-| `crc32fast` | `1.5.4` | `MIT OR Apache-2.0` | [https://github.com/srijs/rust-crc32fast](https://github.com/srijs/rust-crc32fast) |
+| `crc32fast` | `1.5.6` | `MIT OR Apache-2.0` | [https://github.com/srijs/rust-crc32fast](https://github.com/srijs/rust-crc32fast) |
 | `croner` | `5.0.1` | `MIT` | [https://github.com/hexagon/croner-rust](https://github.com/hexagon/croner-rust) |
 | `crossbeam-channel` | `0.5.17` | `MIT OR Apache-2.0` | [https://github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |
 | `crossbeam-deque` | `0.8.8` | `MIT OR Apache-2.0` | [https://github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |
@@ -256,14 +255,14 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `ctutils` | `0.4.8` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `curve25519-dalek` | `5.0.0` | `BSD-3-Clause` | [https://github.com/dalek-cryptography/curve25519-dalek/tree/main/curve25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/curve25519-dalek) |
 | `curve25519-dalek-derive` | `0.1.1` | `MIT/Apache-2.0` | [https://github.com/dalek-cryptography/curve25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek) |
-| `darling` | `0.21.3` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
-| `darling_core` | `0.21.3` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
-| `darling_macro` | `0.21.3` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
+| `darling` | `0.24.1` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
+| `darling_core` | `0.24.1` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
+| `darling_macro` | `0.24.1` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
 | `data-encoding` | `2.11.1` | `MIT` | [https://github.com/ia0/data-encoding](https://github.com/ia0/data-encoding) |
 | `data-encoding-macro` | `0.1.21` | `MIT` | [https://github.com/ia0/data-encoding](https://github.com/ia0/data-encoding) |
 | `data-encoding-macro-internal` | `0.1.19` | `MIT` | [https://github.com/ia0/data-encoding](https://github.com/ia0/data-encoding) |
 | `dbus` | `0.9.12` | `Apache-2.0/MIT` | [https://github.com/diwic/dbus-rs](https://github.com/diwic/dbus-rs) |
-| `dbus-secret-service` | `4.1.0` | `MIT OR Apache-2.0` | [https://github.com/brotskydotcom/dbus-secret-service.git](https://github.com/brotskydotcom/dbus-secret-service.git) |
+| `dbus-secret-service` | `4.2.0` | `MIT OR Apache-2.0` | [https://github.com/open-source-cooperative/dbus-secret-service.git](https://github.com/open-source-cooperative/dbus-secret-service.git) |
 | `deadpool` | `0.12.3` | `MIT OR Apache-2.0` | [https://github.com/bikeshedder/deadpool](https://github.com/bikeshedder/deadpool) |
 | `deadpool-runtime` | `0.1.4` | `MIT OR Apache-2.0` | [https://github.com/bikeshedder/deadpool](https://github.com/bikeshedder/deadpool) |
 | `debug_unsafe` | `0.1.4` | `MIT OR Apache-2.0` | [https://github.com/RoDmitry/debug_unsafe](https://github.com/RoDmitry/debug_unsafe) |
@@ -298,7 +297,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `ed25519-dalek` | `3.0.0` | `BSD-3-Clause` | [https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek) |
 | `ego-tree` | `0.11.1` | `ISC` | [https://github.com/rust-scraper/ego-tree](https://github.com/rust-scraper/ego-tree) |
 | `either` | `1.19.0` | `MIT OR Apache-2.0` | [https://github.com/rayon-rs/either](https://github.com/rayon-rs/either) |
-| `email_address` | `0.2.9` | `MIT` | [https://github.com/johnstonskj/rust-email_address.git](https://github.com/johnstonskj/rust-email_address.git) |
+| `email_address` | `0.2.10` | `MIT OR Apache-2.0` | [https://github.com/johnstonskj/rust-email_address.git](https://github.com/johnstonskj/rust-email_address.git) |
 | `embed-resource` | `3.0.12` | `MIT` | [https://github.com/nabijaczleweli/rust-embed-resource](https://github.com/nabijaczleweli/rust-embed-resource) |
 | `embed_plist` | `1.2.2` | `MIT OR Apache-2.0` | [https://github.com/nvzqz/embed-plist-rs](https://github.com/nvzqz/embed-plist-rs) |
 | `embedded-io` | `0.4.0` | `MIT OR Apache-2.0` | [https://github.com/embassy-rs/embedded-io](https://github.com/embassy-rs/embedded-io) |
@@ -311,7 +310,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `enumflags2_derive` | `0.7.12` | `MIT OR Apache-2.0` | [https://github.com/meithecatte/enumflags2](https://github.com/meithecatte/enumflags2) |
 | `equivalent` | `1.0.3` | `Apache-2.0 OR MIT` | [https://github.com/indexmap-rs/equivalent](https://github.com/indexmap-rs/equivalent) |
 | `erased-serde` | `0.4.11` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/erased-serde](https://github.com/dtolnay/erased-serde) |
-| `errno` | `0.3.14` | `MIT OR Apache-2.0` | [https://github.com/lambda-fairy/rust-errno](https://github.com/lambda-fairy/rust-errno) |
+| `errno` | `0.3.15` | `MIT OR Apache-2.0` | [https://github.com/lambda-fairy/rust-errno](https://github.com/lambda-fairy/rust-errno) |
 | `event-listener` | `2.5.3` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/event-listener](https://github.com/smol-rs/event-listener) |
 | `event-listener` | `5.4.2` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/event-listener](https://github.com/smol-rs/event-listener) |
 | `event-listener-strategy` | `0.5.4` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/event-listener-strategy](https://github.com/smol-rs/event-listener-strategy) |
@@ -324,9 +323,9 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `fiat-crypto` | `0.3.0` | `MIT OR Apache-2.0 OR BSD-1-Clause` | [https://github.com/mit-plv/fiat-crypto](https://github.com/mit-plv/fiat-crypto) |
 | `field-offset` | `0.3.6` | `MIT OR Apache-2.0` | [https://github.com/Diggsey/rust-field-offset](https://github.com/Diggsey/rust-field-offset) |
 | `filedescriptor` | `0.8.3` | `MIT` | [https://github.com/wezterm/wezterm](https://github.com/wezterm/wezterm) |
-| `filetime` | `0.2.29` | `MIT/Apache-2.0` | [https://github.com/alexcrichton/filetime](https://github.com/alexcrichton/filetime) |
-| `find-msvc-tools` | `0.1.15` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |
-| `fixedbitset` | `0.5.7` | `MIT OR Apache-2.0` | [https://github.com/petgraph/fixedbitset](https://github.com/petgraph/fixedbitset) |
+| `filetime` | `0.2.30` | `MIT/Apache-2.0` | [https://github.com/alexcrichton/filetime](https://github.com/alexcrichton/filetime) |
+| `find-msvc-tools` | `0.1.16` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |
+| `fixedbitset` | `0.5.9` | `MIT OR Apache-2.0` | [https://github.com/petgraph/fixedbitset](https://github.com/petgraph/fixedbitset) |
 | `flatbuffers` | `24.12.23` | `Apache-2.0` | [https://github.com/google/flatbuffers](https://github.com/google/flatbuffers) |
 | `flate2` | `1.1.11` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/flate2-rs](https://github.com/rust-lang/flate2-rs) |
 | `fnv` | `1.0.7` | `Apache-2.0 / MIT` | [https://github.com/servo/rust-fnv](https://github.com/servo/rust-fnv) |
@@ -372,15 +371,15 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `glib-sys` | `0.18.1` | `MIT` | [https://github.com/gtk-rs/gtk-rs-core](https://github.com/gtk-rs/gtk-rs-core) |
 | `glob` | `0.3.4` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/glob](https://github.com/rust-lang/glob) |
 | `global-hotkey` | `0.8.0` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/global-hotkey](https://github.com/tauri-apps/global-hotkey) |
-| `globset` | `0.4.19` | `Unlicense OR MIT` | [https://github.com/BurntSushi/ripgrep/tree/master/crates/globset](https://github.com/BurntSushi/ripgrep/tree/master/crates/globset) |
+| `globset` | `0.4.22` | `Unlicense OR MIT` | [https://github.com/BurntSushi/ripgrep/tree/master/crates/globset](https://github.com/BurntSushi/ripgrep/tree/master/crates/globset) |
 | `gloo-timers` | `0.3.0` | `MIT OR Apache-2.0` | [https://github.com/rustwasm/gloo/tree/master/crates/timers](https://github.com/rustwasm/gloo/tree/master/crates/timers) |
 | `gobject-sys` | `0.18.0` | `MIT` | [https://github.com/gtk-rs/gtk-rs-core](https://github.com/gtk-rs/gtk-rs-core) |
 | `gtk` | `0.18.2` | `MIT` | [https://github.com/gtk-rs/gtk3-rs](https://github.com/gtk-rs/gtk3-rs) |
 | `gtk-sys` | `0.18.2` | `MIT` | [https://github.com/gtk-rs/gtk3-rs](https://github.com/gtk-rs/gtk3-rs) |
 | `gtk3-macros` | `0.18.2` | `MIT` | [https://github.com/gtk-rs/gtk3-rs](https://github.com/gtk-rs/gtk3-rs) |
-| `h2` | `0.4.20` | `MIT` | [https://github.com/hyperium/h2](https://github.com/hyperium/h2) |
+| `h2` | `0.4.21` | `MIT` | [https://github.com/hyperium/h2](https://github.com/hyperium/h2) |
 | `hashbrown` | `0.12.3` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |
-| `hashbrown` | `0.17.1` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |
+| `hashbrown` | `0.17.2` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/hashbrown](https://github.com/rust-lang/hashbrown) |
 | `hashify` | `0.2.9` | `Apache-2.0 OR MIT` | [https://github.com/stalwartlabs/hashify](https://github.com/stalwartlabs/hashify) |
 | `hashlink` | `0.12.2` | `MIT OR Apache-2.0` | [https://github.com/djc/hashlink](https://github.com/djc/hashlink) |
 | `heck` | `0.4.1` | `MIT OR Apache-2.0` | [https://github.com/withoutboats/heck](https://github.com/withoutboats/heck) |
@@ -397,25 +396,25 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `httparse` | `1.10.1` | `MIT OR Apache-2.0` | [https://github.com/seanmonstar/httparse](https://github.com/seanmonstar/httparse) |
 | `httpdate` | `1.0.3` | `MIT OR Apache-2.0` | [https://github.com/pyfisch/httpdate](https://github.com/pyfisch/httpdate) |
 | `hybrid-array` | `0.4.15` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hybrid-array](https://github.com/RustCrypto/hybrid-array) |
-| `hyper` | `1.12.0` | `MIT` | [https://github.com/hyperium/hyper](https://github.com/hyperium/hyper) |
+| `hyper` | `1.13.0` | `MIT` | [https://github.com/hyperium/hyper](https://github.com/hyperium/hyper) |
 | `hyper-rustls` | `0.27.10` | `Apache-2.0 OR ISC OR MIT` | [https://github.com/rustls/hyper-rustls](https://github.com/rustls/hyper-rustls) |
 | `hyper-tls` | `0.6.0` | `MIT/Apache-2.0` | [https://github.com/hyperium/hyper-tls](https://github.com/hyperium/hyper-tls) |
 | `hyper-util` | `0.1.21` | `MIT` | [https://github.com/hyperium/hyper-util](https://github.com/hyperium/hyper-util) |
 | `iana-time-zone` | `0.1.65` | `MIT OR Apache-2.0` | [https://github.com/strawlab/iana-time-zone](https://github.com/strawlab/iana-time-zone) |
 | `iana-time-zone-haiku` | `0.1.2` | `MIT OR Apache-2.0` | [https://github.com/strawlab/iana-time-zone](https://github.com/strawlab/iana-time-zone) |
 | `ico` | `0.5.0` | `MIT` | [https://github.com/mdsteele/rust-ico](https://github.com/mdsteele/rust-ico) |
-| `icu_collections` | `2.1.1` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_locale_core` | `2.1.1` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_normalizer` | `2.1.1` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_normalizer_data` | `2.1.1` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_properties` | `2.1.2` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_properties_data` | `2.1.2` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `icu_provider` | `2.1.1` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_collections` | `2.4.0` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_locale_core` | `2.4.0` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_normalizer` | `2.4.0` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_normalizer_data` | `2.4.0` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_properties` | `2.4.0` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_properties_data` | `2.4.0` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
+| `icu_provider` | `2.4.0` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `ident_case` | `1.0.1` | `MIT/Apache-2.0` | [https://github.com/TedDriggs/ident_case](https://github.com/TedDriggs/ident_case) |
 | `identity-hash` | `0.1.0` | `Apache-2.0 OR MIT` | [https://github.com/offsetting/identity-hash](https://github.com/offsetting/identity-hash) |
 | `idna` | `1.1.0` | `MIT OR Apache-2.0` | [https://github.com/servo/rust-url/](https://github.com/servo/rust-url/) |
-| `idna_adapter` | `1.2.1` | `Apache-2.0 OR MIT` | [https://github.com/hsivonen/idna_adapter](https://github.com/hsivonen/idna_adapter) |
-| `igd-next` | `0.17.1` | `MIT` | [https://github.com/dariusc93/rust-igd](https://github.com/dariusc93/rust-igd) |
+| `idna_adapter` | `1.2.2` | `Apache-2.0 OR MIT` | [https://github.com/hsivonen/idna_adapter](https://github.com/hsivonen/idna_adapter) |
+| `igd-next` | `0.18.0` | `MIT` | [https://github.com/dariusc93/rust-igd](https://github.com/dariusc93/rust-igd) |
 | `image` | `0.25.10` | `MIT OR Apache-2.0` | [https://github.com/image-rs/image](https://github.com/image-rs/image) |
 | `image-webp` | `0.2.4` | `MIT OR Apache-2.0` | [https://github.com/image-rs/image-webp](https://github.com/image-rs/image-webp) |
 | `imap-proto` | `0.17.0` | `MIT OR Apache-2.0` | [https://github.com/djc/imap-proto](https://github.com/djc/imap-proto) |
@@ -430,21 +429,28 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `io-lifetimes` | `3.0.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/sunfishcode/io-lifetimes](https://github.com/sunfishcode/io-lifetimes) |
 | `ipconfig` | `0.3.4` | `MIT/Apache-2.0` | [https://github.com/liranringel/ipconfig](https://github.com/liranringel/ipconfig) |
 | `ipnet` | `2.12.2` | `MIT OR Apache-2.0` | [https://github.com/krisprice/ipnet](https://github.com/krisprice/ipnet) |
-| `iroh` | `1.4.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
-| `iroh-base` | `1.4.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
-| `iroh-dns` | `1.4.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
-| `iroh-metrics` | `1.0.2` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh-metrics](https://github.com/n0-computer/iroh-metrics) |
+| `iroh` | `1.5.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
+| `iroh-base` | `1.5.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
+| `iroh-dns` | `1.5.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
+| `iroh-metrics` | `1.0.3` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh-metrics](https://github.com/n0-computer/iroh-metrics) |
 | `iroh-metrics-derive` | `1.0.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh-metrics](https://github.com/n0-computer/iroh-metrics) |
-| `iroh-relay` | `1.4.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
+| `iroh-relay` | `1.5.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
 | `is-docker` | `0.2.0` | `MIT` | [https://github.com/TheLarkInn/is-docker](https://github.com/TheLarkInn/is-docker) |
 | `is-wsl` | `0.4.0` | `MIT` | [https://github.com/TheLarkInn/is-wsl](https://github.com/TheLarkInn/is-wsl) |
 | `is_terminal_polyfill` | `1.70.2` | `MIT OR Apache-2.0` | [https://github.com/polyfill-rs/is_terminal_polyfill](https://github.com/polyfill-rs/is_terminal_polyfill) |
-| `itoa` | `1.0.18` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/itoa](https://github.com/dtolnay/itoa) |
+| `itoa` | `1.0.19` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/itoa](https://github.com/dtolnay/itoa) |
 | `javascriptcore-rs` | `1.1.2` | `MIT` | [https://github.com/tauri-apps/javascriptcore-rs](https://github.com/tauri-apps/javascriptcore-rs) |
 | `javascriptcore-rs-sys` | `1.1.1` | `MIT` | [https://github.com/tauri-apps/javascriptcore-rs](https://github.com/tauri-apps/javascriptcore-rs) |
+| `jiff` | `0.2.46` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
 | `jiff` | `1.0.3` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
+| `jiff-core` | `0.1.8` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
 | `jiff-core` | `1.0.2` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
+| `jiff-static` | `0.2.46` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
 | `jiff-static` | `1.0.3` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
+| `jiff-tzdb` | `0.1.10` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
+| `jiff-tzdb` | `1.0.0` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
+| `jiff-tzdb-platform` | `0.1.3` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
+| `jiff-tzdb-platform` | `1.0.0` | `Unlicense OR MIT` | [https://github.com/BurntSushi/jiff](https://github.com/BurntSushi/jiff) |
 | `jni` | `0.21.1` | `MIT/Apache-2.0` | [https://github.com/jni-rs/jni-rs](https://github.com/jni-rs/jni-rs) |
 | `jni` | `0.22.4` | `MIT OR Apache-2.0` | [https://github.com/jni-rs/jni-rs](https://github.com/jni-rs/jni-rs) |
 | `jni-macros` | `0.22.4` | `MIT OR Apache-2.0` | [https://github.com/jni-rs/jni-rs](https://github.com/jni-rs/jni-rs) |
@@ -469,9 +475,10 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `litemap` | `0.8.3` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `lock_api` | `0.4.14` | `MIT OR Apache-2.0` | [https://github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |
 | `log` | `0.4.35` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/log](https://github.com/rust-lang/log) |
-| `loom` | `0.7.2` | `MIT` | [https://github.com/tokio-rs/loom](https://github.com/tokio-rs/loom) |
+| `loom` | `0.7.3` | `MIT` | [https://github.com/tokio-rs/loom](https://github.com/tokio-rs/loom) |
 | `lopdf` | `0.47.0` | `MIT` | [https://github.com/J-F-Liu/lopdf.git](https://github.com/J-F-Liu/lopdf.git) |
 | `lru` | `0.18.5` | `MIT` | [https://github.com/jeromefroe/lru-rs.git](https://github.com/jeromefroe/lru-rs.git) |
+| `lru` | `0.19.2` | `MIT` | [https://github.com/jeromefroe/lru-rs.git](https://github.com/jeromefroe/lru-rs.git) |
 | `lru-slab` | `0.1.3` | `MIT OR Apache-2.0 OR Zlib` | [https://github.com/Ralith/lru-slab](https://github.com/Ralith/lru-slab) |
 | `mac-addr` | `0.3.0` | `MIT` | [https://github.com/shellrow/mac-addr](https://github.com/shellrow/mac-addr) |
 | `mac-notification-sys` | `0.6.15` | `MIT/Apache-2.0` | [https://github.com/h4llow3En/mac-notification-sys](https://github.com/h4llow3En/mac-notification-sys) |
@@ -489,42 +496,40 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `mime` | `0.3.18` | `MIT OR Apache-2.0` | [https://github.com/hyperium/mime](https://github.com/hyperium/mime) |
 | `minimal-lexical` | `0.2.1` | `MIT/Apache-2.0` | [https://github.com/Alexhuszagh/minimal-lexical](https://github.com/Alexhuszagh/minimal-lexical) |
 | `minisign-verify` | `0.2.5` | `MIT` | [https://github.com/jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) |
+| `minisign-verify` | `0.3.0` | `MIT` | [https://github.com/jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) |
 | `miniz_oxide` | `0.8.9` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | `miniz_oxide` | `0.9.1` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
-| `mio` | `1.2.4` | `MIT` | [https://github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |
+| `mio` | `1.2.5` | `MIT` | [https://github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |
 | `moxcms` | `0.8.1` | `BSD-3-Clause OR Apache-2.0` | [https://github.com/awxkee/moxcms.git](https://github.com/awxkee/moxcms.git) |
 | `muda` | `0.19.3` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/muda](https://github.com/tauri-apps/muda) |
 | `multer` | `3.1.0` | `MIT` | [https://github.com/rwf2/multer](https://github.com/rwf2/multer) |
 | `multiversion_no_op` | `1.0.0` | `Apache-2.0 OR MIT` | [https://github.com/hsivonen/multiversion_no_op](https://github.com/hsivonen/multiversion_no_op) |
-| `n0-dns-resolver` | `0.1.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
-| `n0-error` | `1.0.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/n0-error](https://github.com/n0-computer/n0-error) |
-| `n0-error-macros` | `1.0.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/n0-error](https://github.com/n0-computer/n0-error) |
+| `n0-dns-resolver` | `0.1.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
+| `n0-error` | `1.0.3` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/n0-error](https://github.com/n0-computer/n0-error) |
+| `n0-error-macros` | `1.0.3` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/n0-error](https://github.com/n0-computer/n0-error) |
 | `n0-future` | `0.3.2` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/n0-future](https://github.com/n0-computer/n0-future) |
 | `n0-watcher` | `1.0.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/n0-watcher](https://github.com/n0-computer/n0-watcher) |
 | `native-tls` | `0.2.18` | `MIT OR Apache-2.0` | [https://github.com/rust-native-tls/rust-native-tls](https://github.com/rust-native-tls/rust-native-tls) |
 | `ndk` | `0.9.0` | `MIT OR Apache-2.0` | [https://github.com/rust-mobile/ndk](https://github.com/rust-mobile/ndk) |
 | `ndk-context` | `0.1.1` | `MIT OR Apache-2.0` | [https://github.com/rust-windowing/android-ndk-rs](https://github.com/rust-windowing/android-ndk-rs) |
 | `ndk-sys` | `0.6.0+11769913` | `MIT OR Apache-2.0` | [https://github.com/rust-mobile/ndk](https://github.com/rust-mobile/ndk) |
-| `netdev` | `0.45.1` | `MIT` | [https://github.com/shellrow/netdev](https://github.com/shellrow/netdev) |
-| `netdev` | `0.46.3` | `MIT` | [https://github.com/shellrow/netdev](https://github.com/shellrow/netdev) |
-| `netlink-packet-core` | `0.8.2` | `MIT` | [https://github.com/rust-netlink/netlink-packet-core](https://github.com/rust-netlink/netlink-packet-core) |
+| `netdev` | `0.47.0` | `MIT` | [https://github.com/shellrow/netdev](https://github.com/shellrow/netdev) |
 | `netlink-packet-core` | `0.9.0` | `MIT` | [https://github.com/rust-netlink/netlink-packet-core](https://github.com/rust-netlink/netlink-packet-core) |
-| `netlink-packet-route` | `0.31.0` | `MIT` | [https://github.com/rust-netlink/netlink-packet-route](https://github.com/rust-netlink/netlink-packet-route) |
 | `netlink-packet-route` | `0.33.0` | `MIT` | [https://github.com/rust-netlink/netlink-packet-route](https://github.com/rust-netlink/netlink-packet-route) |
-| `netlink-proto` | `0.12.2` | `MIT` | [https://github.com/rust-netlink/netlink-proto](https://github.com/rust-netlink/netlink-proto) |
-| `netlink-sys` | `0.8.8` | `MIT` | [https://github.com/rust-netlink/netlink-sys](https://github.com/rust-netlink/netlink-sys) |
+| `netlink-proto` | `0.13.0` | `MIT` | [https://github.com/rust-netlink/netlink-proto](https://github.com/rust-netlink/netlink-proto) |
 | `netlink-sys` | `0.9.0` | `MIT` | [https://github.com/rust-netlink/netlink-sys](https://github.com/rust-netlink/netlink-sys) |
-| `netwatch` | `0.19.3` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/net-tools](https://github.com/n0-computer/net-tools) |
+| `netwatch` | `0.20.2` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/net-tools](https://github.com/n0-computer/net-tools) |
 | `new_debug_unreachable` | `1.0.6` | `MIT` | [https://github.com/mbrubeck/rust-debug-unreachable](https://github.com/mbrubeck/rust-debug-unreachable) |
 | `nix` | `0.28.0` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
 | `nix` | `0.29.0` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
-| `nix` | `0.31.3` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
+| `nix` | `0.31.4` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
+| `nix` | `0.32.0` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
 | `nom` | `7.1.3` | `MIT` | [https://github.com/Geal/nom](https://github.com/Geal/nom) |
 | `nom` | `8.0.0` | `MIT` | [https://github.com/rust-bakery/nom](https://github.com/rust-bakery/nom) |
-| `noq` | `1.4.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/noq](https://github.com/n0-computer/noq) |
-| `noq-proto` | `1.4.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/noq](https://github.com/n0-computer/noq) |
-| `noq-udp` | `1.4.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/noq](https://github.com/n0-computer/noq) |
-| `notify-rust` | `4.17.0` | `MIT/Apache-2.0` | [https://github.com/hoodie/notify-rust](https://github.com/hoodie/notify-rust) |
+| `noq` | `1.5.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/noq](https://github.com/n0-computer/noq) |
+| `noq-proto` | `1.5.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/noq](https://github.com/n0-computer/noq) |
+| `noq-udp` | `1.5.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/noq](https://github.com/n0-computer/noq) |
+| `notify-rust` | `4.19.0` | `MIT OR Apache-2.0` | [https://github.com/hoodie/notify-rust](https://github.com/hoodie/notify-rust) |
 | `ntapi` | `0.4.3` | `Apache-2.0 OR MIT` | [https://github.com/MSxDOS/ntapi](https://github.com/MSxDOS/ntapi) |
 | `nu-ansi-term` | `0.50.3` | `MIT` | [https://github.com/nushell/nu-ansi-term](https://github.com/nushell/nu-ansi-term) |
 | `num` | `0.4.3` | `MIT OR Apache-2.0` | [https://github.com/rust-num/num](https://github.com/rust-num/num) |
@@ -548,7 +553,6 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `objc2-core-image` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-core-location` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-core-text` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
-| `objc2-core-wlan` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-encode` | `4.1.0` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-exception-helper` | `0.1.1` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-foundation` | `0.3.2` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
@@ -557,7 +561,6 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `objc2-osa-kit` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-quartz-core` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-security` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
-| `objc2-security-foundation` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-system-configuration` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-ui-kit` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | `objc2-user-notifications` | `0.3.2` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
@@ -582,7 +585,6 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `parking_lot` | `0.12.5` | `MIT OR Apache-2.0` | [https://github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |
 | `parking_lot_core` | `0.9.12` | `MIT OR Apache-2.0` | [https://github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |
 | `password-hash` | `0.5.0` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/traits/tree/master/password-hash](https://github.com/RustCrypto/traits/tree/master/password-hash) |
-| `paste` | `1.0.15` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/paste](https://github.com/dtolnay/paste) |
 | `pastey` | `0.2.3` | `MIT OR Apache-2.0` | [https://github.com/as1100k/pastey](https://github.com/as1100k/pastey) |
 | `pem` | `4.0.0` | `MIT` | [https://github.com/jcreekmore/pem-rs.git](https://github.com/jcreekmore/pem-rs.git) |
 | `pem-rfc7468` | `1.0.0` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |
@@ -595,14 +597,14 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `phf_macros` | `0.13.1` | `MIT` | [https://github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |
 | `phf_shared` | `0.12.1` | `MIT` | [https://github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |
 | `phf_shared` | `0.13.1` | `MIT` | [https://github.com/rust-phf/rust-phf](https://github.com/rust-phf/rust-phf) |
-| `pin-project` | `1.1.13` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |
-| `pin-project-internal` | `1.1.13` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |
-| `pin-project-lite` | `0.2.17` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/pin-project-lite](https://github.com/taiki-e/pin-project-lite) |
+| `pin-project` | `1.2.0` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |
+| `pin-project-internal` | `1.2.0` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/pin-project](https://github.com/taiki-e/pin-project) |
+| `pin-project-lite` | `0.2.18` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/pin-project-lite](https://github.com/taiki-e/pin-project-lite) |
 | `pin-utils` | `0.1.1` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/pin-utils](https://github.com/rust-lang/pin-utils) |
 | `piper` | `0.2.5` | `MIT OR Apache-2.0` | [https://github.com/smol-rs/piper](https://github.com/smol-rs/piper) |
 | `pkcs8` | `0.11.0` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |
 | `pkg-config` | `0.3.34` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/pkg-config-rs](https://github.com/rust-lang/pkg-config-rs) |
-| `plist` | `1.10.3` | `MIT` | [https://github.com/ebarnard/rust-plist/](https://github.com/ebarnard/rust-plist/) |
+| `plist` | `1.10.5` | `MIT` | [https://github.com/ebarnard/rust-plist/](https://github.com/ebarnard/rust-plist/) |
 | `png` | `0.17.16` | `MIT OR Apache-2.0` | [https://github.com/image-rs/image-png](https://github.com/image-rs/image-png) |
 | `png` | `0.18.1` | `MIT OR Apache-2.0` | [https://github.com/image-rs/image-png](https://github.com/image-rs/image-png) |
 | `polling` | `3.11.0` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/polling](https://github.com/smol-rs/polling) |
@@ -611,20 +613,20 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `portable-atomic` | `1.15.0` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/portable-atomic](https://github.com/taiki-e/portable-atomic) |
 | `portable-atomic-util` | `0.2.8` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/portable-atomic-util](https://github.com/taiki-e/portable-atomic-util) |
 | `portable-pty` | `0.9.0` | `MIT` | [https://github.com/wezterm/wezterm](https://github.com/wezterm/wezterm) |
-| `portmapper` | `0.19.3` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/net-tools](https://github.com/n0-computer/net-tools) |
-| `postcard` | `1.1.3` | `MIT OR Apache-2.0` | [https://github.com/jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
-| `postcard-derive` | `0.2.2` | `MIT OR Apache-2.0` | [https://github.com/jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
+| `portmapper` | `0.20.2` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/net-tools](https://github.com/n0-computer/net-tools) |
+| `postcard` | `1.2.0` | `MIT OR Apache-2.0` | [https://github.com/jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
+| `postcard-derive` | `0.2.3` | `MIT OR Apache-2.0` | [https://github.com/jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
 | `potential_utf` | `0.1.6` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `powerfmt` | `0.2.1` | `MIT OR Apache-2.0` | [https://github.com/jhpratt/powerfmt](https://github.com/jhpratt/powerfmt) |
 | `ppv-lite86` | `0.2.21` | `MIT OR Apache-2.0` | [https://github.com/cryptocorrosion/cryptocorrosion](https://github.com/cryptocorrosion/cryptocorrosion) |
 | `precomputed-hash` | `0.1.1` | `MIT` | [https://github.com/emilio/precomputed-hash](https://github.com/emilio/precomputed-hash) |
 | `proc-macro-crate` | `1.3.1` | `MIT OR Apache-2.0` | [https://github.com/bkchr/proc-macro-crate](https://github.com/bkchr/proc-macro-crate) |
-| `proc-macro-crate` | `2.0.2` | `MIT OR Apache-2.0` | [https://github.com/bkchr/proc-macro-crate](https://github.com/bkchr/proc-macro-crate) |
+| `proc-macro-crate` | `2.0.0` | `MIT OR Apache-2.0` | [https://github.com/bkchr/proc-macro-crate](https://github.com/bkchr/proc-macro-crate) |
 | `proc-macro-crate` | `3.5.0` | `MIT OR Apache-2.0` | [https://github.com/bkchr/proc-macro-crate](https://github.com/bkchr/proc-macro-crate) |
 | `proc-macro-error` | `1.0.4` | `MIT OR Apache-2.0` | [https://gitlab.com/CreepySkeleton/proc-macro-error](https://gitlab.com/CreepySkeleton/proc-macro-error) |
 | `proc-macro-error-attr` | `1.0.4` | `MIT OR Apache-2.0` | [https://gitlab.com/CreepySkeleton/proc-macro-error](https://gitlab.com/CreepySkeleton/proc-macro-error) |
 | `proc-macro2` | `1.0.107` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/proc-macro2](https://github.com/dtolnay/proc-macro2) |
-| `process-wrap` | `10.0.1` | `Apache-2.0 OR MIT` | [https://github.com/watchexec/process-wrap](https://github.com/watchexec/process-wrap) |
+| `process-wrap` | `10.0.2` | `Apache-2.0 OR MIT` | [https://github.com/watchexec/process-wrap](https://github.com/watchexec/process-wrap) |
 | `proptest` | `1.12.0` | `MIT OR Apache-2.0` | [https://github.com/proptest-rs/proptest](https://github.com/proptest-rs/proptest) |
 | `pxfm` | `0.1.30` | `BSD-3-Clause OR Apache-2.0` | [https://github.com/awxkee/pxfm](https://github.com/awxkee/pxfm) |
 | `qrcode` | `0.14.1` | `MIT OR Apache-2.0` | [https://github.com/kennytm/qrcode-rust](https://github.com/kennytm/qrcode-rust) |
@@ -636,7 +638,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `quote` | `1.0.47` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/quote](https://github.com/dtolnay/quote) |
 | `r-efi` | `5.3.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | [https://github.com/r-efi/r-efi](https://github.com/r-efi/r-efi) |
 | `r-efi` | `6.0.0` | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | [https://github.com/r-efi/r-efi](https://github.com/r-efi/r-efi) |
-| `rand` | `0.10.3` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
+| `rand` | `0.10.4` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
 | `rand` | `0.8.8` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
 | `rand` | `0.9.5` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
 | `rand_chacha` | `0.3.1` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
@@ -644,9 +646,9 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `rand_core` | `0.10.1` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand_core](https://github.com/rust-random/rand_core) |
 | `rand_core` | `0.6.4` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
 | `rand_core` | `0.9.5` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rand](https://github.com/rust-random/rand) |
-| `rand_pcg` | `0.10.2` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rngs](https://github.com/rust-random/rngs) |
+| `rand_pcg` | `0.10.3` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rngs](https://github.com/rust-random/rngs) |
 | `rand_xorshift` | `0.5.0` | `MIT OR Apache-2.0` | [https://github.com/rust-random/rngs](https://github.com/rust-random/rngs) |
-| `rangemap` | `1.8.0` | `MIT/Apache-2.0` | [https://github.com/jeffparsons/rangemap](https://github.com/jeffparsons/rangemap) |
+| `rangemap` | `1.9.0` | `MIT/Apache-2.0` | [https://github.com/jeffparsons/rangemap](https://github.com/jeffparsons/rangemap) |
 | `raw-window-handle` | `0.6.2` | `MIT OR Apache-2.0 OR Zlib` | [https://github.com/rust-windowing/raw-window-handle](https://github.com/rust-windowing/raw-window-handle) |
 | `rayon` | `1.12.0` | `MIT OR Apache-2.0` | [https://github.com/rayon-rs/rayon](https://github.com/rayon-rs/rayon) |
 | `rayon-core` | `1.13.0` | `MIT OR Apache-2.0` | [https://github.com/rayon-rs/rayon](https://github.com/rayon-rs/rayon) |
@@ -656,14 +658,14 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `redox_users` | `0.5.3` | `MIT` | [https://gitlab.redox-os.org/redox-os/users](https://gitlab.redox-os.org/redox-os/users) |
 | `ref-cast` | `1.0.27` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/ref-cast](https://github.com/dtolnay/ref-cast) |
 | `ref-cast-impl` | `1.0.27` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/ref-cast](https://github.com/dtolnay/ref-cast) |
-| `regex` | `1.13.1` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
-| `regex-automata` | `0.4.18` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
-| `regex-syntax` | `0.8.11` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
+| `regex` | `1.13.2` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
+| `regex-automata` | `0.4.19` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
+| `regex-syntax` | `0.8.12` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/regex](https://github.com/rust-lang/regex) |
 | `relative-path` | `2.0.3` | `MIT OR Apache-2.0` | [https://github.com/udoprog/relative-path](https://github.com/udoprog/relative-path) |
 | `reqwest` | `0.12.28` | `MIT OR Apache-2.0` | [https://github.com/seanmonstar/reqwest](https://github.com/seanmonstar/reqwest) |
 | `reqwest` | `0.13.5` | `MIT OR Apache-2.0` | [https://github.com/seanmonstar/reqwest](https://github.com/seanmonstar/reqwest) |
 | `ring` | `0.17.14` | `Apache-2.0 AND ISC` | [https://github.com/briansmith/ring](https://github.com/briansmith/ring) |
-| `rmcp` | `3.9.0` | `Apache-2.0` | [https://github.com/modelcontextprotocol/rust-sdk/](https://github.com/modelcontextprotocol/rust-sdk/) |
+| `rmcp` | `3.12.0` | `Apache-2.0` | [https://github.com/modelcontextprotocol/rust-sdk/](https://github.com/modelcontextprotocol/rust-sdk/) |
 | `roff` | `1.1.1` | `MIT OR Apache-2.0` | [https://github.com/rust-cli/roff-rs](https://github.com/rust-cli/roff-rs) |
 | `roxmltree` | `0.21.2` | `MIT OR Apache-2.0` | [https://github.com/RazrFalcon/roxmltree](https://github.com/RazrFalcon/roxmltree) |
 | `rquickjs` | `0.14.0` | `MIT` | [https://github.com/DelSkayn/rquickjs.git](https://github.com/DelSkayn/rquickjs.git) |
@@ -689,10 +691,10 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `rustix-linux-procfs` | `0.1.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/sunfishcode/rustix-linux-procfs](https://github.com/sunfishcode/rustix-linux-procfs) |
 | `rustls` | `0.23.46` | `Apache-2.0 OR ISC OR MIT` | [https://github.com/rustls/rustls](https://github.com/rustls/rustls) |
 | `rustls-native-certs` | `0.8.5` | `Apache-2.0 OR ISC OR MIT` | [https://github.com/rustls/rustls-native-certs](https://github.com/rustls/rustls-native-certs) |
-| `rustls-pki-types` | `1.15.1` | `MIT OR Apache-2.0` | [https://github.com/rustls/pki-types](https://github.com/rustls/pki-types) |
+| `rustls-pki-types` | `1.16.0` | `MIT OR Apache-2.0` | [https://github.com/rustls/pki-types](https://github.com/rustls/pki-types) |
 | `rustls-platform-verifier` | `0.7.1` | `MIT OR Apache-2.0` | [https://github.com/rustls/rustls-platform-verifier](https://github.com/rustls/rustls-platform-verifier) |
 | `rustls-platform-verifier-android` | `0.2.0` | `MIT OR Apache-2.0` | [https://github.com/rustls/rustls-platform-verifier](https://github.com/rustls/rustls-platform-verifier) |
-| `rustls-webpki` | `0.103.16` | `ISC` | [https://github.com/rustls/webpki](https://github.com/rustls/webpki) |
+| `rustls-webpki` | `0.103.17` | `ISC` | [https://github.com/rustls/webpki](https://github.com/rustls/webpki) |
 | `rustversion` | `1.0.23` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/rustversion](https://github.com/dtolnay/rustversion) |
 | `ryu` | `1.0.23` | `Apache-2.0 OR BSL-1.0` | [https://github.com/dtolnay/ryu](https://github.com/dtolnay/ryu) |
 | `same-file` | `1.0.6` | `Unlicense/MIT` | [https://github.com/BurntSushi/same-file](https://github.com/BurntSushi/same-file) |
@@ -731,8 +733,8 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `serde_spanned` | `0.6.9` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `serde_spanned` | `1.1.3` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `serde_urlencoded` | `0.7.1` | `MIT/Apache-2.0` | [https://github.com/nox/serde_urlencoded](https://github.com/nox/serde_urlencoded) |
-| `serde_with` | `3.17.0` | `MIT OR Apache-2.0` | [https://github.com/jonasbb/serde_with/](https://github.com/jonasbb/serde_with/) |
-| `serde_with_macros` | `3.17.0` | `MIT OR Apache-2.0` | [https://github.com/jonasbb/serde_with/](https://github.com/jonasbb/serde_with/) |
+| `serde_with` | `3.25.0` | `MIT OR Apache-2.0` | [https://github.com/jonasbb/serde_with/](https://github.com/jonasbb/serde_with/) |
+| `serde_with_macros` | `3.25.0` | `MIT OR Apache-2.0` | [https://github.com/jonasbb/serde_with/](https://github.com/jonasbb/serde_with/) |
 | `serde_yaml` | `0.9.34+deprecated` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/serde-yaml](https://github.com/dtolnay/serde-yaml) |
 | `serde_yaml_ng` | `0.10.0` | `MIT` | [https://github.com/acatton/serde-yaml-ng](https://github.com/acatton/serde-yaml-ng) |
 | `serdect` | `0.4.3` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |
@@ -743,7 +745,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `sha1` | `0.10.7` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
 | `sha1_smol` | `1.0.1` | `BSD-3-Clause` | [https://github.com/mitsuhiko/sha1-smol](https://github.com/mitsuhiko/sha1-smol) |
 | `sha2` | `0.10.9` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
-| `sha2` | `0.11.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
+| `sha2` | `0.11.2` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
 | `sharded-slab` | `0.1.7` | `MIT` | [https://github.com/hawkw/sharded-slab](https://github.com/hawkw/sharded-slab) |
 | `shared_library` | `0.1.9` | `Apache-2.0/MIT` | [https://github.com/tomaka/shared_library/](https://github.com/tomaka/shared_library/) |
 | `shell-words` | `1.1.1` | `MIT/Apache-2.0` | [https://github.com/tmiasko/shell-words](https://github.com/tmiasko/shell-words) |
@@ -754,11 +756,11 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `simd_cesu8` | `1.2.0` | `Apache-2.0 OR MIT` | [https://github.com/seancroach/simd_cesu8](https://github.com/seancroach/simd_cesu8) |
 | `simdutf8` | `0.1.5` | `MIT OR Apache-2.0` | [https://github.com/rusticstuff/simdutf8](https://github.com/rusticstuff/simdutf8) |
 | `similar` | `2.7.0` | `Apache-2.0` | [https://github.com/mitsuhiko/similar](https://github.com/mitsuhiko/similar) |
-| `simple-dns` | `0.12.0` | `MIT` | [https://github.com/balliegojr/simple-dns](https://github.com/balliegojr/simple-dns) |
+| `simple-dns` | `0.13.1` | `MIT` | [https://github.com/balliegojr/simple-dns](https://github.com/balliegojr/simple-dns) |
 | `siphasher` | `1.0.4` | `MIT OR Apache-2.0` | [https://github.com/jedisct1/rust-siphash](https://github.com/jedisct1/rust-siphash) |
 | `slab` | `0.4.12` | `MIT` | [https://github.com/tokio-rs/slab](https://github.com/tokio-rs/slab) |
 | `slotmap` | `1.1.1` | `Zlib` | [https://github.com/orlp/slotmap](https://github.com/orlp/slotmap) |
-| `smallvec` | `1.16.5` | `MIT OR Apache-2.0` | [https://github.com/servo/rust-smallvec](https://github.com/servo/rust-smallvec) |
+| `smallvec` | `1.16.6` | `MIT OR Apache-2.0` | [https://github.com/smallvec/smallvec](https://github.com/smallvec/smallvec) |
 | `smtp-proto` | `0.2.5` | `Apache-2.0 OR MIT` | [https://github.com/stalwartlabs/smtp-proto](https://github.com/stalwartlabs/smtp-proto) |
 | `socket2` | `0.6.5` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/socket2](https://github.com/rust-lang/socket2) |
 | `softbuffer` | `0.4.8` | `MIT OR Apache-2.0` | [https://github.com/rust-windowing/softbuffer](https://github.com/rust-windowing/softbuffer) |
@@ -784,7 +786,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `swift-rs` | `1.0.9` | `MIT OR Apache-2.0` | [https://github.com/Brendonovich/swift-rs](https://github.com/Brendonovich/swift-rs) |
 | `syn` | `1.0.109` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
 | `syn` | `2.0.119` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
-| `syn` | `3.0.9` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
+| `syn` | `3.0.10` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
 | `sync_wrapper` | `1.0.2` | `Apache-2.0` | [https://github.com/Actyx/sync_wrapper](https://github.com/Actyx/sync_wrapper) |
 | `synstructure` | `0.13.2` | `MIT` | [https://github.com/mystor/synstructure](https://github.com/mystor/synstructure) |
 | `synstructure` | `0.14.0` | `MIT` | [https://github.com/mystor/synstructure](https://github.com/mystor/synstructure) |
@@ -810,7 +812,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `tauri-runtime-wry` | `2.11.4` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 | `tauri-utils` | `2.9.3` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 | `tauri-winres` | `0.3.7` | `MIT` | [https://github.com/tauri-apps/winres](https://github.com/tauri-apps/winres) |
-| `tauri-winrt-notification` | `0.7.3` | `MIT OR Apache-2.0` | [https://github.com/tauri-apps/winrt-notification](https://github.com/tauri-apps/winrt-notification) |
+| `tauri-winrt-notification` | `0.8.1` | `MIT OR Apache-2.0` | [https://github.com/tauri-apps/winrt-notification](https://github.com/tauri-apps/winrt-notification) |
 | `tempfile` | `3.27.0` | `MIT OR Apache-2.0` | [https://github.com/Stebalien/tempfile](https://github.com/Stebalien/tempfile) |
 | `tendril` | `0.5.1` | `MIT OR Apache-2.0` | [https://github.com/servo/html5ever](https://github.com/servo/html5ever) |
 | `thiserror` | `1.0.69` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
@@ -819,9 +821,9 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `thiserror-impl` | `2.0.21` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
 | `thread_local` | `1.1.10` | `MIT OR Apache-2.0` | [https://github.com/Amanieu/thread_local-rs](https://github.com/Amanieu/thread_local-rs) |
 | `tiktoken-rs` | `0.12.1` | `MIT` | [https://github.com/zurawiki/tiktoken-rs](https://github.com/zurawiki/tiktoken-rs) |
-| `time` | `0.3.47` | `MIT OR Apache-2.0` | [https://github.com/time-rs/time](https://github.com/time-rs/time) |
-| `time-core` | `0.1.8` | `MIT OR Apache-2.0` | [https://github.com/time-rs/time](https://github.com/time-rs/time) |
-| `time-macros` | `0.2.27` | `MIT OR Apache-2.0` | [https://github.com/time-rs/time](https://github.com/time-rs/time) |
+| `time` | `0.3.55` | `MIT OR Apache-2.0` | [https://github.com/time-rs/time](https://github.com/time-rs/time) |
+| `time-core` | `0.1.9` | `MIT OR Apache-2.0` | [https://github.com/time-rs/time](https://github.com/time-rs/time) |
+| `time-macros` | `0.2.32` | `MIT OR Apache-2.0` | [https://github.com/time-rs/time](https://github.com/time-rs/time) |
 | `tinystr` | `0.8.5` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `tinyvec` | `1.13.3` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/Lokathor/tinyvec](https://github.com/Lokathor/tinyvec) |
 | `tokio` | `1.54.1` | `MIT` | [https://github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
@@ -832,15 +834,16 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `tokio-tungstenite` | `0.26.2` | `MIT` | [https://github.com/snapview/tokio-tungstenite](https://github.com/snapview/tokio-tungstenite) |
 | `tokio-util` | `0.7.20` | `MIT` | [https://github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
 | `tokio-websockets` | `0.13.3` | `MIT` | [https://github.com/Gelbpunkt/tokio-websockets/](https://github.com/Gelbpunkt/tokio-websockets/) |
-| `toml` | `0.8.2` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
+| `toml` | `0.8.23` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `toml` | `0.9.12+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `toml` | `1.2.3+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
-| `toml_datetime` | `0.6.3` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
+| `toml_datetime` | `0.6.11` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `toml_datetime` | `0.7.5+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `toml_datetime` | `1.1.3+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `toml_edit` | `0.19.15` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
-| `toml_edit` | `0.20.2` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
-| `toml_edit` | `0.25.19+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
+| `toml_edit` | `0.20.7` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
+| `toml_edit` | `0.22.27` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
+| `toml_edit` | `0.25.21+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `toml_parser` | `1.1.7+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `toml_writer` | `1.2.0+spec-1.1.0` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | `tower` | `0.5.3` | `MIT` | [https://github.com/tower-rs/tower](https://github.com/tower-rs/tower) |
@@ -866,6 +869,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `unic-ucd-ident` | `0.9.0` | `MIT/Apache-2.0` | [https://github.com/open-i18n/rust-unic/](https://github.com/open-i18n/rust-unic/) |
 | `unic-ucd-version` | `0.9.0` | `MIT/Apache-2.0` | [https://github.com/open-i18n/rust-unic/](https://github.com/open-i18n/rust-unic/) |
 | `unicode-bidi` | `0.3.18` | `MIT OR Apache-2.0` | [https://github.com/servo/unicode-bidi](https://github.com/servo/unicode-bidi) |
+| `unicode-general-category` | `1.1.0` | `Apache-2.0` | [https://github.com/yeslogic/unicode-general-category](https://github.com/yeslogic/unicode-general-category) |
 | `unicode-ident` | `1.0.27` | `(MIT OR Apache-2.0) AND Unicode-3.0` | [https://github.com/dtolnay/unicode-ident](https://github.com/dtolnay/unicode-ident) |
 | `unicode-normalization` | `0.1.26` | `(MIT OR Apache-2.0) AND Unicode-3.0` | [https://github.com/unicode-rs/unicode-normalization](https://github.com/unicode-rs/unicode-normalization) |
 | `unicode-properties` | `0.1.5` | `(MIT OR Apache-2.0) AND Unicode-3.0` | [https://github.com/unicode-rs/unicode-properties](https://github.com/unicode-rs/unicode-properties) |
@@ -883,7 +887,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `utf_types` | `1.0.0` | `Apache-2.0 OR MIT` | [https://github.com/hsivonen/utf_types](https://github.com/hsivonen/utf_types) |
 | `utoipa` | `5.5.0` | `MIT OR Apache-2.0` | [https://github.com/juhaku/utoipa](https://github.com/juhaku/utoipa) |
 | `utoipa-gen` | `5.5.0` | `MIT OR Apache-2.0` | [https://github.com/juhaku/utoipa](https://github.com/juhaku/utoipa) |
-| `uuid` | `1.26.1` | `Apache-2.0 OR MIT` | [https://github.com/uuid-rs/uuid](https://github.com/uuid-rs/uuid) |
+| `uuid` | `1.29.3` | `Apache-2.0 OR MIT` | [https://github.com/uuid-rs/uuid](https://github.com/uuid-rs/uuid) |
 | `valuable` | `0.1.1` | `MIT` | [https://github.com/tokio-rs/valuable](https://github.com/tokio-rs/valuable) |
 | `vcpkg` | `0.2.15` | `MIT/Apache-2.0` | [https://github.com/mcgoo/vcpkg-rs](https://github.com/mcgoo/vcpkg-rs) |
 | `version-compare` | `0.2.1` | `MIT` | [https://gitlab.com/timvisee/version-compare](https://gitlab.com/timvisee/version-compare) |
@@ -892,10 +896,10 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `vswhom-sys` | `0.1.3` | `MIT` | [https://github.com/nabijaczleweli/vswhom-sys.rs](https://github.com/nabijaczleweli/vswhom-sys.rs) |
 | `vt100` | `0.18.1` | `MIT` | [https://github.com/doy/vt100-rust](https://github.com/doy/vt100-rust) |
 | `vte` | `0.15.0` | `Apache-2.0 OR MIT` | [https://github.com/alacritty/vte](https://github.com/alacritty/vte) |
-| `walkdir` | `2.5.0` | `Unlicense/MIT` | [https://github.com/BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) |
+| `walkdir` | `2.5.1` | `Unlicense/MIT` | [https://github.com/BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) |
 | `want` | `0.3.2` | `MIT` | [https://github.com/seanmonstar/want](https://github.com/seanmonstar/want) |
 | `wasi` | `0.11.1+wasi-snapshot-preview1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wasi](https://github.com/bytecodealliance/wasi) |
-| `wasip2` | `1.0.1+wasi-0.2.4` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wasi-rs](https://github.com/bytecodealliance/wasi-rs) |
+| `wasip2` | `1.0.4+wasi-0.2.12` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wasi-rs](https://github.com/bytecodealliance/wasi-rs) |
 | `wasm-bindgen` | `0.2.130` | `MIT OR Apache-2.0` | [https://github.com/wasm-bindgen/wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) |
 | `wasm-bindgen-futures` | `0.4.80` | `MIT OR Apache-2.0` | [https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures) |
 | `wasm-bindgen-macro` | `0.2.130` | `MIT OR Apache-2.0` | [https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro) |
@@ -908,8 +912,8 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `web_atoms` | `0.2.6` | `MIT OR Apache-2.0` | [https://github.com/servo/html5ever](https://github.com/servo/html5ever) |
 | `webkit2gtk` | `2.0.2` | `MIT` | [https://github.com/tauri-apps/webkit2gtk-rs](https://github.com/tauri-apps/webkit2gtk-rs) |
 | `webkit2gtk-sys` | `2.0.2` | `MIT` | [https://github.com/tauri-apps/webkit2gtk-rs](https://github.com/tauri-apps/webkit2gtk-rs) |
-| `webpki-root-certs` | `1.0.11` | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
-| `webpki-roots` | `1.0.11` | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
+| `webpki-root-certs` | `1.0.12` | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
+| `webpki-roots` | `1.0.12` | `CDLA-Permissive-2.0` | [https://github.com/rustls/webpki-roots](https://github.com/rustls/webpki-roots) |
 | `webview2-com` | `0.38.2` | `MIT` | [https://github.com/wravery/webview2-rs](https://github.com/wravery/webview2-rs) |
 | `webview2-com-macros` | `0.8.1` | `MIT` | [https://github.com/wravery/webview2-rs](https://github.com/wravery/webview2-rs) |
 | `webview2-com-sys` | `0.38.2` | `MIT` | [https://github.com/wravery/webview2-rs](https://github.com/wravery/webview2-rs) |
@@ -990,7 +994,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `winreg` | `0.56.0` | `MIT` | [https://github.com/gentoo90/winreg-rs](https://github.com/gentoo90/winreg-rs) |
 | `winx` | `0.36.4` | `Apache-2.0 WITH LLVM-exception` | [https://github.com/sunfishcode/winx](https://github.com/sunfishcode/winx) |
 | `wiremock` | `0.6.5` | `MIT/Apache-2.0` | [https://github.com/LukeMathWalker/wiremock-rs](https://github.com/LukeMathWalker/wiremock-rs) |
-| `wit-bindgen` | `0.46.0` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wit-bindgen](https://github.com/bytecodealliance/wit-bindgen) |
+| `wit-bindgen` | `0.57.1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wit-bindgen](https://github.com/bytecodealliance/wit-bindgen) |
 | `wmi` | `0.18.4` | `MIT OR Apache-2.0` | [https://github.com/ohadravid/wmi-rs](https://github.com/ohadravid/wmi-rs) |
 | `writeable` | `0.6.4` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `wry` | `0.55.1` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/wry](https://github.com/tauri-apps/wry) |
@@ -1012,27 +1016,31 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `yoke-derive` | `0.8.4` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `zbus` | `4.4.0` | `MIT` | [https://github.com/dbus2/zbus/](https://github.com/dbus2/zbus/) |
 | `zbus` | `5.19.0` | `MIT` | [https://github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |
+| `zbus` | `6.5.0` | `MIT` | [https://github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |
 | `zbus-lockstep` | `0.5.2` | `MIT` | [https://github.com/luukvanderduim/zbus-lockstep](https://github.com/luukvanderduim/zbus-lockstep) |
 | `zbus-lockstep-macros` | `0.5.2` | `MIT` | [https://github.com/luukvanderduim/zbus-lockstep](https://github.com/luukvanderduim/zbus-lockstep) |
 | `zbus_macros` | `4.4.0` | `MIT` | [https://github.com/dbus2/zbus/](https://github.com/dbus2/zbus/) |
 | `zbus_macros` | `5.19.0` | `MIT` | [https://github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |
+| `zbus_macros` | `6.5.0` | `MIT` | [https://github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |
 | `zbus_names` | `3.0.0` | `MIT` | [https://github.com/dbus2/zbus/](https://github.com/dbus2/zbus/) |
 | `zbus_names` | `4.3.5` | `MIT` | [https://github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |
+| `zbus_utils` | `6.1.0` | `MIT` | [https://github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |
 | `zbus_xml` | `5.2.1` | `MIT` | [https://github.com/z-galaxy/zbus/](https://github.com/z-galaxy/zbus/) |
-| `zcheapstr` | `1.2.0` | `MIT` | [https://github.com/z-galaxy/zcheapstr/](https://github.com/z-galaxy/zcheapstr/) |
-| `zerocopy` | `0.8.63` | `BSD-2-Clause OR Apache-2.0 OR MIT` | [https://github.com/google/zerocopy](https://github.com/google/zerocopy) |
-| `zerocopy-derive` | `0.8.63` | `BSD-2-Clause OR Apache-2.0 OR MIT` | [https://github.com/google/zerocopy](https://github.com/google/zerocopy) |
+| `zcheapstr` | `1.4.0` | `MIT` | [https://github.com/z-galaxy/zcheapstr/](https://github.com/z-galaxy/zcheapstr/) |
+| `zerocopy` | `0.8.66` | `BSD-2-Clause OR Apache-2.0 OR MIT` | [https://github.com/google/zerocopy](https://github.com/google/zerocopy) |
+| `zerocopy-derive` | `0.8.66` | `BSD-2-Clause OR Apache-2.0 OR MIT` | [https://github.com/google/zerocopy](https://github.com/google/zerocopy) |
 | `zerofrom` | `0.1.8` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `zerofrom-derive` | `0.1.8` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `zeroize` | `1.9.1` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
+| `zeroize` | `1.9.2` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `zeroize_derive` | `1.5.0` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | `zerotrie` | `0.2.5` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `zerovec` | `0.11.9` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
 | `zerovec-derive` | `0.11.7` | `Unicode-3.0` | [https://github.com/unicode-org/icu4x](https://github.com/unicode-org/icu4x) |
-| `zip` | `9.4.1` | `MIT` | [https://github.com/zip-rs/zip2](https://github.com/zip-rs/zip2) |
-| `zlib-rs` | `0.6.8` | `Zlib` | [https://github.com/trifectatechfoundation/zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) |
+| `zip` | `9.8.2` | `MIT` | [https://github.com/zip-rs/zip2](https://github.com/zip-rs/zip2) |
+| `zlib-rs` | `0.6.9` | `Zlib` | [https://github.com/trifectatechfoundation/zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) |
 | `zmij` | `1.0.23` | `MIT` | [https://github.com/dtolnay/zmij](https://github.com/dtolnay/zmij) |
 | `zopfli` | `0.8.4` | `Apache-2.0` | [https://github.com/zopfli-rs/zopfli](https://github.com/zopfli-rs/zopfli) |
+| `zruntime` | `0.2.4` | `MIT` | [https://github.com/z-galaxy/zruntime](https://github.com/z-galaxy/zruntime) |
 | `zune-core` | `0.5.3` | `MIT OR Apache-2.0 OR Zlib` | [https://github.com/etemesi254/zune-image](https://github.com/etemesi254/zune-image) |
 | `zune-jpeg` | `0.5.15` | `MIT OR Apache-2.0 OR Zlib` | [https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) |
 | `zvariant` | `4.2.0` | `MIT` | [https://github.com/dbus2/zbus/](https://github.com/dbus2/zbus/) |
@@ -1058,15 +1066,15 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `@radix-ui/react-use-callback-ref` | `1.1.5` | `MIT` |
 | `@radix-ui/react-use-is-hydrated` | `0.1.3` | `MIT` |
 | `@radix-ui/react-use-layout-effect` | `1.1.4` | `MIT` |
-| `@tauri-apps/api` | `2.12.4` | `Apache-2.0 OR MIT` |
-| `@tauri-apps/plugin-store` | `2.5.0` | `MIT OR Apache-2.0` |
+| `@tauri-apps/api` | `2.12.5` | `Apache-2.0 OR MIT` |
+| `@tauri-apps/plugin-store` | `2.5.1` | `MIT OR Apache-2.0` |
 | `@xterm/addon-fit` | `0.11.0` | `MIT` |
 | `@xterm/xterm` | `6.0.0` | `MIT` |
 | `html-parse-stringify` | `4.0.1` | `MIT` |
 | `i18next` | `27.2.7` | `MIT` |
-| `lucide-react` | `1.70.0` | `ISC` |
+| `lucide-react` | `1.81.0` | `ISC` |
 | `react` | `19.3.1` | `MIT` |
 | `react-dom` | `19.3.1` | `MIT` |
 | `react-i18next` | `18.0.3` | `MIT` |
 | `scheduler` | `0.28.0` | `MIT` |
-| `simple-icons` | `16.36.0` | `CC0-1.0` |
+| `simple-icons` | `16.38.1` | `CC0-1.0` |

@@ -44,6 +44,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 - **Unread markers.** Bots with unseen replies or pending decisions show a dot in the left rail, and the open chat marks the first unseen reply with a **New messages** divider. See [Unread markers](chatting-and-approvals.md#unread-markers).
 - **Praxi as the default main bot and per-computer "Make main bot".** Fresh desktop setups default to **Praxi** (white ghost) as the main bot. Each computer (This computer and every paired host) keeps its own bot order and main bot, set with the star button (**Make main bot**) in the bot panel header. See [Main bot and bot order](bots-and-profiles.md#main-bot-and-bot-order-desktop-app).
 - **Hands-free voice call mode.** Tap the phone button in the desktop chat composer to talk to a bot with automatic voice activity detection, sentence-by-sentence speech, barge-in, push-to-talk, and click-only approvals. See [Voice call mode](voice-call.md).
+- **Live voice conversation (Talk).** Press **Talk** in the desktop composer for a low-latency spoken conversation (Gemini Live): interrupt by speaking, the bot does the work through the normal approvals, and the conversation lands in the chat as text. Audio is not stored unless you turn it on. See [Live voice conversation](voice-live.md).
 - **Integrated window controls and complete ghost app icon.** On Windows, the desktop app hides the native window frame by default and draws its own minimize, maximize/restore, and close controls in a reserved title-bar strip above the panels, alongside the complete Praxi ghost icon. See [Window controls and appearance](install-windows.md#window-controls-and-appearance).
 - **Refined satin-matte bot avatars.** Bots can use one of 16 procedural SVG shapes with layered lighting, living eyes, state motion (respecting reduced motion), or a custom uploaded image/GIF. See [Bot avatars](bots-and-profiles.md#bot-avatars-desktop-app).
 - **Host-status commands without approval fatigue.** Fixed read-only status commands (`uptime`, `df -h`, `free -m`, `uname -a`, and similar) on an always-on host's own computer no longer taint the run or trigger repeated executor asks. See [Host-status commands on an always-on host](chatting-and-approvals.md#host-status-commands-on-an-always-on-host).
@@ -61,7 +62,7 @@ Seven short pages in plain words. Read them in this order:
 
 | Page | What it is |
 | --- | --- |
-| Wake a bot when mail or a signed call arrives | [When something happens](triggers.md) |
+| Wake a bot when mail, a signed call, a feed item, a page change, a calendar event or a Home Assistant change happens | [When something happens](triggers.md) |
 | [Getting started in 5 minutes](getting-started.md) | Install, get a free key, have your first chat, and learn what a bot is. |
 | [Keep your bot safe](keep-your-bot-safe.md) | The permission levels, approvals, and what leaves your computer. |
 | [Run it on this computer or on a server](local-or-server.md) | Why you do not need a server, and how to add one if you want. |
@@ -88,6 +89,7 @@ Seven short pages in plain words. Read them in this order:
 | Create a bot and understand its profile file | [Bots and profiles](bots-and-profiles.md) |
 | Talk to a bot, approve or deny actions | [Chatting and approvals](chatting-and-approvals.md) |
 | Talk to a bot hands-free by voice (desktop app) | [Voice call mode](voice-call.md) |
+| Have a live, interruptible spoken conversation (desktop app) | [Live voice conversation](voice-live.md) |
 | Run something every morning | [Scheduled jobs in plain words](schedules.md), [Scheduled tasks](scheduled-tasks.md) (reference) |
 | Give one big task and let the bot finish it | [Missions](missions.md) |
 | Replay a recorded sequence of steps without a model | [Workflows](workflows.md) |
@@ -106,6 +108,7 @@ Seven short pages in plain words. Read them in this order:
 | See what each model call in a run was for and what it used | [LLM call ledger](llm-call-ledger.md) |
 | Cap what a bot may spend per day, week or month | [Bot spending limits](bot-spending-limits.md) |
 | See, correct, forget and switch off what your bots remember | [Memory](memory.md) |
+| Keep one chat going for weeks: the rolling "earlier in this chat" note, and how to switch it off | [Long chats](long-chats.md) |
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |
 | Talk to your bots from Discord | [Discord](discord.md) |

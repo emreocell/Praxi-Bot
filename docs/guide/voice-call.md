@@ -34,17 +34,50 @@ dictation and voice calls:
   is never shown again. The daemon, not the app window, talks to Google, one short
   connection per utterance. Only the transcript is used: the answer still comes from the
   bot model you chose, and the Live model's own reply is ignored.
-- **On this computer (offline)**: Whisper plus Silero voice detection run inside Praxi-Bot, so your
-  speech never leaves the machine. Pick a model (small is the most accurate, also for Turkish and
-  German) and press **Download**: the files come once from huggingface.co / github.com, are checked
-  against a fixed checksum and saved under `<data dir>/models/voice/`. The licence (MIT for all
-  offered models) is shown before you download. Needs a build with the `local-voice` cargo feature
-  (`cargo build -p cli --features local-voice`); other builds say so instead of failing silently.
+- **On this computer (offline)**: Silero detects speech and Whisper transcribes it in Praxi-Bot's local
+  voice process. Choose a model, download it and save the provider. Small is the most accurate option
+  for Turkish and German. With Silero, the tiny, base and small downloads are about 105, 162 and
+  377 MB respectively. Both models have an MIT licence.
   When this provider is on, **Telegram voice notes** from paired users are transcribed on this computer
   too (up to 2 minutes), the text is echoed back as "🎤 ..." and then handled like typed text. Slash
   commands and approvals still need typed text or the buttons. With any other provider, voice notes are
-  never sent to a cloud service; the bot just says it cannot read them. Read-aloud still uses your
-  operating system's voices; on-device read-aloud is not part of this version.
+  never sent to a cloud service. The bot tells you it cannot read them.
+
+For hands-free calls, the selected computer handles transcription. A cloud provider receives the
+audio when configured there. Free-tier keys are subject to Google's own limits and terms.
+
+## Offline dictation and read-aloud
+
+Use a daemon built with `cargo build -p cli --features local-voice`. The standard build leaves the
+feature off. The speech models are downloaded when the owner presses **Download** in Settings.
+Settings shows the size, source and licence before you download. Praxi-Bot checks free disk space,
+keeps a 512 MiB reserve during downloads, and verifies every file against a pinned SHA-256 before
+using it. The files are stored under `<data dir>/models/voice/`. If the connection drops, press
+**Download** again to resume. The installer contains no speech weights.
+
+1. Select and save **On this computer (offline)** under **Settings → General → Voice dictation**.
+   Use the microphone button in the chat composer or enable the push-to-talk key under
+   **Microphone and push-to-talk** in the same section. Recognised text goes into the composer.
+   With offline dictation selected on this computer, the composer also uses it in paired-host chats.
+2. Under **Settings → General → Voice → Offline read-aloud**, download Supertonic 3 (about 146 MB,
+   OpenRAIL-M) and turn on the switch. Use **Read aloud** beside a reply, or enable **Speak replies**
+   to hear each finished reply. Hands-free call playback uses the operating system's voice setting.
+
+Both models use the CPU. The first audio can take a few seconds, and the larger Whisper model takes
+more CPU time. Speech follows the app language, including English, Turkish and German. Supertonic
+uses English when the app language has no matching synthesis language. The speech steps work
+offline after setup. Chat replies still use the language model configured for the bot.
+
+Run `bot doctor` or open **Settings → Diagnostics** to see whether offline voice is available
+and which model files are present. Settings verifies the model checksums when it shows install
+status, and the voice process checks them again before use.
+
+**Where dictation runs.** Your microphone is on this computer, so dictation (and voice calls) transcribe
+with this computer's own settings, also when the bot you are chatting with works on a paired server
+("My server"). Only when this computer has no transcription service set up does the recording go to the
+server's service instead. If neither is set up, the app says dictation is not set up and points to
+**Settings → General**. If the transcription service itself fails (wrong key, no network on that machine) the
+message says so, instead of reporting that the server did not answer.
 
 Audio leaves your machine only while you dictate or are in a call, and only to the service
 you configured. Free-tier keys are subject to Google's own limits and terms.

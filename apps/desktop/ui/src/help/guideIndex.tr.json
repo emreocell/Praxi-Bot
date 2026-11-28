@@ -244,6 +244,12 @@
     "title": "Kendi bilgisayarında bilgisayar kullanımı",
     "headings": [
       "Bir bot neler yapabilir",
+      "Pencere yönetimi",
+      "Erişilebilirlik eylemleri",
+      "Klavye",
+      "Pano",
+      "Uyumak yerine beklemek",
+      "Daha az ekran görüntüsü gerektiren sonuçlar",
       "Güvenlik",
       "Doğrulanmayanlar"
     ],
@@ -309,6 +315,7 @@
       "Bağlayın (yaklaşık 5 dakika)",
       "Bota kimler yazabilir",
       "Sohbette",
+      "Görevleri telefondan yönetin",
       "Onaylar",
       "Mesajlar ve ekler",
       "Bilmekte fayda var"
@@ -443,6 +450,7 @@
       "Neden Google istemcisini kendin oluşturuyorsun",
       "Kurulum (yaklaşık beş dakika, bir kez)",
       "Önce yalnızca okuma",
+      "Botun e-posta göndermesine ya da etkinlik oluşturmasına izin verme",
       "Praxi bir sunucuda",
       "Neler ters gidebilir",
       "Çıkış ve kaldırma",
@@ -611,6 +619,17 @@
     "summary": "Botların, Praxi'yi kurduğun bilgisayarda çalışır. Praxi açıkken ve bilgisayarın uyanıkken çalışırlar."
   },
   {
+    "doc": "tr/long-chats.md",
+    "title": "Uzun sohbetler: bot konuyu nasıl kaybetmez",
+    "headings": [
+      "Ne olur",
+      "Not nedir, ne değildir",
+      "Kapat",
+      "Bilmekte fayda var"
+    ],
+    "summary": "Başka dilde: English."
+  },
+  {
     "doc": "tr/mcp-server.md",
     "title": "Praxi'yi MCP sunucusu olarak kullanma",
     "headings": [
@@ -656,6 +675,15 @@
       "Notlar nasıl bulunur: Temel veya Akıllı"
     ],
     "summary": "Başka dilde: English · Deutsch."
+  },
+  {
+    "doc": "tr/missions.md",
+    "title": "Görevler: tek büyük iş, ara onay olmadan",
+    "headings": [
+      "Bir postayı, zamanlayıcıyı veya webhook'u beklemek",
+      "Bu sürümün sınırları"
+    ],
+    "summary": "Uzun süren görevler oturumlar halinde ilerler; bekleme kayıtları yeniden başlatmadan sonra da durur."
   },
   {
     "doc": "tr/model-catalog.md",
@@ -761,6 +789,7 @@
       "Bir tane oluştur",
       "Ne zaman ifadeleri",
       "Bir zamanlama ne çalıştırabilir",
+      "Kalıcı talimatlar: yalnızca sana bir şey gerektiğinde konuşan kontrol",
       "Webhooklar",
       "Kaçırılan çalışmalar",
       "Kısa seri işler için zamanlama değil, tek bir çalışma kullan",
@@ -861,6 +890,7 @@
     "title": "Telegram",
     "headings": [
       "Sohbette",
+      "Görevleri telefondan yönet",
       "Dil",
       "Bilmen gerekenler"
     ],
@@ -869,7 +899,9 @@
   {
     "doc": "tr/triggers.md",
     "title": "Bir şey olduğunda",
-    "headings": [],
+    "headings": [
+      "Akışlar, web sayfaları, takvim etkinlikleri ve Home Assistant"
+    ],
     "summary": "Bot panelinde Otomasyon → Bir şey olduğunda bölümünü açın. Yeni e-posta,"
   },
   {
@@ -922,6 +954,7 @@
     "headings": [
       "Başlamadan önce",
       "Konuşmayı yazıya çevirme sağlayıcısını seçmek",
+      "Çevrimdışı dikte ve sesli okuma",
       "Arama başlatmak ve kullanmak",
       "Sözünü kesmek ve arama denetimleri",
       "Neler yapabilir, neler yapamaz",

@@ -570,7 +570,7 @@ impl TurnExecutor {
                 ConfigEngine::Codex => Engine::Codex,
                 other => {
                     return Err(cli_invalid(format!(
-                        "{name} only works with its own tools. Allow that in this bot's engine settings. (engine_needs_native)",
+                        "{name} cannot run in governed mode. Open this bot's engine settings and select native tools, or switch to a supported engine. (engine_needs_native)",
                         name = cli_provider::Driver::from_id(other.as_str())
                             .map_or(other.as_str(), cli_provider::Driver::display_name)
                     )));
@@ -667,6 +667,7 @@ fn cli_provider_error(name: &str, command: &str, error: &CliError) -> ProviderEr
         CliError::NotInstalled
         | CliError::ShimRefused
         | CliError::NativeToolsOpen
+        | CliError::PraxiBridgeUnavailable
         | CliError::CodexUnconfinable
         | CliError::BinaryChanged
         | CliError::WorkspaceUnavailable => FailureClass::Configuration,
@@ -696,6 +697,9 @@ fn cli_exec_error_for(name: &str, cmd: &str, err: &CliError) -> ExecError {
         CliError::NativeToolsOpen => format!(
             "{name} could not be started safely because required isolation flags are missing or unsupported. Update the CLI and try again. ({code})"
         ),
+        CliError::PraxiBridgeUnavailable => format!(
+            "{name} cannot connect to Praxi's apps, mail or browser in this mode. Switch engine or mode and try again. ({code})"
+        ),
         CliError::Quota => format!(
             "{name} subscription usage limit reached. Wait for your quota to reset or switch providers. ({code})"
         ),
@@ -711,7 +715,7 @@ fn cli_exec_error_for(name: &str, cmd: &str, err: &CliError) -> ExecError {
             "The {name} binary changed while starting the turn. Try sending your message again. ({code})"
         ),
         CliError::CodexUnconfinable => format!(
-            "{name} only works with its own tools. Allow that in this bot's engine settings. (engine_needs_native)"
+            "{name} cannot run in governed mode. Open this bot's engine settings and select native tools, or switch to a supported engine. (engine_needs_native)"
         ),
         CliError::WorkspaceUnavailable => format!(
             "The workspace folder chosen for this bot is missing. Choose it again in the bot's engine settings. ({code})"

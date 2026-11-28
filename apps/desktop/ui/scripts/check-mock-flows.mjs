@@ -74,26 +74,17 @@ try {
   await page.getByTestId('mcp-server-smoke-mock-mcp').waitFor(T);
   process.stdout.write('PASS apps: custom MCP server added by HTTP URL\n');
 
-  // Mission: prefer `/mission` when the slash menu lists it; otherwise the bot-panel start form.
+  // Mission: `/mission` starts a card in the chat when the slash menu lists it.
   await page.goto(`${base}/?${query}&screen=empty&panel=1`, { waitUntil: 'load', timeout: T.timeout });
   await page.getByTestId('bot-panel').waitFor(T);
   await composer.fill('/mission Sign up on five test sites');
   const missionInMenu = await page.getByTestId('composer-menu').getByRole('option', { name: /mission|görev/i }).count();
   if (missionInMenu > 0) {
     await composer.press('Enter');
-    await page.getByTestId('mission-card').first().waitFor(T);
+    await page.getByTestId('mission-started-card').first().waitFor(T);
     process.stdout.write('PASS mission: /mission starts a mission card in chat\n');
   } else {
-    const start = page.getByTestId('mission-start');
-    if (await start.count()) {
-      await start.locator('summary').click();
-      await start.locator('textarea').fill('Sign up on five test sites');
-      await start.getByRole('button', { name: /start/i }).click();
-      await page.getByTestId('mission-card').first().waitFor(T);
-      process.stdout.write('PASS mission: bot panel starts a mission card\n');
-    } else {
-      process.stdout.write('SKIP mission: /mission and panel start not on this build (merge u12 missions-from-chat)\n');
-    }
+    process.stdout.write('SKIP mission: /mission is not listed by the mock composer\n');
   }
 
   process.stdout.write('mock flows OK\n');

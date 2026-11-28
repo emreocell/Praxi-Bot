@@ -14,10 +14,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use daemon_api::mcp::{
-    McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto, McpCatalogOAuthClientDto,
-    McpCatalogTestDto, McpErrorKind as ErrorKindDto, McpFolderDto, McpOAuthConfig,
-    McpRequiredSecretDto, McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpTestResult,
-    McpToolChangeDto, McpToolDto, McpTransportInput, McpTransportKind, McpTransportObject,
+    McpAuthLogoutDto, McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto,
+    McpCatalogOAuthClientDto, McpCatalogTestDto, McpErrorKind as ErrorKindDto, McpFolderDto,
+    McpOAuthConfig, McpRequiredSecretDto, McpServerChanged, McpServerDto, McpServerInput,
+    McpStatus, McpTestResult, McpToolChangeDto, McpToolDto, McpTransportInput, McpTransportKind,
+    McpTransportObject,
 };
 use daemon_api::mcp_import::{BundleApproval, ImportValues};
 use daemon_api::{McpControl, McpControlError};
@@ -728,6 +729,10 @@ fn map_err(e: McpError) -> McpControlError {
     e.into()
 }
 
+fn remote_revocation_ok(outcome: mcp_bridge::RemoteRevokeOutcome) -> bool {
+    !matches!(outcome, mcp_bridge::RemoteRevokeOutcome::Failed)
+}
+
 fn import_secret_reference(reference: &str) -> bool {
     reference
         .strip_prefix("mcp/import-")
@@ -1327,13 +1332,25 @@ impl McpControl for McpHost {
         )
     }
 
-    async fn auth_logout(&self, name: &str) -> Result<McpAuthState, McpControlError> {
-        let mut flows = self.auth_flows.lock().await;
+    async fn auth_logout(&self, name: &str) -> Result<McpAuthLogoutDto, McpControlError> {
         self.check_http(name)?;
-        abort_sign_in(&mut flows, name).await;
-        self.manager.sign_out(name).await.map_err(map_err)?;
+        {
+            let mut flows = self.auth_flows.lock().await;
+            abort_sign_in(&mut flows, name).await;
+        }
+        let outcome = self.manager.sign_out(name).await.map_err(map_err)?;
+        if outcome.remote_revocation == mcp_bridge::RemoteRevokeOutcome::Failed {
+            support_logs::tracing::warn!(
+                target: "praxi_support",
+                reason = "component_warning",
+                "warning: MCP server {name}: the provider could not be asked to revoke the sign-in; revoke it manually at the provider if needed"
+            );
+        }
         self.announce(name);
-        Ok(McpAuthState::SignedOut)
+        Ok(McpAuthLogoutDto {
+            state: McpAuthState::SignedOut,
+            remote_revoked: remote_revocation_ok(outcome.remote_revocation),
+        })
     }
     fn list(&self) -> Vec<McpServerDto> {
         let all: Vec<McpServerConfig> = self.configs.lock().values().cloned().collect();
@@ -1475,13 +1492,34 @@ impl McpControl for McpHost {
     }
 
     async fn remove(&self, name: &str) -> Result<(), McpControlError> {
-        let mut flows = self.auth_flows.lock().await;
-        abort_sign_in(&mut flows, name).await;
-        let old = {
+        let import = {
             let _op = self.ops.lock().await;
             self.check_writable()?;
             let cfg = self.config_of(name)?;
-            if let Some(import) = &cfg.import {
+            cfg.import.clone()
+        };
+        {
+            let mut flows = self.auth_flows.lock().await;
+            abort_sign_in(&mut flows, name).await;
+        }
+        // The sign-in goes with the server: forgotten here and ended at the
+        // provider (not under the operations lock: that is a network call).
+        if self
+            .config_of(name)
+            .is_ok_and(|cfg| matches!(cfg.transport, McpTransport::Http { .. }))
+            && let Ok(outcome) = self.manager.sign_out(name).await
+            && outcome.remote_revocation == mcp_bridge::RemoteRevokeOutcome::Failed
+        {
+            support_logs::tracing::warn!(
+                target: "praxi_support",
+                reason = "component_warning",
+                "warning: MCP server {name}: the provider could not be asked to revoke the sign-in; revoke it manually at the provider if needed"
+            );
+        }
+        let old = {
+            let _op = self.ops.lock().await;
+            if let Some(import) = import.as_ref() {
+                let cfg = self.config_of(name)?;
                 return self.remove_import(&cfg, import).await;
             }
             self.persist(|m| {
@@ -1625,12 +1663,15 @@ impl Drop for McpHost {
 }
 
 #[cfg(test)]
+mod google_e2e;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use mcp_bridge::Backoff;
     use serde_json::json;
 
-    fn fast_policy() -> McpPolicy {
+    pub(super) fn fast_policy() -> McpPolicy {
         McpPolicy {
             quarantine_after: 3,
             backoff: Backoff {
@@ -1885,7 +1926,7 @@ mod tests {
         server
     }
 
-    fn query_pairs(url: &str) -> HashMap<String, String> {
+    pub(super) fn query_pairs(url: &str) -> HashMap<String, String> {
         reqwest::Url::parse(url)
             .unwrap()
             .query_pairs()
@@ -1894,7 +1935,10 @@ mod tests {
     }
 
     /// Play the browser: hit the loopback `redirect_uri` with `query`.
-    async fn browser_redirect(authorization_url: &str, query: &str) -> std::io::Result<String> {
+    pub(super) async fn browser_redirect(
+        authorization_url: &str,
+        query: &str,
+    ) -> std::io::Result<String> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let redirect =
             reqwest::Url::parse(&query_pairs(authorization_url)["redirect_uri"]).unwrap();
@@ -1918,7 +1962,7 @@ mod tests {
         Ok(out)
     }
 
-    async fn wait_auth(host: &McpHost, name: &str, want: McpAuthState) {
+    pub(super) async fn wait_auth(host: &McpHost, name: &str, want: McpAuthState) {
         let reached = tokio::time::timeout(Duration::from_secs(10), async {
             while host.auth_status(name).await.unwrap() != want {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1928,7 +1972,7 @@ mod tests {
         assert!(reached.is_ok(), "{name}: auth state never became {want:?}");
     }
 
-    async fn wait_for(host: &McpHost, name: &str, want: McpStatus) {
+    pub(super) async fn wait_for(host: &McpHost, name: &str, want: McpStatus) {
         let reached = tokio::time::timeout(Duration::from_secs(10), async {
             while host.status_of(name) != want {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1937,8 +1981,9 @@ mod tests {
         .await;
         assert!(
             reached.is_ok(),
-            "{name}: wanted {want:?}, is {:?}",
-            host.status_of(name)
+            "{name}: wanted {want:?}, is {:?} ({:?})",
+            host.status_of(name),
+            host.snapshot(name).and_then(|s| s.last_error)
         );
     }
 
@@ -2058,7 +2103,10 @@ mod tests {
         // Logout forgets the credential and the tools.
         assert_eq!(
             host.auth_logout("remote").await.unwrap(),
-            McpAuthState::SignedOut
+            McpAuthLogoutDto {
+                state: McpAuthState::SignedOut,
+                remote_revoked: true,
+            }
         );
         assert!(store.get("mcp/remote/oauth").unwrap().is_none());
         assert!(registry.get("mcp:remote/echo").is_none());
@@ -2078,7 +2126,7 @@ mod tests {
 
     /// Every file under `dir`, recursively (event logs, the SQLite database
     /// holding the audit log and its WAL, `mcp.toml` ...).
-    fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    pub(super) fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
         let mut out = Vec::new();
         let mut stack = vec![dir.to_path_buf()];
         while let Some(d) = stack.pop() {
@@ -2094,7 +2142,7 @@ mod tests {
         out
     }
 
-    fn contains(haystack: &[u8], needle: &str) -> bool {
+    pub(super) fn contains(haystack: &[u8], needle: &str) -> bool {
         haystack
             .windows(needle.len())
             .any(|w| w == needle.as_bytes())
@@ -2579,7 +2627,10 @@ mod tests {
                 "logout" => {
                     assert_eq!(
                         host.auth_logout("remote").await.unwrap(),
-                        McpAuthState::SignedOut
+                        McpAuthLogoutDto {
+                            state: McpAuthState::SignedOut,
+                            remote_revoked: true,
+                        }
                     );
                 }
                 "cancel" => {
@@ -2603,7 +2654,7 @@ mod tests {
         }
     }
 
-    fn stdio(name: &str, enabled: bool) -> McpServerInput {
+    pub(super) fn stdio(name: &str, enabled: bool) -> McpServerInput {
         serde_json::from_value(json!({
             "name": name,
             "transport": "stdio",

@@ -946,7 +946,15 @@ fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
     let Ok(data) = serde_json::to_string(env) else {
         return SseEvent::default().comment("unserialisable event");
     };
-    let name = event_type_of(&data).unwrap_or_else(|| "event".to_owned());
+    let name = event_type_of(&data)
+        .or_else(|| {
+            serde_json::to_value(&env.event)
+                .ok()?
+                .get("type")?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "event".to_owned());
     SseEvent::default().id(id).event(name).data(data)
 }
 
@@ -1332,6 +1340,22 @@ mod tests {
                 .to_owned();
             let data = serde_json::to_string(&Envelope::new(seq as u64, event)).unwrap();
             assert_eq!(event_type_of(&data).as_deref(), Some(tag.as_str()));
+        }
+        for (data, expected) in [
+            (
+                r#"{"event":{"payload":[null,{"type":"nested"}],"type":"tool_call_requested"}}"#,
+                "tool_call_requested",
+            ),
+            (
+                r#"{"event":{"type":"escaped\u005ftag","text":"\"type\":\"wrong\""}}"#,
+                "escaped_tag",
+            ),
+            (
+                r#"{"event":{"type":"error","details":{"x":[1,true,null]}}}"#,
+                "error",
+            ),
+        ] {
+            assert_eq!(event_type_of(data).as_deref(), Some(expected));
         }
         assert_eq!(event_type_of("not json"), None);
         assert_eq!(event_type_of(r#"{"event":{"no":"tag"}}"#), None);

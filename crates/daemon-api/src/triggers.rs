@@ -167,8 +167,75 @@ fn validate(s: &AppState, bot: BotId, input: &TriggerInput) -> Result<Rule, ApiE
                 .ok_or_else(|| ApiError::not_found("webhook"))?;
         }
         TriggerSource::Time { .. } => {}
+        TriggerSource::Feed { url, .. } => {
+            validate_web_url(s, bot, url)?;
+            s.agent()
+                .validate_schedule_web_poll(bot)
+                .map_err(unavailable_source)?;
+        }
+        TriggerSource::Page { url, selector, .. } => {
+            validate_web_url(s, bot, url)?;
+            web_tools::watch::check_selector(selector).map_err(|_| {
+                bad_trigger("write the selector as CSS, for example #price or h1.title")
+            })?;
+            s.agent()
+                .validate_schedule_web_poll(bot)
+                .map_err(unavailable_source)?;
+        }
+        TriggerSource::Calendar { account, .. } => {
+            let accounts = s
+                .calendar()
+                .ok_or_else(|| unavailable_source("connect a calendar first"))?
+                .list();
+            if !calendar_account_ok(account.as_deref(), accounts.iter().map(|a| a.name.as_str())) {
+                return Err(unavailable_source("choose a configured calendar"));
+            }
+            s.agent()
+                .validate_schedule_read(bot, "calendar_list_events", &Value::Null)
+                .map_err(|_| {
+                    unavailable_source("connect a calendar first, and allow this bot to read it")
+                })?;
+        }
+        TriggerSource::HomeAssistant { .. } => {
+            s.agent()
+                .validate_schedule_read(bot, "ha_get_state", &Value::Null)
+                .map_err(|_| {
+                    unavailable_source("connect Home Assistant first, and allow this bot to use it")
+                })?;
+        }
     }
     Ok(rule)
+}
+fn calendar_account_ok<'a>(account: Option<&str>, names: impl Iterator<Item = &'a str>) -> bool {
+    let names: Vec<_> = names.collect();
+    account.map_or(names.len() == 1, |name| names.contains(&name))
+}
+
+#[cfg(test)]
+mod calendar_account_tests {
+    use super::calendar_account_ok;
+    #[test]
+    fn default_requires_exactly_one_calendar_and_names_must_exist() {
+        assert!(!calendar_account_ok(None, [].into_iter()));
+        assert!(calendar_account_ok(None, ["one"].into_iter()));
+        assert!(!calendar_account_ok(None, ["one", "two"].into_iter()));
+        assert!(calendar_account_ok(Some("two"), ["one", "two"].into_iter()));
+        assert!(!calendar_account_ok(
+            Some("missing"),
+            ["one", "two"].into_iter()
+        ));
+    }
+}
+fn validate_web_url(s: &AppState, bot: BotId, raw: &str) -> Result<(), ApiError> {
+    use web_tools::UrlPolicy as _;
+    let url = url::Url::parse(raw).map_err(|_| bad_trigger("choose a public web address"))?;
+    web_tools::DefaultUrlPolicy::default()
+        .check_url(&url)
+        .map_err(|_| bad_trigger("choose a public web address"))?;
+    if s.agent().schedule_url_guard(bot).blocked(raw, false) {
+        return Err(unavailable_source("this site is blocked by an owner rule"));
+    }
+    Ok(())
 }
 fn schedule(s: &AppState, bot: BotId, id: Uuid) -> Result<Schedule, ApiError> {
     s.schedule_store()?

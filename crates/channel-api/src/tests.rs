@@ -60,6 +60,8 @@ fn event(id: &str, kind: IncomingKind) -> IncomingMessage {
             display_name: Some("Owner".into()),
         },
         message_id: Some("message:opaque".into()),
+        forwarded: false,
+        edited: false,
         kind,
     }
 }

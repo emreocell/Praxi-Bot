@@ -104,7 +104,10 @@ fn fix_entities(xml: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        let end = tail.find(';').filter(|&e| e <= 10);
+        let end = tail
+            .char_indices()
+            .take_while(|(i, _)| *i <= 10)
+            .find_map(|(i, c)| (c == ';').then_some(i));
         match end {
             Some(e) => {
                 let name = &tail[1..e];
@@ -155,8 +158,8 @@ fn parse_once<R>(
     f: &impl Fn(&Document<'_>) -> Result<R, WebError>,
 ) -> Result<R, WebError> {
     let opts = ParsingOptions {
-        allow_dtd: true,
-        nodes_limit: 2_000_000,
+        allow_dtd: false,
+        nodes_limit: 100_000,
         ..ParsingOptions::default()
     };
     let doc = Document::parse_with_options(text, opts)
@@ -202,6 +205,14 @@ fn child_text(n: Node<'_, '_>, local: &str) -> Option<String> {
     child(n, local).and_then(text_of)
 }
 
+fn feed_text_char_ok(c: char) -> bool {
+    !c.is_control()
+        && !matches!(
+            c,
+            '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}'
+        )
+}
+
 /// Strip markup from a feed text field and collapse whitespace.
 fn plain(s: &str) -> String {
     let text = if s.contains('<') {
@@ -212,7 +223,12 @@ fn plain(s: &str) -> String {
     } else {
         s.to_string()
     };
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    text.chars()
+        .filter(|&c| feed_text_char_ok(c))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn abs(base: Option<&Url>, link: &str) -> String {

@@ -673,8 +673,7 @@ async fn a_full_bots_scheduled_run_runs_a_shell_command_and_sends_mail_without_a
     }
 }
 
-/// An unattended send never overrides the mail guard: a second mail to the same recipient is
-/// refused with a plain reason and nobody is asked.
+/// An unattended send still refuses the opt-out list with a plain reason and nobody is asked.
 #[tokio::test]
 async fn an_unattended_send_that_the_mail_guard_flags_is_refused_not_asked() {
     use builtin_tools::connector_email::{AgentMailEndpoint, EmailConnector, SendMode};
@@ -743,7 +742,7 @@ async fn an_unattended_send_that_the_mail_guard_flags_is_refused_not_asked() {
     // The model was told why, in the guard's own words, instead of a card being raised.
     let told = serde_json::to_string(&fake.request(1).messages).unwrap();
     assert!(
-        told.contains("Mail guard stopped this send and nobody was asked"),
+        told.contains("Mail guard stopped this send (opt-out list)"),
         "{told}"
     );
 }

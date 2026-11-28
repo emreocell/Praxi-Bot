@@ -71,7 +71,7 @@ pub struct McpServerDto {
     /// Public OAuth identity and secret names only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth: Option<McpOAuthConfig>,
-    /// Server name (the `<server>` of `mcp:<server>/<tool>`).
+    /// Server name (the server segment of a qualified `mcp:…/…` tool name).
     pub name: String,
     /// Transport.
     pub transport: McpTransportKind,
@@ -377,7 +377,7 @@ pub struct McpServerPatch {
 /// A tool of an MCP server (`GET /v1/mcp/servers/{name}/tools`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpToolDto {
-    /// Qualified tool name (`mcp:<server>/<tool>`).
+    /// Qualified tool name (`mcp:server/tool`).
     pub name: String,
     /// Description given by the server.
     pub description: String,
@@ -573,6 +573,15 @@ pub enum McpAuthState {
     SigningIn,
     SignedIn,
     AuthRequired,
+}
+
+/// `POST /v1/mcp/servers/{name}/auth/logout` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpAuthLogoutDto {
+    pub state: McpAuthState,
+    /// The provider confirmed revocation. When `false`, sign-out here succeeded
+    /// but the owner may need to revoke access at the provider manually.
+    pub remote_revoked: bool,
 }
 
 /// Body of `POST /v1/mcp/servers/{name}/auth/callback`.
@@ -792,7 +801,7 @@ pub trait McpControl: Send + Sync {
     /// Cancel pending sign-in, delete credentials and disconnect.
     /// # Errors
     /// Unknown server or secret-store failure.
-    async fn auth_logout(&self, _name: &str) -> Result<McpAuthState, McpControlError> {
+    async fn auth_logout(&self, _name: &str) -> Result<McpAuthLogoutDto, McpControlError> {
         Err(McpControlError::Invalid("OAuth is unavailable".into()))
     }
     /// Mask secrets in `text` with the daemon's production redactor before it

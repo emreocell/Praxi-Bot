@@ -1,0 +1,121 @@
+name: Update feed
+
+# Moves the Preview channel's update feed to a release. GitHub has no fixed address for "the newest
+# release including pre-releases" (its /releases/latest/ ignores them), so the Preview feed is one
+# small file, preview.json, on the orphan branch `update-feed`:
+#   https://raw.githubusercontent.com/emreocell/Praxi-Bot/update-feed/preview.json
+# The Stable feed needs nothing: it is the latest.json of GitHub's "latest release".
+#
+# The file is copied from the latest.json attached to the release (already signed and checked by the
+# Windows Installer workflow) after it is checked again against the public key of that tag. The feed
+# only ever moves FORWARD (a download link to an older release is never put back). No release is
+# created or changed; nothing else runs here and no secret is used (docs/updates.md).
+#
+#   * Pre-release tags: runs by itself when Windows Installer finishes (it attached the files).
+#   * Final tags are attached by hand (docs/contributing/releasing.md): run this once the files are
+#     on the release: gh workflow run update-feed.yml -f tag=v1.0.0
+on:
+  workflow_run:
+    workflows: ["Windows Installer"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose latest.json becomes the Preview feed, e.g. v0.1.0-alpha.4"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: update-feed
+  cancel-in-progress: false
+
+jobs:
+  preview-feed:
+    name: Move the Preview feed
+    if: >-
+      github.repository == 'emreocell/Praxi-Bot' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        startsWith(github.event.workflow_run.head_branch, 'v')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
+
+    steps:
+      # Default branch: only for the checking script. This job runs no code from the tag.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read the release's feed and check it against the app's public key
+        id: incoming
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$TAG' is not a release tag such as v1.2.3 or v1.2.3-alpha.4"
+            exit 1
+          fi
+          mkdir incoming
+          if ! gh release download "$TAG" --pattern latest.json --dir incoming 2> incoming/err.txt; then
+            {
+              echo "### The Preview feed was not moved"
+              echo "Release $TAG has no latest.json attached yet (or no release exists). Attach the files of the"
+              echo "Windows Installer run (docs/contributing/releasing.md), then run this workflow again:"
+              echo '```'
+              echo "gh workflow run update-feed.yml -f tag=$TAG"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Release $TAG has no latest.json yet: the Preview feed was not moved."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The public key is the one on the default branch (the key the owner committed), not the
+          # one inside the tag being promoted: a tag built with another key is refused here.
+          python3 -B scripts/release/update_manifest.py check-config --config apps/desktop/tauri.conf.json --require-pubkey
+          python3 -B scripts/release/update_manifest.py check --manifest incoming/latest.json --tag "$TAG" --config apps/desktop/tauri.conf.json
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Move preview.json on the update-feed branch (forward only)
+        if: steps.incoming.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin update-feed > /dev/null; then
+            git fetch --depth 1 origin update-feed
+            git worktree add feed FETCH_HEAD
+            git -C feed switch -C update-feed
+          else
+            git worktree add --orphan -b update-feed feed
+          fi
+          if [[ -f feed/preview.json ]]; then
+            if cmp -s incoming/latest.json feed/preview.json; then
+              echo "::notice::The Preview feed already announces $TAG."
+              exit 0
+            fi
+            python3 -B scripts/release/update_manifest.py newer --candidate incoming/latest.json --current feed/preview.json
+          fi
+          cp incoming/latest.json feed/preview.json
+          cat > feed/README.md <<'EOF'
+          # Update feed (generated)
+
+          `preview.json` is the update feed of the Preview channel of Praxi-Bot. It is written by the
+          "Update feed" workflow from the `latest.json` of a release and only ever moves forward.
+          Do not edit it by hand; see docs/updates.md in the main branch.
+          EOF
+          git -C feed add preview.json README.md
+          git -C feed -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "Preview feed: $TAG"
+          git -C feed push origin update-feed
+          {
+            echo "### Preview feed moved to $TAG"
+            echo "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/update-feed/preview.json (cached for a few minutes by GitHub)"
+          } >> "$GITHUB_STEP_SUMMARY"

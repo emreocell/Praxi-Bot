@@ -1001,6 +1001,203 @@ async fn stored_bearer_quietly(
     }
 }
 
+/// The token to hand back to the authorization server on sign-out, read
+/// before the local copy is forgotten.
+pub struct TokenToRevoke {
+    token: String,
+    issuer: Option<String>,
+}
+
+impl std::fmt::Debug for TokenToRevoke {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenToRevoke").finish_non_exhaustive()
+    }
+}
+
+/// How long sign-out waits for the authorization server to confirm.
+const REVOKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Google MCP apps store this issuer; revocation is pinned, not taken from MCP
+/// discovery metadata.
+const GOOGLE_ISSUER: &str = "https://accounts.google.com";
+const GOOGLE_REVOKE_ENDPOINT: &str = "https://oauth2.googleapis.com/revoke";
+
+fn pinned_revocation_endpoint(issuer: &str) -> Option<&'static str> {
+    if same_issuer(issuer, GOOGLE_ISSUER) {
+        Some(GOOGLE_REVOKE_ENDPOINT)
+    } else {
+        None
+    }
+}
+
+/// The issuer the stored token was issued under, vetted against the configured
+/// binding. Fails closed when the two disagree.
+fn trusted_issuer_for_revoke(
+    server: &str,
+    revoke: &TokenToRevoke,
+    options: &SignInOptions,
+) -> Result<Option<String>> {
+    match (revoke.issuer.as_deref(), options.expected_issuer.as_deref()) {
+        (Some(stored), Some(expected)) if !same_issuer(stored, expected) => {
+            Err(McpError::Config(format!(
+                "server `{server}`: authorization server refused: the stored sign-in issuer does not match the configured issuer"
+            )))
+        }
+        (Some(stored), _) => Ok(Some(stored.to_owned())),
+        (None, Some(expected)) => Ok(Some(expected.to_owned())),
+        (None, None) => Ok(None),
+    }
+}
+
+async fn resolve_revocation_endpoint(
+    server: &str,
+    trusted_issuer: &str,
+    options: &SignInOptions,
+) -> Result<Option<reqwest::Url>> {
+    let http = options.http_client();
+    if let Some(pinned) = pinned_revocation_endpoint(trusted_issuer) {
+        let endpoint = reqwest::Url::parse(pinned).map_err(|_| {
+            McpError::Config(format!(
+                "server `{server}`: authorization server refused: an endpoint is not a valid URL"
+            ))
+        })?;
+        http.vet(&endpoint).await.map_err(|e| {
+            McpError::Config(format!(
+                "server `{server}`: authorization server refused: {e}"
+            ))
+        })?;
+        return Ok(Some(endpoint));
+    }
+    let manager = AuthorizationManager::new_with_oauth_http_client(trusted_issuer, http.clone())
+        .await
+        .map_err(|e| auth_error(server, &e))?;
+    let metadata = manager
+        .resolve_metadata()
+        .await
+        .map_err(|e| auth_error(server, &e))?
+        .metadata;
+    let advertised = metadata.issuer.as_deref().ok_or_else(|| {
+        McpError::Config(format!(
+            "server `{server}`: authorization server refused: its issuer does not match the sign-in"
+        ))
+    })?;
+    if !same_issuer(advertised, trusted_issuer) {
+        return Err(McpError::Config(format!(
+            "server `{server}`: authorization server refused: its issuer does not match the sign-in"
+        )));
+    }
+    options.check_issuer(server, Some(advertised))?;
+    check_metadata(server, &metadata, options.allow_loopback_http)?;
+    let Some(endpoint_str) = metadata
+        .additional_fields
+        .get("revocation_endpoint")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let endpoint = reqwest::Url::parse(endpoint_str).map_err(|_| {
+        McpError::Config(format!(
+            "server `{server}`: authorization server refused: an endpoint is not a valid URL"
+        ))
+    })?;
+    match endpoint.scheme() {
+        "https" => {}
+        "http"
+            if options.allow_loopback_http
+                && endpoint.host().is_some_and(|h| {
+                    h.to_string().eq_ignore_ascii_case("localhost")
+                        || h.to_string().eq_ignore_ascii_case("127.0.0.1")
+                }) => {}
+        _ => {
+            return Err(McpError::Config(format!(
+                "server `{server}`: authorization server refused: its endpoints must use https"
+            )));
+        }
+    }
+    http.vet(&endpoint).await.map_err(|e| {
+        McpError::Config(format!(
+            "server `{server}`: authorization server refused: {e}"
+        ))
+    })?;
+    Ok(Some(endpoint))
+}
+
+/// The stored sign-in of `server` at `url` as something to revoke: the refresh
+/// token when there is one (the server ends the access tokens with it), else
+/// the access token. No network; `None` when nothing is stored.
+pub async fn token_to_revoke(
+    server: &str,
+    url: &str,
+    store: &Arc<dyn SecretStore>,
+    registrar: Option<SecretRegistrar>,
+) -> Option<TokenToRevoke> {
+    let stored = SecretCredentialStore::new(Arc::clone(store), server, url, registrar)
+        .ok()?
+        .load()
+        .await
+        .ok()
+        .flatten()?;
+    let response = stored.token_response.as_ref()?;
+    let token = match response.refresh_token() {
+        Some(refresh) => refresh.secret().clone(),
+        None => response.access_token().secret().clone(),
+    };
+    Some(TokenToRevoke {
+        token,
+        issuer: stored.issuer.clone(),
+    })
+}
+
+/// Ask the authorization server to end a sign-in (RFC 7009), so removing
+/// Praxi here also removes its access there. Best effort: `Ok(false)` when
+/// the issuer is unknown or it advertises no `revocation_endpoint`. The
+/// endpoint is pinned for known issuers (Google) or discovered only from the
+/// stored/configured issuer, never from the MCP server URL. Only the token is
+/// sent in the revoke request.
+///
+/// # Errors
+/// Discovery, policy or transport failure, or a refusal by the server.
+pub async fn revoke_at_issuer(
+    server: &str,
+    revoke: TokenToRevoke,
+    options: &SignInOptions,
+) -> Result<bool> {
+    revoke_at_issuer_quietly(server, revoke, options)
+        .with_subscriber(quiet())
+        .await
+}
+
+async fn revoke_at_issuer_quietly(
+    server: &str,
+    revoke: TokenToRevoke,
+    options: &SignInOptions,
+) -> Result<bool> {
+    let Some(trusted_issuer) = trusted_issuer_for_revoke(server, &revoke, options)? else {
+        return Ok(false);
+    };
+    let Some(endpoint) = resolve_revocation_endpoint(server, &trusted_issuer, options).await?
+    else {
+        return Ok(false);
+    };
+    let http = options.http_client();
+    let form = [("token", revoke.token.as_str())];
+    let status = http
+        .post_form(endpoint, &form, REVOKE_TIMEOUT)
+        .await
+        .map_err(|e| McpError::Transport {
+            server: server.to_owned(),
+            message: format!("revoking the sign-in failed: {e}"),
+        })?;
+    if status.is_success() {
+        Ok(true)
+    } else {
+        Err(McpError::Transport {
+            server: server.to_owned(),
+            message: format!("revoking the sign-in was refused ({status})"),
+        })
+    }
+}
+
 /// DNS lookup used by the OAuth policy client, independent of any proxy.
 /// Injectable so policy tests never use real DNS.
 #[async_trait::async_trait]
@@ -1705,6 +1902,35 @@ mod tests {
                 "{target}"
             );
         }
+    }
+
+    #[test]
+    fn revoke_refuses_a_mismatched_stored_and_configured_issuer() {
+        let revoke = TokenToRevoke {
+            token: "t".into(),
+            issuer: Some("https://evil.example".into()),
+        };
+        let options = SignInOptions {
+            expected_issuer: Some("https://accounts.google.com".into()),
+            ..SignInOptions::default()
+        };
+        assert!(
+            trusted_issuer_for_revoke("s", &revoke, &options).is_err(),
+            "a stored issuer that disagrees with the configured one must fail closed"
+        );
+    }
+
+    #[test]
+    fn google_issuer_uses_a_pinned_revoke_endpoint() {
+        assert_eq!(
+            pinned_revocation_endpoint("https://accounts.google.com"),
+            Some(GOOGLE_REVOKE_ENDPOINT)
+        );
+        assert_eq!(
+            pinned_revocation_endpoint("https://accounts.google.com/"),
+            Some(GOOGLE_REVOKE_ENDPOINT)
+        );
+        assert!(pinned_revocation_endpoint("https://as.example").is_none());
     }
 
     #[tokio::test(start_paused = true)]

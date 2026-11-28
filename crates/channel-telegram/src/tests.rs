@@ -70,6 +70,14 @@ struct FakeDaemon {
     notice_retries: Mutex<Vec<String>>,
     /// Make `answer_notice` and `retry_notice` fail.
     notice_fail: Mutex<bool>,
+    /// The missions `list_missions` and `mission` serve.
+    missions: Mutex<Vec<channel_api::control::MissionBrief>>,
+    /// Every state change asked for: `(mission id, action)`.
+    mission_calls: Mutex<Vec<(String, channel_api::control::Action)>>,
+    /// Every `start_mission`: `(bot, goal)`.
+    missions_started: Mutex<Vec<(BotId, String)>>,
+    /// Make every mission call fail with this HTTP status.
+    mission_fail: Mutex<Option<u16>>,
 }
 
 impl FakeDaemon {
@@ -96,6 +104,20 @@ impl FakeDaemon {
             notice_answers: Mutex::new(Vec::new()),
             notice_retries: Mutex::new(Vec::new()),
             notice_fail: Mutex::new(false),
+            missions: Mutex::new(Vec::new()),
+            mission_calls: Mutex::new(Vec::new()),
+            missions_started: Mutex::new(Vec::new()),
+            mission_fail: Mutex::new(None),
+        }
+    }
+
+    fn mission_error(&self) -> Result<()> {
+        match *self.mission_fail.lock() {
+            Some(status) => Err(crate::TelegramError::DaemonHttp {
+                status,
+                message: "secret daemon detail".into(),
+            }),
+            None => Ok(()),
         }
     }
 
@@ -273,6 +295,87 @@ impl DaemonClient for FakeDaemon {
         }
         self.notice_retries.lock().push(notice_id.to_owned());
         Ok(())
+    }
+
+    async fn list_missions(&self) -> Result<Vec<channel_api::control::MissionBrief>> {
+        self.mission_error()?;
+        Ok(self.missions.lock().clone())
+    }
+
+    async fn mission(&self, id: &str) -> Result<channel_api::control::MissionView> {
+        self.mission_error()?;
+        let mission = self
+            .missions
+            .lock()
+            .iter()
+            .find(|m| m.id == id)
+            .cloned()
+            .ok_or(crate::TelegramError::DaemonHttp {
+                status: 404,
+                message: "no".into(),
+            })?;
+        Ok(channel_api::control::MissionView {
+            mission,
+            items: vec![],
+            blocked: vec![],
+            digest: None,
+        })
+    }
+
+    async fn mission_action(
+        &self,
+        id: &str,
+        action: channel_api::control::Action,
+    ) -> Result<channel_api::control::MissionBrief> {
+        use channel_api::control::Action;
+        self.mission_error()?;
+        self.mission_calls.lock().push((id.to_owned(), action));
+        let mut missions = self.missions.lock();
+        let m =
+            missions
+                .iter_mut()
+                .find(|m| m.id == id)
+                .ok_or(crate::TelegramError::DaemonHttp {
+                    status: 404,
+                    message: "no".into(),
+                })?;
+        let next = match (action, m.state.as_str()) {
+            (Action::Pause, "running" | "waiting" | "blocked") => "paused",
+            (Action::Resume, "paused" | "blocked") => "running",
+            (Action::Stop, "running" | "waiting" | "blocked" | "paused") => "cancelled",
+            _ => {
+                return Err(crate::TelegramError::DaemonHttp {
+                    status: 409,
+                    message: "illegal transition".into(),
+                });
+            }
+        };
+        m.state = next.into();
+        Ok(m.clone())
+    }
+
+    async fn start_mission(
+        &self,
+        bot_id: BotId,
+        goal: &str,
+    ) -> Result<channel_api::control::MissionBrief> {
+        self.mission_error()?;
+        self.missions_started.lock().push((bot_id, goal.to_owned()));
+        let m = channel_api::control::MissionBrief {
+            id: "0192f6c4-9999-7000-8000-cccccccc5678".into(),
+            title: goal.chars().take(60).collect(),
+            state: "running".into(),
+            state_reason: None,
+            progress: channel_api::control::MissionCounts::default(),
+            session_running: false,
+            updated_at_ms: 1,
+        };
+        self.missions.lock().push(m.clone());
+        Ok(m)
+    }
+
+    async fn running_run_count(&self) -> Result<usize> {
+        Ok(2)
     }
 
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {
@@ -1174,6 +1277,8 @@ async fn start_polls_get_updates_and_channel_trait_works() {
             display_name: Some("tester".into()),
         },
         message_id: Some("100".into()),
+        forwarded: false,
+        edited: false,
         kind: channel_api::IncomingKind::Text("/status".into()),
     };
     channel_api::conformance::assert_transport(
@@ -4942,7 +5047,9 @@ async fn a_turkish_chat_gets_turkish_command_replies_and_run_notices() {
         "{}",
         replies[2]
     );
-    assert!(replies[2].ends_with("\nÇalışma: boşta"), "{}", replies[2]);
+    assert!(replies[2].contains("\nÇalışma: boşta\n"), "{}", replies[2]);
+    // The mission lines follow, in the chat's language.
+    assert!(replies[2].contains("Botlar (1): Mira"), "{}", replies[2]);
     assert_eq!(replies[3], "❌ Eşleşme kodu geçersiz.");
     assert_eq!(
         replies[4],
@@ -5571,4 +5678,658 @@ mod owner_notices {
         assert_eq!(afters[0], None, "a fresh bridge starts from now");
         assert_eq!(afters[1], Some(8), "then it asks only for what it missed");
     }
+}
+
+mod mission_control {
+    use super::*;
+    use crate::ControlHub;
+    use channel_api::control::{Action, MissionBrief, MissionCounts};
+
+    const OTHER_CHAT: i64 = -100_200;
+    const ID_A: &str = "0192f6c4-1111-7000-8000-aaaaaaaa1234";
+    const ID_B: &str = "0192f6c4-2222-7000-8000-bbbbbbbb1234";
+
+    fn mission(id: &str, state: &str, title: &str) -> MissionBrief {
+        MissionBrief {
+            id: id.into(),
+            title: title.into(),
+            state: state.into(),
+            state_reason: None,
+            progress: MissionCounts {
+                total: 10,
+                done: 6,
+                blocked: 1,
+                waiting: 0,
+                failed: 0,
+                left: 3,
+            },
+            session_running: false,
+            updated_at_ms: 1,
+        }
+    }
+
+    fn setup(server: &MockServer) -> (Arc<FakeDaemon>, TelegramChannel) {
+        let daemon = one_bot_daemon();
+        *daemon.missions.lock() = vec![
+            mission(ID_A, "running", "Backlinks"),
+            mission(ID_B, "paused", "Price watch"),
+        ];
+        let channel = TelegramChannel::new(
+            TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+                .with_api_base_url(server.uri())
+                .with_poll_backoff(Duration::from_millis(5))
+                .with_paired_users([PAIRED_USER_ID]),
+            daemon.clone(),
+        )
+        .unwrap();
+        (daemon, channel)
+    }
+
+    async fn say(channel: &TelegramChannel, id: i64, text: &str) {
+        channel
+            .handle_update(update(text_update(
+                id,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                text,
+            )))
+            .await
+            .unwrap();
+    }
+
+    async fn last_reply(server: &MockServer) -> String {
+        replies_to(server, PAIRED_USER_ID)
+            .await
+            .last()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    async fn press(channel: &TelegramChannel, id: i64, query: &str, data: &str) {
+        channel
+            .handle_update(update(callback_update(
+                id,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                query,
+                data,
+            )))
+            .await
+            .unwrap();
+    }
+
+    /// The two stop buttons of the newest message that has any.
+    async fn stop_buttons(server: &MockServer) -> (String, String) {
+        let reqs = server.received_requests().await.unwrap();
+        let msg = sent_messages(&reqs)
+            .into_iter()
+            .rev()
+            .find(|m| m.get("reply_markup").is_some_and(|v| !v.is_null()))
+            .expect("a message with buttons");
+        let row = &msg["reply_markup"]["inline_keyboard"][0];
+        (
+            row[0]["callback_data"].as_str().unwrap().to_owned(),
+            row[1]["callback_data"].as_str().unwrap().to_owned(),
+        )
+    }
+
+    #[tokio::test]
+    async fn the_list_and_the_details_come_in_the_chats_language() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (_daemon, channel) = setup(&server);
+
+        say(&channel, 1, "/missions").await;
+        let en = last_reply(&server).await;
+        assert!(en.starts_with("Missions (2):"), "{en}");
+        assert!(en.contains("aaaa1234") && en.contains("Backlinks") && en.contains("6/10"));
+        assert!(en.contains("running") && en.contains("paused"));
+
+        say(&channel, 2, "/mission aaaa1234").await;
+        let detail = last_reply(&server).await;
+        assert!(detail.contains("Backlinks (aaaa1234)"), "{detail}");
+        assert!(detail.contains("6 of 10 done"), "{detail}");
+
+        say(&channel, 3, "/lang tr").await;
+        say(&channel, 4, "/gorevler").await;
+        let tr = last_reply(&server).await;
+        assert!(tr.starts_with("Görevler (2):"), "{tr}");
+        assert!(
+            tr.contains("çalışıyor") && tr.contains("duraklatıldı"),
+            "{tr}"
+        );
+        say(&channel, 5, "/gorev bbbb1234").await;
+        assert!(last_reply(&server).await.contains("Price watch (bbbb1234)"));
+        say(&channel, 6, "/yardim").await;
+        assert!(last_reply(&server).await.contains("/duraklat <id>"));
+        // The bot's own name after the command (a group habit) works too.
+        say(&channel, 7, "/gorevler@my_praxi_bot").await;
+        assert!(last_reply(&server).await.starts_with("Görevler (2):"));
+    }
+
+    #[tokio::test]
+    async fn pause_and_resume_go_to_the_daemon_and_say_what_happened() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+
+        say(&channel, 1, "/pause aaaa1234").await;
+        assert!(last_reply(&server).await.starts_with("⏸ Paused: Backlinks"));
+        say(&channel, 2, "/resume AAAA1234").await;
+        assert!(
+            last_reply(&server)
+                .await
+                .starts_with("▶ Resumed: Backlinks")
+        );
+        // The Turkish names do the same.
+        say(&channel, 3, "/duraklat bbbb1234").await;
+        // It is paused already: the state is told, the daemon text is not.
+        let told = last_reply(&server).await;
+        assert!(
+            told.contains("Cannot pause") && told.contains("paused"),
+            "{told}"
+        );
+        assert!(!told.contains("illegal transition"));
+        say(&channel, 4, "/surdur bbbb1234").await;
+        assert!(
+            last_reply(&server)
+                .await
+                .starts_with("▶ Resumed: Price watch")
+        );
+        let calls = daemon.mission_calls.lock().clone();
+        assert_eq!(
+            calls,
+            vec![
+                (ID_A.to_owned(), Action::Pause),
+                (ID_A.to_owned(), Action::Resume),
+                (ID_B.to_owned(), Action::Pause),
+                (ID_B.to_owned(), Action::Resume),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn stopping_asks_first_and_only_the_button_stops_it_once() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+
+        say(&channel, 1, "/stop aaaa1234").await;
+        let q = last_reply(&server).await;
+        assert!(q.contains("Stop “Backlinks” (aaaa1234) for good?"), "{q}");
+        assert!(
+            daemon.mission_calls.lock().is_empty(),
+            "the command alone stops nothing"
+        );
+        let (yes, no) = stop_buttons(&server).await;
+        assert!(yes.len() <= 64 && no.len() <= 64);
+
+        // "Keep going" closes the question; the stop button of the same question is then dead.
+        press(&channel, 2, "q1", &no).await;
+        assert!(last_reply(&server).await.contains("nothing changed"));
+        press(&channel, 3, "q2", &yes).await;
+        assert!(last_reply(&server).await.contains("expired"));
+        assert!(daemon.mission_calls.lock().is_empty());
+
+        say(&channel, 4, "/durdur bbbb1234").await;
+        assert!(last_reply(&server).await.contains("for good?"));
+        let (yes, _) = stop_buttons(&server).await;
+        press(&channel, 5, "q3", &yes).await;
+        assert!(
+            last_reply(&server)
+                .await
+                .starts_with("⏹ Stopped: Price watch")
+        );
+        // A second press (or a replayed callback) does nothing.
+        press(&channel, 6, "q4", &yes).await;
+        assert!(last_reply(&server).await.contains("expired"));
+        assert_eq!(
+            daemon.mission_calls.lock().clone(),
+            vec![(ID_B.to_owned(), Action::Stop)]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stop_button_nobody_offered_does_nothing() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        // Never asked.
+        press(&channel, 1, "q1", &format!("mc:y:{ID_A}")).await;
+        assert!(last_reply(&server).await.contains("expired"));
+        // Garbled data is not ours: acknowledged, nothing else.
+        press(&channel, 2, "q2", "mc:y:not-an-id").await;
+        // Asked for A; a press naming B is dead.
+        say(&channel, 3, "/stop aaaa1234").await;
+        press(&channel, 4, "q3", &format!("mc:y:{ID_B}")).await;
+        assert!(daemon.mission_calls.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn only_the_paired_user_in_a_private_chat_can_run_a_command() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+
+        // A stranger gets the one refusal and nothing runs.
+        channel
+            .handle_update(update(text_update(
+                1,
+                UNPAIRED_USER_ID,
+                UNPAIRED_USER_ID,
+                "/pause aaaa1234",
+            )))
+            .await
+            .unwrap();
+        channel
+            .handle_update(update(text_update(
+                2,
+                UNPAIRED_USER_ID,
+                UNPAIRED_USER_ID,
+                "/mission new buy things",
+            )))
+            .await
+            .unwrap();
+        let reqs = server.received_requests().await.unwrap();
+        assert!(
+            sent_messages(&reqs)
+                .iter()
+                .all(|m| m["text"] == crate::UNPAIRED_REFUSAL_TEXT)
+        );
+        // A group, even from the paired user, is ignored whole.
+        channel
+            .handle_update(update(with_chat_type(
+                text_update(3, PAIRED_USER_ID, OTHER_CHAT, "/pause aaaa1234"),
+                "supergroup",
+            )))
+            .await
+            .unwrap();
+        assert_eq!(replies_to(&server, OTHER_CHAT).await, Vec::<String>::new());
+        // A pressed button from a stranger is not acted on either.
+        channel
+            .handle_update(update(callback_update(
+                4,
+                UNPAIRED_USER_ID,
+                UNPAIRED_USER_ID,
+                "q",
+                &format!("mc:y:{ID_A}"),
+            )))
+            .await
+            .unwrap();
+        assert!(daemon.mission_calls.lock().is_empty());
+        assert!(daemon.missions_started.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_command_is_refused() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        for (id, field, value) in [
+            (
+                1,
+                "forward_origin",
+                json!({"type": "hidden_user", "date": 1, "sender_user_name": "x"}),
+            ),
+            (
+                2,
+                "forward_from",
+                json!({"id": 99, "is_bot": false, "first_name": "Eve"}),
+            ),
+            (3, "forward_date", json!(1)),
+        ] {
+            let mut v = text_update(
+                id,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/mission new wire money to eve",
+            );
+            v["message"][field] = value;
+            channel.handle_update(update(v)).await.unwrap();
+            assert_eq!(
+                last_reply(&server).await,
+                "A forwarded message cannot run a command. Type it yourself."
+            );
+        }
+        assert!(daemon.missions_started.lock().is_empty());
+        let mut v = text_update(4, PAIRED_USER_ID, PAIRED_USER_ID, "/pause aaaa1234");
+        v["message"]["forward_date"] = json!(1);
+        channel.handle_update(update(v)).await.unwrap();
+        assert!(daemon.mission_calls.lock().is_empty());
+    }
+
+    /// How many of the paired user's replies say the stop question had lapsed.
+    async fn expired_replies(server: &MockServer) -> usize {
+        replies_to(server, PAIRED_USER_ID)
+            .await
+            .iter()
+            .filter(|r| r.contains("expired"))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn pressing_the_stop_buttons_over_and_over_is_rate_limited_and_then_silent() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        say(&channel, 1, "/stop aaaa1234").await;
+        let (yes, no) = stop_buttons(&server).await;
+        // The command used one of the 20 a minute; the buttons share the same window.
+        for n in 0..40 {
+            let data = if n % 2 == 0 { &yes } else { &no };
+            press(&channel, 100 + n, &format!("q{n}"), data).await;
+        }
+        let replies = replies_to(&server, PAIRED_USER_ID).await;
+        // 1 question + 19 answered presses; the other 21 said nothing at all.
+        assert_eq!(replies.len(), 20, "{replies:?}");
+        assert!(
+            !replies.iter().any(|r| r.contains("Too many")),
+            "{replies:?}"
+        );
+        // The pressed-too-fast buttons were acknowledged (no spinner) but did nothing more.
+        assert_eq!(
+            daemon.mission_calls.lock().len(),
+            1,
+            "stopped once, at most"
+        );
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(callback_answers(&reqs).len(), 40);
+    }
+
+    #[tokio::test]
+    async fn a_press_after_the_window_is_spent_does_not_stop_the_mission() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        say(&channel, 1, "/stop aaaa1234").await;
+        let (yes, _) = stop_buttons(&server).await;
+        for n in 0..19 {
+            say(&channel, 10 + n, "/missions").await;
+        }
+        // 20 commands used the window: the confirm is ignored, and the question stays open.
+        press(&channel, 50, "q1", &yes).await;
+        assert!(daemon.mission_calls.lock().is_empty());
+        assert_eq!(expired_replies(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn the_hub_keeps_a_rate_window_and_stop_questions_for_each_owner() {
+        use channel_api::control::{Control, OwnerId};
+
+        let hub = ControlHub::new(one_bot_daemon());
+        let (en, plain) = (
+            channel_api::notice::NoticeLang::En,
+            channel_api::notice::Flavor::Plain,
+        );
+        let a = OwnerId::telegram(11).unwrap();
+        let b = OwnerId::telegram(22).unwrap();
+        for _ in 0..20 {
+            let said = hub.handle(a, &Control::Help, en, plain, None).await.text;
+            assert_ne!(said, "");
+        }
+        let refused = hub.handle(a, &Control::Help, en, plain, None).await;
+        assert!(refused.text.contains("Too many"), "{}", refused.text);
+        // `a` used up its window; `b` has its own.
+        let said = hub.handle(b, &Control::Help, en, plain, None).await.text;
+        assert_ne!(said, "");
+
+        // `b` cannot answer the question `c` was asked, even naming the same mission.
+        let daemon = one_bot_daemon();
+        *daemon.missions.lock() = vec![mission(ID_A, "running", "Backlinks")];
+        let hub = ControlHub::new(daemon.clone());
+        let c = OwnerId::telegram(33).unwrap();
+        let asked = hub
+            .handle(c, &Control::Stop("aaaa1234".into()), en, plain, None)
+            .await;
+        assert_eq!(asked.confirm.as_deref(), Some(ID_A));
+        assert!(
+            hub.confirm_stop(b, ID_A, en, plain)
+                .await
+                .text
+                .contains("expired")
+        );
+        assert!(daemon.mission_calls.lock().is_empty());
+        assert!(
+            hub.confirm_stop(c, ID_A, en, plain)
+                .await
+                .text
+                .starts_with("⏹ Stopped")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_mission_starts_on_the_chats_bot_with_the_owners_words() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        say(&channel, 1, "/mission new  find 20 backlinks for my shop ").await;
+        let started = daemon.missions_started.lock().clone();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].0, daemon.bots[0].id);
+        assert_eq!(started[0].1, "find 20 backlinks for my shop");
+        let told = last_reply(&server).await;
+        assert!(
+            told.starts_with("🚀 Mission started: find 20 backlinks for my shop (cccc5678)"),
+            "{told}"
+        );
+
+        say(&channel, 2, "/gorev yeni siteyi her gün kontrol et").await;
+        assert_eq!(
+            daemon.missions_started.lock()[1].1,
+            "siteyi her gün kontrol et"
+        );
+
+        // The daemon refuses (the bot is not on the Full level): told without its text.
+        *daemon.mission_fail.lock() = Some(400);
+        say(&channel, 5, "/mission new something").await;
+        let refused = last_reply(&server).await;
+        assert!(refused.contains("Full level"), "{refused}");
+        assert!(!refused.contains("secret daemon detail"));
+    }
+
+    #[tokio::test]
+    async fn starting_is_rate_limited_harder_than_looking_and_a_flood_is_told_once() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        for i in 1..=5 {
+            say(&channel, i, &format!("/mission new job {i}")).await;
+        }
+        assert_eq!(
+            daemon.missions_started.lock().len(),
+            3,
+            "three starts per ten minutes"
+        );
+        assert!(last_reply(&server).await.contains("Too many commands"));
+        // Looking still works until the general budget is used up.
+        say(&channel, 6, "/missions").await;
+        assert!(last_reply(&server).await.starts_with("Missions ("));
+        for i in 7..=40 {
+            say(&channel, i, "/missions").await;
+        }
+        let told: Vec<String> = replies_to(&server, PAIRED_USER_ID)
+            .await
+            .into_iter()
+            .filter(|t| t.contains("Too many commands"))
+            .collect();
+        assert_eq!(
+            told.len(),
+            2,
+            "once for the starts, once for the flood: {told:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ids_that_do_not_fit_are_explained() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        say(&channel, 1, "/pause").await;
+        assert!(last_reply(&server).await.starts_with("Which mission?"));
+        say(&channel, 2, "/pause zzzz").await;
+        assert!(last_reply(&server).await.contains("not a mission id"));
+        say(&channel, 3, "/pause cccc1111").await;
+        assert!(
+            last_reply(&server)
+                .await
+                .contains("No mission with that id")
+        );
+        say(&channel, 4, "/pause 1234").await;
+        assert!(last_reply(&server).await.contains("matches 2 missions"));
+        say(&channel, 5, "/mission").await;
+        assert!(last_reply(&server).await.contains("/mission <id>"));
+        // Nothing to start, or too much.
+        say(&channel, 6, "/mission new").await;
+        assert!(
+            last_reply(&server)
+                .await
+                .contains("/mission new <what to do>")
+        );
+        say(&channel, 7, &format!("/mission new {}", "x".repeat(4_001))).await;
+        assert!(last_reply(&server).await.contains("too long"));
+        assert!(daemon.missions_started.lock().is_empty());
+        assert!(daemon.mission_calls.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missions_that_are_off_or_failing_get_a_plain_answer() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        *daemon.mission_fail.lock() = Some(503);
+        say(&channel, 1, "/missions").await;
+        assert!(last_reply(&server).await.contains("not available"));
+        *daemon.mission_fail.lock() = Some(500);
+        say(&channel, 2, "/missions").await;
+        let failed = last_reply(&server).await;
+        assert!(failed.contains("did not work") && !failed.contains("secret daemon detail"));
+        *daemon.mission_fail.lock() = None;
+        daemon.missions.lock().clear();
+        say(&channel, 3, "/missions").await;
+        assert!(last_reply(&server).await.contains("No missions yet"));
+    }
+
+    #[tokio::test]
+    async fn what_a_mission_wrote_cannot_make_a_link_or_a_command() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        daemon.missions.lock()[0].title = "Visit https://evil.example then /stop".into();
+        say(&channel, 1, "/missions").await;
+        let list = last_reply(&server).await;
+        assert!(
+            !list.contains("https://") && !list.contains(" /stop"),
+            "{list}"
+        );
+    }
+
+    #[tokio::test]
+    async fn status_adds_bots_runs_and_missions_and_a_bare_stop_still_stops_the_run() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        for (id, cmd) in [(1, "/status"), (2, "/durum")] {
+            say(&channel, id, cmd).await;
+            let s = last_reply(&server).await;
+            assert!(s.contains("Bots (1): Mira"), "{s}");
+            assert!(
+                s.contains("Running now: 2") || s.contains("Şu an çalışan: 2"),
+                "{s}"
+            );
+            assert!(s.contains("1 running, 0 waiting for you, 1 paused"), "{s}");
+        }
+        // A bare /stop (either name) is still the chat's own stop, not a mission command.
+        say(&channel, 3, "/stop").await;
+        say(&channel, 4, "/durdur").await;
+        assert!(daemon.mission_calls.lock().is_empty());
+        assert!(daemon.cancelled_runs.lock().is_empty(), "no run was active");
+        assert_eq!(last_reply(&server).await, "No active run to stop.");
+    }
+}
+
+#[tokio::test]
+async fn http_daemon_client_maps_the_mission_routes_and_labels_a_started_goal() {
+    use channel_api::control::Action;
+    use wiremock::matchers::{body_json, header};
+
+    const ID: &str = "0192f6c4-1111-7000-8000-aaaaaaaa1234";
+    let srv = MockServer::start().await;
+    let bot = BotId::new();
+    let brief = |state: &str| {
+        json!({"id": ID, "title": "Backlinks", "state": state,
+               "progress": {"total": 10, "done": 6, "blocked": 1, "waiting": 0, "todo": 2,
+                            "doing": 1, "failed": 0, "skipped": 0, "left": 3},
+               "sessions": 1, "session_running": false, "updated_at_ms": 5})
+    };
+    Mock::given(method("GET"))
+        .and(path("/v1/missions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([brief("running")])))
+        .mount(&srv)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/v1/missions/{ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "mission": brief("running"), "items": [], "blocked": [], "digest": null
+        })))
+        .mount(&srv)
+        .await;
+    for (verb, state) in [
+        ("pause", "paused"),
+        ("resume", "running"),
+        ("cancel", "cancelled"),
+    ] {
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/missions/{ID}/{verb}")))
+            .and(header("x-praxi-owner-key", "owner-key"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"mission": brief(state)})),
+            )
+            .mount(&srv)
+            .await;
+    }
+    // The started goal carries the bridge's message source, and nothing else about the sender.
+    Mock::given(method("POST"))
+        .and(path("/v1/missions"))
+        .and(header("x-praxi-message-source", "discord"))
+        .and(body_json(
+            json!({"bot_id": bot.0, "goal": "find backlinks"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "mission": brief("running"), "items": [], "blocked": [], "digest": null
+        })))
+        .mount(&srv)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v1/runs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"state": "running"}, {"state": "succeeded"}, {"state": "running"}
+        ])))
+        .mount(&srv)
+        .await;
+
+    let client = HttpDaemonClient::new(srv.uri(), SecretValue::new("tok"))
+        .with_owner_key(Some(SecretValue::new("owner-key")))
+        .with_message_source("discord");
+    let list = client.list_missions().await.unwrap();
+    assert_eq!((list[0].id.as_str(), list[0].progress.done), (ID, 6));
+    assert_eq!(client.mission(ID).await.unwrap().mission.state, "running");
+    for (action, state) in [
+        (Action::Pause, "paused"),
+        (Action::Resume, "running"),
+        (Action::Stop, "cancelled"),
+    ] {
+        assert_eq!(
+            client.mission_action(ID, action).await.unwrap().state,
+            state
+        );
+    }
+    assert_eq!(
+        client
+            .start_mission(bot, "find backlinks")
+            .await
+            .unwrap()
+            .id,
+        ID
+    );
+    assert_eq!(client.running_run_count().await.unwrap(), 2);
 }

@@ -39,6 +39,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0004_sent_chars",
         include_str!("../migrations/0004_sent_chars.sql"),
     ),
+    (
+        "0005_wait_deferral",
+        include_str!("../migrations/0005_wait_deferral.sql"),
+    ),
+    (
+        "0006_wait_deferred_ids",
+        include_str!("../migrations/0006_wait_deferred_ids.sql"),
+    ),
 ];
 
 mod waits;
@@ -238,6 +246,14 @@ fn model_item_transition_ok(from: ItemStatus, to: ItemStatus) -> bool {
         // `mission_wait` parks an item; the bot may take it up again by itself (its wait ends).
         Waiting => matches!(to, Todo | Doing | Done | Blocked | Failed | Skipped),
     }
+}
+
+fn item_transition_cancels_waits(from: ItemStatus, to: ItemStatus) -> bool {
+    from == ItemStatus::Waiting
+        || matches!(
+            to,
+            ItemStatus::Done | ItemStatus::Failed | ItemStatus::Skipped
+        )
 }
 
 fn check_text(what: &str, s: &str, max: usize) -> Result<String> {
@@ -661,7 +677,7 @@ impl MissionStore {
         if to != cur.status {
             // The item left its wait: nobody watches it any more. A wake that was meant to
             // continue the item is delivered until it is settled or parked again.
-            if cur.status == ItemStatus::Waiting {
+            if item_transition_cancels_waits(cur.status, to) {
                 waits::cancel_item_waits(&tx, id, key, now)?;
             }
             if !matches!(to, ItemStatus::Todo | ItemStatus::Doing) {

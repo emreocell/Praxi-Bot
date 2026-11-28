@@ -866,7 +866,7 @@ fn runs_without_a_card(w: &World, ctx: &crate::shared::RunCtx, command: &str) ->
 #[tokio::test]
 async fn full_shell_after_a_page_read_runs_for_the_owner_and_the_owners_paired_channel() {
     let w = shell_world();
-    for source in ["owner", "telegram_owner"] {
+    for source in ["owner", "telegram_owner", "discord_owner"] {
         let ctx = owned_root_ctx_from(&w, source).await;
         assert!(
             runs_without_a_card(&w, &ctx, "cargo build --release"),
@@ -882,7 +882,7 @@ async fn full_shell_after_a_page_read_still_asks_for_everyone_who_is_not_the_own
     let w = shell_world();
     // a Telegram message without the owner key, a paired device that is not the admin, a plain
     // local API caller: none of them is the owner
-    for source in ["telegram", "peer", "local_api", "email"] {
+    for source in ["telegram", "discord", "peer", "local_api", "email"] {
         let ctx = owned_root_ctx_from(&w, source).await;
         let (d, _) = decide_shell(&w, &ctx, "ls -la");
         assert!(d.is_ask(), "{source}: {d:?}");

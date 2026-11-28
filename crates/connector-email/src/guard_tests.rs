@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use secret_store::{MemoryStore, SecretRef, SecretStore};
 use serde_json::{Value, json};
-use tool_registry::{Tool, ToolContext, ToolError};
+use tool_registry::{ContentPart, Tool, ToolContext, ToolError};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -73,6 +73,15 @@ fn ctx() -> ToolContext {
     ToolContext {
         bot_id: Some(BOT.into()),
         run_id: "run-1".into(),
+        ..ToolContext::default()
+    }
+}
+
+fn full_ctx() -> ToolContext {
+    ToolContext {
+        bot_id: Some(BOT.into()),
+        run_id: "run-1".into(),
+        unattended_mail: true,
         ..ToolContext::default()
     }
 }
@@ -252,6 +261,9 @@ async fn the_same_recipient_wait_and_opt_out_by_unicode_entry_match_the_other_sp
         ["opt_out_listed"]
     );
     let (_s2, conn2) = setup().await;
+    let mut settings = conn2.guard().settings();
+    settings.same_recipient_days = 14;
+    conn2.guard().set_settings(settings).unwrap();
     let t2 = send_tool(&conn2);
     t2.call(&ctx(), mail("tom@example.com")).await.unwrap();
     // `tom+2@` is the same mailbox: the same-recipient wait applies.
@@ -308,6 +320,73 @@ async fn the_guard_runs_again_for_the_identity_chosen_on_the_card() {
 }
 
 #[tokio::test]
+async fn full_level_sends_past_repeat_recipient_and_daily_warnings() {
+    let (server, conn) = setup().await;
+    let mut s = conn.guard().settings();
+    s.daily_limit = 1;
+    s.same_recipient_days = 7;
+    conn.guard().set_settings(s).unwrap();
+    let t = send_tool(&conn);
+    let who = "tom@example.com";
+    t.call(&full_ctx(), mail(who)).await.unwrap();
+    let second = mail(who);
+    let out = t.call(&full_ctx(), second).await.unwrap();
+    let ContentPart::Json { data: body } = &out.content[0] else {
+        panic!("json output");
+    };
+    let warned = body
+        .get("mail_guard_warnings")
+        .and_then(Value::as_array)
+        .map_or(0, std::vec::Vec::len);
+    assert_eq!(warned, 2, "{body:?}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(conn.guard().log(10).len(), 2);
+}
+
+#[tokio::test]
+async fn full_level_still_blocks_the_opt_out_list() {
+    let (server, conn) = setup().await;
+    conn.guard().add_opt_out("ann@example.com", "").unwrap();
+    let t = send_tool(&conn);
+    let err = t
+        .call(&full_ctx(), mail("ann@example.com"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::PermissionDenied(ref m) if m.contains("(opt-out list)")),
+        "{err}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn full_level_cannot_remove_the_owner_enabled_footer() {
+    let (server, conn) = setup().await;
+    let mut input = mail("bob@example.com");
+    input["opt_out_line"] = json!(false);
+    let err = send_tool(&conn).call(&full_ctx(), input).await.unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn full_level_blocks_unreadable_guard_with_repair_instructions() {
+    let (server, conn) = setup().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("guard-settings.json"), "{bad json").unwrap();
+    conn.set_guard_dir(dir.path().to_path_buf());
+    let err = send_tool(&conn)
+        .call(&full_ctx(), mail("bob@example.com"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::PermissionDenied(ref m) if m.contains("Repair") && !m.contains("Remove the recipient")),
+        "{err}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn literal_backslash_n_in_the_body_becomes_real_line_breaks_on_the_card_and_in_the_mail() {
     let (server, conn) = setup().await;
     let t = send_tool(&conn);
@@ -344,4 +423,105 @@ async fn a_body_that_already_has_real_line_breaks_is_never_altered() {
     assert!(d["body"].as_str().unwrap().starts_with(body));
     t.call(&ctx(), input).await.unwrap();
     assert!(sent_bodies(&server).await[0].starts_with(body));
+}
+
+#[tokio::test]
+async fn the_thread_id_and_the_mission_of_a_send_are_logged() {
+    let (_server, conn) = setup().await;
+    conn.set_mission_resolver(Arc::new(|run: &str| {
+        (run == "run-1").then(|| "mission-7".to_owned())
+    }));
+    let t = send_tool(&conn);
+    t.call(&ctx(), mail("bob@example.com")).await.unwrap();
+    let e = conn.guard().log(1).remove(0);
+    assert_eq!(e.thread_id.as_deref(), Some("t"));
+    assert_eq!(e.mission_id.as_deref(), Some("mission-7"));
+    // A reply that quotes the id, or comes in the thread, finds it.
+    let by_id = conn.guard().find_sent("work", "sent1", None).unwrap();
+    assert_eq!(by_id.mission_id.as_deref(), Some("mission-7"));
+    assert!(conn.guard().find_sent("work", "x", Some("t")).is_some());
+}
+
+fn tight_budget(conn: &Arc<EmailConnector>, budget: u32) {
+    let mut s = conn.guard().settings();
+    s.outreach_daily_budget = budget;
+    s.outreach_warmup_days = 0;
+    s.daily_limit = 0;
+    s.same_recipient_days = 0;
+    conn.guard().set_settings(s).unwrap();
+}
+
+#[tokio::test]
+async fn an_unattended_bot_is_refused_past_the_daily_outreach_budget() {
+    let (server, conn) = setup().await;
+    tight_budget(&conn, 2);
+    let t = send_tool(&conn);
+    t.call(&full_ctx(), mail("a@example.com")).await.unwrap();
+    t.call(&full_ctx(), mail("b@example.com")).await.unwrap();
+    let e = t
+        .call(&full_ctx(), mail("c@example.com"))
+        .await
+        .unwrap_err();
+    let ToolError::Execution(m) = e else {
+        panic!("{e:?}")
+    };
+    assert!(m.contains("Not sent") && m.contains("2 of 2"), "{m}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(conn.guard().log(10).len(), 2);
+    // The owner at the screen decides for their own mail: the budget is for outreach.
+    t.call(&ctx(), mail("c@example.com")).await.unwrap();
+    // A mission session is outreach whoever approved the card.
+    conn.set_mission_resolver(Arc::new(|_| Some("m".to_owned())));
+    assert!(t.call(&ctx(), mail("d@example.com")).await.is_err());
+    // Raising the budget lets it through again.
+    tight_budget(&conn, 10);
+    t.call(&ctx(), mail("d@example.com")).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_mail_the_owner_asked_for_in_chat_is_never_held_to_the_outreach_budget() {
+    let (server, conn) = setup().await;
+    tight_budget(&conn, 1);
+    let t = send_tool(&conn);
+    // The owner's own chat turn on a Full bot: every call carries `unattended_mail`, but the
+    // mail is the owner's request, so the budget does not count it out.
+    let owner_chat = ToolContext {
+        owner_chat_turn: true,
+        ..full_ctx()
+    };
+    for to in ["a@example.com", "b@example.com", "c@example.com"] {
+        t.call(&owner_chat, mail(to)).await.unwrap();
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+    // The same Full bot running in the background is still held: its one slot is used up.
+    let e = t
+        .call(&full_ctx(), mail("d@example.com"))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, ToolError::Execution(m) if m.contains("Not sent")));
+    // A mission session counts against the budget even if a context said "owner chat".
+    conn.set_mission_resolver(Arc::new(|_| Some("m".to_owned())));
+    assert!(t.call(&owner_chat, mail("e@example.com")).await.is_err());
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn parallel_unattended_sends_cannot_share_the_last_slot_of_the_budget() {
+    let (server, conn) = setup().await;
+    tight_budget(&conn, 3);
+    let mut tasks = Vec::new();
+    for i in 0..8 {
+        let t = send_tool(&conn);
+        tasks.push(tokio::spawn(async move {
+            t.call(&full_ctx(), mail(&format!("p{i}@example.com")))
+                .await
+                .is_ok()
+        }));
+    }
+    let mut ok = 0;
+    for t in tasks {
+        ok += usize::from(t.await.unwrap());
+    }
+    assert_eq!(ok, 3);
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
 }

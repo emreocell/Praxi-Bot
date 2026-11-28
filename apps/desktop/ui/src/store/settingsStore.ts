@@ -83,6 +83,8 @@ export interface AppSettings extends AppearanceSettings {
   voiceName: string;
   /** Speaking speed of read-aloud replies (0.5 - 2). */
   voiceRate: number;
+  /** Read chat replies with the on-device daemon model. */
+  offlineReadAloud: boolean;
   /** Read each finished bot reply aloud automatically. */
   speakReplies: boolean;
   /** Push-to-talk: hold a key to dictate, release to send. Off by default. */
@@ -135,6 +137,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hostBotOrders: {},
   voiceName: "",
   voiceRate: DEFAULT_VOICE_RATE,
+  offlineReadAloud: false,
   speakReplies: false,
   pttEnabled: false,
   pttKey: DEFAULT_PTT_KEY,
@@ -198,6 +201,7 @@ export function loadSettingsSync(): AppSettings | null {
       hostBotOrders: parseHostBotOrders(parsed.hostBotOrders),
       voiceName: parseVoiceName(parsed.voiceName),
       voiceRate: parseVoiceRate(parsed.voiceRate),
+      offlineReadAloud: parsed.offlineReadAloud === true,
       speakReplies: parsed.speakReplies === true,
       pttEnabled: parsed.pttEnabled === true,
       pttKey: parsePttKey(parsed.pttKey),
@@ -296,6 +300,7 @@ export async function loadSettings(): Promise<AppSettings> {
       const hostBotOrders = parseHostBotOrders(await store.get<unknown>("hostBotOrders"));
       const voiceName = parseVoiceName(await store.get<string>("voiceName"));
       const voiceRate = parseVoiceRate(await store.get<number>("voiceRate"));
+      const offlineReadAloud = (await store.get<boolean>("offlineReadAloud")) === true;
       const speakReplies = (await store.get<boolean>("speakReplies")) === true;
       const pttEnabled = (await store.get<boolean>("pttEnabled")) === true;
       const pttKey = parsePttKey(await store.get<string>("pttKey"));
@@ -340,6 +345,7 @@ export async function loadSettings(): Promise<AppSettings> {
         hostBotOrders,
         voiceName,
         voiceRate,
+        offlineReadAloud,
         speakReplies,
         pttEnabled,
         pttKey,
@@ -402,6 +408,7 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("hostBotOrders", settings.hostBotOrders);
       await store.set("voiceName", settings.voiceName);
       await store.set("voiceRate", settings.voiceRate);
+      await store.set("offlineReadAloud", settings.offlineReadAloud);
       await store.set("speakReplies", settings.speakReplies);
       await store.set("pttEnabled", settings.pttEnabled);
       await store.set("pttKey", settings.pttKey);

@@ -96,6 +96,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         ),
         core::check_disk(env.data_dir),
         check_local_models(env.data_dir),
+        crate::voice_host::check_offline_voice(env.data_dir),
         check_resources(),
         check_telegram(env),
         core::check_unicode_path(env.data_dir),
@@ -106,6 +107,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_node_runtime(
             &cli_provider::node_runtime::probe(&cli_provider::PathEnv::from_ambient()),
             cli_provider::identity::installed_as_service(),
+            Some(env.data_dir),
         ),
         core::check_peer_link(env.data_dir, &live_link(env)),
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
@@ -113,6 +115,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             std::time::SystemTime::now(),
             core::newest_mtime(env.data_dir),
         ),
+        core::check_account_sessions(env.data_dir),
     ];
     if let Some(url) = env.time_url {
         checks.push(core::check_clock_skew(

@@ -3,6 +3,7 @@
 use mail_parser::{Address, MessageParser, MimeHeaders};
 use serde::Serialize;
 
+use crate::dsn::DeliveryStatus;
 use crate::error::EmailError;
 
 /// Maximum body characters returned by default.
@@ -115,6 +116,16 @@ pub struct MessageDetail {
     /// The `References` header ids (without angle brackets), oldest first.
     #[serde(skip)]
     pub references: Vec<String>,
+    /// The `In-Reply-To` header ids (without angle brackets). Not part of the model-facing JSON.
+    #[serde(skip)]
+    pub in_reply_to: Vec<String>,
+    /// The provider's thread id (API mailboxes). Not part of the model-facing JSON.
+    #[serde(skip)]
+    pub thread_id: Option<String>,
+    /// What the message says when it is a delivery report (RFC 3464). Not part of the
+    /// model-facing JSON.
+    #[serde(skip)]
+    pub delivery_status: Option<DeliveryStatus>,
     /// Bare addresses of the To and Cc recipients, for "reply all".
     #[serde(skip)]
     pub recipients: Vec<String>,
@@ -295,13 +306,24 @@ pub fn parse_detail(
             .reply_to()
             .map(|a| sole_address(Some(a)))
             .filter(|a| !a.is_empty()),
-        references: msg
-            .references()
+        references: {
+            // A stranger's header can list thousands of ids: keep the newest (the last).
+            let ids = msg.references().as_text_list().unwrap_or_default();
+            ids.iter()
+                .skip(ids.len().saturating_sub(MAX_REFERENCE_IDS))
+                .map(|r| cap_untrusted(r.trim_matches(['<', '>'])))
+                .collect()
+        },
+        in_reply_to: msg
+            .in_reply_to()
             .as_text_list()
             .unwrap_or_default()
             .iter()
-            .map(|r| r.trim_matches(['<', '>']).to_owned())
+            .take(MAX_IN_REPLY_TO_IDS)
+            .map(|r| cap_untrusted(r.trim_matches(['<', '>'])))
             .collect(),
+        thread_id: None,
+        delivery_status: delivery_status_of(&msg),
         recipients: msg
             .to()
             .iter()
@@ -320,6 +342,65 @@ pub fn parse_detail(
             .find(|(name, _)| name.eq_ignore_ascii_case("Authentication-Results"))
             .map(|(_, raw)| authenticated_sender(raw, &summary_from)),
     })
+}
+
+/// Most ids kept of one message's `References` header (the newest).
+const MAX_REFERENCE_IDS: usize = 50;
+/// Most ids kept of one message's `In-Reply-To` header (a reply has one).
+const MAX_IN_REPLY_TO_IDS: usize = 5;
+/// Most bytes of delivery-status text read from one message.
+const MAX_DSN_BYTES: usize = 64 * 1024;
+
+/// The delivery report inside `msg`, joined with the original message's headers that the
+/// report returns. `None` when the message has no recipient block to read.
+///
+/// The result is `structured` only for a real report: an outer `multipart/report` that carries
+/// a `message/delivery-status` part. Any sender can attach such a part to an ordinary mail, so
+/// even then the caller still decides on who sent it; a part alone, or a lone
+/// `text/rfc822-headers`, is read like body text.
+fn delivery_status_of(msg: &mail_parser::Message<'_>) -> Option<DeliveryStatus> {
+    let mut text = String::new();
+    let mut original_id = None;
+    let mut has_status_part = false;
+    let is_report = msg
+        .parts
+        .first()
+        .and_then(|root| root.content_type())
+        .is_some_and(|ct| {
+            ct.ctype().eq_ignore_ascii_case("multipart")
+                && ct
+                    .subtype()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("report"))
+        });
+    for part in &msg.parts {
+        let Some(ct) = part.content_type() else {
+            continue;
+        };
+        let kind = ct.ctype().to_ascii_lowercase();
+        let sub = ct.subtype().unwrap_or_default().to_ascii_lowercase();
+        match (kind.as_str(), sub.as_str()) {
+            ("message", "delivery-status") | ("text", "rfc822-headers") => {
+                has_status_part |= sub == "delivery-status";
+                let bytes = part.contents();
+                let bytes = &bytes[..bytes.len().min(MAX_DSN_BYTES.saturating_sub(text.len()))];
+                text.push_str(&String::from_utf8_lossy(bytes));
+                text.push_str("\n\n");
+            }
+            ("message", "rfc822") => {
+                if let mail_parser::PartType::Message(inner) = &part.body {
+                    original_id = inner
+                        .message_id()
+                        .map(|id| cap_untrusted(id.trim_matches(['<', '>'])));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut dsn = DeliveryStatus::parse(&text, is_report && has_status_part)?;
+    if dsn.original_message_id.is_none() {
+        dsn.original_message_id = original_id.filter(|id| !id.is_empty());
+    }
+    Some(dsn)
 }
 
 /// Longest `Authentication-Results` value read.

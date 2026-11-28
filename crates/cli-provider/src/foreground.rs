@@ -61,7 +61,7 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    /// A service user's layout: each `<root>/home/.local/bin/<name>` is a script that records
+    /// A service user's layout: each `root/home/.local/bin/…` is a script that records
     /// its name, arguments and `HOME` into `<root>/seen`.
     fn service_layout(names: &[&str]) -> (tempfile::TempDir, PathEnv) {
         service_layout_in("home", names)

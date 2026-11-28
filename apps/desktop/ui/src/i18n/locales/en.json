@@ -688,8 +688,6 @@
   },
   "approvalDock": {
     "counter": "Approval {{current}} of {{total}}",
-    "keyAllow": "Allow once",
-    "keyDeny": "Deny",
     "label": "Needs your OK",
     "next": "Show next",
     "previous": "Show previous"
@@ -717,6 +715,7 @@
       "signIn": "Sign in",
       "signOut": "Sign out",
       "signedInToast": "{{name}}: signed in",
+      "signedOutRemoteRevokeFailed": "{{name}}: signed out here, but the provider could not be told to revoke it — revoke access at the provider if needed",
       "signedOutToast": "{{name}}: signed out",
       "waiting": "Waiting for the browser sign-in…"
     },
@@ -1433,7 +1432,11 @@
       "noHooks": "This bot has no signed address yet. Create one under “Signed addresses” below, then pick it here.",
       "shouldPlaceholder": "For example: summarise it and tell me only if I must reply today.",
       "title": {
+        "calendar": "Before a calendar event",
+        "feed": "When a feed has something new",
+        "home_assistant": "When a home device changes",
         "mail": "When an email arrives",
+        "page": "When a web page changes",
         "time": "At a set time",
         "webhook": "When an app calls in"
       }
@@ -1451,14 +1454,30 @@
     },
     "empty": "Nothing runs on its own yet. Write above when and what, for example “Every Monday at 8:00, plan my week”.",
     "events": {
+      "calendar": {
+        "line": "A calendar event is about to start, so the bot can prepare you.",
+        "title": "Before a calendar event"
+      },
+      "feed": {
+        "line": "A blog, news or release feed (RSS or Atom) gets a new item.",
+        "title": "When a feed has something new"
+      },
       "file": {
         "line": "A file is added to or changed in a folder. Ask in the chat (“when a new invoice lands in Downloads, file it”); the bot asks for the folder first.",
         "title": "When a file arrives"
+      },
+      "home_assistant": {
+        "line": "A Home Assistant sensor, switch or lock changes state.",
+        "title": "When a home device changes"
       },
       "intro": "Instead of a time, start when something happens:",
       "mail": {
         "line": "Mail from a person or domain, or with a subject. The bot reads the headers, never the body.",
         "title": "When an email arrives"
+      },
+      "page": {
+        "line": "The text you pick on a page changes, such as a price or a status.",
+        "title": "When a web page changes"
       },
       "title": "When something happens",
       "webhook": {
@@ -1533,10 +1552,14 @@
     "toggle": "Turn {{name}} on or off",
     "what": {
       "anyone": "anyone",
+      "calendar": "{{minutes}} min before a calendar event",
+      "feed": "A new item in {{host}}",
       "file": "A file changes in {{path}}",
       "fileShort": "When a file changes",
+      "home_assistant": "{{entity}} changes",
       "mail": "An email from {{from}}",
       "mailShort": "When an email arrives",
+      "page": "Text changes on {{host}}",
       "webhook": "An app calls its signed address"
     }
   },
@@ -1659,7 +1682,7 @@
     "needsAttention": "Needs attention",
     "noProvidersBody": "Connect a provider in Settings → AI to choose a model here.",
     "noProvidersTitle": "No AI provider is connected",
-    "pageHint": "Everything about this bot on one page. Memory saves as you change it and spending limits have their own Save button; everything else is saved with Save below.",
+    "pageHint": "Everything about this bot. Memory and spending limits save on their own; the rest with Save.",
     "pickModel": "Choose a model",
     "placeBrowserHint": "Where it opens web pages.",
     "placeComputerHint": "Where it runs commands and opens files.",
@@ -1984,8 +2007,11 @@
     "triggers": {
       "account": "Mailbox",
       "add": "Add a rule",
+      "anyCalendar": "The default calendar",
       "approvalHint": "Uses this bot’s permissions. Actions that need your approval wait and notify you.",
       "attachment": "Has an attachment",
+      "calendar": "Calendar",
+      "calendarHint": "Starts the bot once per event, up to a couple of minutes late. Events already inside the window when you turn this on, and all-day events, do not start it. Needs a connected calendar this bot may read.",
       "chooseAccount": "Choose a mailbox",
       "chooseHook": "Choose a webhook",
       "close": "Close builder",
@@ -1998,12 +2024,15 @@
       "duringQuiet": "During quiet hours",
       "edit": "Edit rule",
       "end": "Until",
+      "entity": "Entity",
       "equals": "Address is",
       "exampleDraft": "Prepare a reply for me to review.",
       "exampleNotify": "Tell me only if action is needed.",
       "exampleSummary": "Summarize what needs my attention.",
       "existingHint": "Already set up. Open to add quiet hours and limits; saving starts it off.",
+      "feedHint": "An RSS or Atom address. The first check only notes the items that exist; later new items start the bot with their title, link and a short summary.",
       "folder": "Folder / label",
+      "haHint": "Needs Home Assistant connected and this bot allowed to use it. Checked about once a minute, so very quick back-and-forth changes can be missed.",
       "hook": "Signed webhook",
       "hookHint": "Create a signed address below, then link it here. Linked calls follow this rule instead of its original instruction.",
       "limitSummary": "{{hour}} / hour · {{day}} / day",
@@ -2012,29 +2041,34 @@
       "mail": "A mail arrives",
       "mailHint": "IMAP mailboxes only. Reads headers, never the body. First check starts watching new mail.",
       "manageHooks": "Signed addresses",
+      "minutesBefore": "Minutes before it starts",
       "name": "Name",
       "off": "Off",
+      "pageHint": "The page is fetched politely, at most every 15 minutes, and never from this computer’s own network. The first check only notes the current text.",
       "per_day": "Runs per day",
       "per_hour": "Runs per hour",
       "poll": "Check every (seconds)",
+      "pollMinutes": "Check every (minutes, at least 15)",
       "preview": "Show what the bot receives",
       "previewHint": "Exact instruction and protected event text, capped for size. No run starts and no tools are used.",
       "queueError": "Too many events are waiting. Narrow the filters, then turn this rule on again.",
       "quietHours": "Quiet hours",
       "remove": "Remove rule",
       "runError": "The last run did not finish or the queue is full. Check activity and filters, then turn this on again.",
-      "sample": "Sample subject or call text",
+      "sample": "Sample subject, call or event text",
       "sampleMatches": "This sample matches the filters.",
       "sampleMisses": "This sample does not match the filters.",
       "save": "Save changes",
       "saveOff": "Save · starts off",
       "schedule": "Schedule",
       "scheduleHint": "Example: 0 9 * * * Europe/Berlin (every day at 09:00). Minimum five minutes apart.",
+      "selector": "Part of the page to watch (CSS selector)",
+      "selectorHint": "For example #price, h1.title or .stock. Only the text of what it picks is compared. If the selector stops finding anything, the rule pauses instead of reporting a change.",
       "sender": "Sender",
       "senderError": "The sender filter is not an address or a domain, so this rule is off and matches nothing. Enter an exact address (ann@example.com) or a domain (example.com), then turn it on again.",
       "senderMatch": "Sender rule",
       "should": "The bot should",
-      "sourceError": "Mailbox checks failed repeatedly. Check the connection and permissions, then turn this on again.",
+      "sourceError": "Checks of the source failed repeatedly. Check the connection, address and permissions, then turn this on again.",
       "start": "From",
       "subject": "Subject contains (optional)",
       "test": "Test with a sample",
@@ -2043,9 +2077,16 @@
       "time": "On a schedule",
       "timezone": "Time zone",
       "title": "When something happens",
+      "toState": "Only when it becomes (optional)",
+      "toStateHint": "For example on, off, home or unlocked. Empty means any change.",
+      "url": "Web address",
       "useQuiet": "Keep this bot quiet overnight",
       "webhook": "A webhook is called",
-      "when": "When"
+      "when": "When",
+      "when_calendar": "A calendar event is about to start",
+      "when_feed": "A new item appears in a feed",
+      "when_home_assistant": "A Home Assistant device changes",
+      "when_page": "Text on a web page changes"
     },
     "untitled": "New chat",
     "upcoming": {
@@ -2876,6 +2917,16 @@
         "failed": "Couldn't calculate",
         "running": "Calculating"
       },
+      "desktop_clipboard": {
+        "done": "Used the clipboard",
+        "failed": "Couldn't use the clipboard",
+        "running": "Using the clipboard"
+      },
+      "desktop_element": {
+        "done": "Used a control on the computer",
+        "failed": "Couldn't use a control",
+        "running": "Using a control on the computer"
+      },
       "desktop_key": {
         "done": "Pressed keys on the computer",
         "failed": "Didn't press keys",
@@ -2905,6 +2956,11 @@
         "done": "Typed on the computer",
         "failed": "Didn't type on the computer",
         "running": "Typing on the computer"
+      },
+      "desktop_window": {
+        "done": "Managed a window",
+        "failed": "Couldn't manage a window",
+        "running": "Managing a window"
       },
       "doc_edit": {
         "done": "Updated a document",
@@ -3886,6 +3942,10 @@
         "hint": "It is still reading your files. Try again in a moment.",
         "title": "The knowledge base is busy"
       },
+      "live_voice_not_configured": {
+        "hint": "Add a Gemini key in Settings → General → Voice dictation, then press Talk again.",
+        "title": "Live voice needs a Gemini key"
+      },
       "login_busy": {
         "hint": "Finish or cancel it, then try again.",
         "title": "Another sign-in is running on the server"
@@ -4244,6 +4304,18 @@
     "localOnly": {
       "hint": "Do this on the computer that runs the bot, or clear it from the administrator's desktop.",
       "title": "Only someone at that computer can do this"
+    },
+    "mailGuardBlocked": {
+      "hint": "Review the rule in Settings → Safe sending, or use Ask access so the owner can review the send.",
+      "title": "The mail guard blocked that send"
+    },
+    "mailGuardOptOut": {
+      "hint": "Remove them under Settings → Safe sending → People I will not write to, or write to them yourself.",
+      "title": "That person is on your do-not-write list"
+    },
+    "mailGuardUnreadable": {
+      "hint": "Fix or replace the damaged mail-guard files on the host, then try again.",
+      "title": "The mail guard could not read its saved rules"
     },
     "modelFailed": {
       "hint": "Try again, or pick another model in Settings.",
@@ -4699,6 +4771,7 @@
       "slash": "Slash commands (type / in the composer)"
     },
     "intro": "Handy shortcuts while the app is open.",
+    "liveVoiceEnd": "End the live voice conversation",
     "menuAccept": "Pick the highlighted item",
     "menuDismiss": "Close the menu",
     "menuMove": "Move through the slash / mention menu",
@@ -4793,6 +4866,15 @@
       "tokensPerMinute": "Amount of text per minute"
     }
   },
+  "historySummary": {
+    "bot": "Bot",
+    "description": "Long chats: older messages are condensed into a short note so the bot keeps the thread.",
+    "hint": "Older messages of a long chat are condensed into a short note. The messages stay saved and searchable.",
+    "label": "Summarise older messages of long chats",
+    "noBot": "Create a bot first.",
+    "note": "When a chat gets very long, the bot's own model (or its cheaper helper model, unless private data is involved) writes a short note about the older part. The bot then reads that note plus your recent messages. The note is marked as untrusted text, never as your words, and text from web pages or mail stays marked as such. The original messages are not changed or deleted. Off: the bot only sees the newest messages, as before.",
+    "title": "Long chats"
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} keeps some things to itself: the execution policy, command-line tool servers, skills and coding-CLI sign-ins are changed on {{name}} directly. Email, search and dictation accounts can be connected from this computer.",
@@ -4832,7 +4914,6 @@
       "none": "The server reported no coding CLIs.",
       "notInstalled": "Not installed.",
       "note": "These are the server's own tools. Installing and signing in happens on {{name}}.",
-      "officialPage": "Install {{name}} from the official page",
       "ready": "Ready",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstall on server",
@@ -4843,8 +4924,7 @@
       "signIn": "To sign in, run on the server:",
       "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Signing in shows a web address on the server (often with a code). Open the address on this computer, sign in there and, if asked, paste the code into the server's terminal. Sign-ins on this computer are never copied to the server.",
-      "signInOnServer": "Sign in on {{server}}",
-      "title": "Coding CLIs on {{name}}"
+      "signInOnServer": "Sign in on {{server}}"
     },
     "hint": "on {{name}}",
     "menu": {
@@ -5713,6 +5793,22 @@
     "when_month": "Past month",
     "when_week": "Past week"
   },
+  "missionChat": {
+    "eyebrow": "Mission",
+    "needsGoal": "Write the job after /mission, for example: /mission Sign up on these 20 directory sites.",
+    "open": "Open mission",
+    "openAnswers": "Answer ({{count}})",
+    "openAnswers_one": "Answer ({{count}})",
+    "openAnswers_other": "Answer ({{count}})",
+    "openReport": "See the report",
+    "panelEmpty": "No missions yet: type /mission and the job in the chat, or just ask for a long job.",
+    "slash": "Start a mission: the bot works through a long job on its own",
+    "startFailed": "Could not start the mission: {{reason}}",
+    "startInChat": "Start one",
+    "waiting": "Waiting ({{count}})",
+    "waiting_one": "Waiting ({{count}})",
+    "waiting_other": "Waiting ({{count}})"
+  },
   "missions": {
     "chip": {
       "done": "Done",
@@ -5809,14 +5905,6 @@
     "sessions": "{{count}} sessions",
     "sessions_one": "{{count}} session",
     "sessions_other": "{{count}} sessions",
-    "start": {
-      "button": "Start",
-      "goalLabel": "What should the bot do?",
-      "help": "Describe the whole task once; the bot will ask what it needs at the start, then work until it is done and report.",
-      "placeholder": "For example: register my shop on these 15 websites and tell me which ones worked.",
-      "starting": "Starting…",
-      "summary": "Start a mission"
-    },
     "stop": "Stop",
     "stopConfirm": "Stop this mission for good?",
     "stopNo": "Keep going",
@@ -5851,7 +5939,6 @@
     "hint": {
       "new": "New"
     },
-    "howToInstall": "How to install",
     "install": "Install {{name}}",
     "levels": {
       "high": "High",
@@ -5862,9 +5949,9 @@
     "listAge": "Updated {{hours}} h ago",
     "listBundled": "Built-in fallback list: the CLI could not be asked.",
     "listFresh": "Updated just now",
+    "missingCliShort": "{{name}} · not ready on {{server}}",
     "noModels": "Type a model id in the search to use one.",
     "none": "No model",
-    "notOnServer": "{{name}} · not on {{server}} yet",
     "noteLocalClis": "Subscription CLIs on this computer are used when a bot runs on \"this computer\".",
     "otherId": "Use \"{{id}}\" with {{provider}}",
     "recent": "Recent",
@@ -5874,6 +5961,7 @@
     "search": "Search models",
     "sectionApi": "API providers",
     "sectionCli": "Coding CLIs (your subscription)",
+    "setUpCli": "Set up",
     "showAll": "All models ({{count}})",
     "switched": "Switched to {{model}}",
     "switchedDefault": "Default model set to {{model}}",
@@ -5951,24 +6039,38 @@
     "title": "Needs you"
   },
   "newBot": {
-    "advanced": "Advanced settings",
-    "advancedHint": "Instructions, picture, models, permissions in detail, apps",
-    "blankHint": "Start from scratch: you choose the name, the look and what it may do.",
-    "blankTitle": "Blank bot",
     "brain": "AI",
     "brainAuto": "Auto",
     "brainHint": "You can change this later in chat",
-    "changeLook": "Change name or look",
     "create": "Create",
     "creating": "Creating…",
-    "importHint": "A bot profile file someone shared with you. You review it before anything is created.",
-    "importTitle": "Import a shared bot",
     "nameNeeded": "Give your bot a name to create it.",
     "namePlaceholder": "Bot name",
-    "next": "Next",
-    "quickLooks": "Quick looks:",
-    "readyHint": "They come with their instructions and careful permissions. You review everything before the bot is created.",
-    "readyTitle": "Ready-made bots",
+    "quick": {
+      "accessHelp": "What does this level mean?",
+      "brainDefault": "Your default: {{model}}",
+      "fromFile": "Import from a file",
+      "general": "General helper",
+      "more": "More options",
+      "moreHint": "AI, instructions, picture, apps, permissions",
+      "moreHintTemplate": "AI, what it comes with",
+      "namePlaceholder": "Name your bot",
+      "purpose": {
+        "coder": "Reads and edits your code",
+        "daily-briefing": "Morning news and tasks",
+        "family-helper": "Everyday help, plain words",
+        "general": "Helps with anything",
+        "inbox-triage": "Sorts mail, drafts replies",
+        "researcher": "Finds and cites sources"
+      },
+      "review": "See what it comes with",
+      "subtitle": "Name it, pick what it does, create it.",
+      "surprise": "Surprise me: another shape and colour",
+      "templateCap": "{{name}} goes up to {{level}}.",
+      "templateCli": "A ready-made bot can't run on a command-line engine. Choose another AI under More options.",
+      "templateNote": "{{name}} comes with its own instructions and permissions. You can change them after creating it.",
+      "what": "What should it do?"
+    },
     "shapeGroup": "Character shape",
     "shapes": {
       "boulder": "Bean",
@@ -5988,25 +6090,6 @@
       "star": "Star",
       "tri": "Triangle"
     },
-    "stepHints": {
-      "access": "Choose its AI and how freely it may work, then create it.",
-      "identity": "Give it a name and a look. You can change both later.",
-      "start": "Start from scratch, from a ready-made bot or from a shared file."
-    },
-    "steps": {
-      "access": "What it can do",
-      "identity": "Name and look",
-      "start": "Start"
-    },
-    "stepsLabel": "Steps",
-    "templates": {
-      "assistant": "Assistant",
-      "blank": "Blank",
-      "coder": "Coder",
-      "researcher": "Researcher",
-      "social": "Social"
-    },
-    "templatesLabel": "Templates",
     "title": "New bot"
   },
   "notify": {
@@ -6449,7 +6532,10 @@
       "bot": "The bot could not be created. Nothing was started. Try again.",
       "chat": "The bot was created, but its chat could not be opened. Try again; no second bot will be made.",
       "check": "Some answers are missing. Go back and fill them in.",
-      "message": "The bot and its chat are ready, but the task could not be sent. Try again; nothing is created twice."
+      "goal": "The task text is too long for a mission. Go back and shorten your answers. Nothing was created.",
+      "level": "The bot was already created on another level. Switch back to that level to continue, or close this window and start again.",
+      "message": "The bot and its chat are ready, but the task could not be sent. Try again; nothing is created twice.",
+      "mission": "The bot is ready, but the mission could not be started. Try again; no second bot or mission will be made."
     },
     "hints": {
       "pick": "Pick what you want. You review everything before anything is created.",
@@ -6458,6 +6544,7 @@
     },
     "levelRaised": "You chose a freer level than this goal asks for ({{level}}). The bot will ask you less often.",
     "levelTitle": "How freely it may work",
+    "missionHint": "On {{level}} this goal runs as a mission: a work list that survives restarts and goes on until it is done. On a lower level it runs as one chat task.",
     "need": {
       "app": {
         "fix": "Connect an app",
@@ -6492,6 +6579,7 @@
       "bot": "A new bot named \"{{name}}\".",
       "folder": "The bot can read and write only inside {{folder}}.",
       "later": "You can change the bot's name, look and settings afterwards.",
+      "mission": "The task \"{{name}}\" starts right away as a mission in its own chat: the bot lists the work, goes through it without asking and reports back.",
       "ownMail": "It uses the mailbox you connect for the bot, never your personal accounts.",
       "task": "The task \"{{name}}\" starts right away in a new chat."
     },
@@ -6627,6 +6715,22 @@
       "hint": "Starts the service with tools, schedules and channels off, so you can fix the problem. Nothing is deleted."
     }
   },
+  "scheduleEditor": {
+    "changeZone": "Change time zone",
+    "examples": "Examples:",
+    "more": "More options",
+    "moreLine": "Tell me: {{notify}} · {{zone}}",
+    "summary": {
+      "daily": "Every day at {{time}}, {{zone}}",
+      "monthly": "On day {{day}} of every month at {{time}}, {{zone}}",
+      "once": "Once, on {{date}} at {{time}}, {{zone}}",
+      "onceNoDate": "Once at {{time}}, {{zone}}: pick the day",
+      "weekdays": "Every weekday at {{time}}, {{zone}}",
+      "weekly": "Every {{weekday}} at {{time}}, {{zone}}"
+    },
+    "whatPlaceholder": "For example: check my inbox and summarise what is new.",
+    "whatToDo": "What should the bot do?"
+  },
   "schedules": {
     "bot": "Bot",
     "calendar": {
@@ -6690,7 +6794,12 @@
       },
       "invalid": {
         "bot": "Pick a bot.",
+        "checklist": "Write the checklist.",
         "cron": "Enter a cron expression.",
+        "hoursEnd": "Enter an end time like 22:00 (not the same as the start).",
+        "hoursStart": "Enter a start time like 08:00.",
+        "hoursTz": "Pick a known timezone for active hours.",
+        "maxRuns": "Runs per day must be between 1 and 288.",
         "name": "Give the schedule a name.",
         "prompt": "Write what the bot should do.",
         "text": "Describe when it should run."
@@ -6721,6 +6830,7 @@
         "problems": "Only if something goes wrong"
       },
       "payloadKept": "This schedule runs a workflow or tool; that part stays unchanged.",
+      "payloadKeptStanding": "This standing order was made by a bot after you approved it. You cannot change its checklist here.",
       "preview": "Preview",
       "prompt": "Prompt",
       "promptHint": "What the bot is asked to do each time.",
@@ -6730,9 +6840,22 @@
         "past": "That time has already passed. Pick a later one.",
         "time": "Pick a time like 09:00."
       },
-      "templates": {
-        "hint": "Pick one to fill in the form. You can change everything afterwards.",
-        "title": "Start from an example"
+      "standing": {
+        "activeHours": "Only during certain hours",
+        "checklist": "Checklist",
+        "checklistHint": "What the bot checks each run. It only tells you when something needs you.",
+        "from": "From",
+        "hoursHint": "May cross midnight (end is exclusive). Outside this window, scheduled firings are skipped. Run now still works.",
+        "hoursZone": "Active-hours timezone",
+        "maxRuns": "Runs per day",
+        "maxRunsHint": "Default 24, maximum 288 (one every five minutes).",
+        "to": "To"
+      },
+      "taskKind": {
+        "label": "What kind of task?",
+        "prompt": "Ask the bot each time",
+        "standing": "Standing order (tells you only when something needs you)",
+        "standingHint": "Each run ends with OK (no notice) or NEEDS_OWNER (you are told)."
       },
       "text": "Schedule in words",
       "textHint": "English or Turkish. Times use {{tz}}.",
@@ -6741,7 +6864,6 @@
       "tz": "Timezone",
       "tzCronHint": "Used if the cron expression has 5 fields without a timezone.",
       "tzSearch": "Search a timezone, e.g. Europe/Istanbul",
-      "tzShown": "Times are in {{tz}}.",
       "tzUnknown": "Not a known timezone. Pick one from the list.",
       "weekday": "On which day of the week?",
       "when": "When"
@@ -6760,6 +6882,7 @@
     "originBot": "Made by bot",
     "originBotHint": "A bot created this after you approved it. Bots can change only schedules they made themselves.",
     "payload": {
+      "standingOrder": "Standing order: {{text}}",
       "tool": "Calls tool {{name}}",
       "unknown": "Custom task",
       "workflow": "Runs workflow {{name}}"
@@ -6806,6 +6929,14 @@
         "seconds_one": "Every second"
       },
       "unknown": "Custom schedule"
+    },
+    "standing": {
+      "runsToday": "{{runs}} / {{cap}} runs today",
+      "verdict": {
+        "needs_owner": "Last: needs you",
+        "ok": "Last: all clear",
+        "unclear": "Last: unclear answer"
+      }
     },
     "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
     "title": "Scheduled tasks",
@@ -7141,14 +7272,11 @@
       },
       "detected": {
         "copied": "Command copied",
-        "copyCommand": "Copy command",
         "copyDetails": "Copy details",
-        "description": "AI apps you are signed in to on this computer are switched on automatically. Switch one off and it stays off.",
+        "description": "One list for every coding CLI: this computer and your server. Actions live in each row's menu.",
         "detailsCopied": "Details copied",
-        "detailsToggle": "Details",
         "detectError": "Could not check installed coding tools.",
         "dismissExpired": "Dismiss expired approval",
-        "docs": "Docs",
         "enabledToast": "{{name}} enabled.",
         "experimentalChip": "Experimental",
         "install": "Install",
@@ -7163,16 +7291,12 @@
           "powershell_missing": "PowerShell could not be found. Copy the command and run it in your terminal.",
           "timeout": "Installation exceeded ten minutes and was stopped. Check the output before retrying."
         },
-        "installLabel": "Install command",
         "installRunning": "Installing… leaving this section does not revoke an accepted approval.",
         "installSummary": "Install or update {{engine}}",
-        "loginLabel": "Sign in with",
-        "moreEngines": "More engines you can install ({{count}})",
         "noteNative": "Runs with its own tools: choose it in a bot's Engine settings.",
         "noteUnsupported": "Praxi detects it but cannot run it as an engine yet.",
         "noteUnverified": "Unverified command: check the vendor docs, then copy and run it yourself.",
         "offline": "The local service is not running, so detected coding tools cannot be shown.",
-        "onThisComputer": "On this computer",
         "pathLabel": "Location",
         "problem": "That did not work.",
         "refresh": "Rescan",
@@ -7185,8 +7309,7 @@
           "unsupported": "Not supported yet"
         },
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "title": "Found on this computer",
-        "toggle": "Use {{name}}"
+        "title": "Coding CLIs"
       },
       "keys": {
         "add": "Add",
@@ -7207,36 +7330,46 @@
     "calendar": {
       "add": "Add calendar",
       "addTitle": "Connect a calendar",
+      "advanced": "Advanced",
+      "advancedHint": "Calendar address, bot name and invitation sender.",
       "description": "Let your bots read and manage your calendar.",
       "emailHint": "Invitations come from this address. Leave it empty if your user name is already your email address.",
       "emailLabel": "Your email address (optional)",
+      "emailShort": "For invitation e-mails. Optional when your user name is already an address.",
       "empty": "No calendar is connected yet.",
       "loadError": "Could not load your calendars ({{message}}).",
       "nameHint": "Letters, numbers, - and _. Bots use this name to pick the calendar.",
       "nameLabel": "Name for your bots",
+      "nameShort": "Letters, numbers, - and _. Bots use this name.",
       "note": "Your bots can look at your calendar, find free time, add and move events and invite people. The password is kept in the secure store and is never shown again.",
       "passwordHint": "Use an app password, not your normal password. It is stored securely and cannot be read back.",
       "passwordLabel": "App password",
+      "passwordShort": "Use an app password, not your normal password.",
       "pickHint": "Choose the calendar your bots should use:",
       "presets": {
         "fastmail": {
           "hint": "Use your Fastmail address and an app password with calendar access (Settings, Privacy & Security, Integrations).",
+          "hintShort": "Fastmail address + app password with calendar access.",
           "label": "Fastmail"
         },
         "google": {
           "hint": "Use your full Gmail address and an app password (Google Account, Security, App passwords; needs 2-step verification). Google sometimes refuses app passwords for calendars. If the test fails, that is the likely reason.",
+          "hintShort": "Full Gmail address + Google app password (needs 2-step verification).",
           "label": "Google Calendar"
         },
         "icloud": {
           "hint": "Use your Apple ID and an app-specific password (account.apple.com, Sign-In and Security).",
+          "hintShort": "Apple ID + app-specific password from account.apple.com.",
           "label": "iCloud (Apple)"
         },
         "nextcloud": {
           "hint": "Enter your server's address and your user name. Create an app password in Settings, Security, Devices & sessions.",
+          "hintShort": "Your server host, user name and a Nextcloud app password.",
           "label": "Nextcloud"
         },
         "other": {
           "hint": "Paste the CalDAV address your calendar service gives you.",
+          "hintShort": "Paste the CalDAV URL from your provider.",
           "label": "Other (CalDAV)"
         }
       },
@@ -7246,6 +7379,7 @@
       "schedulingOff": "This service does not send invitations itself, so your bot will send them by email instead (an email account is needed for that).",
       "schedulingOn": "This service sends invitations itself.",
       "serverLabel": "Your Nextcloud server",
+      "serverShort": "Host name only, without https://.",
       "serviceLabel": "Calendar service",
       "test": "Test connection",
       "testFailed": "The test did not work: {{error}}",
@@ -7259,6 +7393,7 @@
       },
       "urlHint": "Filled in for you. Test the connection to pick the right calendar from the list.",
       "urlLabel": "Calendar address",
+      "urlShort": "Filled for you. Test the connection to pick a calendar from the list.",
       "usernameLabel": "User name"
     },
     "computer": {
@@ -7555,6 +7690,7 @@
       "allGood": "Everything looks fine",
       "checkedAt": "Last checked at {{time}}",
       "checks": {
+        "account_health": "Account sessions",
         "browser": "Browser",
         "capabilities": "Capabilities",
         "catalog_freshness": "Model catalog freshness",
@@ -7579,6 +7715,7 @@
       "description": "Checks why the bot might not be working and fixes common problems.",
       "empty": "No checks were returned",
       "hints": {
+        "account_health": "Open Apps or the bot browser profile to reconnect mail, Composio apps or site sign-ins listed in the notice.",
         "browser": "Install Chrome, Edge or Chromium (not the snap package).",
         "catalog_freshness": "The curated model list is over 90 days old; update Praxi or run `bot catalog check` to review current models.",
         "cli_accounts": "Open a terminal once and sign in to the CLI (for example `claude` or `codex login`).",
@@ -7789,27 +7926,39 @@
     },
     "emailChannel": {
       "account": "Mailbox to watch",
+      "accountHint": "Only IMAP mailboxes can be watched.",
       "approve": "Send exactly this",
       "bot": "Bot that gets the mail",
       "choose": "Choose…",
       "deny": "Don't send",
       "description": "Let one bot see new mail from one folder of your mailbox.",
       "enable": "Switch on the e-mail channel",
+      "enableHint": "When off, no mail is passed to a bot.",
       "folder": "Folder to watch",
       "folderHint": "Usually INBOX. Only mail that arrives after you switch this on is passed on.",
       "fromLine": "From: {{from}}. Send mode: every send needs your approval.",
       "full": "Show the bot the whole text of each mail, not just a summary",
+      "fullHint": "Otherwise the bot sees a short summary only.",
       "ignored": "Mails from senders who are not allowed were ignored: {{n}}",
       "needsSenders": "This channel was running without a list of allowed senders, so it now passes NO mail to the bot. Add the addresses that may write to the bot (for example your own) under \"Allowed senders\" in the mailbox settings above. Until then every incoming mail stays unread in the mailbox.",
       "noAccount": "Add a mailbox above first.",
-      "noSenders": "The selected mailbox has no allowed senders, so no mail will reach the bot. Add your own address under \"Allowed senders\" in the mailbox settings above.",
       "note": "Mail is written by other people, so the bot treats it as information, never as orders. By default it only sees the sender, the subject and the first few lines. Attachments are never opened. Nothing is sent unless you allow replies and then approve each one here.",
       "replies": "Let the bot suggest replies (you approve every one before it is sent)",
+      "repliesHint": "Each suggested reply waits for your OK here.",
       "running": "Running",
       "save": "Save",
       "saved": "Saved.",
       "sent": "E-mail sent.",
       "skipped": "Mails given up after repeated failures (for example the bot was deleted): {{n}}",
+      "status": {
+        "needMailbox": "Pick a mailbox first.",
+        "noSendersDetail": "Add allowed senders on the mailbox card, then save here.",
+        "noSendersTitle": "No allowed senders",
+        "off": "Channel is off.",
+        "openMailbox": "Open mailbox settings",
+        "stoppedHint": "Turn the channel on, pick a mailbox and a bot, then save.",
+        "unsaved": "Unsaved changes — save to apply."
+      },
       "stopped": "Not running",
       "subject": "Subject: {{subject}}",
       "title": "E-mail to a bot",
@@ -7892,41 +8041,59 @@
       }
     },
     "mailGuard": {
+      "budget": "Most e-mails per day, per mailbox (0 = no limit)",
+      "budgetHelp": "A send over this limit is refused until the count falls again. Default 20.",
+      "budgetHint": "Unlike the warnings above, this limit blocks. It applies to e-mail your bots send in the background, without you watching, and to missions. A mail you ask for yourself in a chat with your bot is never held back by it. It is counted over a rolling 24 hours.",
+      "budgetTitle": "Outreach budget",
       "colBot": "Bot",
       "colNote": "Note",
       "colSubject": "Subject",
       "colTime": "When",
       "colTo": "To",
       "daily": "Warn above this many e-mails per day, per mailbox (0 = never)",
+      "dailyHelp": "0 turns this warning off. It does not block sending.",
       "days": "Warn when I already wrote to someone within this many days (0 = never)",
+      "daysHelp": "0 turns this warning off. It does not block sending.",
       "description": "Limits, an opt-out list and a log of every e-mail your bots send.",
       "export": "Export as CSV",
       "footer": "Text of the opt-out line",
       "footerHint": "{sender} is replaced by the sending address. The line is added by the app, not by the bot, and the bot cannot remove it. You can send one e-mail without it by approving it on the card, which shows a warning. The program does not read replies: when someone answers “STOP”, add their address to the opt-out list here yourself.",
       "footerPlaceholder": "Leave empty to use the built-in text (Turkish and English)",
-      "intro": "Every e-mail a bot sends still asks you first. These settings only decide when the question carries a warning. A warning never blocks you: you can always choose \"Send anyway\", and that choice is written to the log.",
+      "footerShort": "Leave empty for the built-in Turkish and English text.",
+      "intro": "On Ask-level bots, every send asks you first; daily limits and repeat-recipient reminders show up as warnings you can override with \"Send anyway\". On Full-level bots those two only add a note in the run step — they never block or ask. The opt-out list below always blocks until you remove someone or send the mail yourself.",
       "kindAddress": "address",
       "kindDomain": "whole domain",
+      "limitsTitle": "Sending warnings",
       "loading": "Loading…",
       "logEmpty": "No e-mail has been sent yet.",
       "logHint": "Who got an e-mail, when, and from which bot. Only e-mails that were really sent are listed.",
       "logTitle": "Sent e-mail log",
       "optOutAdd": "Add",
       "optOutEmpty": "Nobody is on the list yet.",
-      "optOutHint": "Add an address (ann@example.com) or a whole domain (example.com). A bot that tries to write to them gets a warning on your approval card.",
+      "optOutHint": "Add an address (ann@example.com) or a whole domain (example.com). Any bot that tries to write to them is stopped — on Ask-level bots you see it on the approval card; on Full-level bots the send is refused with no card.",
       "optOutLine": "Add an opt-out line to e-mails by default",
+      "optOutLineHint": "The app adds the line; the bot cannot remove it.",
       "optOutPlaceholder": "ann@example.com or example.com",
       "optOutRemove": "Remove {{value}}",
       "optOutTitle": "People I will not write to",
+      "reasonHardBounce": "bounced for good",
+      "reasonStopReply": "asked to stop",
       "retry": "Try again",
       "save": "Save",
       "saved": "Saved",
       "sentAnyway": "Sent anyway",
-      "softHint": "These two are warnings, not blocks.",
+      "softHint": "These two are warnings on Ask-level bots (you can send anyway). On Full-level bots they are only logged in the run step.",
+      "status": {
+        "saved": "All changes saved.",
+        "unsaved": "You have unsaved changes."
+      },
       "title": "Safe sending",
       "verifyDomains": "Extra sites a verification e-mail may link to",
       "verifyDomainsHint": "A bot that signs up on a site gets back only the links of that site from its verification e-mail. If a site sends its mails through another service (for example a tracking domain), add that domain here, one per line (example.com). Leave it empty if you are unsure: the bot then asks you.",
-      "verifyDomainsPlaceholder": "mail.example.com"
+      "verifyDomainsPlaceholder": "mail.example.com",
+      "verifyDomainsShort": "One domain per line when verification links use another host.",
+      "warmup": "Days a new mailbox takes to reach that number (0 = no ramp-up)",
+      "warmupHelp": "A mailbox with no sending history starts at 5 e-mails a day and climbs to the limit over these days. A mailbox that has been sending for longer starts at the full limit."
     },
     "mode": {
       "moreHint": "Rarely needed. Closed again the next time you open Settings.",
@@ -8072,6 +8239,7 @@
         "busy": "An update is already in progress.",
         "failed": "The update did not work. Nothing was changed. Please try again later.",
         "network": "Could not reach the update server. Check your internet connection and try again.",
+        "no_release": "No update information is published for this channel yet. Nothing was changed. Try again later.",
         "no_rollback": "No earlier version is available to go back to.",
         "not_configured": "Updates are not set up in this build.",
         "nothing_to_install": "Please check for updates first.",
@@ -8084,6 +8252,7 @@
         "working": "Updating…"
       },
       "notConfigured": "Updates are unavailable: this build has no updater signing key or secure update feed configured. Nothing will be downloaded or installed.",
+      "previewBuildHint": "You are using a preview build. Choose Preview as the update channel to receive its updates.",
       "rollback": {
         "action": "Go back to the previous version",
         "description": "Version {{version}} did not start properly. You can go back to the last version that worked.",
@@ -8127,7 +8296,6 @@
         "searxng": "The address of your own SearXNG server, for example http://127.0.0.1:8080. The web search guide has a one-command install for a server.",
         "tavily": "Create a key in your Tavily account and paste it here."
       },
-      "providerHint": "Bots search the web through a search provider. The free engines often work on a home computer, but they usually block servers, so a server needs one of these.",
       "providerTitle": "Search provider",
       "saveAndTest": "Save and test",
       "searxngLabel": "SearXNG URL",
@@ -8156,6 +8324,41 @@
     }
   },
   "settingsUi": {
+    "codingClis": {
+      "accountOnServer": "Account on {{name}}: {{account}}",
+      "actions": "Actions for {{name}}",
+      "copyInstallLocal": "Copy install command for this computer",
+      "copyInstallServer": "Copy install command for server",
+      "copyLoginLocal": "Copy sign-in command for this computer",
+      "copyLoginServer": "Copy sign-in command for server",
+      "howToInstall": "How to install",
+      "local": {
+        "not_installed": "not installed",
+        "off": "off",
+        "on": "on",
+        "unreachable": "can't check"
+      },
+      "myServer": "{{name}}:",
+      "note": "Switch a coding CLI on here when bots run on this computer; sign in on your server when bots live there.",
+      "pathOnServer": "Path on {{name}}",
+      "quotaAge": "Updated {{hours}} h ago",
+      "quotaFresh": "Updated just now",
+      "quotaLeft": "{{pct}}% left on plan",
+      "server": {
+        "loading": "checking…",
+        "logged_in": "signed in",
+        "not_installed": "not installed",
+        "not_logged_in": "not signed in",
+        "unknown": "sign-in unknown",
+        "unreachable": "not reachable"
+      },
+      "serverNotConnected": "You are working on this computer, so {{name}} is not connected. Switch back to it to manage its coding CLIs.",
+      "serverUnreachable": "Could not reach {{name}}, so its coding CLIs are not shown as installed or missing. Try Refresh.",
+      "thisComputer": "This computer:",
+      "title": "Coding CLIs",
+      "turnOff": "Turn off on this computer",
+      "turnOn": "Turn on on this computer"
+    },
     "groups": {
       "troubleshooting": "Troubleshooting",
       "updates": "Updates and version"
@@ -8182,11 +8385,6 @@
         "description": "Logins and secrets your bots may use, kept on this computer.",
         "name": "Vault"
       }
-    },
-    "serverCli": {
-      "repair": "Repair",
-      "signIn": "Sign in",
-      "unknown": "Sign-in unknown"
     },
     "updates": {
       "description": "Check for a new version, read what changed and install it.",
@@ -8899,7 +9097,7 @@
       "listLabel": "Standing grants by vault item",
       "open": "Standing grants",
       "revoke": "Revoke",
-      "revokeAria": "Revoke the standing grant for {{name}} on {{origin}}",
+      "revokeAria": "{{action}} the standing grant for {{name}} on {{origin}}",
       "revoked": "Standing grant revoked",
       "seeGrants": "See standing grants",
       "since": "Since {{date}}",
@@ -9051,6 +9249,63 @@
       "title": "Microphone and push-to-talk",
       "unsupported": "This window cannot record audio, so there is nothing to set up here."
     },
+    "live": {
+      "approvalHint": "Approve or deny on the card in the chat. Approvals cannot be given by voice.",
+      "blockedByCall": "End the voice call first, then press Talk.",
+      "blockedByLive": "Live voice is open. End it first to start a voice call.",
+      "cancel": "Cancel",
+      "close": "Close",
+      "empty": "Say something to get started.",
+      "end": "End",
+      "micMuted": "Microphone muted",
+      "micOn": "Microphone on",
+      "mute": "Mute microphone",
+      "notice": {
+        "busy": "Another live conversation is already open. End it first.",
+        "daemonUnavailable": "The voice service is unavailable. Reconnect the background service on this computer and try again.",
+        "dropped": "The connection was lost.",
+        "error": "The connection to the voice service was lost. The text so far is saved in the chat.",
+        "idle": "The conversation ended because nothing was said for a while. The text is saved in the chat.",
+        "keyMissing": "Add a Gemini key in Settings → General → Voice dictation, then try again.",
+        "limit": "The conversation reached its time limit. The text is saved in the chat.",
+        "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local background service, then try again.",
+        "runActive": "A bot is running. Wait for it to finish, or stop it in the chat, then press Talk. The microphone is off.",
+        "serviceFailed": "Google's voice service refused the request. Check the Gemini key and the live model in Settings → General → Voice dictation.",
+        "settingsInvalid": "The live voice settings are not valid. Check them in Settings → General → Voice dictation.",
+        "unavailable": "Live voice is not available in this background service. Update Praxi-Bot and try again."
+      },
+      "openSettings": "Open settings",
+      "phase": {
+        "approval": "Waiting for your approval",
+        "ended": "The conversation ended",
+        "failed": "The conversation could not start",
+        "idle": "Live voice",
+        "listening": "Listening",
+        "reconnecting": "One moment…",
+        "speaking": "{{name}} is speaking",
+        "starting": "Connecting…",
+        "working": "{{name}} is working on it…"
+      },
+      "retry": "Try again",
+      "saveFailed": "The conversation could not be saved to the chat.",
+      "settings": {
+        "description": "Talk with your bot out loud, in real time, with Google's Gemini Live. Uses the Gemini key above.",
+        "keepAudio": "Keep the audio of live conversations on this computer",
+        "keepAudioHint": "Off by default: audio only passes through memory and is never saved. The text of each conversation is added to the chat either way.",
+        "model": "Live model",
+        "title": "Live voice conversation",
+        "voice": "Voice"
+      },
+      "speakHint": "Just start speaking to interrupt. Your voice is streamed to Google's Gemini while the microphone is on.",
+      "stopTalking": "Stop talking",
+      "talk": "Talk",
+      "talkAgain": "Talk again",
+      "talkTitle": "Talk with {{name}} out loud",
+      "title": "Live voice conversation",
+      "transcript": "Conversation",
+      "unmute": "Unmute microphone",
+      "you": "You"
+    },
     "local": {
       "details": "Download about {{size}} MB from {{host}} (checked against a fixed checksum). Licence: {{license}}.",
       "download": "Download ({{size}} MB)",
@@ -9065,7 +9320,39 @@
     "micBusy": "The microphone is in use by another app. Close it and try again.",
     "micDenied": "Allow microphone access for Praxi-Bot. In Windows Settings → Privacy & security → Microphone, enable Microphone access and Let desktop apps access your microphone. Then restart Praxi-Bot and retry.",
     "micMissing": "No microphone was found. Connect one and try again.",
-    "notConfigured": "Dictation is not set up yet. Add a transcription service in Settings → General → Voice dictation.",
+    "notConfigured": "Dictation is not set up on this computer yet. Add a transcription service in Settings → General → Voice dictation.",
+    "offlineDiagnostics": {
+      "both": "Dictation and read-aloud model files are present.",
+      "dictationMissing": "The selected dictation model files and the read-aloud model files are missing or incomplete.",
+      "dictationMissingWithTts": "The selected dictation model files are missing or incomplete. Read-aloud model files are present.",
+      "hint": "Download the model again in Settings → General → Voice dictation.",
+      "off": "Offline dictation is off and the read-aloud model files are missing or incomplete.",
+      "sttOnly": "Dictation model files are present. Read-aloud model files are missing or incomplete.",
+      "title": "Offline voice",
+      "ttsOnly": "Read-aloud model files are present. Offline dictation is off.",
+      "unavailable": "This build does not include offline voice."
+    },
+    "offlineModels": {
+      "baseDescription": "A balance of CPU time and accuracy for several languages, including Turkish and German.",
+      "baseLabel": "Whisper base (balanced)",
+      "downloadFailed": "Download failed. Choose Download to retry.",
+      "smallDescription": "Most accurate of these models in Turkish and German. Uses more disk space and CPU time.",
+      "smallLabel": "Whisper small (most accurate)",
+      "tinyDescription": "Smallest download and lowest CPU use. Less accurate in Turkish and German.",
+      "tinyLabel": "Whisper tiny (fastest)",
+      "vad": "Includes Silero VAD (MIT)."
+    },
+    "offlineReadAloud": {
+      "busy": "Offline voice is busy. Try again in a moment.",
+      "description": "Read chat replies on this computer using the app language. Synthesis runs on the CPU and the first audio may take a few seconds.",
+      "model": "{{name}} supports English, Turkish, German and more.",
+      "notInstalled": "Download the model in Settings → General → Voice to read replies offline.",
+      "playbackFailed": "The reply could not be read aloud offline. Check the model in Settings → General → Voice.",
+      "ready": "Ready to read replies without the internet.",
+      "title": "Offline read-aloud",
+      "unavailable": "The local background service is unavailable.",
+      "unsupported": "This build does not include offline read-aloud."
+    },
     "online": "online",
     "speak": "Read aloud",
     "speakAuto": {

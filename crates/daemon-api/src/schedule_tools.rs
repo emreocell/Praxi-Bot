@@ -64,6 +64,16 @@ fn event_timing(trigger: Option<&scheduler::Trigger>) -> Option<&'static str> {
         Some(scheduler::Trigger::Email { .. }) => Some(
             "Matching email headers / Eşleşen e-posta başlıkları (120s polling / yoklama; max 6/min)",
         ),
+        Some(scheduler::Trigger::Feed { .. }) => Some("New feed items / Yeni akış öğeleri"),
+        Some(scheduler::Trigger::PageChange { .. }) => {
+            Some("Changed page text / Değişen sayfa metni")
+        }
+        Some(scheduler::Trigger::Calendar { .. }) => {
+            Some("Calendar events about to start / Başlamak üzere olan takvim etkinlikleri")
+        }
+        Some(scheduler::Trigger::HomeAssistant { .. }) => {
+            Some("Home Assistant state changes / Home Assistant durum değişiklikleri")
+        }
         _ => None,
     }
 }
@@ -312,6 +322,7 @@ fn prompt_of(p: &Payload) -> String {
         Payload::AgentPrompt { text } => text.clone(),
         Payload::Workflow { name, .. } => format!("(runs workflow {name})"),
         Payload::Tool { name, .. } => format!("(calls tool {name})"),
+        Payload::StandingOrder { checklist, .. } => checklist.clone(),
     }
 }
 
@@ -449,6 +460,15 @@ impl DaemonScheduleHost {
                 match trigger {
                     scheduler::Trigger::Webhook { .. } => {
                         return Err("bots cannot configure webhook secrets".into());
+                    }
+                    scheduler::Trigger::Feed { .. }
+                    | scheduler::Trigger::PageChange { .. }
+                    | scheduler::Trigger::Calendar { .. }
+                    | scheduler::Trigger::HomeAssistant { .. } => {
+                        return Err(
+                            "feed, page, calendar and Home Assistant triggers are made by the owner in “When something happens”"
+                                .into(),
+                        );
                     }
                     scheduler::Trigger::Email { .. } => agent.validate_schedule_read(
                         bot,

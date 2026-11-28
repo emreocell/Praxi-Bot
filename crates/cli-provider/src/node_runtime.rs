@@ -68,14 +68,66 @@ pub fn supported_target() -> Option<&'static str> {
     }
 }
 
+/// Data-directory name for extracted Node.js runtimes (`runtimes/node-v22.…`).
+pub const RUNTIMES_DIR: &str = "runtimes";
+
+/// Folder name under [`RUNTIMES_DIR`] where `npm install -g` lands when Praxi bootstraps Node.
+pub const NPM_GLOBAL_DIR: &str = "npm-global";
+
 fn runtimes_dir(data: &Path) -> PathBuf {
-    data.join("runtimes")
+    data.join(RUNTIMES_DIR)
 }
 
 /// npm's user-level global prefix (inside the data directory, never a system path).
 #[must_use]
 pub fn npm_prefix(data: &Path) -> PathBuf {
-    runtimes_dir(data).join("npm-global")
+    runtimes_dir(data).join(NPM_GLOBAL_DIR)
+}
+
+/// Relative path segments from the data directory to the bootstrap npm global `bin` folder.
+pub const RUNTIMES_NPM_GLOBAL_BIN: [&str; 3] = ["runtimes", NPM_GLOBAL_DIR, "bin"];
+
+/// The `bin` directory where a bootstrap `npm install -g` puts coding CLIs.
+#[must_use]
+pub fn npm_global_bin_dir(data: &Path) -> PathBuf {
+    RUNTIMES_NPM_GLOBAL_BIN
+        .iter()
+        .fold(data.to_path_buf(), |path, part| path.join(part))
+}
+
+/// Extra `PATH` directories the Linux installer's `SERVICE_PATH` shares with the daemon when
+/// they exist (the bootstrap Node.js `bin` is not one of them: the daemon finds it through
+/// [`path_dirs`], and the installer's own Node.js lives in `/opt/praxi-nodejs`).
+#[must_use]
+pub fn service_path_extras(data: &Path) -> Vec<PathBuf> {
+    vec![data.join(".local/bin"), npm_global_bin_dir(data)]
+}
+
+/// Bootstrap runtime folders that exist on disk but are missing from this process's `PATH`.
+#[must_use]
+pub fn missing_service_path_entries(data: &Path) -> Vec<PathBuf> {
+    let path = std::env::var_os("PATH")
+        .map(|val| std::env::split_paths(&val).collect::<Vec<_>>())
+        .unwrap_or_default();
+    missing_from(data, &path)
+}
+
+fn missing_from(data: &Path, path: &[PathBuf]) -> Vec<PathBuf> {
+    service_path_extras(data)
+        .into_iter()
+        .filter(|dir| dir.is_dir() && !path_on(path.iter(), dir))
+        .collect()
+}
+
+fn path_on<'a>(mut path: impl Iterator<Item = &'a PathBuf>, dir: &Path) -> bool {
+    let canon = std::fs::canonicalize(dir).ok();
+    path.any(|entry| {
+        entry == dir
+            || canon
+                .as_ref()
+                .zip(std::fs::canonicalize(entry).ok())
+                .is_some_and(|(a, b)| a == &b)
+    })
 }
 
 /// The installed runtime's `bin` directory, when one is installed and complete.
@@ -504,6 +556,38 @@ pub async fn verify_runs(data: &Path, version: &str) -> Result<(), &'static str>
 
 #[cfg(test)]
 mod tests {
+    /// `SERVICE_PATH` in `install-linux.sh` has no `runtimes/node-v*/bin`: asking for it would be
+    /// a warning `--update` can never clear.
+    #[test]
+    fn service_path_extras_are_only_what_the_installer_puts_on_the_service_path() {
+        let data = tempfile::tempdir().unwrap();
+        let runtime = data.path().join("runtimes/node-v22.0.0/bin");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join("node"), b"x").unwrap();
+        std::fs::write(data.path().join("runtimes/node-current"), "node-v22.0.0").unwrap();
+        assert!(node_bin_dir(data.path()).is_some(), "fixture is a runtime");
+        assert_eq!(
+            service_path_extras(data.path()),
+            vec![
+                data.path().join(".local/bin"),
+                data.path().join("runtimes/npm-global/bin"),
+            ]
+        );
+        assert!(
+            missing_from(data.path(), &[]).is_empty(),
+            "nothing exists yet"
+        );
+    }
+
+    #[test]
+    fn missing_from_names_existing_folders_that_the_path_lacks() {
+        let data = tempfile::tempdir().unwrap();
+        let npm = npm_global_bin_dir(data.path());
+        std::fs::create_dir_all(&npm).unwrap();
+        assert_eq!(missing_from(data.path(), &[]), vec![npm.clone()]);
+        assert_eq!(missing_from(data.path(), &[npm]), Vec::<PathBuf>::new());
+    }
+
     use super::*;
 
     /// `<root>/bin/{node,npm}` as tiny scripts; `node --version` prints `version`.

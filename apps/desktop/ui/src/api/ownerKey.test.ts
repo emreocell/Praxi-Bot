@@ -39,6 +39,37 @@ test("the owner key goes to this computer's daemon only, never through a host pr
   }
 });
 
+test("offline read-aloud sends reply text only to the local owner daemon", async () => {
+  const local = new ApiClient({ base_url: "http://127.0.0.1:47821", token: "t" });
+  const proxy = new ApiClient({ base_url: "http://127.0.0.1:50999", token: "p" });
+  const unmark = markRemoteBaseUrl(proxy.baseUrl);
+  const realFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = (async (url, init) => {
+    fetches += 1;
+    assert.equal(String(url), `${local.baseUrl}/v1/voice/synthesize`);
+    assert.equal(init?.redirect, "error");
+    assert.equal(new Headers(init?.headers).get("x-praxi-owner-key"), "owner-key-for-test");
+    assert.deepEqual(JSON.parse(String(init?.body)), { text: "Günaydın.", language: "tr-TR" });
+    return new Response("WAV", { headers: { "content-type": "audio/wav" } });
+  }) as typeof fetch;
+  const signal = new AbortController().signal;
+  try {
+    await assert.rejects(local.synthesizeVoice("Günaydın.", "tr-TR", signal), { status: 403 });
+    ApiClient.ownerKeyProvider = async () => "owner-key-for-test";
+    await assert.rejects(proxy.synthesizeVoice("Günaydın.", "tr-TR", signal), { status: 403 });
+    assert.equal(fetches, 0);
+    assert.equal((await local.synthesizeVoice("Günaydın.", "tr-TR", signal)).type, "audio/wav");
+    assert.equal(fetches, 1);
+  } finally {
+    ApiClient.ownerKeyProvider = null;
+    globalThis.fetch = realFetch;
+    unmark();
+    local.dispose();
+    proxy.dispose();
+  }
+});
+
 test("a managed host update sends the exact tag and accepts an empty 202 response", async () => {
   const real = globalThis.fetch;
   const base = "http://127.0.0.1:50999";

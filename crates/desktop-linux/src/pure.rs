@@ -210,6 +210,38 @@ pub fn preferred_action_index(actions: &[String]) -> Option<i32> {
     Some(0)
 }
 
+/// The 0-based AT-SPI action that expands (`want_expanded`) or collapses an
+/// element. Toolkits differ: some name two actions, GTK trees expose one that
+/// flips (`expand or contract`). The caller has already checked the live state,
+/// so a flipping action is only run when a flip is what is needed.
+#[must_use]
+pub fn expand_action_index(actions: &[String], want_expanded: bool) -> Option<i32> {
+    let wanted: &[&str] = if want_expanded {
+        &["expand", "open"]
+    } else {
+        &["collapse", "contract", "close"]
+    };
+    let flipping = ["expand or contract", "toggle expand", "toggle"];
+    let find = |names: &[&str]| {
+        actions.iter().position(|a| {
+            let a = a.trim();
+            names.iter().any(|n| a.eq_ignore_ascii_case(n))
+        })
+    };
+    find(wanted)
+        .or_else(|| find(&flipping))
+        .and_then(|i| i32::try_from(i).ok())
+}
+
+/// The 0-based AT-SPI action that selects an element, if it names one.
+#[must_use]
+pub fn select_action_index(actions: &[String]) -> Option<i32> {
+    actions
+        .iter()
+        .position(|a| a.trim().eq_ignore_ascii_case("select"))
+        .and_then(|i| i32::try_from(i).ok())
+}
+
 /// One element as read from AT-SPI, before filtering.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
@@ -832,8 +864,77 @@ pub fn plan_text_actions(
     Ok(actions)
 }
 
+/// Process start time (clock ticks since boot) from the text of `/proc/<pid>/stat`.
+/// The command name sits in parentheses and may hold spaces and `)`, so the
+/// fields are counted from the LAST `)`. `None` when absent or zero: a zero
+/// start time is "unknown" and never names a process.
+#[must_use]
+pub fn parse_proc_start_time(stat: &str) -> Option<u64> {
+    let (_, after_comm) = stat.rsplit_once(')')?;
+    // Field 3 (the state) is the first one after the command; the start time is field 22.
+    after_comm
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+        .filter(|t| *t != 0)
+}
+
+/// Real and effective user id from the text of `/proc/<pid>/status`.
+#[must_use]
+pub fn parse_proc_uids(status: &str) -> Option<(u32, u32)> {
+    let line = status.lines().find_map(|l| l.strip_prefix("Uid:"))?;
+    let mut ids = line.split_whitespace().map(str::parse::<u32>);
+    let real = ids.next()?.ok()?;
+    let effective = ids.next()?.ok()?;
+    Some((real, effective))
+}
+
+/// Whether a program runs outside the user's own account: any of its user ids
+/// differs from the daemon's effective user id (root's programs, another user's).
+#[must_use]
+pub fn runs_outside_own_account(uids: (u32, u32), own_euid: u32) -> bool {
+    uids.0 != own_euid || uids.1 != own_euid
+}
+
+/// The window class out of a `WM_CLASS` property (`instance\0Class\0`): the class
+/// part, or the instance when there is no second part. Empty when unreadable.
+#[must_use]
+pub fn parse_wm_class(raw: &[u8]) -> String {
+    let mut parts = raw
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).trim().to_owned());
+    let first = parts.next();
+    parts.next().or(first).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn expand_and_collapse_pick_the_named_action_or_a_flipping_one() {
+        use super::{expand_action_index, select_action_index};
+        let v = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(expand_action_index(&v(&["click", "expand"]), true), Some(1));
+        assert_eq!(
+            expand_action_index(&v(&["click", "collapse"]), false),
+            Some(1)
+        );
+        assert_eq!(
+            expand_action_index(&v(&["Expand or contract"]), true),
+            Some(0)
+        );
+        assert_eq!(
+            expand_action_index(&v(&["Expand or contract"]), false),
+            Some(0)
+        );
+        // A named expand never collapses: no action for the other direction.
+        assert_eq!(expand_action_index(&v(&["expand"]), false), None);
+        assert_eq!(expand_action_index(&v(&["click"]), true), None);
+        assert_eq!(select_action_index(&v(&["click", "Select"])), Some(1));
+        assert_eq!(select_action_index(&v(&["click"])), None);
+    }
+
     use super::*;
 
     fn raw(role: &'static str, name: &str) -> RawNode {
@@ -1180,6 +1281,43 @@ mod tests {
         let raw24 = vec![10, 20, 30, 40, 50, 60];
         let bgra24 = zpixmap_to_bgra(&raw24, 2, 1, 24).unwrap();
         assert_eq!(bgra24, vec![10, 20, 30, 255, 40, 50, 60, 255]);
+    }
+
+    #[test]
+    fn the_start_time_is_field_22_even_when_the_command_name_has_spaces_and_parentheses() {
+        let stat = "4242 (my (odd) app) S 1 4242 4242 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 7 0 987654 1000 200 18446744073709551615";
+        assert_eq!(parse_proc_start_time(stat), Some(987_654));
+        assert_eq!(
+            parse_proc_start_time("1 (init) S 0 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 12 0 0"),
+            Some(12)
+        );
+        // Unknown is not a start time.
+        assert_eq!(
+            parse_proc_start_time("1 (x) S 0 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 0 0 0"),
+            None
+        );
+        assert_eq!(parse_proc_start_time("1 (x) S 0 1"), None);
+        assert_eq!(parse_proc_start_time(""), None);
+    }
+
+    #[test]
+    fn user_ids_and_the_own_account_test() {
+        let status = "Name:\tgedit\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n";
+        assert_eq!(parse_proc_uids(status), Some((1000, 1000)));
+        assert_eq!(parse_proc_uids("Name:\tx\n"), None);
+        assert_eq!(parse_proc_uids("Uid:\tabc\t1\n"), None);
+        assert!(!runs_outside_own_account((1000, 1000), 1000));
+        assert!(runs_outside_own_account((0, 0), 1000), "root's program");
+        assert!(runs_outside_own_account((1000, 0), 1000), "set-uid root");
+        assert!(runs_outside_own_account((1001, 1001), 1000), "another user");
+    }
+
+    #[test]
+    fn the_window_class_is_the_second_part_of_wm_class() {
+        assert_eq!(parse_wm_class(b"gedit\0Gedit\0"), "Gedit");
+        assert_eq!(parse_wm_class(b"xterm\0"), "xterm");
+        assert_eq!(parse_wm_class(b""), "");
+        assert_eq!(parse_wm_class(b"\0\0"), "");
     }
 }
 

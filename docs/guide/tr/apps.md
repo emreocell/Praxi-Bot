@@ -153,12 +153,14 @@ ya da bir anahtar) [Her uygulamayı bağlamak için ne gerekir](app-catalog.md) 
   `mcp.toml` içinde özel bir `tool_allow` listesi kurduysan Praxi, araçların bu izin listesiyle
   sınırlı olduğunu belirtir.
 - **Oturumu kapat** (giriş yapılmış HTTP OAuth sunucularında): saklanan OAuth tokenlarını
-  daemonun gizli bilgi deposundan siler, sunucu ayarını ise korur. Sunucu, sen yeniden
-  **Oturum aç**'a tıklayana kadar **Oturum açılması gerekiyor** durumuna geçer.
+  daemonun gizli bilgi deposundan siler, sunucu ayarını ise korur; yetkilendirme sunucusu
+  destekliyorsa girişi orada da bitirmesini ister (elinden geleni yapma esasıyla; sunucuya
+  ulaşılamaması çıkışı engellemez). Sunucu, sen yeniden **Oturum aç**'a tıklayana kadar
+  **Oturum açılması gerekiyor** durumuna geçer.
 - **Yeniden bağlan** (**Hata**, **Bağlı değil** ya da **Karantinada** olduğunda): daemona sunucuyu
   hemen yeniden başlatmasını ya da yeniden bağlamasını söyler.
-- **Bağlantıyı kes**: önce onay ister (**Bu sunucunun bağlantısı kesilsin mi?**), sonra sunucu
-  ayarını `mcp.toml` dosyasından siler.
+- **Bağlantıyı kes**: önce onay ister (**Bu sunucunun bağlantısı kesilsin mi?**), sonra yukarıdaki
+  gibi oturumu kapatır ve sunucu ayarını `mcp.toml` dosyasından siler; saklanan giriş kalmaz.
 
 ![Bağlı bir uygulamanın Yönet paneli: bot erişimi, güven sorusu, araçlar ve Bağlantıyı test et](../images/tr/apps/apps-manage.webp)
 

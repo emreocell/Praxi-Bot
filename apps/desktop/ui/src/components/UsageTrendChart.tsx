@@ -201,7 +201,7 @@ export function UsageTrendChart({ daily, timeZone, spend }: UsageTrendChartProps
                 key={bar.day}
                 className={styles.barGroup}
                 tabIndex={0}
-                role="button"
+                role="graphics-object"
                 aria-label={metricReadout(bar)}
                 onMouseEnter={() => setActiveIndex(index)}
                 onFocus={() => setActiveIndex(index)}

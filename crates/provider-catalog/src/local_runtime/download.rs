@@ -55,17 +55,91 @@ fn io_err(e: &std::io::Error) -> DownloadError {
     DownloadError::Io(e.kind().to_string())
 }
 
+/// Hosts the pinned downloads of this catalog come from (the llama.cpp release, the GGUF models
+/// and the managed browser). A redirect may only lead to one of these (or a subdomain of one),
+/// so a compromised or hijacked mirror cannot send the download somewhere else.
+pub const PINNED_HOST_ROOTS: &[&str] = &[
+    "huggingface.co",
+    "hf.co",
+    "github.com",
+    "githubusercontent.com",
+    "storage.googleapis.com",
+];
+
+/// `https`, no user name or password, the default port, and a host that is one of `roots` or a
+/// subdomain of one. The rule for the first URL and for every redirect hop alike.
+#[must_use]
+pub fn is_pinned_https_url(url: &reqwest::Url, roots: &[&str]) -> bool {
+    if url.scheme() != "https"
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.to_ascii_lowercase();
+    roots
+        .iter()
+        .any(|root| host == *root || host.ends_with(&format!(".{root}")))
+}
+
+/// Follow at most 5 redirects, each only to a URL that passes [`is_pinned_https_url`] for
+/// `roots`. Anything else is not followed and surfaces as "server answered 3xx".
+#[must_use]
+pub fn pinned_redirects(roots: &'static [&'static str]) -> Policy {
+    Policy::custom(move |attempt| {
+        if attempt.previous().len() < 5 && is_pinned_https_url(attempt.url(), roots) {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
 /// http is only accepted towards this machine (tests and local mirrors).
 fn url_allowed(url: &str) -> bool {
-    url.starts_with("https://")
-        || url.starts_with("http://127.0.0.1")
-        || url.starts_with("http://localhost")
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        url.username().is_empty()
+            && url.password().is_none()
+            && (url.scheme() == "https"
+                || (url.scheme() == "http"
+                    && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))))
+    })
 }
 
 fn part_path(dest: &Path) -> PathBuf {
     let mut name = dest.as_os_str().to_owned();
     name.push(".part");
     PathBuf::from(name)
+}
+
+/// Bytes still needed for a file that has not been installed yet.
+#[must_use]
+pub fn missing_bytes(dest: &Path, size: u64) -> u64 {
+    let partial = std::fs::symlink_metadata(part_path(dest))
+        .ok()
+        .filter(|m| m.is_file() && m.len() <= size)
+        .map_or(0, |m| m.len());
+    size - partial
+}
+
+/// Check the space needed for all pending downloads on this volume, including a reserve.
+///
+/// # Errors
+/// Disk space could not be checked or is insufficient.
+pub fn check_disk_space(dir: &Path, bytes: u64) -> Result<(), DownloadError> {
+    let need_bytes = bytes.saturating_add(DISK_MARGIN);
+    let free_bytes = fs4::available_space(dir).map_err(|e| io_err(&e))?;
+    if free_bytes < need_bytes {
+        return Err(DownloadError::NotEnoughDisk {
+            need_bytes,
+            free_bytes,
+        });
+    }
+    Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -96,7 +170,8 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
 
 async fn verified(path: PathBuf, want: String, size: u64) -> Result<bool, DownloadError> {
     tokio::task::spawn_blocking(move || {
-        let ok_size = std::fs::metadata(&path).is_ok_and(|m| m.len() == size);
+        let ok_size =
+            std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() == size);
         Ok(ok_size && sha256_file(&path)?.eq_ignore_ascii_case(&want))
     })
     .await
@@ -104,7 +179,17 @@ async fn verified(path: PathBuf, want: String, size: u64) -> Result<bool, Downlo
     .map_err(|e: std::io::Error| io_err(&e))
 }
 
-/// [`download_verified`] with the default HTTP client (the system proxy settings apply).
+fn expected_range(response: &reqwest::Response, have: u64, size: u64) -> bool {
+    let expected = format!("bytes {have}-{}/{size}", size - 1);
+    response
+        .headers()
+        .get(header::CONTENT_RANGE)
+        .and_then(|v| v.to_str().ok())
+        == Some(expected.as_str())
+}
+
+/// [`download_verified`] with the default HTTP client (the system proxy settings apply) and
+/// redirects limited to [`PINNED_HOST_ROOTS`].
 ///
 /// # Errors
 /// See [`DownloadError`].
@@ -113,11 +198,20 @@ pub async fn download(
     progress: &(dyn Fn(u64) + Send + Sync),
     cancel: &AtomicBool,
 ) -> Result<(), DownloadError> {
-    download_verified(reqwest::Client::builder(), spec, progress, cancel).await
+    // The first URL obeys the rule its redirects do (plain http is left to `download_verified`,
+    // which only accepts this machine).
+    let pinned = reqwest::Url::parse(spec.url)
+        .is_ok_and(|url| url.scheme() == "http" || is_pinned_https_url(&url, PINNED_HOST_ROOTS));
+    if !pinned {
+        return Err(DownloadError::InsecureUrl);
+    }
+    let builder = reqwest::Client::builder().redirect(pinned_redirects(PINNED_HOST_ROOTS));
+    download_verified(builder, spec, progress, cancel).await
 }
 
 /// Downloads `spec` to `spec.dest`, resuming a previous `.part`. `progress` gets the number of
 /// bytes on disk so far. Setting `cancel` stops it between chunks and keeps the `.part`.
+/// The caller supplies the redirect policy for its pinned source.
 ///
 /// # Errors
 /// See [`DownloadError`].
@@ -145,31 +239,21 @@ pub async fn download_verified(
         .await
         .map_err(|e| io_err(&e))?;
     let part = part_path(spec.dest);
-    let mut have = tokio::fs::metadata(&part).await.map_or(0, |m| m.len());
+    let mut have = match tokio::fs::symlink_metadata(&part).await {
+        Ok(m) if m.is_file() => m.len(),
+        Ok(_) => return Err(DownloadError::Io("invalid partial file".into())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(e) => return Err(io_err(&e)),
+    };
     if have > spec.size_bytes {
         let _ = tokio::fs::remove_file(&part).await;
         have = 0;
     }
 
-    let need = spec.size_bytes - have + DISK_MARGIN;
-    if let Ok(free) = fs4::available_space(parent)
-        && free < need
-    {
-        return Err(DownloadError::NotEnoughDisk {
-            need_bytes: need,
-            free_bytes: free,
-        });
-    }
+    check_disk_space(parent, spec.size_bytes - have)?;
 
     if have < spec.size_bytes {
         let client = client_builder
-            .redirect(Policy::custom(|attempt| {
-                if attempt.url().scheme() == "https" && attempt.previous().len() < 5 {
-                    attempt.follow()
-                } else {
-                    attempt.stop()
-                }
-            }))
             .read_timeout(IDLE_TIMEOUT)
             .build()
             .map_err(|e| DownloadError::Network(e.to_string()))?;
@@ -182,11 +266,18 @@ pub async fn download_verified(
             .await
             .map_err(|e| DownloadError::Network(e.without_url().to_string()))?;
         let mut file = match resp.status() {
-            StatusCode::PARTIAL_CONTENT if have > 0 => tokio::fs::OpenOptions::new()
-                .append(true)
-                .open(&part)
-                .await
-                .map_err(|e| io_err(&e))?,
+            StatusCode::PARTIAL_CONTENT if have > 0 => {
+                if !expected_range(&resp, have, spec.size_bytes) {
+                    return Err(DownloadError::Network(
+                        "unexpected range in download response".into(),
+                    ));
+                }
+                tokio::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&part)
+                    .await
+                    .map_err(|e| io_err(&e))?
+            }
             StatusCode::OK => {
                 // The server ignored the range: start over.
                 have = 0;
@@ -310,7 +401,11 @@ mod tests {
         let server = MockServer::start().await;
         let rest = &BODY[10..];
         Mock::given(header_exists("range"))
-            .respond_with(ResponseTemplate::new(206).set_body_bytes(rest))
+            .respond_with(
+                ResponseTemplate::new(206)
+                    .insert_header("content-range", "bytes 10-35/36")
+                    .set_body_bytes(rest),
+            )
             .mount(&server)
             .await;
         let dir = tempfile::tempdir().unwrap();
@@ -330,6 +425,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_a_wrong_range_without_touching_the_partial_file() {
+        let server = MockServer::start().await;
+        Mock::given(header_exists("range"))
+            .respond_with(
+                ResponseTemplate::new(206)
+                    .insert_header("content-range", "bytes 9-35/36")
+                    .set_body_bytes(&BODY[9..]),
+            )
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("m.gguf");
+        let part = part_path(&dest);
+        std::fs::write(&part, &BODY[..10]).unwrap();
+        let url = format!("{}/m.gguf", server.uri());
+        let err = download_verified(
+            builder(),
+            &spec(&url, &dest, &good_sha()),
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DownloadError::Network(_)));
+        assert_eq!(std::fs::read(&part).unwrap(), &BODY[..10]);
+        assert!(!dest.exists());
+    }
+
+    #[tokio::test]
     async fn refuses_plain_http_to_other_hosts_and_a_full_disk() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("m.gguf");
@@ -343,6 +467,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err, DownloadError::InsecureUrl);
+        assert!(!url_allowed("http://localhost.example.com/m.gguf"));
         // A pin larger than any disk cannot fit: refused before any request is made.
         let huge = DownloadSpec {
             url: "http://127.0.0.1:9/x",
@@ -356,6 +481,79 @@ mod tests {
         assert!(
             matches!(err, DownloadError::NotEnoughDisk { .. }),
             "{err:?}"
+        );
+    }
+
+    #[test]
+    fn the_pinned_rule_checks_scheme_credentials_port_and_host() {
+        let ok = |u: &str| is_pinned_https_url(&reqwest::Url::parse(u).unwrap(), PINNED_HOST_ROOTS);
+        assert!(ok("https://huggingface.co/a/b"));
+        assert!(ok("https://cas-bridge.xethub.hf.co/x"));
+        assert!(ok("https://release-assets.githubusercontent.com/x"));
+        assert!(ok(
+            "https://storage.googleapis.com/chrome-for-testing-public/x.zip"
+        ));
+        assert!(
+            ok("https://HuggingFace.co:443/a"),
+            "the default port is the same thing"
+        );
+        assert!(!ok("http://huggingface.co/a"));
+        assert!(!ok("https://huggingface.co:8443/a"));
+        assert!(!ok("https://user@huggingface.co/a"));
+        assert!(!ok("https://user:pw@huggingface.co/a"));
+        assert!(!ok("https://huggingface.co.evil.example/a"));
+        assert!(!ok("https://evilhuggingface.co/a"));
+        assert!(!ok("https://huggingface.co@evil.example/a"));
+        assert!(!ok("https://evil.googleapis.com/a"));
+        assert!(!ok("https://127.0.0.1/a"));
+        assert!(!ok("https://[::1]/a"));
+    }
+
+    /// A server whose first answer is a redirect to `location`.
+    async fn redirecting_to(location: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", location))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn the_shared_downloader_does_not_follow_a_redirect_off_the_allow_list() {
+        // The second server would answer with the right bytes: following the redirect would
+        // install them. The policy must refuse before any request reaches it.
+        let target = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(BODY))
+            .mount(&target)
+            .await;
+        let hops = [
+            format!("{}/m.gguf", target.uri()), // plain http, loopback, explicit port
+            "https://user:pw@huggingface.co/m.gguf".to_owned(),
+            "https://huggingface.co:8443/m.gguf".to_owned(),
+            "https://huggingface.co.evil.example/m.gguf".to_owned(),
+        ];
+        for hop in hops {
+            let first = redirecting_to(&hop).await;
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("m.gguf");
+            let url = format!("{}/m.gguf", first.uri());
+            let sha = good_sha();
+            let err = download_verified(
+                builder().redirect(pinned_redirects(PINNED_HOST_ROOTS)),
+                &spec(&url, &dest, &sha),
+                &|_| {},
+                &AtomicBool::new(false),
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(err, DownloadError::Network(_)), "{hop}: {err:?}");
+            assert!(!dest.exists(), "{hop}");
+        }
+        assert!(
+            target.received_requests().await.unwrap().is_empty(),
+            "a refused redirect must not be requested"
         );
     }
 }

@@ -34,7 +34,7 @@ jobs:
       smoke_os: ${{ steps.filter.outputs.smoke_os }}
     steps:
       - name: Checkout (merge commit and its first parent)
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
@@ -61,7 +61,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check relative Markdown links
         run: python3 scripts/check_markdown_links.py
@@ -89,11 +89,37 @@ jobs:
           python3 scripts/installer/generate_installer_assets.py --check
           python3 -B -m unittest discover -s scripts/tests -p test_installer_assets.py -v
 
+      - name: Test the in-app update feed generator and its checks
+        run: python3 -B -m unittest discover -s scripts/tests -p test_update_manifest.py -v
+
       - name: Check third-party notices consistency and dependency hygiene tests
         run: |
           python3 scripts/license_report.py --check-notices
           python3 -B -m unittest discover -s scripts/tests -p "test_license_report.py" -v
           python3 -B -m unittest discover -s scripts/tests -p "test_dependency_hygiene.py" -v
+
+      - name: Check GitHub Actions are pinned to commit SHAs
+        run: |
+          python3 scripts/ci/check_github_actions_pins.py
+          python3 -B -m unittest discover -s scripts/tests -p test_check_github_actions_pins.py -v
+
+      - name: actionlint
+        env:
+          # A fixed release, not the moving `main` download script. The sha256 below is the one in the
+          # release's own actionlint_1.7.12_checksums.txt (checked again against that file at run time).
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --output "$tarball" "$base/$tarball"
+          curl --fail --silent --show-error --location --output checksums.txt "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum --check --strict -
+          grep -F "${ACTIONLINT_SHA256}  ${tarball}" checksums.txt
+          tar -xzf "$tarball" actionlint
+          rm -f "$tarball" checksums.txt
+          ./actionlint -color
 
   build-and-test:
     name: ${{ matrix.name }}
@@ -139,16 +165,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
         with:
           components: rustfmt, clippy
 
       - name: Set up sccache (Windows)
         if: matrix.os == 'windows-latest' && matrix.suite == 'workspace'
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Install cargo-nextest
         if: matrix.suite != 'embeddings'
@@ -163,7 +189,7 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev pkg-config libxcb1-dev
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The feature-enabled lane saves a different set of compiled dependencies.
           key: ${{ matrix.suite == 'embeddings' && 'local-embeddings' || '' }}
@@ -241,10 +267,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
 
       - name: Install Linux build dependencies
         run: |
@@ -252,7 +278,7 @@ jobs:
           sudo apt-get install -y libdbus-1-dev pkg-config libxcb1-dev
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ubuntu-rust
           # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
@@ -287,13 +313,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ubuntu-rust
           # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
@@ -302,7 +328,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check licenses
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@bb119f768ea239e765aeaef5769558d4f21213aa # v2.1.5
         with:
           arguments: --all-features
           command: check licenses bans advisories sources
@@ -318,15 +344,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -379,15 +405,15 @@ jobs:
     continue-on-error: true
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -402,7 +428,7 @@ jobs:
 
       - name: Upload screenshots and report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visual-regression
           path: ${{ runner.temp }}/visual/
@@ -425,12 +451,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (2026-11-15)
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -439,7 +465,7 @@ jobs:
           sudo apt-get install -y libdbus-1-dev pkg-config libxcb1-dev xvfb xauth dbus-x11 at-spi2-core
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: desktop-smoke
           # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
@@ -448,12 +474,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -530,7 +556,7 @@ jobs:
 
       - name: Upload trigger registry screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trigger-registry-${{ matrix.os }}
           path: ${{ runner.temp }}/desktop-smoke/trigger-registry-*.png
@@ -538,7 +564,7 @@ jobs:
 
       - name: Upload smoke screenshots and logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-smoke-${{ matrix.os }}
           path: ${{ runner.temp }}/desktop-smoke/

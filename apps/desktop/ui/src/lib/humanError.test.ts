@@ -336,6 +336,16 @@ test("a provider's refusal behind a 502 is worded by what the provider said, nev
 
 test("a failed tool step says one human reason, not the generic sentence", () => {
   assert.equal(layer.humanToolError("all configured search backends failed (duckduckgo returned a bot challenge (HTTP 202))").code, "toolSearchDown");
+  assert.equal(
+    layer.humanToolError(
+      "Mail guard stopped this send (opt-out list). Nobody was asked on this Full-level bot."
+    ).code,
+    "mailGuardOptOut"
+  );
+  assert.equal(
+    layer.humanToolError("Mail guard stopped this send (unreadable guard file).").code,
+    "mailGuardUnreadable"
+  );
   assert.equal(layer.humanToolError("Permission denied (os error 13)").code, "toolNoPermission");
   assert.equal(layer.humanToolError("unknown tool `write_file`; use find_tool to search for the right name").code, "toolNoSuchTool");
   assert.equal(layer.humanToolError("user rejected the step").code, "toolDenied");

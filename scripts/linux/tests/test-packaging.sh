@@ -1472,7 +1472,7 @@ run_ok "${TMP_ROOT}/dry-node.log" bash "${SB_INSTALL}" --dry-run
 assert_file_contains "${TMP_ROOT}/dry-node.log" "Node.js: would install v${NODE_FIX_VERSION} (linux-x64, SHA-256 verified) into ${NODE_DIR_SB}"
 assert_file_contains "${TMP_ROOT}/dry-node.log" "npm for praxi: global prefix ${NPM_PREFIX_SB} (no root needed)"
 # System directories first, the ones the service user can write last.
-SB_SERVICE_PATH="${SANDBOX}/usr/local/bin:/usr/bin:/bin:${NODE_DIR_SB}/bin:${SANDBOX}/var/lib/praxi/.local/bin:${NPM_PREFIX_SB}/bin"
+SB_SERVICE_PATH="${SANDBOX}/usr/local/bin:/usr/bin:/bin:${NODE_DIR_SB}/bin:${SANDBOX}/var/lib/praxi/.local/bin:${NPM_PREFIX_SB}/bin:${SANDBOX}/var/lib/praxi/runtimes/npm-global/bin"
 assert_file_contains "${TMP_ROOT}/dry-node.log" "${SB_SERVICE_PATH}"
 assert_file_contains "${TMP_ROOT}/dry-node.log" "registry pinned to https://registry.npmjs.org/ in ${SANDBOX}/etc/praxi/npmrc"
 FAKE_UNAME_M=aarch64 run_ok "${TMP_ROOT}/dry-node-arm.log" bash "${SB_INSTALL}" --dry-run

@@ -278,7 +278,7 @@ fn finish(s: &AppState, engine: &str, id: u64, state: &'static str, error: Optio
 }
 
 /// A stable reason for a login that ended without a sign-in, read from the CLI's private output.
-fn classify(output: &str) -> &'static str {
+fn classify(output: &str, exit_ok: bool) -> &'static str {
     let lower = output.to_ascii_lowercase();
     if lower.contains("device-auth")
         && (lower.contains("unexpected argument")
@@ -294,7 +294,18 @@ fn classify(output: &str) -> &'static str {
         "device_auth_disabled"
     } else if lower.contains("expired") || lower.contains("timed out") {
         "login_expired"
-    } else if lower.contains("invalid") && lower.contains("code") {
+    } else if !exit_ok
+        && [
+            "code rejected",
+            "code was rejected",
+            "invalid authorization code",
+            "invalid device code",
+            "did not accept",
+            "incorrect code",
+        ]
+        .iter()
+        .any(|phrase| lower.contains(*phrase))
+    {
         "login_code_rejected"
     } else {
         "login_failed"
@@ -349,7 +360,7 @@ async fn run_job(
         () = revoked(&still_admin) => { run.terminate().await; finish(&s, engine, id, "failed", Some("admin_revoked")); return; }
     };
     let Some(Prompt::Page { url, code }) = prompt else {
-        let reason = classify(&run.private_output());
+        let reason = classify(&run.private_output(), false);
         run.terminate().await;
         finish(
             &s,
@@ -434,7 +445,7 @@ async fn run_job(
     let output = run.private_output();
     let wrote = run.credential_written(spec, detector.environment());
     if ended == Ended::Exit(false) {
-        let reason = classify(&output);
+        let reason = classify(&output, false);
         run.terminate().await;
         finish(&s, engine, id, "failed", Some(reason));
         return;
@@ -920,6 +931,22 @@ mod tests {
 
     /// The pins say which programs the service may later run: a user who does not own the data
     /// folder (an SSH user running `bot cli install` by mistake) must not be able to write them.
+    #[test]
+    fn login_code_rejection_requires_a_failed_exit_or_an_explicit_message() {
+        assert_eq!(
+            classify("Enter code: ABCD\nWaiting for auth...\n", true),
+            "login_failed"
+        );
+        assert_eq!(
+            classify("invalid authorization code\n", false),
+            "login_code_rejected"
+        );
+        assert_eq!(
+            classify("The code was rejected\n", false),
+            "login_code_rejected"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_terminal_install_by_another_user_records_no_pin() {

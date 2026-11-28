@@ -337,6 +337,7 @@ fn only_an_untainted_owner_message_can_be_a_goal() {
     use crate::mission_start::goal_origin_ok;
     assert!(goal_origin_ok("owner", false));
     assert!(goal_origin_ok("telegram_owner", false));
+    assert!(goal_origin_ok("discord_owner", false));
     assert!(
         !goal_origin_ok("owner", true),
         "written after untrusted content"
@@ -346,6 +347,7 @@ fn only_an_untainted_owner_message_can_be_a_goal() {
         "imported",
         "peer_admin",
         "telegram",
+        "discord",
         "mission_brief",
         "webhook",
     ] {

@@ -1513,6 +1513,7 @@ fn action_name(a: &Action) -> &'static str {
         Action::Scroll { .. } => "scroll",
         Action::KeyPress { .. } => "key",
         Action::Drag { .. } => "drag",
+        Action::Element { .. } => "element action",
     }
 }
 
@@ -1937,6 +1938,7 @@ fn describe_action(
             target_text(from),
             target_text(to)
         )),
+        Action::Element { target, op } => Ok(format!("{} {}", op.label(), target_text(target))),
     }
 }
 

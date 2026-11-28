@@ -975,6 +975,29 @@ fn held_back_keys(changed: &[ToolChange]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Outcome of [`McpManager::sign_out`]: whether local credentials existed and
+/// whether the provider confirmed remote revocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignOutResult {
+    /// Whether OAuth credentials were deleted locally.
+    pub had_credentials: bool,
+    /// Remote revocation at the authorization server, when attempted.
+    pub remote_revocation: RemoteRevokeOutcome,
+}
+
+/// Whether the authorization server was asked to end the sign-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteRevokeOutcome {
+    /// No HTTP transport or nothing stored to revoke.
+    Skipped,
+    /// The issuer does not advertise revocation (or the issuer is unknown).
+    NotAdvertised,
+    /// RFC 7009 revoke succeeded.
+    Revoked,
+    /// Local sign-out completed; remote revoke failed or was refused.
+    Failed,
+}
+
 /// Owns all configured MCP servers and keeps a [`ToolRegistry`] in sync with them.
 pub struct McpManager {
     registry: ToolRegistry,
@@ -1093,15 +1116,23 @@ impl McpManager {
     }
 
     /// Forget the stored OAuth sign-in of server `id` and drop its session.
-    /// Returns whether credentials existed.
+    /// Returns whether credentials existed and remote revocation status.
     ///
     /// # Errors
     /// Unknown server, no secret store, or a secret-store failure.
-    pub async fn sign_out(&self, id: &str) -> Result<bool> {
+    pub async fn sign_out(&self, id: &str) -> Result<SignOutResult> {
         let server = self.get(id)?;
         let store = self.secrets.clone().ok_or_else(|| {
             McpError::Config(format!("server `{id}`: no secret store is configured"))
         })?;
+        // What the authorization server is asked to forget, read before the
+        // local copy goes.
+        let revoke = match &server.config.transport {
+            McpTransport::Http { url, .. } => {
+                crate::oauth::token_to_revoke(id, url, &store, self.registrar.clone()).await
+            }
+            McpTransport::Stdio { .. } => None,
+        };
         // Revoke first: a sign-in exchange or refresh in flight can no longer
         // save, so the delete below is final.
         let existed = server
@@ -1113,17 +1144,51 @@ impl McpManager {
             })
             .map_err(|_| McpError::Store("cannot delete OAuth credentials".to_owned()))?;
         server.drop_session().await;
-        let mut state = server.state.lock();
-        state.generation = state.generation.wrapping_add(1);
-        state.auth_required = false;
-        state.last_error = None;
-        if state.status == ServerStatus::Connected {
-            state.status = ServerStatus::Disconnected;
+        {
+            let mut state = server.state.lock();
+            state.generation = state.generation.wrapping_add(1);
+            state.auth_required = false;
+            state.last_error = None;
+            if state.status == ServerStatus::Connected {
+                state.status = ServerStatus::Disconnected;
+            }
+            for tool in state.tools.drain(..) {
+                server.registry.unregister(&tool);
+            }
         }
-        for tool in state.tools.drain(..) {
-            server.registry.unregister(&tool);
-        }
-        Ok(existed)
+        // Then end the sign-in at the provider too. Best effort: the local
+        // copy is already gone and a provider that is down must not keep the
+        // owner from signing out.
+        let remote_revocation = if let Some(token) = revoke {
+            let options =
+                if let Ok(options) = server.oauth_options(crate::oauth::SignInOptions::default()) {
+                    options
+                } else if let Some(oauth) = &server.config.oauth {
+                    crate::oauth::SignInOptions {
+                        guard: Some(server.credentials.clone()),
+                        expected_issuer: oauth.issuer.clone(),
+                        allow_loopback_http: oauth.allow_loopback_http,
+                        client_id: oauth.client_id.clone(),
+                        ..Default::default()
+                    }
+                } else {
+                    crate::oauth::SignInOptions {
+                        guard: Some(server.credentials.clone()),
+                        ..Default::default()
+                    }
+                };
+            match crate::oauth::revoke_at_issuer(id, token, &options).await {
+                Ok(true) => RemoteRevokeOutcome::Revoked,
+                Ok(false) => RemoteRevokeOutcome::NotAdvertised,
+                Err(_) => RemoteRevokeOutcome::Failed,
+            }
+        } else {
+            RemoteRevokeOutcome::Skipped
+        };
+        Ok(SignOutResult {
+            had_credentials: existed,
+            remote_revocation,
+        })
     }
 
     /// Whether a resource-bound authorization is stored, without network I/O.

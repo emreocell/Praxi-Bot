@@ -231,3 +231,33 @@ export function missionNote(m: Pick<Mission, "state">): MissionNote | null {
       return null;
   }
 }
+
+/**
+ * The missions started from this chat, oldest first, for the cards in its stream: the ones
+ * `/mission` started here (`linked`, remembered on this computer) and the ones the bot started
+ * itself from the owner's message here (`mission_create` copies that message as the goal, so a
+ * mission whose goal is one of this chat's own messages, started after it, came from here). The
+ * mission's own chat is never one of them: it has the progress header instead.
+ */
+export function missionsStartedIn(
+  all: readonly Mission[],
+  chatId: string | undefined,
+  ownMessages: readonly { text: string; ts: number }[],
+  linked: readonly string[]
+): Mission[] {
+  if (!chatId) {
+    return [];
+  }
+  const fromMessage = (m: Mission) => {
+    const goal = m.goal.trim();
+    return goal !== "" && ownMessages.some((u) => u.text.trim() === goal && u.ts <= m.started_at_ms);
+  };
+  return all
+    .filter((m) => m.chat_id !== chatId && (linked.includes(m.id) || fromMessage(m)))
+    .sort((a, b) => a.started_at_ms - b.started_at_ms);
+}
+
+/** A mission's progress in a few characters: "7/15", or null while the bot is still making its list. */
+export function progressShort(m: Pick<Mission, "progress">): string | null {
+  return m.progress.total > 0 ? `${m.progress.done}/${m.progress.total}` : null;
+}

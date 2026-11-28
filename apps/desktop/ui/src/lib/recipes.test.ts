@@ -13,6 +13,7 @@ import {
   recipeBotName,
   recipeFolder,
   recipeText,
+  runsAsMission,
   validateRecipe,
   type Recipe
 } from "./recipes.ts";
@@ -101,6 +102,33 @@ test("the validator accepts a small recipe and names what is wrong otherwise", (
   );
   const twoFolders = ["topic", "other"].map((id) => ({ id, kind: "folder", required: true, text: { en: { label: id } } }));
   bad({ questions: twoFolders, text: { en: { name: "n", blurb: "b", goal: "{{topic}} {{other}}" } } }, /at most one folder/);
+});
+
+test("a mission block is checked: an English plan, whole-number budgets within the ceilings, nothing else", () => {
+  const mission = { plan: { en: "One item per site." }, budgets: { max_sessions: 10, max_model_steps: 300, max_minutes: 600 } };
+  assert.equal(validateRecipe({ ...base(), mission }).ok, true);
+  const bad = (m: unknown, match: RegExp) => {
+    const res = validateRecipe({ ...base(), mission: m });
+    assert.equal(res.ok, false);
+    if (!res.ok) assert.match(res.errors.join("\n"), match);
+  };
+  bad("yes", /mission must be an object/);
+  bad({ budgets: mission.budgets }, /plan needs an "en" text/);
+  bad({ plan: { tr: "x" }, budgets: mission.budgets }, /plan needs an "en" text/);
+  bad({ plan: mission.plan }, /budgets are needed/);
+  bad({ ...mission, budgets: { ...mission.budgets, max_sessions: 0 } }, /max_sessions must be a whole number from 1 to/);
+  bad({ ...mission, budgets: { ...mission.budgets, max_model_steps: 1e9 } }, /max_model_steps must be a whole number/);
+  bad({ ...mission, budgets: { ...mission.budgets, max_minutes: 1.5 } }, /max_minutes must be a whole number/);
+  bad({ ...mission, budgets: { ...mission.budgets, max_cost_usd: 5 } }, /unknown key "max_cost_usd"/);
+  bad({ ...mission, level: "auto" }, /unknown key "level"/);
+});
+
+test("a recipe runs as a mission only when it has one AND the owner confirmed the Full level", () => {
+  const long = byId("backlinks");
+  assert.equal(runsAsMission(long, "auto"), true);
+  assert.equal(runsAsMission(long, "balanced"), false);
+  assert.equal(runsAsMission(long, "ask"), false);
+  for (const level of ["ask", "balanced", "auto"] as const) assert.equal(runsAsMission(byId("daily-brief"), level), false);
 });
 
 test("a bad recipe is dropped and reported without hiding the good ones; a wrong version loads nothing", () => {

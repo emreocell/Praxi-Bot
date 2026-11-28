@@ -754,7 +754,7 @@ struct Hit {
     node: Option<(i64, String)>,
     /// Words for the model.
     what: String,
-    /// Origin of the receiving frame (see [`Page::hit_at`]); unused when `top`.
+    /// Origin of the receiving frame (see `Page::hit_at`); unused when `top`.
     origin: Option<String>,
     /// Nothing but the page background: the top document receives it.
     top: bool,

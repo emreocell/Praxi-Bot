@@ -1,7 +1,7 @@
 import type { EmailAccount } from "../api/types";
 import { useOptionalDaemonClient } from "../state/DaemonContext";
 import { daemonSender, identitiesFor, senderOf, switchReason } from "../lib/mailIdentity";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import {
   AppWindow,
   Bot,
@@ -752,39 +752,32 @@ export function ApprovalCard({
       : t("chat.approval.compact.alwaysTool");
   const openDetailsByDefault =
     egress?.reviewFullPayload === true || mail !== null || (app ? app.count <= 1000 : false);
+  // Details open by default for a card that has to be read; the owner's own toggle wins after that.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const detailsOpen = userOpen ?? openDetailsByDefault;
+  const detailsId = useId();
 
-  // Enter allows once, Esc denies: only for the card the dock shows, never for a card that has to
-  // be read (a payload to review, an outgoing message, a mail) and never in the first moments.
+  // Enter allows once, Esc denies: only while the focus is on this card (see `approvalKeyAction`), only
+  // for the card the dock shows, never for a card that has to be read (a payload to review, an outgoing
+  // message, a mail), never in the first moments and never for a card that cannot be answered now.
+  // Nothing focuses the card or Allow for the person.
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!keyboard) return undefined;
     const id = window.setTimeout(() => setArmed(true), KEY_ARM_MS);
     return () => window.clearTimeout(id);
   }, [keyboard, tool.callId]);
-  const keyState = {
-    armed,
-    canAllow:
-      !disabled && !reviewPending && !unrenderable && enterMayAllow(tool)
-  };
-  const keyDecide = useRef<(k: "allow" | "deny") => void>(() => undefined);
-  keyDecide.current = (k) => {
-    if (busy || remaining === 0) return;
-    if (k === "allow") void decide("approve", "once");
+  const allowEnabled = !disabled && !reviewPending && !unrenderable;
+  const allowKey = keyboard && allowEnabled && enterMayAllow(tool);
+  const denyKey = keyboard && !disabled;
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!keyboard || disabled) return;
+    const action = approvalKeyAction(e.nativeEvent, { armed, canAllow: allowKey });
+    if (!action) return;
+    e.preventDefault();
+    if (action === "allow") void decide("approve", "once");
     else void decide("deny", undefined, reason || undefined);
   };
-  const keyStateRef = useRef(keyState);
-  keyStateRef.current = keyState;
-  useEffect(() => {
-    if (!keyboard) return undefined;
-    const onKey = (e: KeyboardEvent) => {
-      const action = approvalKeyAction(e, keyStateRef.current);
-      if (!action) return;
-      e.preventDefault();
-      keyDecide.current(action);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [keyboard]);
 
   return (
     <div
@@ -797,6 +790,9 @@ export function ApprovalCard({
         .join(" ")}
       role="group"
       aria-label={t(outbound ? "chat.approval.sendTitle" : "chat.approval.title")}
+      tabIndex={keyboard ? 0 : undefined}
+      onKeyDown={onKeyDown}
+      data-approval-card=""
       data-testid={outbound ? "approval-card-outbound" : "approval-card"}
       data-call-id={tool.callId}
       data-risk={risk ?? undefined}
@@ -842,10 +838,14 @@ export function ApprovalCard({
             <Button
               size="sm"
               variant={risk === "delete" ? "secondary" : "primary"}
-              disabled={disabled || reviewPending || unrenderable}
+              disabled={!allowEnabled}
+              aria-keyshortcuts={allowKey ? "Enter" : undefined}
               onClick={() => void decide("approve", "once")}
             >
               {allowLabel}
+              {allowKey ? (
+                <kbd className={styles.keyHint} aria-hidden="true" data-testid="approval-key-allow">↵</kbd>
+              ) : null}
             </Button>
             {showAlways ? (
               <Button
@@ -864,23 +864,36 @@ export function ApprovalCard({
               variant={risk === "delete" ? "primary" : "ghost"}
               className={risk === "delete" ? undefined : styles.denyButton}
               disabled={disabled}
+              aria-keyshortcuts={denyKey ? "Escape" : undefined}
               onClick={() => void decide("deny", undefined, reason || undefined)}
             >
               {t("chat.approval.deny")}
+              {denyKey ? (
+                <kbd className={styles.keyHint} aria-hidden="true" data-testid="approval-key-deny">esc</kbd>
+              ) : null}
             </Button>
+            {/* Details is a quiet toggle at the end of the answers, not a row of its own. */}
+            <button
+              type="button"
+              className={styles.detailsToggle}
+              aria-expanded={detailsOpen}
+              aria-controls={detailsId}
+              data-testid="approval-details-toggle"
+              onClick={() => setUserOpen(!detailsOpen)}
+            >
+              <span>{t("chat.approval.plain.details")}</span>
+              <ChevronDown size={14} aria-hidden="true" className={styles.detailsChevron} />
+            </button>
           </div>
         </div>
       </div>
 
-      <details
+      <div
+        id={detailsId}
         className={styles.detailsBox}
-        open={openDetailsByDefault || undefined}
+        hidden={!detailsOpen}
         data-testid="approval-details"
       >
-        <summary className={styles.detailsToggle}>
-          <ChevronDown size={14} aria-hidden="true" className={styles.detailsChevron} />
-          <span>{t("chat.approval.plain.details")}</span>
-        </summary>
         <div className={styles.detailsBody}>
           {bot ? (
             <>
@@ -1035,7 +1048,7 @@ export function ApprovalCard({
             onChange={(e) => setReason(e.target.value)}
           />
         </div>
-      </details>
+      </div>
 
       {error ? <p className={formStyles.error} role="alert">{error}</p> : null}
     </div>

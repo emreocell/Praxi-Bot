@@ -47,6 +47,7 @@ members = [
     "crates/web-tools",
     "crates/openapi-tools",
     "crates/composio",
+    "crates/account-health",
     "crates/process-guard",
     "crates/pty-session",
     "crates/missions",
@@ -104,7 +105,7 @@ cli-provider = { path = "crates/cli-provider", version = "0.1.0" }
 storage = { path = "crates/storage", version = "0.1.0" }
 secret-store = { path = "crates/secret-store", version = "0.1.0" }
 wiremock = "0.6"
-uuid = { version = "1", features = ["v7", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 atspi = { version = "0.30", default-features = false, features = ["connection", "proxies", "tokio", "zbus"] }
 x11rb = { version = "0.14", features = ["xtest", "randr"] }
 

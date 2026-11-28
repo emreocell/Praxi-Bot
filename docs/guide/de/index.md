@@ -18,6 +18,7 @@ deutsche Seite, wenn es sie gibt.
 | [Häufige Probleme lösen](fix-common-problems.md) | Die 12 wahrscheinlichsten Probleme und der nächste Schritt. |
 | [Kurze Antworten](quick-faq.md) | Kurze Antworten auf die Fragen, die zuerst gestellt werden. |
 | [Einstellungen](settings.md) | Die Einstellungsseiten, die Suche, Sicherheitsstufen und „Auf Empfehlung zurücksetzen“. |
+| [Offline diktieren und vorlesen](voice-call.md) | Spracherkennung und Sprachausgabe auf deinem Computer. |
 | [Geplante Jobs](schedules.md) | Einen Bot zu bestimmten Zeiten von selbst arbeiten lassen. |
 | [Ausgabenlimits für Bots](bot-spending-limits.md) | Tages-, Wochen- und Monatslimits. |
 | [Gedächtnis](memory.md) | Sieh, korrigiere, vergiss und schalte aus, woran sich deine Bots erinnern. |

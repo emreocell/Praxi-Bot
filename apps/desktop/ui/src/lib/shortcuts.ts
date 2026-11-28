@@ -41,6 +41,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "menuAccept", group: "composer", labelKey: "help.menuAccept", keys: "Enter / Tab", source: "views/ChatView.tsx" },
   { id: "menuDismiss", group: "composer", labelKey: "help.menuDismiss", keys: "Esc", source: "views/ChatView.tsx" },
   { id: "voiceCallEnd", group: "dialogs", labelKey: "help.voiceCallEnd", keys: "Esc", source: "components/voiceCall/VoiceCallPanel.tsx" },
+  { id: "liveVoiceEnd", group: "dialogs", labelKey: "help.liveVoiceEnd", keys: "Esc", source: "components/liveVoice/LiveVoicePanel.tsx" },
   { id: "voiceCallTalk", group: "dialogs", labelKey: "help.voiceCallTalk", keys: "Space / Enter (hold)", source: "components/voiceCall/VoiceCallPanel.tsx" },
   { id: "dialogClose", group: "dialogs", labelKey: "help.dialogClose", keys: "Esc", source: "components/Modal.tsx" },
   { id: "dialogFocus", group: "dialogs", labelKey: "help.dialogFocus", keys: "Tab / Shift+Tab", source: "components/Modal.tsx" },

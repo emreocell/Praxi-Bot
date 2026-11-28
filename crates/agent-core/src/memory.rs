@@ -50,7 +50,7 @@ impl LoopMemoryModel {
 }
 
 /// The span of `text` from the first `open` to the last `close`.
-fn json_span(text: &str, open: char, close: char) -> Option<&str> {
+pub(crate) fn json_span(text: &str, open: char, close: char) -> Option<&str> {
     let a = text.find(open)?;
     let b = text.rfind(close)?;
     (b > a).then(|| &text[a..=b])

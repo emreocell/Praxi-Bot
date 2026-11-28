@@ -494,12 +494,12 @@ pub(crate) async fn mcp_auth_status(
 
 /// Cancel sign-in and forget stored tokens before disconnecting.
 #[utoipa::path(post, path = "/v1/mcp/servers/{name}/auth/logout", tag = "mcp", security(("bearer" = [])),
-    params(("name" = String, Path)), responses((status = 200, body = crate::mcp::McpAuthState), (status = 404, body = ErrorBody)))]
+    params(("name" = String, Path)), responses((status = 200, body = crate::mcp::McpAuthLogoutDto), (status = 404, body = ErrorBody)))]
 pub(crate) async fn logout_mcp_auth(
     State(s): State<AppState>,
     actor: MaybeActor,
     Path(name): Path<String>,
-) -> Result<Json<crate::mcp::McpAuthState>, ApiError> {
+) -> Result<Json<crate::mcp::McpAuthLogoutDto>, ApiError> {
     let host = mcp(&s)?;
     audited(&s, &actor, "mcp.auth_logout", &name, async {
         Ok(Json(host.auth_logout(&name).await?))

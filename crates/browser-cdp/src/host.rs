@@ -8,7 +8,7 @@ pub fn display_configured(display: Option<&str>) -> bool {
 
 /// Session reachability. The X11 handshake runs on a dedicated OS thread, never
 /// on a Tokio worker, bounded to 1 s. A reachable display is remembered for the
-/// process life; an unreachable one is probed again after [`RETRY_AFTER`], so a
+/// process life; an unreachable one is probed again after `RETRY_AFTER`, so a
 /// slow handshake during a busy daemon start (or an Xvfb that came up late) does
 /// not pin Chrome to headless until the next restart.
 #[must_use]

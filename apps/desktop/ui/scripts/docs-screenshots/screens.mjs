@@ -36,6 +36,18 @@ export const SCREENS = [
     await page.getByRole('button', { name: /^(New schedule|Yeni zamanlama)/ }).click();
     await page.waitForTimeout(500);
   } },
+  {
+    name: 'schedule-standing',
+    height: 1280,
+    query: 'screen=schedules',
+    ready: '[data-testid="schedules-view-list"]',
+    act: async (page) => {
+      await page.getByRole('button', { name: /^(New schedule|Yeni zamanlama)/ }).click();
+      await page.getByTestId('schedule-task-kind-standing').click();
+      await page.waitForSelector('[data-testid="schedule-standing-fields"]', { timeout: 15000 });
+      await page.waitForTimeout(400);
+    }
+  },
   { name: 'notifications', query: 'screen=notifications', ready: '#root > *' },
   { name: 'live-view', query: 'lv=open', ready: '[data-testid="live-view-takeover"]' },
   { name: 'computer-menu', query: 'screen=empty', ready: '[data-testid="computer-picker"]', act: async (page) => {

@@ -39,14 +39,33 @@ address, and move on to the next site."*
 
 ## Starting a mission
 
-Open the bot's right-hand panel (**bot chip** in the title bar), **Activity** tab,
-**Start a mission**, describe the task once and press **Start**. The bot has to
-be on the **Full** level (a mission works without asking, so that is the level
-where it can). The **Automation** tab explains how missions differ from scheduled
+In the bot's chat, type **`/mission`** (in Turkish **`/görev`**) followed by the
+task, for example `/mission Sign up on these 20 directory sites and report which
+ones worked`, and send it. The app starts the mission at once, without a
+confirmation: you typed the command, that is the go-ahead. The bot has to be on
+the **Full** level (a mission works without asking, so that is the level where it
+can); below Full the chat says why it cannot start. "Start a mission" in the
+bot's panel types `/mission` into the message box for you. The **Automation** tab explains how missions differ from scheduled
 jobs and links here.
+
+A compact **mission card** appears in the chat where you started it: the title,
+its status, a progress bar, **Pause**/**Resume** and **Stop**, and a button that
+opens the mission's own chat (**Answer** when it waits for you, **See the
+report** when it ended). The card is remembered on this computer.
 
 The bot may ask its questions once, in one message, at the start. After that it
 decides for itself and writes the decisions down; you read them in the report.
+
+### Or start from a goal
+
+The **Start from a goal** recipes that describe long work (get backlinks, collect leads into a
+spreadsheet, watch competitor pages, a weekly report from your files) run as a mission when you
+set the bot's level to **Full access** in the review step. The bot is created at the level you
+confirm (a recipe never asks for Full itself), the mission gets its own chat, and the app opens
+it, with the progress at the top. On a lower level the same goal is one ordinary chat task, and
+the review step says so. A recipe that repeats (competitor watch, weekly report) starts the
+mission as the first big pass; the schedule then repeats the check as a normal run. Short recipes
+(a daily brief, inbox triage) are never missions.
 
 ### Or just ask in the chat
 
@@ -62,13 +81,17 @@ What the bot cannot change: the goal is **your own message**, copied by the daem
 (the bot cannot rewrite it), the budgets are the defaults, and a chat in which the
 bot has already read a web page or a mail cannot start a mission any more (a page
 could plant the request). A bot has at most three open missions, and the same
-request never starts a second one. Below the Full level the tool does not exist:
-use **Start a mission** in the Activity panel.
+request never starts a second one. The chat you asked in also shows the mission
+card. Below the Full level the tool does not exist, and `/mission` is refused with
+the reason: raise the bot to Full first.
 
 ## What you see
 
-The Activity tab shows each running mission with a progress bar: **done**,
-**waiting**, **blocked** and **left**. You can pause, resume or stop it there.
+The bot panel's **Activity** tab lists the missions one line each: the title, a
+status chip and how many items are done ("7/15"). Click a line to open the
+mission's chat. Its header shows the progress bar (**done**, **waiting**,
+**blocked** and **left**), what the bot works on now, and **Pause**/**Resume** and
+**Stop**.
 
 An item that needs you (a 2FA code, a question only you can answer, a payment, an
 approval nobody gave) is **parked**: it is marked blocked with the reason and the
@@ -99,9 +122,11 @@ Some steps cannot go on at once: a site sends a verification mail, an account is
 reviewed "within a few hours", a form tool calls you back. The bot does not hold a
 session open for that. It **parks the item** with `mission_wait` and takes the next
 one; when nothing else is open, the session ends and the mission shows
-**Waiting**. Three things can wake it:
+**Waiting**. Five things can wake it:
 
 * **A timer** (`after_seconds`, 30 seconds to 7 days). The item continues when it is due.
+* **A recurring schedule** (`every`: an RFC 5545 `RRULE` such as `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`, with an optional IANA time zone so weekdays follow your local clock across DST). Each occurrence wakes the mission; the wait stays registered until the series ends.
+* **A child run finishing** (`child_run`: a `spawn_subagent` run the bot started in the same mission session). The helper's final text arrives in the next brief as untrusted data, like a webhook body.
 * **A mail in the bot's own inbox** (a sender domain, a word in the subject or a
   keyword). The daemon looks into the inbox and junk folder of the bot's **own**
   mail identity about once a minute; the owner's mailbox is never read for this.
@@ -119,7 +144,7 @@ one; when nothing else is open, the session ends and the mission shows
   retries at the active one. Bodies over 64 KB are refused before anything reads
   them, and the mission keeps a 4,096-character copy.
 
-The Activity tab lists each parked item: *waiting for a mail from example.com*,
+The mission chat's header lists each parked item under **Waiting**: *waiting for a mail from example.com*,
 *waiting until 14:00*. If nothing happens in time, the item is **parked for you**
 (blocked, with what was missing) and the mission goes on without it; it never
 fails the mission. Waits are stored in the daemon's database, so a restart keeps
@@ -171,16 +196,53 @@ question in one message that you can answer from the chat. See
 quiet hours, and why approvals (anything involving money) always stay in the app.
 A short progress note at 25%, 50% and 75% is available but off by default.
 
+## From your phone
+
+With Telegram or Discord paired you can steer missions without the app: `/missions`,
+`/mission <id>`, `/pause <id>`, `/resume <id>`, `/stop <id>` (asks for a button tap) and
+`/mission new <text>`, in English or Turkish, only from your own private chat. See
+[Telegram](telegram.md#manage-missions-from-your-phone) and [Discord](discord.md#manage-missions-from-your-phone).
+Answering the blocked items of a mission still happens through the "needs you" message
+(`/answer`) or the app.
+
+Every mail the bot sends carries a `Message-ID` the app wrote itself (an API mailbox gives
+a message and a thread id instead); the send log keeps it with the recipient, the bot and the
+mission. When something comes back, the app matches it to that record, without a model and
+without trusting what the text says, and acts only on a confident match (the same mailbox,
+our own id in `In-Reply-To` / `References` or the same thread, and a sender that is one of
+the people the mail went to):
+
+- **A hard bounce** (a delivery report with a permanent failure for an address the mail went
+  to) puts that address on the opt-out list, with the reason and the message id. A
+  **temporary failure** is only counted per address; it never suppresses. The app also looks
+  for delivery reports in the bot's inbox on its own, every few minutes, because a bounce comes
+  from a mail system and not from the person the mission waits for.
+- **An explicit STOP** ("STOP", "DURDUR", "unsubscribe" on a line of its own in the new part of
+  the reply) from one of the recipients puts that sender on the opt-out list.
+- **An out-of-office reply** does not wake the item. The mail wait goes on until the date the
+  reply states (only a future date within 60 days is believed), otherwise for three more days,
+  and that notice is not found again. The pause is saved with the wait, so it survives a
+  restart; after three such notices the next one wakes the item anyway.
+- **A budget** limits outreach per mailbox: mail a bot sends in the background or a mission session sends
+  is refused once the mailbox has sent its daily budget in the last 24 hours (default 20). A mail you ask for yourself in a chat is never counted against it.
+  A mailbox with no sending history ramps up from 5 a day over 14 days. Both numbers are in
+  Settings > Mail > Safe sending; the count comes from the send log, so a restart does not
+  reset it. Mail you approve yourself in a chat is not held to it.
+
+The mail wake also carries an `inbound` field with what was matched and done, and the
+rule-based `reply_class_hint` for the text. Both are data, never instructions. A recipient
+who writes a fake "delivery report" can only speak for their own address. Replies the app
+cannot match (an alias, a forwarded mail, a reply with its headers stripped) change nothing:
+read them and use the opt-out list yourself.
+
 ## Limits of this first version
 
 Missions are delivered in waves (see the [design](../design/missions-adr.md)).
 What works today: the item list, session chaining, budgets, parking of 2FA and
 approval items, giving up CAPTCHA items, starting a mission from a Full-level chat,
-waking by a timer, a mail in the bot's own inbox or a webhook, the
-report, pause/resume/stop, restart recovery and the Activity
-panel. What does **not** exist yet: a recurring ("every weekday") wake, a wake
-when a helper bot finishes, mail reply classification (bounce, STOP), a separate permission scope per mission, mail pacing and
-opt-out handling for outreach and sub-missions for helper bots. A mission session is **not** your own typing, because its first
+waking by a timer, a recurring schedule, a child run finishing, a mail in the bot's own inbox or a webhook, the
+report, pause/resume/stop, restart recovery, the `/mission` command with its
+chat card, and the Activity list. What does **not** exist yet: a separate permission scope per mission and sub-missions for helper bots. A mission session is **not** your own typing, because its first
 message is built from a list that earlier sessions filled with text from web
 pages and mails. It runs as its own kind (`mission`): that text never counts as
 your words (the sites you named, the URLs you typed), it never reaches your own

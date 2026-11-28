@@ -207,6 +207,9 @@ pub(crate) fn admin_desktop_never(method: &Method, check_path: &str) -> Option<&
     if under(check_path, "/v1/doctor") {
         return Some("host-local diagnostics are not allowed for peers");
     }
+    if check_path == "/v1/voice/synthesize" || check_path == "/v1/voice/local/install" {
+        return Some("offline voice downloads and synthesis are done at the host's own app");
+    }
     if *method == Method::POST && check_path == "/v1/channels/telegram/pair-code" {
         return Some("host transfer and channel pairing are done on the host itself");
     }
@@ -721,7 +724,7 @@ fn audit_chat_start(
 /// `method path` as an owner action, if it is: the owner settings
 /// (`host_local_denial`, `host_mode_desktop_denial`) and every owner-gated
 /// route that is not one a paired device may call
-/// (`crate::owner::peer_may_call`). A desktop of a daemon that is not an
+/// (`peer_may_call` in `owner`). A desktop of a daemon that is not an
 /// always-on host keeps its older, wider reach.
 fn owner_denial(
     method: &Method,

@@ -75,34 +75,19 @@
   cursor: default;
 }
 
+/* "From another chat of this bot: …": one quiet line; a long chat title ends in an ellipsis. */
 .caption {
   margin: var(--space-0);
-  padding: var(--space-2) var(--space-4) var(--space-0);
+  padding: var(--space-3) var(--space-4) var(--space-0);
+  overflow: hidden;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .page {
   min-width: var(--space-0);
-}
-
-.keys {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  margin: var(--space-0);
-  padding: var(--space-0) var(--space-4) var(--space-2);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
-
-.keys kbd {
-  font-family: var(--font-mono);
-  padding: var(--space-half) var(--space-1);
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background-color: var(--color-surface);
-  font-size: var(--font-size-2xs);
 }
 
 @keyframes dockIn {

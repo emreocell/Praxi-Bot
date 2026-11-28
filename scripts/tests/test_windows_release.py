@@ -17,7 +17,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "installer.yml"
+FEED_WORKFLOW = ROOT / ".github" / "workflows" / "update-feed.yml"
 VERIFY = ROOT / "scripts" / "release" / "verify-windows.ps1"
+SCRIPT_MANIFEST = ROOT / "scripts" / "release" / "update_manifest.py"
+# Public keys and signatures of throwaway keys (see test_update_manifest.py).
+FIXTURES = json.loads((Path(__file__).parent / "fixtures" / "update_signatures.json").read_text(encoding="utf-8"))
 PWSH = shutil.which("pwsh")
 
 
@@ -67,11 +71,20 @@ class InstallerWorkflowPolicy(unittest.TestCase):
             self.assertNotIn("secrets.", self.jobs[name], name)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY", self.jobs["windows-installer"])
 
+    def step_text(self, name, text=None):
+        """One step of the installer job: from its name to the next step (or the comment above it)."""
+        body = (text or self.text).split(f"- name: {name}\n", 1)[1]
+        return re.split(r"\n      (?:- name:|#)", body, maxsplit=1)[0]
+
+    def step_script(self, name, text=None):
+        """The `run:` script of one step of the installer job, unindented."""
+        step = self.step_text(name, text)
+        script = step.split("        run: |\n", 1)[1]
+        return "\n".join(line[10:] for line in script.splitlines())
+
     @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
     def test_preview_build_keeps_the_full_release_version_for_signed_updates(self):
-        step = self.text.split("- name: Build installer\n", 1)[1].split("\n      - name:", 1)[0]
-        script = step.split("        run: |\n", 1)[1]
-        script = "\n".join(line[10:] for line in script.splitlines())
+        script = self.step_script("Build installer")
         # Exercise the actual workflow script, replacing only the expensive build command.
         stub = """
 function pnpm {
@@ -84,14 +97,155 @@ function pnpm {
 }
 """
         with tempfile.TemporaryDirectory() as tmp:
-            env = {**os.environ, "RUNNER_TEMP": tmp, "GITHUB_REF_TYPE": "tag",
-                   "GITHUB_REF_NAME": "v0.1.0-alpha.2", "TAURI_SIGNING_PRIVATE_KEY": "fixture",
-                   "PRAXI_UPDATER_PUBKEY": "fixture"}
+            env = {**os.environ, "RUNNER_TEMP": tmp, "GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "v0.1.0-alpha.2"}
             result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", stub + script],
                                     env=env, capture_output=True, text=True, timeout=20, check=True)
             config = json.loads(next(line[7:] for line in result.stdout.splitlines() if line.startswith("CONFIG=")))
             self.assertEqual(config["version"], "0.1.0-alpha.2")
-            self.assertTrue(config["bundle"]["createUpdaterArtifacts"])
+            # A release build trusts the public key of tauri.conf.json, never one handed in at build time.
+            self.assertNotIn("plugins", config)
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_rehearsal_build_trusts_only_its_throwaway_key(self):
+        script = self.step_script("Build installer")
+        stub = """
+function pnpm {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$BuildArgs)
+    $config = Get-Content -Raw -LiteralPath $BuildArgs[2] | ConvertFrom-Json
+    Write-Output ('CONFIG=' + ($config | ConvertTo-Json -Compress -Depth 4))
+}
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            key = Path(tmp) / "throwaway.key"
+            Path(f"{key}.pub").write_text(FIXTURES["pub_b"] + "\n", encoding="utf-8")
+            env = {**os.environ, "RUNNER_TEMP": tmp, "GITHUB_REF_TYPE": "branch",
+                   "PRAXI_REHEARSAL_UPDATER_KEY": str(key)}
+            result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", stub + script],
+                                    env=env, capture_output=True, text=True, timeout=20, check=True)
+            config = json.loads(next(line[7:] for line in result.stdout.splitlines() if line.startswith("CONFIG=")))
+            self.assertEqual(config["plugins"]["updater"]["pubkey"], FIXTURES["pub_b"])
+            self.assertNotIn("version", config)
+
+    def test_the_build_never_sees_the_signing_key_and_real_secrets_are_for_tags_only(self):
+        build = self.step_text("Build installer")
+        self.assertNotIn("secrets.", build)
+        self.assertNotIn("TAURI_SIGNING", build)
+        self.assertNotIn("createUpdaterArtifacts", self.text)
+        for name in ("Sign the installer and write the update feed (latest.json)",):
+            step = self.step_text(name)
+            for secret in ("TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"):
+                self.assertIn(f"${{{{ github.ref_type == 'tag' && secrets.{secret} || '' }}}}", step)
+        # The only other place that mentions the secret asks "is it set?" and never reads its value.
+        early = self.step_text("Check the updater configuration and signing key")
+        self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY != ''", early)
+        self.assertEqual(
+            set(re.findall(r"secrets\.([A-Z_]+)", self.text)),
+            {"TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+             "WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD"},
+        )
+
+    def test_the_updater_check_runs_before_the_long_build_and_the_signing_step_can_be_skipped(self):
+        self.assertLess(self.text.index("Check the updater configuration"), self.text.index("- name: Build installer"))
+        sign = self.step_text("Sign the installer and write the update feed (latest.json)")
+        self.assertIn("if: env.PRAXI_UPDATER_MODE != 'off'", sign)
+        # The release files are assembled with or without the feed.
+        self.assertIn("if (Test-Path update-assets)", self.text)
+
+    def run_updater_check(self, *, tag, have_key, pubkey):
+        """Runs the real decision step in a scratch checkout; returns (process, mode written to GITHUB_ENV, summary)."""
+        script = self.step_script("Check the updater configuration and signing key")
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / "scripts" / "release").mkdir(parents=True)
+            shutil.copy(SCRIPT_MANIFEST, work / "scripts" / "release")
+            (work / "apps" / "desktop").mkdir(parents=True)
+            conf = json.loads((ROOT / "apps" / "desktop" / "tauri.conf.json").read_text(encoding="utf-8"))
+            conf["plugins"]["updater"]["pubkey"] = pubkey
+            (work / "apps" / "desktop" / "tauri.conf.json").write_text(json.dumps(conf), encoding="utf-8")
+            github_env, summary = work / "github_env.txt", work / "summary.md"
+            env = {**os.environ, "GITHUB_REF_TYPE": "tag" if tag else "branch", "GITHUB_ENV": str(github_env),
+                   "GITHUB_STEP_SUMMARY": str(summary), "HAVE_UPDATER_KEY": "true" if have_key else "false"}
+            done = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+                                  env=env, cwd=work, capture_output=True, encoding="utf-8", errors="replace", timeout=60)
+            read = lambda path: path.read_text(encoding="utf-8-sig") if path.exists() else ""
+            return done, read(github_env), read(summary)
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_tag_build_without_either_key_part_is_released_unsigned_with_a_warning(self):
+        done, github_env, summary = self.run_updater_check(tag=True, have_key=False, pubkey="")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("PRAXI_UPDATER_MODE=off", github_env)
+        self.assertIn("::warning", done.stdout)
+        self.assertIn("in-app updates not enabled: run scripts/release/setup-updater-key.ps1", summary)
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_tag_build_with_both_key_parts_signs(self):
+        done, github_env, summary = self.run_updater_check(tag=True, have_key=True, pubkey=FIXTURES["pub_a"])
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("PRAXI_UPDATER_MODE=release", github_env)
+        self.assertEqual(summary, "")
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_tag_build_with_only_one_key_part_fails(self):
+        for have_key, pubkey, expected in ((True, "", "has no updater public key"),
+                                           (False, FIXTURES["pub_a"], "secret TAURI_SIGNING_PRIVATE_KEY is not set")):
+            with self.subTest(have_key=have_key):
+                done, github_env, _ = self.run_updater_check(tag=True, have_key=have_key, pubkey=pubkey)
+                self.assertNotEqual(done.returncode, 0, done.stdout)
+                self.assertIn(expected, done.stdout + done.stderr)
+                self.assertEqual(github_env, "")
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_a_rehearsal_never_depends_on_the_real_key_and_always_rehearses(self):
+        for have_key, pubkey in ((False, ""), (True, FIXTURES["pub_a"])):
+            done, github_env, summary = self.run_updater_check(tag=False, have_key=have_key, pubkey=pubkey)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertIn("PRAXI_UPDATER_MODE=rehearsal", github_env)
+            self.assertEqual(summary, "")
+
+    @unittest.skipUnless(PWSH, "PowerShell (pwsh) is not installed")
+    def test_the_signing_step_writes_a_feed_the_app_accepts(self):
+        """Runs the real signing step against stand-ins for pnpm/git and the fixture signature and key."""
+        script = self.step_script("Sign the installer and write the update feed (latest.json)")
+        stub = f"""
+function git {{ '2026-11-27T10:15:00+02:00' }}
+function pnpm {{
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$A)
+    # `pnpm exec tauri signer sign --app-version <v> <file>`: the signing key must arrive trimmed.
+    if ($A[0] -ne 'exec' -or $A[1] -ne 'tauri' -or $A[2] -ne 'signer' -or $A[3] -ne 'sign' -or $A[4] -ne '--app-version') {{ throw "unexpected: $A" }}
+    if ($env:TAURI_SIGNING_PRIVATE_KEY -ne $env:TAURI_SIGNING_PRIVATE_KEY.Trim()) {{ throw 'key not trimmed' }}
+    Set-Content -LiteralPath ($A[6] + '.sig') -Value $env:FIXTURE_SIGNATURE -NoNewline
+    $global:LASTEXITCODE = 0
+}}
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / "scripts" / "release").mkdir(parents=True)
+            shutil.copy(SCRIPT_MANIFEST, work / "scripts" / "release")
+            (work / "apps" / "desktop").mkdir(parents=True)
+            conf = json.loads((ROOT / "apps" / "desktop" / "tauri.conf.json").read_text(encoding="utf-8"))
+            conf["plugins"]["updater"]["pubkey"] = FIXTURES["pub_a"]
+            (work / "apps" / "desktop" / "tauri.conf.json").write_text(json.dumps(conf), encoding="utf-8")
+            nsis = work / "target" / "release" / "bundle" / "nsis"
+            nsis.mkdir(parents=True)
+            (nsis / "Praxi-Bot_0.1.0-alpha.2_x64-setup.exe").write_bytes(b"installer")
+            env = {**os.environ, "GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "v0.1.0-alpha.2", "GITHUB_SHA": "0" * 40,
+                   "TAURI_SIGNING_PRIVATE_KEY": "fixture-private-key\n", "FIXTURE_SIGNATURE": FIXTURES["a_ok"]}
+            done = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", stub + script],
+                                  env=env, cwd=work, capture_output=True, encoding="utf-8", errors="replace", timeout=60)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            feed = json.loads((work / "update-assets" / "latest.json").read_text(encoding="utf-8"))
+            self.assertEqual(feed["version"], "0.1.0-alpha.2")
+            self.assertEqual(feed["pub_date"], "2026-11-27T08:15:00Z")
+            self.assertTrue((work / "update-assets" / "Praxi-Bot_0.1.0-alpha.2_x64-setup.exe.sig").is_file())
+            # A signature from another key (a leaked or mismatched secret) stops the release.
+            env["FIXTURE_SIGNATURE"] = FIXTURES["b_ok"]
+            shutil.rmtree(work / "update-assets")
+            wrong = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", stub + script],
+                                   env=env, cwd=work, capture_output=True, encoding="utf-8", errors="replace", timeout=60)
+            self.assertNotEqual(wrong.returncode, 0, wrong.stdout)
+            self.assertIn("different key", wrong.stdout + wrong.stderr)
+            self.assertFalse((work / "update-assets" / "latest.json").exists())
 
     def test_attestation_and_publication_never_run_for_pull_requests_or_forks(self):
         for name in ("attest", "attach-to-release"):
@@ -111,7 +265,8 @@ function pnpm {
         self.assertIn("subject-path: release/*", attest)
         assemble = self.jobs["windows-installer"].split("- name: Assemble the release files", 1)[1]
         assemble = assemble.split("- name: Upload installer artifact", 1)[0]
-        for needle in ('-setup.exe', 'bot-*.exe', "sbom/*.cdx.json", "verify-windows.ps1", "build-info.txt", "SHA256SUMS.txt"):
+        for needle in ('-setup.exe', 'bot-*.exe', "sbom/*.cdx.json", "verify-windows.ps1", "build-info.txt", "SHA256SUMS.txt",
+                       "update-assets/*"):
             self.assertIn(needle, assemble)
         # SBOM generation happens before the long build so a broken SBOM fails fast.
         build = self.jobs["windows-installer"]
@@ -124,6 +279,47 @@ function pnpm {
         self.assertIn("praxi-bot-windows.sigstore.json", script)
         self.assertIn("SHA256SUMS.txt", script)
         self.assertIn(".github/workflows/installer.yml", script)
+
+
+class UpdateFeedWorkflowPolicy(unittest.TestCase):
+    """The Preview feed publisher: no secrets, nothing replaced, forward only, only for this repository."""
+
+    def setUp(self):
+        self.text = FEED_WORKFLOW.read_text(encoding="utf-8")
+
+    def test_every_action_is_pinned_and_nothing_is_granted_by_default(self):
+        for action in re.findall(r"(?m)^\s*(?:-\s*)?uses:\s*(\S+)", self.text):
+            self.assertRegex(action, r"^[^@\s]+@[0-9a-f]{40}$", action)
+        self.assertRegex(self.text, r"(?m)^permissions: \{\}$")
+        self.assertEqual(set(jobs(self.text)), {"preview-feed"})
+        self.assertEqual(job_permissions(jobs(self.text)["preview-feed"]), {"contents": "write"})
+
+    def test_it_uses_no_secret_and_never_replaces_or_creates_a_release(self):
+        self.assertNotIn("secrets.", self.text)
+        self.assertNotIn("--clobber", self.text)
+        self.assertNotIn("gh release create", self.text)
+        self.assertNotIn("gh release upload", self.text)
+        self.assertNotIn("--force", self.text)
+
+    def test_it_only_runs_here_for_a_finished_tag_build_or_by_hand_and_moves_forward_only(self):
+        condition = re.search(r"(?ms)^    if: >-\n(.*?)^    runs-on:", self.text).group(1)
+        for needle in ("github.repository == 'emreocell/Praxi-Bot'", "workflow_run.conclusion == 'success'",
+                       "workflow_run.event == 'push'", "head_repository.full_name == github.repository",
+                       "startsWith(github.event.workflow_run.head_branch, 'v')"):
+            self.assertIn(needle, condition)
+        self.assertIn('workflows: ["Windows Installer"]', self.text)
+        self.assertIn("update_manifest.py newer", self.text)
+        self.assertIn("update_manifest.py check ", self.text)
+        # The tag is validated before it is used and only ever read from the environment.
+        self.assertNotIn("${{ inputs.tag }}", self.text.split("steps:", 1)[1])
+        self.assertIn("^v(0|[1-9]", self.text)
+
+    def test_the_address_the_app_reads_is_the_one_this_workflow_writes(self):
+        conf = json.loads((ROOT / "apps" / "desktop" / "tauri.conf.json").read_text(encoding="utf-8"))
+        preview = conf["plugins"]["updater"]["praxiPreviewEndpoint"]
+        self.assertEqual(preview, "https://raw.githubusercontent.com/emreocell/Praxi-Bot/update-feed/preview.json")
+        self.assertIn("update-feed", self.text)
+        self.assertIn("preview.json", self.text)
 
 
 def valid_sbom(package, components=("serde",)):

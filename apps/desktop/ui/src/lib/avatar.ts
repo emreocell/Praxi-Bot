@@ -3,6 +3,10 @@ export const MAX_GIF_BYTES = 400 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const AVATAR_SIZE = 128;
 
+/** The daemon's limit for a stored avatar data URL (`MAX_AVATAR_BYTES`), prefix included. */
+export const MAX_AVATAR_DATA_URL = 200_000;
+const AVATAR_DATA_URL = /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
+
 export type AvatarError = "tooLarge" | "unreadable";
 
 export class AvatarFileError extends Error {
@@ -29,6 +33,16 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new AvatarFileError("unreadable"));
     img.src = src;
   });
+}
+
+/**
+ * What is wrong with a picture before it is sent to the daemon, by the same rules the upload field
+ * and the daemon apply: a png/jpeg/gif/webp data URL that fits the stored size.  `null` = fine.
+ */
+export function avatarProblem(avatar: string): AvatarError | null {
+  const a = avatar.trim();
+  if (a.length > MAX_AVATAR_DATA_URL) return "tooLarge";
+  return AVATAR_DATA_URL.test(a) ? null : "unreadable";
 }
 
 /**

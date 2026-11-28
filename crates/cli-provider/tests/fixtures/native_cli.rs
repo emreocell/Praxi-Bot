@@ -117,11 +117,51 @@ fn acp(args: &[String]) {
     let mut stdin = std::io::stdin().lock();
     let init = read(&mut stdin);
     log("init", &init["params"].to_string());
+    let capabilities = if matches!(
+        std::env::var("FAKE_MODE").as_deref(),
+        Ok("acp-no-capabilities" | "acp-reject-bridge")
+    ) {
+        json!({})
+    } else {
+        json!({"mcpCapabilities":{"http":true}})
+    };
     emit(&json!({"jsonrpc":"2.0","id":init["id"],"result":{
-        "protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}},"authMethods":[]}}));
+        "protocolVersion":1,"agentCapabilities":capabilities,"authMethods":[]}}));
     let new = read(&mut stdin);
-    log("session_new", &new["params"].to_string());
+    let mut logged_params = new["params"].clone();
+    if let Some(servers) = logged_params["mcpServers"].as_array_mut() {
+        for server in servers {
+            server["headers"] = json!([]);
+        }
+    }
+    log("session_new", &logged_params.to_string());
+    if matches!(
+        std::env::var("FAKE_MODE").as_deref(),
+        Ok("acp-no-capabilities" | "acp-list")
+    ) && let Some(server) = new["params"]["mcpServers"]
+        .as_array()
+        .and_then(|s| s.first())
+    {
+        let response = http(
+            server["url"].as_str().unwrap(),
+            server["headers"][0]["value"].as_str().unwrap(),
+            &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+        );
+        log(
+            "bridge_tool_count",
+            &response["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .len()
+                .to_string(),
+        );
+    }
     match std::env::var("FAKE_MODE").unwrap_or_default().as_str() {
+        "acp-reject-bridge" => {
+            emit(&json!({"jsonrpc":"2.0","id":new["id"],"error":{
+                "code":-32602,"message":"unsupported MCP transport"}}));
+            return;
+        }
         // `vibe-acp` 3.1.5 without an API key.
         "acp-signed-out" => {
             emit(&json!({"jsonrpc":"2.0","id":new["id"],"error":{
