@@ -205,6 +205,12 @@ With Telegram or Discord paired you can steer missions without the app: `/missio
 Answering the blocked items of a mission still happens through the "needs you" message
 (`/answer`) or the app.
 
+A mail wake includes a conservative, rule-based reply classification hint for STOP,
+permanent delivery failure and out-of-office replies. It is untrusted and may miss replies;
+it does not suppress recipients or reschedule follow-ups. Review replies and manage the
+opt-out list manually. The mail guard's daily limit is an approval warning, not an
+unattended outreach pacing system.
+
 ## Limits of this first version
 
 Missions are delivered in waves (see the [design](../design/missions-adr.md)).
@@ -212,7 +218,7 @@ What works today: the item list, session chaining, budgets, parking of 2FA and
 approval items, giving up CAPTCHA items, starting a mission from a Full-level chat,
 waking by a timer, a recurring schedule, a child run finishing, a mail in the bot's own inbox or a webhook, the
 report, pause/resume/stop, restart recovery, the `/mission` command with its
-chat card, and the Activity list. What does **not** exist yet: mail reply classification (bounce, STOP), a separate permission scope per mission, mail pacing and
+chat card, and the Activity list. What does **not** exist yet: automatic action on mail reply classification, a separate permission scope per mission, mail pacing and
 opt-out handling for outreach and sub-missions for helper bots. A mission session is **not** your own typing, because its first
 message is built from a list that earlier sessions filled with text from web
 pages and mails. It runs as its own kind (`mission`): that text never counts as

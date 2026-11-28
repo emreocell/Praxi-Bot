@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use builtin_tools::connector_email::reply_classification::classify_reply;
 use builtin_tools::connector_email::{
     MailHandle, WaitEnd, WaitFilter, WaitPlan, found_json, link_basis, wait_for_mail,
 };
@@ -140,9 +141,18 @@ impl MailProbe for OwnInboxProbe {
                 // calls `email_wait_for`, which finds this mail at once and judges its links.
                 let basis = link_basis(None, None);
                 let owner_domains = connector.guard().settings().verification_domains();
-                Ok(Some(MailHit {
-                    summary: found_json(&detail, &acct.name, &basis, &owner_domains),
-                }))
+                let mut summary = found_json(&detail, &acct.name, &basis, &owner_domains);
+                let auto_submitted = detail
+                    .summary
+                    .automation_headers
+                    .as_ref()
+                    .map(|h| h.auto_submitted.as_str());
+                let class =
+                    classify_reply(&detail.summary.subject, &detail.body_text, auto_submitted);
+                if let Some(object) = summary.as_object_mut() {
+                    object.insert("reply_class_hint".into(), serde_json::json!(class));
+                }
+                Ok(Some(MailHit { summary }))
             }
             Ok(WaitEnd::TimedOut { .. } | WaitEnd::Cancelled) => Ok(None),
             Err(e) => Err(e.to_string()),

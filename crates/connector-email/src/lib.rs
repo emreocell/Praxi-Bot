@@ -29,6 +29,7 @@ pub mod imap_provider;
 pub mod message;
 pub mod probe;
 pub mod provider;
+pub mod reply_classification;
 pub mod smtp;
 mod tls;
 pub mod tools;
