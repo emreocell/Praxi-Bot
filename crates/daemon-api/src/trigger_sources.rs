@@ -60,8 +60,12 @@ pub(crate) async fn feed_observations(
         .get(url, &opts)
         .await
         .map_err(|_| source_err("the feed could not be fetched"))?;
-    let items = web_tools::watch::feed_items(&fetched.text(), Some(&fetched.url))
-        .map_err(|_| source_err("the address is not a feed"))?;
+    let items = tokio::task::spawn_blocking(move || {
+        web_tools::watch::feed_items(&fetched.text(), Some(&fetched.url))
+    })
+    .await
+    .map_err(|_| source_err("feed parsing failed"))?
+    .map_err(|_| source_err("the address is not a feed"))?;
     Ok(items
         .into_iter()
         .map(|item| Observation {
@@ -86,8 +90,13 @@ pub(crate) async fn page_observations(
         .get(url, &GetOptions::accepting(HTML_TYPES))
         .await
         .map_err(|_| source_err("the page could not be fetched"))?;
-    let text = web_tools::watch::select_text(&fetched.text(), selector)
-        .map_err(|_| source_err("the selector found no text on the page"))?;
+    let owned_selector = selector.to_owned();
+    let text = tokio::task::spawn_blocking(move || {
+        web_tools::watch::select_text(&fetched.text(), &owned_selector)
+    })
+    .await
+    .map_err(|_| source_err("page parsing failed"))?
+    .map_err(|_| source_err("the selector found no text on the page"))?;
     Ok(vec![Observation {
         key: "page".into(),
         fingerprint: web_tools::watch::fingerprint(&text),

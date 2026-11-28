@@ -401,3 +401,54 @@ async fn web_polling_needs_a_bot_that_may_browse_and_leaves_one_audit_line() {
     );
     assert!(agent.validate_schedule_web_poll(bot).is_err());
 }
+
+#[tokio::test]
+async fn owner_site_block_refuses_feed_and_redirect_before_connecting() {
+    use permission_engine::{Capability, ProfileAction, SubjectKind, profiles::NewRule};
+    let (_dir, _storage, agent, bot) = agent_with(&[], full());
+    agent
+        .add_profile_rule(
+            bot,
+            &NewRule {
+                kind: SubjectKind::Site,
+                raw_key: "blocked.example",
+                include_subdomains: false,
+                capability: Capability::Read,
+                action: ProfileAction::Block,
+                expires_at_ms: None,
+            },
+        )
+        .unwrap();
+    let client = fetcher_with(Arc::new(AllowAll));
+    assert!(
+        agent
+            .schedule_url_guard(bot)
+            .blocked("https://blocked.example/feed", false)
+    );
+    assert!(
+        agent
+            .schedule_url_guard(bot)
+            .blocked("https://blocked.example/feed", true)
+    );
+    let blocked = tool_registry::with_url_guard(
+        agent.schedule_url_guard(bot),
+        feed_observations(&client, "https://blocked.example/feed"),
+    )
+    .await;
+    assert!(blocked.is_err());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = [0; 4096];
+        let _ = sock.read(&mut buf).await;
+        sock.write_all(b"HTTP/1.1 302 Found\r\nlocation: https://blocked.example/feed\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await.unwrap();
+    });
+    let result = tool_registry::with_url_guard(
+        agent.schedule_url_guard(bot),
+        feed_observations(&client, &format!("http://{address}/feed")),
+    )
+    .await;
+    assert!(result.is_err());
+    server.await.unwrap();
+}

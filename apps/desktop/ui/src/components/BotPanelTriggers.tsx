@@ -103,7 +103,7 @@ export function TriggerBuilder({ botId, start, onClose, onSaved }: { botId: stri
         <label className={styles.field}>{tr("pollMinutes")}<input type="number" min={WEB_MIN_POLL_SECONDS / 60} max={1440} value={Math.round(source.poll_seconds / 60)} onChange={e => setSource({ ...source, poll_seconds: Number(e.target.value) * 60 })} /></label>
       </>}
       {source.kind === "calendar" && <>
-        <label className={styles.field}>{tr("calendar")}<select value={source.account ?? ""} onChange={e => setSource({ ...source, account: e.target.value || null })}><option value="">{tr("anyCalendar")}</option>{calendars.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}</select></label>
+        <label className={styles.field}>{tr("calendar")}<select required={calendars.length > 1} value={source.account ?? ""} onChange={e => setSource({ ...source, account: e.target.value || null })}><option value="" disabled={calendars.length > 1}>{tr(calendars.length > 1 ? "chooseAccount" : "anyCalendar")}</option>{calendars.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}</select></label>
         <label className={styles.field}>{tr("minutesBefore")}<input required type="number" min={1} max={1440} value={source.minutes_before} data-testid="trigger-minutes" onChange={e => setSource({ ...source, minutes_before: Number(e.target.value) })} /></label>
         <p className={styles.note}>{tr("calendarHint")}</p>
       </>}

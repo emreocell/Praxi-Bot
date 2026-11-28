@@ -605,7 +605,15 @@ impl Trigger {
                 to_state,
             } => {
                 plain_text_ok(entity_id, 128)
-                    && !entity_id.contains(char::is_whitespace)
+                    && entity_id.split_once('.').is_some_and(|(domain, object)| {
+                        [domain, object].iter().all(|part| {
+                            !part.is_empty()
+                                && part.len() <= 64
+                                && part.bytes().all(|b| {
+                                    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'
+                                })
+                        })
+                    })
                     && to_state
                         .as_ref()
                         .is_none_or(|s| s.is_empty() || plain_text_ok(s, 255))
@@ -965,5 +973,42 @@ impl Schedule {
             missed_occurrences: 0,
             catchup_window_secs: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod trigger_entity_tests {
+    use super::Trigger;
+    #[test]
+    fn home_assistant_entity_matches_connector_rules() {
+        for id in ["light.kitchen", "binary_sensor.front_door"] {
+            assert!(
+                Trigger::HomeAssistant {
+                    entity_id: id.into(),
+                    to_state: None
+                }
+                .validate()
+                .is_ok()
+            );
+        }
+        for id in [
+            "Light.kitchen",
+            "light",
+            "light.a.b",
+            ".door",
+            "light.",
+            "light.bad-name",
+            &format!("light.{}", "a".repeat(65)),
+        ] {
+            assert!(
+                Trigger::HomeAssistant {
+                    entity_id: id.into(),
+                    to_state: None
+                }
+                .validate()
+                .is_err(),
+                "{id}"
+            );
+        }
     }
 }

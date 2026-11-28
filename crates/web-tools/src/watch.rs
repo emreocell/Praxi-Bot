@@ -127,25 +127,37 @@ pub fn select_text(html: &str, selector: &str) -> Result<String, WebError> {
         .map_err(|_| WebError::Parse("not a valid CSS selector".into()))?;
     let doc = Html::parse_document(html);
     let mut parts = Vec::new();
-    for element in doc.select(&sel) {
+    let mut remaining = MAX_PAGE_TEXT_CHARS;
+    let mut visited = 0usize;
+    for element in doc.select(&sel).take(10_000) {
         let mut text = String::new();
-        for node in element.descendants() {
-            let Some(t) = node.value().as_text() else {
+        let mut stack = vec![*element];
+        while let Some(node) = stack.pop() {
+            visited += 1;
+            if visited > 100_000 || remaining == 0 {
+                break;
+            }
+            if node
+                .value()
+                .as_element()
+                .is_some_and(|e| matches!(e.name(), "script" | "style" | "noscript"))
+            {
                 continue;
-            };
-            let inside_code = node.ancestors().any(|a| {
-                a.value()
-                    .as_element()
-                    .is_some_and(|e| matches!(e.name(), "script" | "style" | "noscript"))
-            });
-            if !inside_code {
-                text.push_str(t);
+            }
+            if let Some(t) = node.value().as_text() {
+                let fragment: String = t.chars().take(remaining).collect();
+                remaining -= fragment.chars().count();
+                text.push_str(&fragment);
                 text.push(' ');
             }
+            stack.extend(node.children().rev());
         }
         let text = cut(&text, MAX_PAGE_TEXT_CHARS);
         if !text.is_empty() {
             parts.push(text);
+        }
+        if remaining == 0 || visited > 100_000 {
+            break;
         }
     }
     if parts.is_empty() {
@@ -162,6 +174,23 @@ mod tests {
       <item><title>Second  post</title><link>https://e.test/2</link><guid>g2</guid><pubDate>Mon, 02 Nov 2026 10:00:00 GMT</pubDate><description>Hello &lt;b&gt;world&lt;/b&gt;</description></item>
       <item><title>First</title><link>https://e.test/1</link></item>
       <item><description>no title and no link</description></item></channel></rss>"#;
+
+    #[test]
+    fn dtd_entity_expansion_is_rejected() {
+        let xml = r#"<!DOCTYPE rss [<!ENTITY a "ha"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;"><!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;"><!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">]><rss><channel><item><title>&d;</title></item></channel></rss>"#;
+        assert!(feed_items(xml, None).is_err());
+    }
+
+    #[test]
+    fn broad_selector_on_large_page_is_bounded() {
+        let html = format!(
+            "<div>{}</div>",
+            "<div>content<script>hidden</script></div>".repeat(50_000)
+        );
+        let text = select_text(&html, "*").unwrap();
+        assert!(text.chars().count() <= MAX_PAGE_TEXT_CHARS);
+        assert!(!text.contains("hidden"));
+    }
 
     #[test]
     fn feed_items_use_guid_then_link_and_skip_items_with_no_identity() {

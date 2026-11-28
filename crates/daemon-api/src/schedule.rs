@@ -498,15 +498,24 @@ async fn poll_trigger_with_rule(
         }
         scheduler::Trigger::Feed { url } => {
             authorize_web_poll(agent, bot, id)?;
-            crate::trigger_sources::feed_observations(crate::trigger_sources::web_fetcher(), url)
-                .await
+            tool_registry::with_url_guard(
+                agent.schedule_url_guard(bot),
+                crate::trigger_sources::feed_observations(
+                    crate::trigger_sources::web_fetcher(),
+                    url,
+                ),
+            )
+            .await
         }
         scheduler::Trigger::PageChange { url, selector } => {
             authorize_web_poll(agent, bot, id)?;
-            crate::trigger_sources::page_observations(
-                crate::trigger_sources::web_fetcher(),
-                url,
-                selector,
+            tool_registry::with_url_guard(
+                agent.schedule_url_guard(bot),
+                crate::trigger_sources::page_observations(
+                    crate::trigger_sources::web_fetcher(),
+                    url,
+                    selector,
+                ),
             )
             .await
         }

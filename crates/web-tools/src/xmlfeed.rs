@@ -104,7 +104,10 @@ fn fix_entities(xml: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        let end = tail.find(';').filter(|&e| e <= 10);
+        let end = tail
+            .char_indices()
+            .take_while(|(i, _)| *i <= 10)
+            .find_map(|(i, c)| (c == ';').then_some(i));
         match end {
             Some(e) => {
                 let name = &tail[1..e];
@@ -155,8 +158,8 @@ fn parse_once<R>(
     f: &impl Fn(&Document<'_>) -> Result<R, WebError>,
 ) -> Result<R, WebError> {
     let opts = ParsingOptions {
-        allow_dtd: true,
-        nodes_limit: 2_000_000,
+        allow_dtd: false,
+        nodes_limit: 100_000,
         ..ParsingOptions::default()
     };
     let doc = Document::parse_with_options(text, opts)
