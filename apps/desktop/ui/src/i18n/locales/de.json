@@ -8178,7 +8178,7 @@
       "listLabel": "Dauerfreigaben nach Tresor-Eintrag",
       "open": "Dauerfreigaben",
       "revoke": "Widerrufen",
-      "revokeAria": "Dauerfreigabe für {{name}} auf {{origin}} widerrufen",
+      "revokeAria": "{{action}}: Dauerfreigabe für {{name}} auf {{origin}}",
       "revoked": "Dauerfreigabe widerrufen",
       "seeGrants": "Dauerfreigaben anzeigen",
       "since": "Seit {{date}}",

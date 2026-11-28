@@ -9088,7 +9088,7 @@
       "listLabel": "Standing grants by vault item",
       "open": "Standing grants",
       "revoke": "Revoke",
-      "revokeAria": "Revoke the standing grant for {{name}} on {{origin}}",
+      "revokeAria": "{{action}} the standing grant for {{name}} on {{origin}}",
       "revoked": "Standing grant revoked",
       "seeGrants": "See standing grants",
       "since": "Since {{date}}",

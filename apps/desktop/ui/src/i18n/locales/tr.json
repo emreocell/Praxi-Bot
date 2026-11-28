@@ -9088,7 +9088,7 @@
       "listLabel": "Kasa öğesine göre kalıcı izinler",
       "open": "Kalıcı izinler",
       "revoke": "İptal et",
-      "revokeAria": "{{name}} için {{origin}} üzerindeki kalıcı izni iptal et",
+      "revokeAria": "{{action}}: {{name}} için {{origin}} üzerindeki kalıcı izin",
       "revoked": "Kalıcı izin iptal edildi",
       "seeGrants": "Kalıcı izinleri gör",
       "since": "{{date}} tarihinden beri",

@@ -76,7 +76,11 @@ export function VaultGrantsPanel({ groups, loading, error, busyId, onRetry, onRe
                       size="sm"
                       data-testid={`vault-grant-revoke-${grant.id}`}
                       disabled={busyId === grant.id}
-                      aria-label={t("vault.grants.revokeAria", { name: group.label, origin: grant.origin })}
+                      aria-label={t("vault.grants.revokeAria", {
+                        action: t("vault.grants.revoke"),
+                        name: group.label,
+                        origin: grant.origin
+                      })}
                       onClick={() => onRevoke(grant, group)}
                     >
                       {t("vault.grants.revoke")}

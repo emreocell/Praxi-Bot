@@ -8178,7 +8178,7 @@
       "listLabel": "Permisos permanentes por elemento de la bóveda",
       "open": "Permisos permanentes",
       "revoke": "Revocar",
-      "revokeAria": "Revocar el permiso permanente de {{name}} en {{origin}}",
+      "revokeAria": "{{action}}: permiso permanente de {{name}} en {{origin}}",
       "revoked": "Permiso permanente revocado",
       "seeGrants": "Ver permisos permanentes",
       "since": "Desde {{date}}",
