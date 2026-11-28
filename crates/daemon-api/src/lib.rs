@@ -1094,14 +1094,26 @@ impl AppState {
     /// The memory store when memory has ever been used here (the agent's store,
     /// one opened earlier, or a `memory.db` on disk); never creates a database.
     /// Used by deletions, which must clean up memory but must not start it.
-    pub(crate) fn memory_store_if_present(&self) -> Option<Arc<memory_store::MemoryStore>> {
-        if self.0.agent.memory_store().is_some()
-            || self.0.memory.lock().is_some()
-            || self.data_dir().join("memory.db").exists()
-        {
-            return self.memory_store().ok();
+    ///
+    /// `Ok(None)` only when memory was never used here. A `memory.db` that is there but cannot
+    /// be looked at or opened is an error, never "nothing to clean up".
+    pub(crate) fn memory_store_if_present(
+        &self,
+    ) -> Result<Option<Arc<memory_store::MemoryStore>>, ApiError> {
+        let on_disk = if self.0.agent.memory_store().is_some() || self.0.memory.lock().is_some() {
+            true
+        } else {
+            match std::fs::metadata(self.data_dir().join("memory.db")) {
+                Ok(_) => true,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                Err(_) => return Err(ApiError::internal("memory store unavailable")),
+            }
+        };
+        if on_disk {
+            self.memory_store().map(Some)
+        } else {
+            Ok(None)
         }
-        None
     }
 
     /// The running scheduler, or `503` when the daemon did not start one.

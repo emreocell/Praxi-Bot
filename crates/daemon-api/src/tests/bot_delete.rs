@@ -1349,6 +1349,147 @@ async fn a_failed_mail_source_revocation_is_finished_by_the_retry() {
     assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
 }
 
+/// The marker names the accounts before the mail host removes them: when it cannot be written
+/// nothing is removed (the step is pending), and the retry removes them once it can.
+#[tokio::test]
+async fn a_marker_that_cannot_be_written_removes_no_mail_account() {
+    let (t, bot, _other, mail) = with_mail().await;
+    let id = bot_id(&bot);
+    inject(id, Fault::MailMarker, true);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!(["mailboxes"]));
+    assert_eq!(r.json()["mailboxes_removed"], 0);
+    assert!(
+        mail.accounts.lock().iter().any(|a| a.name == "praxi"),
+        "the account stays while its name could not be remembered"
+    );
+    assert!(mail.forgotten.lock().is_empty());
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_some());
+
+    inject(id, Fault::MailMarker, false);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!([]));
+    assert_eq!(r.json()["mailboxes_removed"], 1);
+    assert!(!mail.accounts.lock().iter().any(|a| a.name == "praxi"));
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+}
+
+/// The process stops right after the mail host removed the account, before anything else of the
+/// step ran: the marker already names the account, so the retry still finds its sources.
+#[tokio::test]
+async fn a_stop_after_the_mail_account_is_removed_leaves_its_name_in_the_marker() {
+    let (t, bot, _other, mail) = with_mail().await;
+    let id = bot_id(&bot);
+    inject(id, Fault::AfterMailRemoval, true);
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!(["mailboxes"]));
+    assert!(!mail.accounts.lock().iter().any(|a| a.name == "praxi"));
+    let left = t.state.storage().bot_delete_cleanup(id).unwrap().unwrap();
+    assert_eq!(
+        left.email_sources,
+        vec!["praxi".to_owned()],
+        "only the account that was removed, not the one handed over"
+    );
+
+    inject(id, Fault::AfterMailRemoval, false);
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        0
+    );
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+}
+
+/// A `memory.db` that is there but cannot be opened is not "no memories": the step stays pending
+/// and the marker stays, and the retry finishes once the file can be opened.
+#[tokio::test]
+async fn a_memory_database_that_cannot_be_opened_leaves_the_step_pending() {
+    let t = setup();
+    let (bot, _chat) = make_chat(&t).await;
+    let id = bot_id(&bot);
+    let db = t.state.data_dir().join("memory.db");
+    std::fs::write(
+        &db,
+        "this is not a database, and it is long enough to be read as one",
+    )
+    .unwrap();
+
+    let r = call(&t, Method::DELETE, &delete_path(&bot), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["cleanup_pending"], json!(["memory"]));
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_some());
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        1
+    );
+
+    // Gone: memory was never used here, nothing to erase.
+    std::fs::remove_file(&db).unwrap();
+    assert_eq!(
+        crate::bot_delete_routes::finish_pending_cleanups(&t.state).await,
+        0
+    );
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+}
+
+/// The delete runs in a task of its own: cancelling the request (the client goes away) while the
+/// commit is still running neither frees the bot's lock nor its cleanup claim, so a retry, another
+/// delete or the startup sweep cannot run beside the first one; it finishes on its own.
+#[tokio::test]
+async fn a_cancelled_request_keeps_the_lock_and_the_claim_until_the_delete_is_done() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    history(&t, &bot, &chat, "quokka");
+    let id = bot_id(&bot);
+    let (entered, release) = crate::bot_delete_routes::gate_commit(id);
+    let timed_out = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        call(&t, Method::DELETE, &delete_path(&bot), None),
+    )
+    .await;
+    assert!(timed_out.is_err(), "the request was cancelled mid-commit");
+    tokio::task::spawn_blocking(move || entered.recv_timeout(std::time::Duration::from_secs(20)))
+        .await
+        .unwrap()
+        .expect("the commit was reached");
+
+    // The commit is still held open and the request is gone.
+    assert!(t.state.storage().is_retired(id), "the bot stays locked");
+    assert!(
+        !t.state.storage().claim_bot_delete_cleanup(id),
+        "the cleanup stays claimed"
+    );
+    // Nothing here may touch the database: the held commit owns its connection.
+    assert!(
+        BotLock::take(&t.state, id).is_err(),
+        "another delete of the bot is refused"
+    );
+    assert!(
+        t.state.storage().is_retired(id),
+        "a refused retry changes nothing"
+    );
+
+    release.send(()).unwrap();
+    // Done when the claim is free again.
+    let mut done = false;
+    for _ in 0..400 {
+        if t.state.storage().claim_bot_delete_cleanup(id) {
+            t.state.storage().release_bot_delete_cleanup(id);
+            done = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(done, "the delete finished without its request");
+    assert!(t.state.storage().get_bot(id).unwrap().is_none());
+    assert!(t.state.storage().bot_delete_cleanup(id).unwrap().is_none());
+    assert!(t.state.storage().is_retired(id), "a gone bot stays retired");
+    let gone = call(&t, Method::GET, &preview_path(&bot), None).await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+}
+
 /// A chat's attachment folder that is an NTFS junction to a folder outside is refused like a
 /// symbolic link: what it points at stays and the step is reported.
 #[cfg(windows)]

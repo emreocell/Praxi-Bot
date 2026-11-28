@@ -266,6 +266,8 @@ fn preview_of(s: &AppState, bot: &Bot) -> Result<BotDeletePreview, ApiError> {
         .unwrap_or_default();
     let memories = s
         .memory_store_if_present()
+        .ok()
+        .flatten()
         .and_then(|m| m.count_bot(bot.user_id, bot.id).ok())
         .map_or(0, |n| n as u64);
     let channels = s
@@ -451,6 +453,8 @@ fn check_and_commit(s: &AppState, bot: &Bot, delete_inbox: bool) -> Result<Commi
         s.storage()
             .delete_bot_cascade(bot.user_id, bot.id, "user", delete_inbox, |chats| {
                 fault(bot.id, Fault::LiveRun)?;
+                #[cfg(test)]
+                pause_commit(bot.id);
                 if s.agent().bot_has_live_run(bot.id, chats) {
                     return Err(StorageError::Conflict("a run of the bot is alive".into()));
                 }
@@ -716,7 +720,10 @@ async fn clean_up(
     // in cross-session search. Shared memories stay.
     let memory = (|| {
         fault(c.bot_id, Fault::Step(BotDeleteStep::Memory)).map_err(|e| e.to_string())?;
-        let Some(memory) = s.memory_store_if_present() else {
+        let Some(memory) = s
+            .memory_store_if_present()
+            .map_err(|e| e.message().to_owned())?
+        else {
             return Ok(0);
         };
         let n = memory
@@ -866,16 +873,35 @@ async fn forget_mailboxes(
         return Some((ForgottenMailboxes::default(), Err(e.to_string())));
     }
     let Some(email) = email else {
-        let done = revoke_mail_sources(s, c, &[]).await.and_then(|()| {
-            if s.data_dir().join(EMAIL_FILE).exists() {
-                Err("the mail host is not available".into())
-            } else {
-                Ok(())
-            }
-        });
+        let done = revoke_mail_sources(s, c, &[], &BTreeSet::new())
+            .await
+            .and_then(|()| {
+                if s.data_dir().join(EMAIL_FILE).exists() {
+                    Err("the mail host is not available".into())
+                } else {
+                    Ok(())
+                }
+            });
         return Some((ForgottenMailboxes::default(), done));
     };
     let id = c.bot_id.to_string();
+    // The accounts about to go are written to the marker first. Once the mail host has saved the
+    // removal the accounts are gone for good, so a stop between that and the revocation of their
+    // knowledge sources could not find them again. When the marker cannot be written nothing is
+    // removed.
+    let mut marker = c.clone();
+    for mailbox in mailboxes_of(s, c.bot_id) {
+        if mailbox.fate == BotDeleteMailboxFate::Removed
+            && !marker.email_sources.contains(&mailbox.name)
+        {
+            marker.email_sources.push(mailbox.name);
+        }
+    }
+    if marker.email_sources != c.email_sources
+        && let Err(e) = save_marker(s, &marker, Fault::MailMarker)
+    {
+        return Some((ForgottenMailboxes::default(), Err(e)));
+    }
     let before = email.list();
     let out = match email.forget_bot_mailboxes(&id, c.delete_inbox).await {
         Ok(out) => out,
@@ -888,40 +914,53 @@ async fn forget_mailboxes(
         .filter(|a| out.removed.contains(&a.name) || out.kept.contains(&a.name))
         .flat_map(crate::email_bot_tools::bots_of)
         .collect();
-    crate::email_bot_tools::sync(s, &email.list(), &affected);
-    let done = revoke_mail_sources(s, c, &out.removed).await;
+    let after = email.list();
+    crate::email_bot_tools::sync(s, &after, &affected);
+    if let Err(e) = fault(c.bot_id, Fault::AfterMailRemoval) {
+        return Some((out, Err(e.to_string())));
+    }
+    let present: BTreeSet<String> = after.into_iter().map(|a| a.name).collect();
+    let done = revoke_mail_sources(s, &marker, &out.removed, &present).await;
     Some((out, done))
 }
 
-/// The knowledge sources read from the mail accounts the delete removed (`removed` now, and those
-/// a failed earlier attempt left in the marker). The accounts still to revoke are saved in the
-/// marker before any is revoked and after, so a failure or a stop here is retried though the
-/// accounts themselves are gone.
+/// Write the cleanup marker; a failure is returned, never dropped.
+fn save_marker(s: &AppState, marker: &BotDeleteCleanup, at: Fault) -> Result<(), String> {
+    fault(marker.bot_id, at)
+        .map_err(|e| e.to_string())
+        .and_then(|()| {
+            s.storage()
+                .save_bot_delete_cleanup(marker)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+        .map_err(|e| format!("the bot delete marker: {e}"))
+}
+
+/// The knowledge sources read from the mail accounts the delete removed: the ones in the marker
+/// (`c`, which already names every account the delete is about to remove or removed in an
+/// earlier attempt) and `removed` now. An account that still exists (`present`: kept, handed
+/// over, or not removed) keeps its sources and leaves the marker. The accounts still to revoke
+/// stay in the marker until revoked, so a failure or a stop here is retried though the accounts
+/// themselves are gone. A marker that cannot be written fails the step.
 async fn revoke_mail_sources(
     s: &AppState,
     c: &BotDeleteCleanup,
     removed: &[String],
+    present: &BTreeSet<String>,
 ) -> Result<(), String> {
-    let save = |l: &BotDeleteCleanup| {
-        s.storage()
-            .save_bot_delete_cleanup(l)
-            .map(|_| ())
-            .map_err(|e| format!("the bot delete marker: {e}"))
-    };
     let mut left = c.clone();
     for name in removed {
         if !left.email_sources.contains(name) {
             left.email_sources.push(name.clone());
         }
     }
+    left.email_sources
+        .retain(|n| removed.contains(n) || !present.contains(n));
     let mut saved = c.email_sources.clone();
     if left.email_sources != saved {
-        match save(&left) {
-            Ok(()) => saved.clone_from(&left.email_sources),
-            Err(e) => {
-                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: warning: {e}");
-            }
-        }
+        save_marker(s, &left, Fault::MailMarker)?;
+        saved.clone_from(&left.email_sources);
     }
     let mut first_error = None;
     for name in left.email_sources.clone() {
@@ -933,7 +972,7 @@ async fn revoke_mail_sources(
         }
     }
     if left.email_sources != saved {
-        save(&left)?;
+        save_marker(s, &left, Fault::MailMarker)?;
     }
     first_error.map_or(Ok(()), Err)
 }
@@ -1025,6 +1064,10 @@ pub(crate) enum Fault {
     Step(BotDeleteStep),
     /// Revoking the knowledge sources of a removed mail account fails.
     RevokeMail,
+    /// Writing the cleanup marker with the mail accounts to revoke fails.
+    MailMarker,
+    /// The process stops right after the mail host saved the removal of the accounts.
+    AfterMailRemoval,
 }
 
 #[cfg(test)]
@@ -1039,6 +1082,50 @@ pub(crate) fn inject(bot: BotId, fault: Fault, on: bool) {
     faults.retain(|f| *f != (bot, fault));
     if on {
         faults.push((bot, fault));
+    }
+}
+
+/// Test gate: holds a bot's commit (inside the main database's transaction) until released, so a
+/// test can cancel the request meanwhile.
+#[cfg(test)]
+type Gate = (
+    BotId,
+    std::sync::mpsc::SyncSender<()>,
+    std::sync::mpsc::Receiver<()>,
+);
+
+#[cfg(test)]
+static GATES: std::sync::Mutex<Vec<Gate>> = std::sync::Mutex::new(Vec::new());
+
+/// Hold the next commit of `bot`: the first receiver says the commit was reached, sending on the
+/// sender lets it go on (tests).
+#[cfg(test)]
+pub(crate) fn gate_commit(
+    bot: BotId,
+) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    GATES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((bot, entered_tx, release_rx));
+    (entered_rx, release_tx)
+}
+
+#[cfg(test)]
+fn pause_commit(bot: BotId) {
+    let gate = {
+        let mut gates = GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gates
+            .iter()
+            .position(|g| g.0 == bot)
+            .map(|i| gates.remove(i))
+    };
+    if let Some((_, entered, release)) = gate {
+        let _ = entered.send(());
+        let _ = release.recv();
     }
 }
 
