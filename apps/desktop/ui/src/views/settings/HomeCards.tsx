@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Copy, RefreshCw, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ApiClient } from "../../api/client";
 import { useTranslation } from "react-i18next";
 import type { AdminCliEngine, AdminCliEnvironment, AdminCliInstall, AdminState } from "../../api/types";
 import { humanError } from "../../lib/humanError";
@@ -11,7 +12,7 @@ import { RunOnServer } from "../../components/RunOnServer";
 import { brandOf, shortVersion } from "../../lib/cliCards";
 import { engineStatus, stepCommand } from "../../lib/serverSignIn";
 import { ServerSignInModal } from "../../components/ServerSignInModal";
-import { DetectedAccountsBlock } from "./DetectedAccountsBlock";
+import { CodingClisBlock } from "./CodingClisBlock";
 import styles from "./AiPage.module.css";
 
 /**
@@ -46,10 +47,22 @@ export function CopyBlock({ text, inApp }: { text: string; inApp?: string }) {
   );
 }
 
-function useHostAdmin() {
-  const { client } = useDaemon();
+export function useHostAdmin() {
+  const { client, home, hostConn } = useDaemon();
   const active = useActiveHost();
-  const onHome = active.isHost;
+  const onHome = home.kind === "host";
+  const api = useMemo(() => {
+    if (!onHome) {
+      return null;
+    }
+    if (active.isHost && client) {
+      return client;
+    }
+    if (hostConn) {
+      return new ApiClient(hostConn);
+    }
+    return client;
+  }, [onHome, active.isHost, client, hostConn]);
   const [state, setState] = useState<AdminState | null>(null);
   const [engines, setEngines] = useState<AdminCliEngine[] | null>(null);
   // Older hosts have no such answer: the lines that name the user are then simply left out.
@@ -58,34 +71,35 @@ function useHostAdmin() {
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((n) => n + 1), []);
   useEffect(() => {
-    if (!onHome || !client) {
+    if (!onHome || !api) {
       return undefined;
     }
     let live = true;
-    client.adminState().then(
+    api.adminState().then(
       (s) => live && setState(s),
       (e) => live && setProblem(humanError(e).title)
     );
-    client.adminCliEngines().then(
+    api.adminCliEngines().then(
       (s) => live && setEngines(s),
       () => live && setEngines([])
     );
-    client.adminCliEnvironment().then(
+    api.adminCliEnvironment().then(
       (e) => live && setEnvironment(e),
       () => live && setEnvironment(null)
     );
     return () => {
       live = false;
     };
-  }, [onHome, client, tick]);
-  return { onHome, name: active.name, state, engines, environment, problem, reload };
+  }, [onHome, api, tick]);
+  const name = home.kind === "host" ? home.name : active.name;
+  return { onHome, name, state, engines, environment, problem, reload };
 }
 
 /**
  * What the server still needs from its owner before this desktop can set it up. Shown only when
  * something is missing; what the server keeps to itself by design is under "How it works".
  */
-function HostAdminAlert({ name, state, problem }: Pick<ReturnType<typeof useHostAdmin>, "state" | "problem"> & { name: string }) {
+export function HostAdminAlert({ name, state, problem }: Pick<ReturnType<typeof useHostAdmin>, "state" | "problem"> & { name: string }) {
   const { t } = useTranslation();
   const notGranted = state !== null && !state.granted;
   const noSecrets = state !== null && !state.secrets_available;
@@ -115,7 +129,7 @@ function HostAdminAlert({ name, state, problem }: Pick<ReturnType<typeof useHost
 }
 
 /** Installing a coding CLI on the server: start it, follow it, and say what went wrong. */
-function useServerInstall(engine: AdminCliEngine, onChanged?: () => void) {
+export function useServerInstall(engine: AdminCliEngine, onChanged?: () => void) {
   const { client } = useDaemon();
   const [run, setRun] = useState<AdminCliInstall | null>(null);
   const [problem, setProblem] = useState<{ code: string; text: string } | null>(null);
@@ -443,7 +457,7 @@ function HostEngineRow({
  * The server's coding CLIs, as installed THERE: one row per CLI, its install and sign-in steps in
  * its own details. What still needs the owner shows on top only when something is missing.
  */
-function HostEnginesBlock() {
+export function HostEnginesBlock() {
   const { t } = useTranslation();
   const { name, state, problem, engines, environment, reload } = useHostAdmin();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -496,18 +510,7 @@ function HostEnginesBlock() {
   );
 }
 
-/** "Found on this computer" locally; the server's own coding CLIs first when the home is a host. */
+/** Coding CLIs on this computer and on the bots' home server, in one list. */
 export function EnginesCard() {
-  const onHome = useActiveHost().isHost;
-  // Even when the bots live on a server, this computer's own CLIs are listed too: sign in and
-  // use them on Windows (bots that run "on this computer" use them). Each list is clearly titled,
-  // and every CLI's steps live in its own row.
-  return onHome ? (
-    <>
-      <HostEnginesBlock />
-      <DetectedAccountsBlock local />
-    </>
-  ) : (
-    <DetectedAccountsBlock />
-  );
+  return <CodingClisBlock />;
 }

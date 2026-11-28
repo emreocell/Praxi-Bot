@@ -5888,6 +5888,7 @@
     "listAge": "Updated {{hours}} h ago",
     "listBundled": "Built-in fallback list: the CLI could not be asked.",
     "listFresh": "Updated just now",
+    "missingCliShort": "{{name}} · not ready on {{server}}",
     "noModels": "Type a model id in the search to use one.",
     "none": "No model",
     "notOnServer": "{{name}} · not on {{server}} yet",
@@ -5900,6 +5901,7 @@
     "search": "Search models",
     "sectionApi": "API providers",
     "sectionCli": "Coding CLIs (your subscription)",
+    "setUpCli": "Set up",
     "showAll": "All models ({{count}})",
     "switched": "Switched to {{model}}",
     "switchedDefault": "Default model set to {{model}}",
@@ -7180,7 +7182,7 @@
         "copied": "Command copied",
         "copyCommand": "Copy command",
         "copyDetails": "Copy details",
-        "description": "AI apps you are signed in to on this computer are switched on automatically. Switch one off and it stays off.",
+        "description": "One list for every coding CLI: this computer and your server. Actions live in each row's menu.",
         "detailsCopied": "Details copied",
         "detailsToggle": "Details",
         "detectError": "Could not check installed coding tools.",
@@ -7222,7 +7224,7 @@
           "unsupported": "Not supported yet"
         },
         "termsNotice": "Your vendor plan terms apply; verify automated CLI use is permitted before enabling.",
-        "title": "Found on this computer",
+        "title": "Coding CLIs",
         "toggle": "Use {{name}}"
       },
       "keys": {
@@ -8195,6 +8197,33 @@
     }
   },
   "settingsUi": {
+    "codingClis": {
+      "actions": "Actions for {{name}}",
+      "copyInstallServer": "Copy install command for server",
+      "copyLoginLocal": "Copy sign-in command for this computer",
+      "copyLoginServer": "Copy sign-in command for server",
+      "howToInstall": "How to install",
+      "local": {
+        "not_installed": "not installed",
+        "off": "off",
+        "on": "on"
+      },
+      "myServer": "{{name}}:",
+      "note": "Switch a coding CLI on here when bots run on this computer; sign in on your server when bots live there.",
+      "quotaAge": "Updated {{hours}} h ago",
+      "quotaFresh": "Updated just now",
+      "quotaLeft": "{{pct}}% left on plan",
+      "server": {
+        "logged_in": "signed in",
+        "not_installed": "not installed",
+        "not_logged_in": "not signed in",
+        "unknown": "sign-in unknown"
+      },
+      "thisComputer": "This computer:",
+      "title": "Coding CLIs",
+      "turnOff": "Turn off on this computer",
+      "turnOn": "Turn on on this computer"
+    },
     "groups": {
       "troubleshooting": "Troubleshooting",
       "updates": "Updates and version"

@@ -1,4 +1,5 @@
 import type { CliEngineDto } from "../api/types.ts";
+import { brandIcon } from "./brandIcons.ts";
 
 /** The one status an engine card shows. */
 export type CliStatus = "ready" | "sign_in" | "outdated" | "not_installed" | "unsupported";
@@ -52,6 +53,13 @@ export function displayPath(path: string): string {
  */
 export function brandOf(id: string): string {
   return id === "agy" ? "antigravity" : id === "claude" ? "claude" : id;
+}
+
+/** Prefer the real logo; data-only engines with no licensed mark use the neutral terminal glyph. */
+export function cliBrandKey(id: string): string {
+  const name = brandOf(id);
+  const { known } = brandIcon(name);
+  return known ? name : "terminal";
 }
 
 /** Version for display: `claude 2.1.325 (Claude Code)` and `v2.3.0` read as the number. */

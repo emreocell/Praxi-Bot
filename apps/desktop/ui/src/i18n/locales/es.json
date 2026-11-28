@@ -5534,6 +5534,8 @@
     "noModels": "Escribe un ID de modelo en la búsqueda para usarlo.",
     "none": "Sin modelo",
     "notOnServer": "{{name}} · aún no está en {{server}}",
+    "missingCliShort": "{{name}} · not ready on {{server}}",
+    "setUpCli": "Set up",
     "noteLocalClis": "Las CLI de suscripción de este equipo se usan cuando un bot se ejecuta en «este equipo».",
     "otherId": "Usar «{{id}}» con {{provider}}",
     "recent": "Recientes",

@@ -5888,6 +5888,7 @@
     "listAge": "{{hours}} sa önce güncellendi",
     "listBundled": "Yerleşik yedek liste: CLI'ya sorulamadı.",
     "listFresh": "Az önce güncellendi",
+    "missingCliShort": "{{name}} · {{server}} üzerinde hazır değil",
     "noModels": "Kullanmak için aramaya model kimliği yaz.",
     "none": "Model yok",
     "notOnServer": "{{name}} · {{server}} üzerinde henüz yok",
@@ -5900,6 +5901,7 @@
     "search": "Model ara",
     "sectionApi": "API sağlayıcıları",
     "sectionCli": "Kodlama CLI'ları (aboneliğin)",
+    "setUpCli": "Kurulum",
     "showAll": "Tüm modeller ({{count}})",
     "switched": "{{model}} modeline geçildi",
     "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı",
@@ -7180,7 +7182,7 @@
         "copied": "Komut kopyalandı",
         "copyCommand": "Komutu kopyala",
         "copyDetails": "Ayrıntıları kopyala",
-        "description": "Bu bilgisayarda oturum açtığın yapay zekâ uygulamaları kendiliğinden açılır. Birini kapatırsan kapalı kalır.",
+        "description": "Tüm kodlama CLI'ları tek listede: bu bilgisayar ve sunucun. İşlemler her satırın menüsünde.",
         "detailsCopied": "Ayrıntılar kopyalandı",
         "detailsToggle": "Ayrıntılar",
         "detectError": "Kurulu kodlama araçları denetlenemedi.",
@@ -7222,7 +7224,7 @@
           "unsupported": "Henüz desteklenmiyor"
         },
         "termsNotice": "Sağlayıcının abonelik koşulları geçerlidir; etkinleştirmeden önce otomatik kullanıma izin verildiğini doğrula.",
-        "title": "Bu bilgisayarda bulunanlar",
+        "title": "Kodlama CLI'ları",
         "toggle": "{{name}} kullan"
       },
       "keys": {
@@ -8195,6 +8197,33 @@
     }
   },
   "settingsUi": {
+    "codingClis": {
+      "actions": "{{name}} için işlemler",
+      "copyInstallServer": "Sunucu kurulum komutunu kopyala",
+      "copyLoginLocal": "Bu bilgisayar giriş komutunu kopyala",
+      "copyLoginServer": "Sunucu giriş komutunu kopyala",
+      "howToInstall": "Nasıl kurulur",
+      "local": {
+        "not_installed": "kurulu değil",
+        "off": "kapalı",
+        "on": "açık"
+      },
+      "myServer": "{{name}}:",
+      "note": "Botlar bu bilgisayarda çalışırken CLI'ları buradan açıp kapat; botlar sunucudaysa girişi sunucuda yap.",
+      "quotaAge": "{{hours}} sa önce güncellendi",
+      "quotaFresh": "Az önce güncellendi",
+      "quotaLeft": "Planda %{{pct}} kaldı",
+      "server": {
+        "logged_in": "giriş yapıldı",
+        "not_installed": "kurulu değil",
+        "not_logged_in": "giriş yapılmadı",
+        "unknown": "giriş bilinmiyor"
+      },
+      "thisComputer": "Bu bilgisayar:",
+      "title": "Kodlama CLI'ları",
+      "turnOff": "Bu bilgisayarda kapat",
+      "turnOn": "Bu bilgisayarda aç"
+    },
     "groups": {
       "troubleshooting": "Sorun giderme",
       "updates": "Güncellemeler ve sürüm"
