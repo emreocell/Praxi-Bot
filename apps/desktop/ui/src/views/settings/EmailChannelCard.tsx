@@ -1,8 +1,9 @@
 import { Check, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { EmailAccount, EmailChannel, EmailChannelSettings, EmailPendingReply } from "../../api/types";
+import { ConfirmDialog } from "../../components/DialogParts";
 import { CardSaveBar, FormField, formStyles } from "../../components/SettingsForm";
 import { MoreInfo } from "../../components/ChoiceList";
 import { SettingsCard, SwitchField, SwitchGrid } from "../../components/SettingsUi";
@@ -10,6 +11,7 @@ import { useToast } from "../../components/Toast";
 import { humanLine } from "../../lib/humanError";
 import { openSettingsTarget } from "../../lib/settingsLink";
 import { useDaemon } from "../../state/DaemonContext";
+import { useLeaveGuard } from "../../state/LeaveGuard";
 import mailStyles from "./EmailCard.module.css";
 import styles from "./EmailChannelCard.module.css";
 
@@ -41,6 +43,9 @@ export function EmailChannelCard() {
   const [replies, setReplies] = useState<EmailPendingReply[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const pendingLeave = useRef<(() => void) | null>(null);
 
   const reload = useCallback(async () => {
     if (!client) {
@@ -70,11 +75,20 @@ export function EmailChannelCard() {
 
   const dirty = form && saved ? !settingsEqual(form, saved) : false;
 
+  useLeaveGuard({
+    state: () => ({ dirty: Boolean(dirty), busy }),
+    confirm: (proceed) => {
+      pendingLeave.current = proceed;
+      setConfirmLeave(true);
+    }
+  });
+
   const save = async () => {
     if (!client || !form) {
       return;
     }
     setBusy(true);
+    setSaveError(null);
     try {
       const next = await client.saveEmailChannel(form);
       setChannel(next);
@@ -82,7 +96,9 @@ export function EmailChannelCard() {
       setSaved(next.settings);
       toast.show(t(`${K}.saved`), "success");
     } catch (e) {
-      toast.show(humanLine(e), "danger");
+      const line = humanLine(e);
+      setSaveError(line);
+      toast.show(line, "danger");
     } finally {
       setBusy(false);
     }
@@ -147,11 +163,11 @@ export function EmailChannelCard() {
         action: mailboxSenderFix
       };
     }
-    if (!form.enabled) {
-      return { tone: "muted" as const, text: t(`${K}.status.off`) };
-    }
     if (dirty) {
       return { tone: "warn" as const, text: t(`${K}.status.unsaved`) };
+    }
+    if (!form.enabled) {
+      return { tone: "muted" as const, text: t(`${K}.status.off`) };
     }
     if (channel?.running) {
       return { tone: "ok" as const, text: t(`${K}.running`) };
@@ -201,6 +217,7 @@ export function EmailChannelCard() {
                     width="md"
                   >
                     <select
+                      id="email-channel-account"
                       className={formStyles.select}
                       value={form.account}
                       data-testid="email-channel-account"
@@ -218,6 +235,7 @@ export function EmailChannelCard() {
                 <div className={styles.pair}>
                   <FormField id="email-channel-folder" label={t(`${K}.folder`)} hint={t(`${K}.folderHint`)} width="sm">
                     <input
+                      id="email-channel-folder"
                       className={formStyles.input}
                       value={form.folder}
                       data-testid="email-channel-folder"
@@ -227,6 +245,7 @@ export function EmailChannelCard() {
                   </FormField>
                   <FormField id="email-channel-bot" label={t(`${K}.bot`)} width="md">
                     <select
+                      id="email-channel-bot"
                       className={formStyles.select}
                       value={form.bot ?? ""}
                       data-testid="email-channel-bot"
@@ -263,11 +282,11 @@ export function EmailChannelCard() {
               saveLabel={t(`${K}.save`)}
               onSave={() => void save()}
               saving={busy}
-              disabled={!dirty || !form.account}
-              statusText={status?.text}
-              statusTone={status?.tone}
-              statusDetail={status?.detail}
-              action={status?.action}
+              disabled={!dirty || (form.enabled && !form.account)}
+              statusText={saveError ?? status?.text}
+              statusTone={saveError ? "bad" : status?.tone}
+              statusDetail={saveError ? undefined : status?.detail}
+              action={saveError ? undefined : status?.action}
               testId="email-channel-save-bar"
             />
           </>
@@ -310,6 +329,21 @@ export function EmailChannelCard() {
           </div>
         ) : null}
       </div>
+      <ConfirmDialog
+        open={confirmLeave}
+        title={t("botEdit.discardTitle")}
+        body={t("botEdit.discardBody")}
+        confirmLabel={t("botEdit.discard")}
+        onConfirm={() => {
+          setConfirmLeave(false);
+          pendingLeave.current?.();
+          pendingLeave.current = null;
+        }}
+        onCancel={() => {
+          setConfirmLeave(false);
+          pendingLeave.current = null;
+        }}
+      />
     </SettingsCard>
   );
 }

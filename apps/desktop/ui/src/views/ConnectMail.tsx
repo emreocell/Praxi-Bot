@@ -403,7 +403,6 @@ export function ConnectMailFlow({
             {mailPath === "app_password" ? (
               <div className={styles.section}>
                 <FormField
-                  id="connect-mail-bot"
                   label={t(`${K}.bot.label`)}
                   helpTitle={t(`${K}.bot.label`)}
                   helpBody={t(`${K}.bot.hint`)}

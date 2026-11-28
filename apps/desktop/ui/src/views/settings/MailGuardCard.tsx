@@ -1,8 +1,9 @@
 import { Download, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { EmailGuardSettings, EmailOptOut, EmailSendLogEntry } from "../../api/types";
+import { ConfirmDialog } from "../../components/DialogParts";
 import { CardSaveBar, FormField, formStyles } from "../../components/SettingsForm";
 import { SettingsCard, SwitchField } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
@@ -10,6 +11,7 @@ import { type HumanError, humanError, humanLine } from "../../lib/humanError";
 import { formatDateTime } from "../../lib/messageTime";
 import { saveTextFile } from "../../lib/runReport";
 import { useDaemon } from "../../state/DaemonContext";
+import { useLeaveGuard } from "../../state/LeaveGuard";
 import styles from "./MailGuardCard.module.css";
 
 const LOG_ROWS = 100;
@@ -27,6 +29,9 @@ export function MailGuardCard() {
   const [entry, setEntry] = useState("");
   const [domains, setDomains] = useState("");
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const pendingLeave = useRef<(() => void) | null>(null);
 
   const [problems, setProblems] = useState<Record<"settings" | "optOuts" | "log", HumanError | null>>({
     settings: null,
@@ -92,6 +97,14 @@ export function MailGuardCard() {
         domains !== (saved.verification_link_domains ?? []).join("\n")
       : false;
 
+  useLeaveGuard({
+    state: () => ({ dirty: Boolean(dirty), busy }),
+    confirm: (proceed) => {
+      pendingLeave.current = proceed;
+      setConfirmLeave(true);
+    }
+  });
+
   if (!settings) {
     return (
       <SettingsCard title={t(`${K}.title`)} description={t(`${K}.description`)} testId="mail-guard">
@@ -100,9 +113,14 @@ export function MailGuardCard() {
     );
   }
 
-  const persist = () =>
-    act(async () => {
-      const next = await client!.putMailGuardSettings({
+  const persist = async () => {
+    if (!client) {
+      return;
+    }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const next = await client.putMailGuardSettings({
         ...settings,
         verification_link_domains: domains.split(/[\s,;]+/).filter(Boolean)
       });
@@ -110,7 +128,14 @@ export function MailGuardCard() {
       setSaved(next);
       setDomains((next.verification_link_domains ?? []).join("\n"));
       toast.show(t(`${K}.saved`), "success");
-    });
+    } catch (e) {
+      const line = humanLine(e);
+      setSaveError(line);
+      toast.show(line, "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <SettingsCard title={t(`${K}.title`)} description={t(`${K}.description`)} testId="mail-guard">
@@ -205,8 +230,8 @@ export function MailGuardCard() {
             onSave={() => void persist()}
             saving={busy}
             disabled={!dirty}
-            statusText={dirty ? t(`${K}.status.unsaved`) : t(`${K}.status.saved`)}
-            statusTone={dirty ? "warn" : "ok"}
+            statusText={saveError ?? (dirty ? t(`${K}.status.unsaved`) : t(`${K}.status.saved`))}
+            statusTone={saveError ? "bad" : dirty ? "warn" : "ok"}
             testId="mail-guard-save-bar"
           />
         </section>
@@ -295,31 +320,48 @@ export function MailGuardCard() {
           {problems.log ? null : log.length === 0 ? (
             <p className={formStyles.hint}>{t(`${K}.logEmpty`)}</p>
           ) : (
-            <table className={styles.log} data-testid="mail-guard-log">
-              <thead>
-                <tr>
-                  <th>{t(`${K}.colTime`)}</th>
-                  <th>{t(`${K}.colTo`)}</th>
-                  <th>{t(`${K}.colSubject`)}</th>
-                  <th>{t(`${K}.colBot`)}</th>
-                  <th>{t(`${K}.colNote`)}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {log.map((e, i) => (
-                  <tr key={`${e.at}-${e.message_id}-${i}`}>
-                    <td>{formatDateTime(e.at * 1000, i18n.language)}</td>
-                    <td>{e.recipients.join(", ")}</td>
-                    <td>{e.subject}</td>
-                    <td>{e.bot ?? ""}</td>
-                    <td>{e.send_anyway.length > 0 ? t(`${K}.sentAnyway`) : ""}</td>
+            <div className={styles.logWrap}>
+              <table className={styles.log} data-testid="mail-guard-log">
+                <thead>
+                  <tr>
+                    <th>{t(`${K}.colTime`)}</th>
+                    <th>{t(`${K}.colTo`)}</th>
+                    <th>{t(`${K}.colSubject`)}</th>
+                    <th>{t(`${K}.colBot`)}</th>
+                    <th>{t(`${K}.colNote`)}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {log.map((e, i) => (
+                    <tr key={`${e.at}-${e.message_id}-${i}`}>
+                      <td>{formatDateTime(e.at * 1000, i18n.language)}</td>
+                      <td>{e.recipients.join(", ")}</td>
+                      <td>{e.subject}</td>
+                      <td>{e.bot ?? ""}</td>
+                      <td>{e.send_anyway.length > 0 ? t(`${K}.sentAnyway`) : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
       </div>
+      <ConfirmDialog
+        open={confirmLeave}
+        title={t("botEdit.discardTitle")}
+        body={t("botEdit.discardBody")}
+        confirmLabel={t("botEdit.discard")}
+        onConfirm={() => {
+          setConfirmLeave(false);
+          pendingLeave.current?.();
+          pendingLeave.current = null;
+        }}
+        onCancel={() => {
+          setConfirmLeave(false);
+          pendingLeave.current = null;
+        }}
+      />
     </SettingsCard>
   );
 }

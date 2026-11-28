@@ -21,7 +21,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
 import { MoreInfo } from "../../components/ChoiceList";
-import { FormField, formStyles } from "../../components/SettingsForm";
+import { FieldHelp, FormField, formStyles } from "../../components/SettingsForm";
 import barStyles from "../../components/SettingsForm.module.css";
 import { SettingsCard, SwitchField, SwitchGrid } from "../../components/SettingsUi";
 import { BrandIcon } from "../../components/BrandIcon";
@@ -426,7 +426,18 @@ function AccountForm({
       ) : null}
 
       <div className={formStyles.field}>
-        <span className={formStyles.label}>{t("settingsModal.email.form.sendMode.label")}</span>
+        <div className={barStyles.labelRow}>
+          <span className={formStyles.label}>{t("settingsModal.email.form.sendMode.label")}</span>
+          <FieldHelp
+            title={t("settingsModal.email.form.sendMode.label")}
+            body={
+              form.sendMode === "draft_only"
+                ? t("settingsModal.email.form.sendMode.draftOnlyHint")
+                : t("settingsModal.email.form.sendMode.askHint")
+            }
+            testId="email-send-mode-help"
+          />
+        </div>
         <Segmented
           label={t("settingsModal.email.form.sendMode.label")}
           value={form.sendMode}

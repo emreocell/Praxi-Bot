@@ -52,6 +52,11 @@
   gap: var(--space-1);
 }
 
+.logWrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
 .log {
   width: 100%;
   border-collapse: collapse;

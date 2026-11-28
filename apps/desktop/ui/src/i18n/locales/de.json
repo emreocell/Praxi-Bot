@@ -7151,7 +7151,6 @@
       "ignored": "E-Mails von nicht erlaubten Absendern wurden ignoriert: {{n}}",
       "needsSenders": "Dieser Kanal lief ohne Liste erlaubter Absender und gibt deshalb jetzt KEINE E-Mail mehr an den Bot weiter. Trage in den Postfach-Einstellungen oben unter „Erlaubte Absender“ die Adressen ein, die dem Bot schreiben dürfen (zum Beispiel deine eigene). Bis dahin bleibt jede eingehende E-Mail ungelesen im Postfach.",
       "noAccount": "Fügen Sie zuerst oben ein Postfach hinzu.",
-      "noSenders": "Das gewählte Postfach hat keine erlaubten Absender, daher erreicht keine E-Mail den Bot. Trage deine eigene Adresse in den Postfach-Einstellungen oben unter „Erlaubte Absender“ ein.",
       "note": "Mails stammen von anderen Personen, deshalb behandelt der Bot sie als Information, nie als Anweisung. Standardmäßig sieht er nur Absender, Betreff und die ersten Zeilen. Anhänge werden nie geöffnet. Es wird nichts gesendet, außer Sie erlauben Antworten und bestätigen jede einzelne hier.",
       "replies": "Dem Bot erlauben, Antworten vorzuschlagen (Sie bestätigen jede, bevor sie gesendet wird)",
       "running": "Läuft",
@@ -7474,7 +7473,6 @@
         "searxng": "Die Adresse deines eigenen SearXNG-Servers, zum Beispiel http://127.0.0.1:8080. Die Anleitung zur Websuche enthält eine Installation für Server mit einem einzigen Befehl.",
         "tavily": "Erstelle in deinem Tavily-Konto einen Schlüssel und füge ihn hier ein."
       },
-      "providerHint": "Bots suchen im Web über einen Suchanbieter. Die kostenlosen Suchmaschinen funktionieren auf einem Heimcomputer oft, sperren Server aber meist aus; ein Server braucht daher einen dieser Anbieter.",
       "providerTitle": "Suchanbieter",
       "saveAndTest": "Speichern und testen",
       "searxngLabel": "SearXNG-URL",

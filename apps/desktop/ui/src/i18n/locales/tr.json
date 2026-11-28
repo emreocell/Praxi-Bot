@@ -7854,7 +7854,6 @@
       "ignored": "İzin verilmeyen göndericilerden gelen ve yok sayılan e-postalar: {{n}}",
       "needsSenders": "Bu kanal izinli gönderici listesi olmadan çalışıyordu, bu yüzden artık bota HİÇ e-posta iletmiyor. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne bota yazabilecek adresleri (örneğin kendi adresini) ekle. O zamana kadar gelen tüm e-postalar posta kutusunda okunmamış kalır.",
       "noAccount": "Önce yukarıdan bir posta kutusu ekleyin.",
-      "noSenders": "Seçilen posta kutusunda izinli gönderici yok, bu yüzden bota hiç e-posta ulaşmaz. Yukarıdaki posta kutusu ayarlarında \"İzinli göndericiler\" bölümüne kendi adresini ekle.",
       "note": "Postaları başkaları yazar; bu yüzden bot onları emir değil bilgi olarak ele alır. Varsayılan olarak yalnızca göndereni, konuyu ve ilk birkaç satırı görür. Ekler hiçbir zaman açılmaz. Yanıtlara izin verip her birini burada onaylamadıkça hiçbir şey gönderilmez.",
       "replies": "Botun yanıt önermesine izin ver (her yanıt gönderilmeden önce sizin onayınızı bekler)",
       "repliesHint": "Önerilen her yanıt burada onayınızı bekler.",
@@ -8201,7 +8200,6 @@
         "searxng": "Kendi SearXNG sunucunun adresi, örneğin http://127.0.0.1:8080. Web arama rehberinde sunucu için tek komutla kurulum var.",
         "tavily": "Tavily hesabında bir anahtar oluştur ve buraya yapıştır."
       },
-      "providerHint": "Botlar web'de bir arama sağlayıcısı üzerinden arar. Ücretsiz motorlar ev bilgisayarında çoğunlukla çalışır ama sunucuları genelde engeller; bu yüzden sunucuda bunlardan birini bağlaman gerekir.",
       "providerTitle": "Arama sağlayıcısı",
       "saveAndTest": "Kaydet ve dene",
       "searxngLabel": "SearXNG URL",

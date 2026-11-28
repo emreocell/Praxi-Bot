@@ -321,15 +321,16 @@ export function CalendarCard() {
                 }}
               />
             </FormField>
-          ) : (
-            <SettingsDisclosure
-              open={advanced}
-              count={3}
-              label={t("settingsModal.calendar.advanced")}
-              hint={t("settingsModal.calendar.advancedHint")}
-              testId="calendar-advanced"
-              onToggle={() => setAdvanced((o) => !o)}
-            >
+          ) : null}
+          <SettingsDisclosure
+            open={advanced}
+            count={isOther ? 2 : 3}
+            label={t("settingsModal.calendar.advanced")}
+            hint={t("settingsModal.calendar.advancedHint")}
+            testId="calendar-advanced"
+            onToggle={() => setAdvanced((o) => !o)}
+          >
+            {!isOther ? (
               <FormField
                 id="calendar-url"
                 label={t("settingsModal.calendar.urlLabel")}
@@ -350,47 +351,47 @@ export function CalendarCard() {
                   }}
                 />
               </FormField>
-              <div className={styles.pair}>
-                <FormField
+            ) : null}
+            <div className={styles.pair}>
+              <FormField
+                id="calendar-name"
+                label={t("settingsModal.calendar.nameLabel")}
+                hint={t("settingsModal.calendar.nameShort")}
+                helpTitle={t("settingsModal.calendar.nameLabel")}
+                helpBody={t("settingsModal.calendar.nameHint")}
+                width="sm"
+              >
+                <input
                   id="calendar-name"
-                  label={t("settingsModal.calendar.nameLabel")}
-                  hint={t("settingsModal.calendar.nameShort")}
-                  helpTitle={t("settingsModal.calendar.nameLabel")}
-                  helpBody={t("settingsModal.calendar.nameHint")}
-                  width="sm"
-                >
-                  <input
-                    id="calendar-name"
-                    type="text"
-                    className={formStyles.input}
-                    value={shownName}
-                    autoComplete="off"
-                    onChange={(e) => {
-                      setName(e.target.value);
-                      setNameEdited(true);
-                    }}
-                  />
-                </FormField>
-                <FormField
+                  type="text"
+                  className={formStyles.input}
+                  value={shownName}
+                  autoComplete="off"
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setNameEdited(true);
+                  }}
+                />
+              </FormField>
+              <FormField
+                id="calendar-email"
+                label={t("settingsModal.calendar.emailLabel")}
+                hint={t("settingsModal.calendar.emailShort")}
+                helpTitle={t("settingsModal.calendar.emailLabel")}
+                helpBody={t("settingsModal.calendar.emailHint")}
+                width="md"
+              >
+                <input
                   id="calendar-email"
-                  label={t("settingsModal.calendar.emailLabel")}
-                  hint={t("settingsModal.calendar.emailShort")}
-                  helpTitle={t("settingsModal.calendar.emailLabel")}
-                  helpBody={t("settingsModal.calendar.emailHint")}
-                  width="md"
-                >
-                  <input
-                    id="calendar-email"
-                    type="email"
-                    className={formStyles.input}
-                    value={email}
-                    autoComplete="off"
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </FormField>
-              </div>
-            </SettingsDisclosure>
-          )}
+                  type="email"
+                  className={formStyles.input}
+                  value={email}
+                  autoComplete="off"
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </FormField>
+            </div>
+          </SettingsDisclosure>
 
           <div className={styles.actions}>
             <Button

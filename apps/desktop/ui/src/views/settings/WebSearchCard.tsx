@@ -17,7 +17,7 @@ import type {
 } from "../../api/types";
 import { MoreInfo } from "../../components/ChoiceList";
 import { FormField, formStyles } from "../../components/SettingsForm";
-import { SettingGroup, SwitchField } from "../../components/SettingsUi";
+import { SettingGroup, Switch } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { applyWebSearchUpdate } from "../../lib/webSearchDraft";
 import {
@@ -346,7 +346,6 @@ export function WebSearchCard() {
                 <FormField
                   id="web-searxng-url"
                   label={t("settingsModal.webSearch.searxngLabel")}
-                  hint={t("settingsModal.webSearch.providerHelp.searxng")}
                   width="md"
                 >
                   <input
@@ -452,13 +451,11 @@ export function WebSearchCard() {
                         </div>
                         <div className={styles.rowControls}>
                           {isKeylessBackend(id) ? (
-                            <SwitchField
+                            <Switch
                               checked={config[id]}
                               onChange={(checked) => toggleKeyless(id, checked)}
                               disabled={saving}
-                              label={label}
-                              hint={t("settingsModal.webSearch.toggleBackend", { name: label })}
-                              testId={`web-toggle-${id}`}
+                              label={t("settingsModal.webSearch.toggleBackend", { name: label })}
                             />
                           ) : null}
                           <Button

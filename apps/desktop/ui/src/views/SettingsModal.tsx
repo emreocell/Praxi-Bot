@@ -58,6 +58,7 @@ import {
   settingsSearchRank
 } from "../lib/settingsPages";
 import { useDaemon } from "../state/DaemonContext";
+import { useLeaveRegistry } from "../state/LeaveGuard";
 import { DEFAULT_SETTINGS } from "../store/settingsStore";
 import { aiCards } from "./settings/AiCards";
 import { appearanceCards } from "./settings/AppearanceCards";
@@ -214,6 +215,7 @@ export function SettingsModal({
 }) {
   const { t } = useTranslation();
   const { client } = useDaemon();
+  const leave = useLeaveRegistry();
   const [page, setPage] = useState<SettingsPageId>(() => parsePage(initialSection));
   const [query, setQuery] = useState("");
   // "Advanced settings" starts closed on every open (initialDetailMode); not remembered across opens.
@@ -234,6 +236,20 @@ export function SettingsModal({
   const changeMode = useCallback((m: DetailMode) => {
     setMode(m);
   }, []);
+
+  const requestClose = useCallback(() => {
+    leave.attempt(onClose);
+  }, [leave, onClose]);
+
+  const goToPage = useCallback(
+    (next: SettingsPageId) => {
+      leave.attempt(() => {
+        setQuery("");
+        setPage(next);
+      });
+    },
+    [leave]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -388,14 +404,16 @@ export function SettingsModal({
     (cardId: string) => {
       const hit = placed.find((p) => p.card.id === cardId);
       if (!hit) return;
-      setQuery("");
-      setPage(hit.page);
-      if (hit.advanced) {
-        changeMode("advanced");
-      }
-      setPendingReveal({ card: cardId, seq: ++revealSeq.current });
+      leave.attempt(() => {
+        setQuery("");
+        setPage(hit.page);
+        if (hit.advanced) {
+          changeMode("advanced");
+        }
+        setPendingReveal({ card: cardId, seq: ++revealSeq.current });
+      });
     },
-    [placed, changeMode]
+    [placed, changeMode, leave]
   );
 
   // Highlight the matched words inside the cards without touching React's DOM.
@@ -444,8 +462,10 @@ export function SettingsModal({
             ? (cur + 1) % enabledPages.length
             : (cur - 1 + enabledPages.length) % enabledPages.length;
     const next = enabledPages[nextIdx];
-    setQuery("");
-    setPage(next);
+    leave.attempt(() => {
+      setQuery("");
+      setPage(next);
+    });
     e.currentTarget.querySelector<HTMLElement>(`[data-testid="settings-nav-${next}"]`)?.focus();
   };
 
@@ -538,7 +558,7 @@ export function SettingsModal({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={requestClose}
       onEscape={() => {
         if (query !== "") {
           setQuery("");
@@ -589,10 +609,7 @@ export function SettingsModal({
                       disabled={dim}
                       aria-current={!searching && s === page ? "page" : undefined}
                       className={[styles.navItem, !searching && s === page ? styles.navActive : ""].filter(Boolean).join(" ")}
-                      onClick={() => {
-                        setQuery("");
-                        setPage(s);
-                      }}
+                      onClick={() => goToPage(s)}
                     >
                       <PageIcon aria-hidden="true" />
                       <span>{pageName(s)}</span>
@@ -651,7 +668,7 @@ export function SettingsModal({
                 className={styles.close}
                 title={t("common.close")}
                 aria-label={t("common.close")}
-                onClick={onClose}
+                onClick={requestClose}
               >
                 <X aria-hidden="true" />
               </button>

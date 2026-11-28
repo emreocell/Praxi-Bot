@@ -81,7 +81,7 @@ export function FormField({
   width = "full",
   children
 }: {
-  id: string;
+  id?: string;
   label: string;
   hint?: string;
   helpTitle?: string;
@@ -93,10 +93,14 @@ export function FormField({
   return (
     <div className={[styles.field, widthClass].filter(Boolean).join(" ")}>
       <div className={styles.labelRow}>
-        <label className={styles.label} htmlFor={id}>
-          {label}
-        </label>
-        {helpBody ? <FieldHelp title={helpTitle ?? label} body={helpBody} testId={`${id}-help`} /> : null}
+        {id ? (
+          <label className={styles.label} htmlFor={id}>
+            {label}
+          </label>
+        ) : (
+          <span className={styles.label}>{label}</span>
+        )}
+        {helpBody ? <FieldHelp title={helpTitle ?? label} body={helpBody} testId={id ? `${id}-help` : undefined} /> : null}
       </div>
       {children}
       {hint ? <p className={styles.lineHint}>{hint}</p> : null}
@@ -144,7 +148,10 @@ export function CardSaveBar({
         </Button>
       </div>
       {statusText ? (
-        <div className={[styles.status, toneClass].filter(Boolean).join(" ")} role="status">
+        <div
+          className={[styles.status, toneClass].filter(Boolean).join(" ")}
+          role={statusTone === "bad" ? "alert" : "status"}
+        >
           <span>{statusText}</span>
           {statusDetail ? <span>{statusDetail}</span> : null}
           {action ? <div className={styles.statusAction}>{action}</div> : null}

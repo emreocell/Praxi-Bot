@@ -6,7 +6,7 @@
 }
 
 .fieldMd {
-  max-width: calc(var(--size-widget-width) * 0.55);
+  max-width: min(100%, var(--size-widget-width));
 }
 
 .fieldSm {
@@ -37,8 +37,8 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: calc(var(--size-icon) + var(--space-1));
-  height: calc(var(--size-icon) + var(--space-1));
+  width: var(--space-6);
+  height: var(--space-6);
   padding: var(--space-0);
   border: var(--size-border) solid transparent;
   border-radius: var(--radius-pill);

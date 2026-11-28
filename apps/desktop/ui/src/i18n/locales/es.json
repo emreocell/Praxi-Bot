@@ -7151,7 +7151,6 @@
       "ignored": "Correos de remitentes no permitidos que se ignoraron: {{n}}",
       "needsSenders": "Este canal funcionaba sin una lista de remitentes permitidos, así que ahora NO pasa ningún correo al bot. Añade en «Remitentes permitidos», en los ajustes del buzón de arriba, las direcciones que pueden escribir al bot (por ejemplo la tuya). Hasta entonces, todo correo entrante queda sin leer en el buzón.",
       "noAccount": "Primero añade un buzón arriba.",
-      "noSenders": "El buzón elegido no tiene remitentes permitidos, así que ningún correo llegará al bot. Añade tu propia dirección en «Remitentes permitidos» en los ajustes del buzón de arriba.",
       "note": "El correo lo escriben otras personas, así que el bot lo trata como información, nunca como órdenes. Por defecto solo ve el remitente, el asunto y las primeras líneas. Los adjuntos no se abren nunca. No se envía nada a menos que permitas las respuestas y apruebes cada una aquí.",
       "replies": "Permitir que el bot sugiera respuestas (tú apruebas cada una antes de enviarla)",
       "running": "En marcha",
@@ -7474,7 +7473,6 @@
         "searxng": "La dirección de tu propio servidor SearXNG, por ejemplo http://127.0.0.1:8080. La guía de búsqueda web incluye una instalación para servidores con un solo comando.",
         "tavily": "Crea una clave en tu cuenta de Tavily y pégala aquí."
       },
-      "providerHint": "Los bots buscan en la web a través de un proveedor de búsqueda. Los buscadores gratuitos suelen funcionar en un ordenador de casa, pero casi siempre bloquean a los servidores, así que un servidor necesita uno de estos.",
       "providerTitle": "Proveedor de búsqueda",
       "saveAndTest": "Guardar y probar",
       "searxngLabel": "URL de SearXNG",
