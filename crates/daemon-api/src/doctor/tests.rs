@@ -29,12 +29,12 @@ fn native_only_clis_are_ready_when_installed_and_signed_in() {
 }
 
 #[test]
-fn native_only_clis_with_a_sign_in_note_are_not_masked() {
+fn native_only_clis_with_a_sign_in_note_are_unverified_not_failed() {
     for note in ["auth_unverified", "auth_metadata_only", "auth_unparsed"] {
         let mut row = cli("agy", true, cli_provider::AuthState::Unknown, false);
         row.detail = Some(note.to_owned());
         assert!(
-            matches!(cli_state("cli:agy", Some(&[row])), CliState::Problem(_)),
+            matches!(cli_state("cli:agy", Some(&[row])), CliState::Unverified(_)),
             "{note}"
         );
     }
@@ -865,6 +865,81 @@ fn cli_provider_needs_a_signed_in_cli_not_an_api_key() {
     assert_eq!(c.status, Status::Warn, "{}", c.detail);
     assert!(c.detail.contains("could not be verified"), "{}", c.detail);
     assert!(!c.detail.contains("CLI ready"), "{}", c.detail);
+}
+
+#[test]
+fn unverified_cli_auth_note_on_enabled_provider_is_a_warning_with_cli_login_hint() {
+    use cli_provider::AuthState::Unknown;
+    let d = tempfile::tempdir().unwrap();
+    write_providers(d.path(), vec![cli_settings()]);
+    let cat = Catalog::from_entries([]);
+    let store = secret_store::MemoryStore::new();
+    let store_ref: StoreRef<'_> = Ok((&store, "Memory".into()));
+    for note in ["auth_unverified", "auth_metadata_only"] {
+        let mut row = cli("claude", true, Unknown, false);
+        row.detail = Some(note.into());
+        let c = check_providers(&ProviderInputs {
+            data_dir: d.path(),
+            catalog: Ok(&cat),
+            store: &store_ref,
+            detected: Some(&[row]),
+            online: None,
+        });
+        assert_eq!(c.status, Status::Warn, "{note}: {}", c.detail);
+        assert!(
+            !c.detail.contains("cannot run turns"),
+            "{note}: {}",
+            c.detail
+        );
+        let hint = c.hint.as_deref().unwrap();
+        assert!(hint.contains("cli login claude"), "{note}: {hint}");
+        assert!(!hint.contains("api_key"), "{note}: {hint}");
+    }
+}
+
+#[test]
+fn signed_out_cli_provider_fails_with_cli_login_hint_not_api_key() {
+    let d = tempfile::tempdir().unwrap();
+    write_providers(d.path(), vec![cli_settings()]);
+    let cat = Catalog::from_entries([]);
+    let store = secret_store::MemoryStore::new();
+    let store_ref: StoreRef<'_> = Ok((&store, "Memory".into()));
+    let c = check_providers(&ProviderInputs {
+        data_dir: d.path(),
+        catalog: Ok(&cat),
+        store: &store_ref,
+        detected: Some(&[cli(
+            "claude",
+            true,
+            cli_provider::AuthState::SignedOut,
+            true,
+        )]),
+        online: None,
+    });
+    assert_eq!(c.status, Status::Fail);
+    let hint = c.hint.as_deref().unwrap();
+    assert!(hint.contains("cli login claude"), "{hint}");
+    assert!(!hint.contains("api_key"), "{hint}");
+}
+
+#[test]
+fn api_provider_missing_key_still_uses_api_key_hint() {
+    let d = tempfile::tempdir().unwrap();
+    let mut api = ProviderSettings::new("openai", 1);
+    api.key = Some(secret_store::SecretRef::new("openai-key").unwrap());
+    write_providers(d.path(), vec![api]);
+    let cat = Catalog::from_entries([]);
+    let store = secret_store::MemoryStore::new();
+    let store_ref: StoreRef<'_> = Ok((&store, "Memory".into()));
+    let c = check_providers(&ProviderInputs {
+        data_dir: d.path(),
+        catalog: Ok(&cat),
+        store: &store_ref,
+        detected: None,
+        online: None,
+    });
+    assert_eq!(c.status, Status::Fail);
+    assert!(c.hint.as_deref().unwrap().contains("api_key"));
 }
 
 #[test]

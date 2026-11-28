@@ -724,6 +724,24 @@ pub fn check_providers(inp: &ProviderInputs<'_>) -> Check {
             notes.push(format!("{}: configured", p.id));
         }
     }
+    providers_check_finish(
+        ID,
+        N,
+        &problems,
+        &unverified,
+        &notes,
+        inp.online.is_some(),
+    )
+}
+
+fn providers_check_finish(
+    id: &str,
+    name: &str,
+    problems: &[String],
+    unverified: &[String],
+    notes: &[String],
+    online: bool,
+) -> Check {
     let detail = notes
         .iter()
         .chain(unverified.iter())
@@ -731,28 +749,42 @@ pub fn check_providers(inp: &ProviderInputs<'_>) -> Check {
         .cloned()
         .collect::<Vec<_>>()
         .join("; ");
+    let cli_login = cli_login_phrase();
     if problems.is_empty() && !unverified.is_empty() {
-        Check::warn(
-            ID,
-            N,
-            detail,
-            "the coding CLI sign-in could not be confirmed: run Diagnostics again, or open a terminal and sign in to the CLI once (e.g. `claude`, `codex login`)",
-        )
-    } else if problems.is_empty() {
-        let c = Check::ok(ID, N, detail);
-        if inp.online.is_some() {
+        let hint = match first_cli_engine_id(unverified.iter().chain(notes.iter())) {
+            Some(e) => format!(
+                "the coding CLI sign-in could not be confirmed: sign in once with `{cli_login} login {e}` (or use Sign in in Settings > AI)"
+            ),
+            None => {
+                "the coding CLI sign-in could not be confirmed: run Diagnostics again".to_owned()
+            }
+        };
+        return Check::warn(id, name, detail, hint);
+    }
+    if problems.is_empty() {
+        let c = Check::ok(id, name, detail);
+        return if online {
             c
         } else {
             c.hint("add --online to test the connections")
-        }
-    } else {
-        Check::fail(
-            ID,
-            N,
-            detail,
-            "`bot secrets set provider.<id>.api_key` or `bot providers add <id>` to fix the key",
-        )
+        };
     }
+    let cli_problem = problems.iter().all(|p| p.starts_with("cli:"));
+    let api_problem = problems.iter().any(|p| p.contains("API key"));
+    let hint = if cli_problem && !api_problem {
+        match first_cli_engine_id(problems.iter()) {
+            Some(e) => format!("sign in with `{cli_login} login {e}`"),
+            None => format!("sign in with `{cli_login} login <engine>`"),
+        }
+    } else if cli_problem && api_problem {
+        format!(
+            "for a coding CLI: `{cli_login} login <engine>`; for an API provider: `bot secrets set provider.<id>.api_key` or `bot providers add <id>`"
+        )
+    } else {
+        "`bot secrets set provider.<id>.api_key` or `bot providers add <id>` to fix the key"
+            .to_owned()
+    };
+    Check::fail(id, name, detail, hint)
 }
 
 /// What the detection result says about an enabled `cli:<engine>` provider.
@@ -776,29 +808,59 @@ fn cli_state(provider_id: &str, detected: Option<&[cli_provider::DetectedCli]>) 
             "{provider_id}: configured, but the CLI was not checked (detection did not answer)"
         ));
     };
+    let login = sign_in_command(engine);
     match detected.iter().find(|d| d.id == engine) {
         Some(d) if !d.installed => {
             CliState::Problem(format!("{provider_id}: CLI is not installed"))
         }
         Some(d) if d.auth == AuthState::SignedOut => CliState::Problem(format!(
-            "{provider_id}: CLI is installed but signed out; sign in with `{}`",
-            sign_in_command(engine)
+            "{provider_id}: CLI is installed but signed out; sign in with `{login}`"
         )),
+        Some(d) if d.auth == AuthState::SignedIn => {
+            CliState::Ready(format!("{provider_id}: CLI ready"))
+        }
+        Some(d)
+            if d.auth == AuthState::Unknown
+                && cli_auth_note_only_unverified(d.detail.as_deref()) =>
+        {
+            CliState::Unverified(format!(
+                "{provider_id}: CLI installed, but its sign-in could not be verified; if turns fail, sign in with `{login}`"
+            ))
+        }
         Some(d) if !d.runnable && !runs_with_its_own_driver(engine, d) => {
             CliState::Problem(format!(
                 "{provider_id}: CLI cannot run turns ({})",
                 d.detail.as_deref().unwrap_or("not runnable")
             ))
         }
-        Some(d) if d.auth == AuthState::SignedIn => {
-            CliState::Ready(format!("{provider_id}: CLI ready"))
-        }
         Some(_) => CliState::Unverified(format!(
-            "{provider_id}: CLI installed, but its sign-in could not be verified; if turns fail, sign in with `{}`",
-            sign_in_command(engine)
+            "{provider_id}: CLI installed, but its sign-in could not be verified; if turns fail, sign in with `{login}`"
         )),
         None => CliState::Problem(format!("{provider_id}: unknown coding CLI")),
     }
+}
+
+/// `auth_*` notes mean sign-in evidence was seen but not confirmed — a warning, not "cannot run".
+fn cli_auth_note_only_unverified(detail: Option<&str>) -> bool {
+    matches!(
+        detail,
+        Some("auth_unverified" | "auth_metadata_only" | "auth_unparsed")
+    )
+}
+
+/// First `cli:<engine>` id in check detail lines (`cli:claude: ...` → `claude`).
+fn first_cli_engine_id<'a>(mut lines: impl Iterator<Item = &'a String>) -> Option<&'a str> {
+    lines.find_map(|line| {
+        line.strip_prefix("cli:")
+            .and_then(|rest| rest.split(':').next())
+    })
+}
+
+/// Prefix for `bot cli login <engine>` as the service user when appropriate.
+fn cli_login_phrase() -> String {
+    cli_provider::identity::terminal_command(&cli_provider::identity::run_as(
+        &cli_provider::PathEnv::from_ambient(),
+    ))
 }
 
 /// A native-tools engine is not `runnable` by design (only the confined engine is), so that alone
@@ -809,12 +871,9 @@ fn runs_with_its_own_driver(engine: &str, d: &cli_provider::DetectedCli) -> bool
         && cli_provider::engine_spec(engine).is_some_and(|spec| spec.driver().is_some())
 }
 
-/// Terminal command that signs in to a coding CLI.
-fn sign_in_command(engine: &str) -> &str {
-    match engine {
-        "codex" => "codex login",
-        other => other,
-    }
+/// Terminal command that signs in to a coding CLI (`bot cli login` / `sudo praxi cli login`).
+fn sign_in_command(engine: &str) -> String {
+    format!("{} login {engine}", cli_login_phrase())
 }
 
 /// Who the coding CLIs run as on this machine, for the `cli accounts` check.

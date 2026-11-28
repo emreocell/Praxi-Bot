@@ -74,11 +74,15 @@ fn known_engine(id: &str) -> Result<&'static cli_provider::CliEngineSpec> {
     })
 }
 
+const SIGN_IN_SEEN_LOCALLY: &str = "signed in (seen locally, not verified)";
+
 fn sign_in_text(row: &cli_provider::DetectedCli) -> &'static str {
     match (row.auth, row.detail.as_deref()) {
         (AuthState::SignedIn, _) => "signed in",
         (AuthState::SignedOut, _) => "NOT signed in",
-        (AuthState::Unknown, Some("auth_metadata_only")) => "sign-in file found (not checked)",
+        (AuthState::Unknown, Some("auth_metadata_only" | "auth_unverified" | "auth_unparsed")) => {
+            SIGN_IN_SEEN_LOCALLY
+        }
         (AuthState::Unknown, _) => "sign-in unknown",
     }
 }
