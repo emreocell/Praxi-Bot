@@ -584,7 +584,7 @@ async fn firecrawl_search_supports_self_hosting_and_write_only_keys() {
     .unwrap();
     let result = json_part(&out);
     assert_eq!(result["backend"], "firecrawl");
-    assert_eq!(result["untrusted_external_content"], true);
+    assert!(text(&out).starts_with("[untrusted external content"));
     assert_eq!(result["results"].as_array().unwrap().len(), 1);
     assert!(!text(&out).contains("test-firecrawl-key"));
 }
