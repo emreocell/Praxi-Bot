@@ -378,6 +378,7 @@ export type DaemonEvent =
       site: string;
       untrusted_content: boolean;
       expires_in_secs: number;
+      parked?: boolean;
     }
   | {
       /**

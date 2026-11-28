@@ -53,7 +53,7 @@ async fn a_full_mission_registers_on_four_sites_with_its_own_mailbox_and_reports
         w.model.model_calls()
     );
 
-    // ---- the ledger: three signed up, one given up with its reason ----
+    // ---- the ledger: three signed up, one parked for the owner on the CAPTCHA page ----
     let status = |k: &str| {
         let i = items
             .iter()
@@ -70,18 +70,15 @@ async fn a_full_mission_registers_on_four_sites_with_its_own_mailbox_and_reports
         assert_eq!(s, "done", "{site}: {items:#?}");
         assert!(result.is_some_and(|r| !r.is_empty()), "{site} has evidence");
     }
-    let (s, _, error) = status(CAPTCHA);
-    assert_eq!(s, "failed", "{items:#?}");
-    assert!(
-        error.as_deref().is_some_and(|e| e.contains("CAPTCHA")),
-        "the CAPTCHA site is given up with the reason: {error:?}"
-    );
+    let (s, _, _) = status(CAPTCHA);
+    assert_eq!(s, "blocked", "{items:#?}");
     assert_eq!(items.len(), 4);
     assert_eq!(end["mission"]["progress"]["done"], 3);
-    assert_eq!(end["mission"]["progress"]["failed"], 1);
+    assert_eq!(end["mission"]["progress"]["failed"], 0);
     assert_eq!(
-        end["mission"]["progress"]["blocked"], 0,
-        "nothing is left for the owner"
+        end["mission"]["progress"]["blocked"],
+        1,
+        "the CAPTCHA site waits for the owner on the page"
     );
 
     // ---- what the sites saw ----

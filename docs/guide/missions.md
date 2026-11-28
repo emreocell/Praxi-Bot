@@ -100,10 +100,12 @@ answer for each (or skip it) and send them all with one button. When nothing
 else is left to do, the mission waits for you and the report lists what is
 blocked.
 
-A **CAPTCHA** is not parked: nobody can solve it from that list and a mission has
-no live hand-over, so the item is **given up** with the reason ("a CAPTCHA on
-site X") and the bot goes on to the next site. The report lists the given-up
-sites, so you know where to try by hand.
+A **CAPTCHA** (or a phone/SMS check the bot cannot complete) is **parked** as
+**needs you on this page**: the browser tab stays open for several hours, you get
+a notice with a link to **Live view**, you **Take control**, solve the check, press
+**Done** on the hand-over card, and the mission tries that site again in a later
+session from the same page. If nobody answers in time, the item is **given up**
+as before, with the reason in the report.
 
 An **approval card** nobody answers (for example for money) stays open for five
 minutes. After that only the item it belongs to is parked ("needs your approval")

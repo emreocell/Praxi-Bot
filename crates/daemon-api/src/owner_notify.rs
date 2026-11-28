@@ -703,6 +703,51 @@ impl AppState {
         }
     }
 
+    /// A mission parked a CAPTCHA or phone check: tell the owner to open live view.
+    pub(crate) fn notify_mission_handover(&self, notice: agent_core::MissionHandoverNotice) {
+        let Ok(store) = self.mission_store() else {
+            return;
+        };
+        let Ok(Some(m)) = store.get(&notice.mission_id) else {
+            return;
+        };
+        let Ok(p) = store.progress(&notice.mission_id) else {
+            return;
+        };
+        let bot = BotId(Uuid::parse_str(&notice.bot_id).unwrap_or_default());
+        let title = store
+            .items(&notice.mission_id, None)
+            .ok()
+            .and_then(|items| {
+                items
+                    .into_iter()
+                    .find(|i| i.key == notice.item)
+                    .map(|i| i.title)
+            })
+            .unwrap_or_else(|| notice.item.clone());
+        let mut d = Draft::new(NoticeKind::Blocked, NoticeSource::Mission, clip(&m.title, 90));
+        self.bot_name(bot).clone_into(&mut d.bot_name);
+        d.bot_id = Some(notice.bot_id);
+        d.mission_id = Some(notice.mission_id);
+        d.chat_id = Some(m.chat_id.clone());
+        d.progress = Some(NoticeProgress {
+            total: p.total,
+            done: p.done,
+            blocked: p.blocked,
+            failed: p.failed,
+            skipped: p.skipped,
+        });
+        d.app_only.push(clip(
+            &format!(
+                "{title}: needs you on this page ({}) — open Live view for {} and press Take control, then press Done on the hand-over card",
+                clip(&notice.site, 80),
+                self.bot_name(bot)
+            ),
+            TEXT_MAX,
+        ));
+        self.owner_notify().publish(d, storage::now_ms());
+    }
+
     /// A mission changed: announce a milestone when its done count passed a quarter.
     pub(crate) fn notify_mission_changed(&self, id: &str) {
         let Ok(store) = self.mission_store() else {

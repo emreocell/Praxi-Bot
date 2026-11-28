@@ -1,10 +1,14 @@
 //! Housekeeping for the owner, deliberately absent from the model's tool list.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use browser_cdp::{Browser, LaunchOptions, saved_sites as profile};
 
 use super::{CdpDriver, Shared, close_session, s};
+
+/// Longest browser hold for a mission hand-over (matches the default mission timeout).
+const MAX_HANDOVER_HOLD: Duration = Duration::from_secs(8 * 60 * 60);
 
 /// A handle to the same per-bot pool used by browser tools.
 #[derive(Default)]
@@ -27,6 +31,24 @@ pub struct ProfileStatus {
 }
 
 impl BrowserProfiles {
+    /// While a mission waits for the owner on a CAPTCHA or phone check, keep this bot's browser
+    /// session from the idle reaper for `duration` (capped at [`MAX_HANDOVER_HOLD`]).
+    ///
+    /// # Errors
+    /// Returns an error when the pool is unavailable.
+    pub fn hold_session_for_owner(&self, bot: &str, duration: Duration) -> Result<(), String> {
+        if bot.is_empty()
+            || !bot
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err("invalid bot id".into());
+        }
+        let capped = duration.min(MAX_HANDOVER_HOLD);
+        crate::handover::handover_hub().hold_browser(bot, Instant::now() + capped);
+        Ok(())
+    }
+
     /// Conservative policy signal, also after a restart. A model's omitted
     /// `profile` argument must never turn a saved account into anonymous browsing.
     ///

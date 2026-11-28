@@ -868,6 +868,83 @@ impl MissionStore {
         Ok(counts)
     }
 
+    /// The owner finished a live step on the page (a CAPTCHA, phone verification): release one
+    /// blocked `live_only` item back to `todo` with a daemon-written note in `owner_answer`.
+    ///
+    /// # Errors
+    /// Unknown mission or item, SQLite failure.
+    pub fn release_live_blocked(
+        &self,
+        id: &str,
+        key: &str,
+        note: &str,
+        now: i64,
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let note = check_text("answer", note, MAX_TEXT_CHARS)?;
+        let n = tx.execute(
+            "UPDATE mission_items SET status = 'todo', owner_answer = ?3, live_only = 0, attempts = 0, cuts = 0, updated_at_ms = ?4 \
+             WHERE mission_id = ?1 AND key = ?2 AND status = 'blocked' AND live_only = 1",
+            params![id, key, note, now],
+        )?;
+        if n > 0 {
+            event(
+                &tx,
+                id,
+                now,
+                "item",
+                Some(key),
+                &json!({"from": "blocked", "to": "todo", "by": "owner_live"}),
+            )?;
+            bump(&tx, id, now)?;
+            let state: String =
+                tx.query_row("SELECT state FROM missions WHERE id = ?1", [id], |r| r.get(0))?;
+            if matches!(
+                MissionState::parse(&state),
+                Some(MissionState::Blocked | MissionState::Waiting)
+            ) {
+                transition_in(
+                    &tx,
+                    id,
+                    MissionState::Running,
+                    Some("the owner finished on the page"),
+                    now,
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(n > 0)
+    }
+
+    /// A live hand-over timed out or the owner gave up: mark one blocked `live_only` item failed.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn fail_live_blocked(&self, id: &str, key: &str, error: &str, now: i64) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let error = check_text("error", error, MAX_TEXT_CHARS)?;
+        let n = tx.execute(
+            "UPDATE mission_items SET status = 'failed', last_error = ?3, blocked_reason = NULL, live_only = 0, updated_at_ms = ?4 \
+             WHERE mission_id = ?1 AND key = ?2 AND status = 'blocked' AND live_only = 1",
+            params![id, key, error, now],
+        )?;
+        if n > 0 {
+            event(
+                &tx,
+                id,
+                now,
+                "item",
+                Some(key),
+                &json!({"from": "blocked", "to": "failed", "by": "handover_timeout"}),
+            )?;
+            bump(&tx, id, now)?;
+        }
+        tx.commit()?;
+        Ok(n > 0)
+    }
+
     /// A CAPTCHA stopped the work on the site the bot is on and nobody can solve it (a mission
     /// has no live hand-over, and a typed answer does not pass a CAPTCHA): give the item being
     /// worked on up with the reason, instead of parking it for an owner who could only skip it.

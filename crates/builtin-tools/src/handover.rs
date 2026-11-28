@@ -565,6 +565,8 @@ fn fingerprint(snapshot: &str) -> u64 {
 #[derive(Default)]
 pub struct HandoverHub {
     armed: Mutex<HashMap<String, Armed>>,
+    /// Keep a bot's browser session open until the owner may finish a step on the page.
+    browser_holds: Mutex<HashMap<String, std::time::Instant>>,
     /// Own action budgets per ROOT run.
     seen: Mutex<HashMap<String, CaptchaBudget>>,
     /// Subagent run -> root run of its family.
@@ -709,6 +711,40 @@ impl HandoverHub {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(run_id.to_owned(), Arc::downgrade(driver));
+    }
+
+    /// Keep the managed browser of `bot_id` from idle-closing until `until`.
+    pub fn hold_browser(&self, bot_id: &str, until: std::time::Instant) {
+        self.browser_holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(bot_id.to_owned(), until);
+    }
+
+    /// Drop a browser hold early (the owner finished or gave up).
+    pub fn clear_browser_hold(&self, bot_id: &str) {
+        self.browser_holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(bot_id);
+    }
+
+    /// Whether a mission hand-over still needs the page open for `bot_id`.
+    #[must_use]
+    pub fn browser_hold_active(&self, bot_id: &str) -> bool {
+        let mut holds = self
+            .browser_holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(until) = holds.get(bot_id) else {
+            return false;
+        };
+        if std::time::Instant::now() >= *until {
+            holds.remove(bot_id);
+            false
+        } else {
+            true
+        }
     }
 
     /// Whether a CAPTCHA is on the page of this run's VISIBLE managed browser right now

@@ -21,7 +21,7 @@ use crate::brief::data_value;
 use crate::error::MissionError;
 use crate::model::{
     DEFAULT_TIMEOUT_MINUTES, ItemStatus, MAX_AFTER_SECS, MAX_TIMEOUT_MINUTES, MIN_AFTER_SECS,
-    Mission, MissionState, clip, mentions_captcha,
+    Mission, MissionState, clip, needs_owner_on_page,
 };
 use crate::store::{ItemUpdate, MissionStore, NewItem};
 use crate::supervisor::Clock;
@@ -102,7 +102,7 @@ pub fn tools(
         "status":{"type":"string","enum":["doing","done","blocked","failed","skipped","todo"]},
         "result":{"type":"string","description":"Evidence of what was achieved (done)."},
         "error":{"type":"string","description":"What went wrong (failed)."},
-        "reason":{"type":"string","description":"What the owner must do or answer (blocked): 2FA code, payment, a question. A CAPTCHA is not blocked: mark the item failed with the CAPTCHA as the error."}
+        "reason":{"type":"string","description":"What the owner must do or answer (blocked): 2FA code, payment, a question. A CAPTCHA or phone/SMS verification needs the owner on the page: mark blocked with that reason (the app opens live view); do not mark failed."}
     },"required":["key","status"]});
     let note_schema = json!({"type":"object","properties":{
         "kind":{"type":"string","enum":["decision","learned","warning"]},
@@ -384,14 +384,8 @@ impl MissionTool {
             )
         })?;
         let (mut error, mut reason) = (i.error, i.reason);
-        // Policy: a CAPTCHA is not something the owner can answer from the list, and a mission
-        // has no live hand-over, so the item is given up with the reason, not parked.
-        let captcha =
-            status == ItemStatus::Blocked && reason.as_deref().is_some_and(mentions_captcha);
-        if captcha {
-            status = ItemStatus::Failed;
-            error = error.or(reason.take());
-        }
+        let live_page = status == ItemStatus::Blocked
+            && reason.as_deref().is_some_and(needs_owner_on_page);
         let it = self
             .store
             .update_item(
@@ -402,7 +396,7 @@ impl MissionTool {
                     result: i.result,
                     error,
                     blocked_reason: reason,
-                    live_only: None,
+                    live_only: live_page.then_some(true),
                 },
                 false,
                 self.clock.now_ms(),
@@ -417,9 +411,9 @@ impl MissionTool {
             p.blocked,
             p.open()
         );
-        if captcha {
+        if live_page {
             s.push_str(
-                " A CAPTCHA cannot be solved here, so the item is given up with that reason (the report lists it). Do not retry the site: take the next item now.",
+                " The owner must finish this on the page (live view, Take control). Do not wait: take the next item now.",
             );
         } else if it.status == ItemStatus::Blocked {
             s.push_str(" It is parked for the owner. Do not wait: take the next item now.");
@@ -760,7 +754,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_captcha_is_given_up_with_its_reason_not_parked_for_the_owner() {
+    async fn a_captcha_blocked_reason_parks_live_for_the_owner_on_the_page() {
         let f = fixture();
         call(
             &f,
@@ -778,15 +772,14 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(r.contains("CAPTCHA") && r.contains("given up"), "{r}");
-        let items = f.store.items(&f.mission, None).unwrap();
-        assert_eq!(items[0].status, ItemStatus::Failed);
-        assert_eq!(
-            items[0].last_error.as_deref(),
-            Some("hCaptcha on the sign-up form")
+        assert!(
+            r.contains("live view") || r.contains("Live view") || r.contains("owner"),
+            "{r}"
         );
-        assert_eq!(items[0].blocked_reason, None);
-        assert_eq!(f.store.progress(&f.mission).unwrap().blocked, 0);
+        let items = f.store.items(&f.mission, None).unwrap();
+        assert_eq!(items[0].status, ItemStatus::Blocked);
+        assert!(items[0].live_only);
+        assert_eq!(f.store.progress(&f.mission).unwrap().blocked, 1);
     }
 
     #[tokio::test]

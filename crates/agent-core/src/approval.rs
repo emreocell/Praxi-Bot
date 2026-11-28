@@ -4023,19 +4023,6 @@ fn mission_refusal_text(why: &str) -> String {
     )
 }
 
-/// What the model reads when a CAPTCHA ends the work on an item of a mission: the item is
-/// given up (nobody can solve it from the ledger), the session moves on.
-fn mission_give_up_text(key: Option<&str>, reason: &str) -> String {
-    match key {
-        Some(key) => format!(
-            "Not waiting: this is a mission, so a person is not asked right now, and a CAPTCHA cannot be solved from the ledger. Item {key:?} is given up ({reason}); the report lists it. Do not retry the site. Take the next open item now."
-        ),
-        None => format!(
-            "Not waiting: this is a mission, so a person is not asked right now, and a CAPTCHA cannot be solved from the ledger. Mark the item you are working on as failed with mission_item (error: {reason}), do not retry the site, and take the next open item now."
-        ),
-    }
-}
-
 /// How [`Shared::route_question`] disposed of a question.
 pub(crate) enum QuestionRoute {
     /// The owner answered the card.
@@ -4091,35 +4078,18 @@ impl Shared {
     /// waits for the owner. The item the bot is working on is parked in the ledger
     /// (the owner finds it in the blocked list and the digest) and the session moves on.
     fn park_item_for_handover(
-        &self,
+        self: &Arc<Self>,
         ctx: &RunCtx,
+        call_id: ToolCallId,
         mission: &str,
         kind: HandoverKind,
         card: &builtin_tools::HandoverCard,
     ) -> (String, bool) {
-        builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
         let site = truncate_utf8(&card.site, 80);
+        let limit = self.cfg.mission_handover_timeout;
+        let deadline = tokio::time::Instant::now() + limit;
         let reason = match kind {
-            HandoverKind::Captcha => {
-                // Policy: nobody can solve a CAPTCHA from a mission (no live hand-over, and a
-                // typed answer does not pass it), so the item is given up with the reason, not
-                // parked for an owner who could only skip it.
-                let reason = format!("a CAPTCHA on {site}; Praxi does not solve CAPTCHAs");
-                let key = self.mission_store.read().clone().and_then(|s| {
-                    s.give_up_sole_doing_item(mission, &reason, storage::now_ms())
-                        .ok()
-                        .flatten()
-                });
-                self.audit(
-                    ctx,
-                    "system",
-                    "handover.given_up",
-                    &json!({"kind": kind, "site": card.site, "item": key}),
-                );
-                return (mission_give_up_text(key.as_deref(), &reason), true);
-            }
-            // A one-time code is never typed into a mission answer (it would sit in the ledger
-            // and reach the model): the owner finishes this step live on the site or skips it.
+            HandoverKind::Captcha => format!("needs you on this page: a CAPTCHA on {site}"),
             HandoverKind::Code => format!(
                 "a 2FA / verification code for {site} is needed; Praxi never stores it or shows it to the bot, so finish this step yourself on the site, or skip the item"
             ),
@@ -4129,19 +4099,98 @@ impl Shared {
             s.block_sole_doing_item(
                 mission,
                 &reason,
-                kind == HandoverKind::Code,
+                true,
                 storage::now_ms(),
             )
             .ok()
             .flatten()
         });
+        if kind == HandoverKind::Code {
+            builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
+        }
         self.audit(
             ctx,
             "system",
             "handover.parked",
-            &json!({"kind": kind, "site": card.site, "item": key}),
+            &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": key}),
         );
-        (mission_park_text(key.as_deref(), &reason), true)
+        let Some(item) = key else {
+            return (mission_park_text(None, &reason), true);
+        };
+        if let Some(profiles) = self.browser_profiles.get() {
+            let bot = ctx.bot_id.to_string();
+            let _ = profiles.hold_session_for_owner(&bot, limit);
+        }
+        self.handovers.lock().insert(
+            call_id,
+            crate::shared::HandoverInfo {
+                run_id: ctx.run_id,
+                kind,
+                bot_id: ctx.bot_id.to_string(),
+                mission: Some(crate::shared::MissionTarget {
+                    mission_id: mission.to_owned(),
+                    item: item.clone(),
+                }),
+                deadline,
+            },
+        );
+        let tainted = self
+            .root_run_id(ctx)
+            .is_none_or(|r| self.router.tainted_runs.lock().contains(&r));
+        self.emit(
+            ctx,
+            Event::HandoverRequested(protocol::event::HandoverRequested {
+                run_id: ctx.run_id,
+                call_id,
+                kind,
+                site: self.redact(card.site.clone()),
+                untrusted_content: tainted,
+                expires_in_secs: limit.as_secs(),
+                parked: true,
+            }),
+        );
+        if let Some(hook) = self.mission_handover_notify.lock().clone() {
+            hook(crate::shared::MissionHandoverNotice {
+                mission_id: mission.to_owned(),
+                item: item.clone(),
+                bot_id: ctx.bot_id.to_string(),
+                call_id,
+                site: card.site.clone(),
+            });
+        }
+        let this = Arc::downgrade(self);
+        let (user_id, run_id, bot_id) = (ctx.user_id, ctx.run_id, ctx.bot_id.to_string());
+        let parked_item = item.clone();
+        let parked_mission = mission.to_owned();
+        let fail_reason = reason.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep_until(deadline).await;
+            let Some(this) = this.upgrade() else {
+                return;
+            };
+            if this.handovers.lock().remove(&call_id).is_none() {
+                return;
+            }
+            builtin_tools::handover_hub().disarm(&run_id.to_string());
+            builtin_tools::handover_hub().clear_browser_hold(&bot_id);
+            if let Some(store) = this.mission_store.read().clone() {
+                let error = format!("{fail_reason} (timed out waiting for the owner)");
+                let _ = store.fail_live_blocked(
+                    &parked_mission,
+                    &parked_item,
+                    &error,
+                    storage::now_ms(),
+                );
+            }
+            let _ = this.storage.append_audit(
+                user_id,
+                Some(run_id),
+                "system",
+                "handover.expired",
+                &json!({"call_id": call_id, "mission_item": parked_item}),
+            );
+        });
+        (mission_park_text(Some(&item), &reason), true)
     }
 
     /// An approval nobody gave in time in a mission session: the call is denied and the item
@@ -4347,39 +4396,35 @@ impl Shared {
                 "only a run the owner started at the desktop can hand a step over; tell the owner in your answer instead",
             );
         }
-        // The per-run limit counts parked handovers of a mission too: a page that throws a
-        // 2FA prompt at every item cannot make a session park without end. A CAPTCHA in a
-        // mission is different: it asks nobody for anything, it only gives that one item up
-        // (a failed item, never retried), so a run over many sites with a CAPTCHA each must
-        // reach the later items instead of being refused after the fourth.
-        let gives_up_only = ctx.mission.is_some() && kind == HandoverKind::Captcha;
-        if !gives_up_only {
-            let mut st = ctx.state.lock();
-            if st.handovers >= self.cfg.max_handovers_per_run {
-                drop(st);
-                return refuse("this run has asked for help too often");
-            }
-            st.handovers += 1;
+        let mut st = ctx.state.lock();
+        if st.handovers >= self.cfg.max_handovers_per_run {
+            drop(st);
+            return refuse("this run has asked for help too often");
         }
+        st.handovers += 1;
+        drop(st);
         if let Some(mission) = &ctx.mission {
-            return self.park_item_for_handover(ctx, mission, kind, card);
+            return self.park_item_for_handover(ctx, call_id, mission, kind, card);
         }
         let tainted = self
             .root_run_id(ctx)
             .is_none_or(|r| self.router.tainted_runs.lock().contains(&r));
+        let summary = format!("handover: {}", truncate_utf8(&card.site, 80));
+        let (approval_id, mut guard, rx) =
+            self.park(ctx, call_id, &summary, true, false, PendingKind::Handover);
         let limit = if self.cfg.approval_timeout.is_zero() {
             self.cfg.handover_timeout
         } else {
             self.cfg.handover_timeout.min(self.cfg.approval_timeout)
         };
-        let summary = format!("handover: {}", truncate_utf8(&card.site, 80));
-        let (approval_id, mut guard, rx) =
-            self.park(ctx, call_id, &summary, true, false, PendingKind::Handover);
         self.handovers.lock().insert(
             call_id,
             crate::shared::HandoverInfo {
                 run_id: ctx.run_id,
                 kind,
+                bot_id: ctx.bot_id.to_string(),
+                mission: None,
+                deadline: tokio::time::Instant::now() + limit,
             },
         );
         self.audit(
@@ -4397,6 +4442,7 @@ impl Shared {
                 site: self.redact(card.site.clone()),
                 untrusted_content: tainted,
                 expires_in_secs: limit.as_secs(),
+                parked: false,
             }),
         );
         let mut rx = rx;

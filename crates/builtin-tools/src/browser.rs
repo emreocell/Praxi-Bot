@@ -2204,7 +2204,10 @@ impl Shared {
             }
             if let Some(gate) = self.control.clone() {
                 let bot_id = id.to_owned();
-                cdp.set_activity_probe(Arc::new(move || gate.computer_in_use_for_bot(&bot_id)));
+                cdp.set_activity_probe(Arc::new(move || {
+                    gate.computer_in_use_for_bot(&bot_id)
+                        || crate::handover::handover_hub().browser_hold_active(&bot_id)
+                }));
             }
             let cdp = Arc::new(cdp);
             managed.peers.lock().insert(id.into(), Arc::downgrade(&cdp));

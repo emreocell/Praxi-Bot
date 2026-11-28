@@ -288,6 +288,14 @@ impl AppState {
             mail: self.0.agent.mail_handle(),
         }));
         let weak = self.downgrade();
+        let notice = weak.clone();
+        self.0.agent.set_mission_handover_notify(Arc::new(
+            move |n| {
+                if let Some(state) = notice.upgrade() {
+                    state.notify_mission_handover(n);
+                }
+            },
+        ));
         supervisor.set_change_hook(Arc::new(move |id| {
             if let Some(state) = weak.upgrade() {
                 state.notify_mission_changed(id);
