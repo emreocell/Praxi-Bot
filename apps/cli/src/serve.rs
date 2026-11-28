@@ -79,6 +79,17 @@ fn env_secret_values(
         .collect()
 }
 
+/// Built-in provider catalog entries (same sources as startup).
+#[must_use]
+pub fn builtin_provider_catalog() -> Catalog {
+    Catalog::from_entries(
+        BUILTIN_CATALOG_SOURCES
+            .iter()
+            .filter_map(|src| toml::from_str(src).ok())
+            .collect(),
+    )
+}
+
 const BUILTIN_CATALOG_SOURCES: &[&str] = &[
     include_str!("../../../providers/catalog/anthropic.toml"),
     include_str!("../../../providers/catalog/deepseek.toml"),
@@ -279,6 +290,7 @@ pub fn build_agent_with_live_views(
         None,
         false,
         false,
+        None,
     )
     .expect("test agent skill wiring")
 }
@@ -304,6 +316,7 @@ fn build_agent_with_skills(
     fill_secrets: Option<Arc<secret_store::FillSecrets>>,
     safe_mode: bool,
     owner_desktop: bool,
+    secret_store: Option<Arc<dyn SecretStore>>,
 ) -> Result<AgentLoop> {
     if !skills.has_assignments() {
         return Err("skill index must carry the per-bot assignment source".into());
@@ -345,6 +358,9 @@ fn build_agent_with_skills(
     tools.knowledge = Some(Arc::new(
         builtin_tools::knowledge::LocalKnowledgeBackend::new(Arc::clone(storage)),
     ));
+    if let Some(store) = secret_store.filter(|_| !safe_mode) {
+        tools.image_wiring = Some((Arc::new(builtin_provider_catalog()), store));
+    }
     let host_limits = std::fs::read_to_string(data_dir.join("host.toml")).unwrap_or_default();
     let (max_computer_runs, idle) = computer_limits(
         &host_limits,
@@ -1220,6 +1236,7 @@ pub fn serve(
         fill_secrets.clone(),
         safe_mode,
         *desktop_session && owner_key.is_some() && !host_is_host,
+        telegram_store.clone(),
     )?;
     step("agent built");
     // Same registry the loop calls tools from: MCP servers, email and web tools register into it.
@@ -2791,6 +2808,7 @@ body
             None,
             false,
             false,
+            None,
         );
         assert!(
             result.is_err(),

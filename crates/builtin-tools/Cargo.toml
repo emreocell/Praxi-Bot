@@ -36,6 +36,7 @@ permission-engine = { path = "../permission-engine", version = "0.1.0" }
 # enabled; tree kill is TerminateJobObject / killpg while the call is armed.
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
 protocol.workspace = true
+provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
 pty-session = { path = "../pty-session", version = "0.1.0" }
 script-runtime = { path = "../script-runtime", version = "0.1.0" }
 secret-store.workspace = true

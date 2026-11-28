@@ -3177,6 +3177,11 @@
         "failed": "Web'de aranamadı",
         "running": "Web'de aranıyor"
       },
+      "image_generate": {
+        "done": "Görsel oluşturuldu",
+        "failed": "Görsel oluşturulamadı",
+        "running": "Görsel oluşturuluyor"
+      },
       "workflow": {
         "done": "İş akışı çalıştırıldı",
         "failed": "İş akışı çalıştırılmadı",

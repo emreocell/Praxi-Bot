@@ -2260,6 +2260,12 @@ impl TurnExecutor {
                     let reported =
                         if tool_name.starts_with("browser_") || tool_name.starts_with("desktop_") {
                             builtin_tools::browser::take_sideband(&run.id.to_string())
+                        } else if tool_name == builtin_tools::IMAGE_GENERATE {
+                            let preview = builtin_tools::take_preview(&run.id.to_string());
+                            builtin_tools::browser::Sideband {
+                                screenshot: preview.preview,
+                                ..Default::default()
+                            }
                         } else {
                             builtin_tools::browser::Sideband::default()
                         };

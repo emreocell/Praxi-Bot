@@ -24,6 +24,7 @@
 //!   `RetryInfo` detail), 5xx -> `Upstream`; 429/`Upstream` are retried.
 
 mod embedding;
+mod image;
 mod request;
 mod schema;
 mod stream;

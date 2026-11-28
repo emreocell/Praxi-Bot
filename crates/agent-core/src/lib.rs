@@ -35,6 +35,7 @@ mod exec;
 mod full_autonomy;
 mod grounding;
 mod history;
+mod image_generate;
 mod knowledge;
 mod ledger;
 mod loops;

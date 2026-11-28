@@ -941,6 +941,7 @@ dependencies = [
  "permission-engine",
  "process-wrap",
  "protocol",
+ "provider-catalog",
  "pty-session",
  "rustix",
  "script-runtime",
@@ -7036,6 +7037,7 @@ name = "provider-catalog"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "cli-provider",
  "flate2",
  "fs4",

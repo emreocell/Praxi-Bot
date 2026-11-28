@@ -424,6 +424,15 @@ impl AgentLoop {
         // The tools and the run loop share ONE mail handle, so the host binds the
         // connector once ([`AgentLoop::mail_handle`]) and both see it.
         cfg.mail = Arc::clone(&self.sh.mail);
+        if cfg.image_generate.is_none()
+            && let Some(wiring) = cfg.image_wiring.take()
+        {
+            cfg.image_generate = Some(Arc::new(crate::image_generate::LoopImageGenerate {
+                sh: Arc::downgrade(&self.sh),
+                catalog: wiring.0,
+                store: wiring.1,
+            }));
+        }
         let _ = builtin_tools::register_builtin_tools(&self.sh.tools, cfg);
         self
     }
