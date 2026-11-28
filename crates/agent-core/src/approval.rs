@@ -4088,6 +4088,37 @@ fn mission_give_up_text(key: Option<&str>, reason: &str) -> String {
 }
 
 impl Shared {
+    /// A mission's 2FA code: never typed into a mission answer (it would sit in the ledger and
+    /// reach the model). The item is parked `live_only`; the owner finishes the step on the
+    /// site or skips the item.
+    fn park_code_item(
+        self: &Arc<Self>,
+        ctx: &RunCtx,
+        call_id: ToolCallId,
+        mission: &str,
+        card: &builtin_tools::HandoverCard,
+    ) -> (String, bool) {
+        let kind = HandoverKind::Code;
+        let site = truncate_utf8(&card.site, 80);
+        let store = self.mission_store.read().clone();
+        builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
+        let reason = format!(
+            "a 2FA / verification code for {site} is needed; Praxi never stores it or shows it to the bot, so finish this step yourself on the site, or skip the item"
+        );
+        let key = store.and_then(|s| {
+            s.block_sole_doing_item(mission, &reason, true, storage::now_ms())
+                .ok()
+                .flatten()
+        });
+        self.audit(
+            ctx,
+            "system",
+            "handover.parked",
+            &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": key}),
+        );
+        (mission_park_text(key.as_deref(), &reason), true)
+    }
+
     /// A CAPTCHA or 2FA in a mission session blocks only the item it stops: nobody
     /// waits for the owner. The item the bot is working on is parked in the ledger
     /// (the owner finds it in the blocked list and the digest) and the session moves on.
@@ -4098,6 +4129,7 @@ impl Shared {
     /// reach (or the bot's browser is locked, see [`builtin_tools::HandoverHub::park`]). Over
     /// the caps the item is given up instead. A code is never parked with a card: the owner
     /// finishes that step on the site.
+    #[allow(clippy::too_many_lines)] // Ledger row, held page, caps and give-ups, card, notice.
     async fn park_item_for_handover(
         self: &Arc<Self>,
         ctx: &RunCtx,
@@ -4106,29 +4138,12 @@ impl Shared {
         kind: HandoverKind,
         card: &builtin_tools::HandoverCard,
     ) -> (String, bool) {
+        if kind == HandoverKind::Code {
+            return self.park_code_item(ctx, call_id, mission, card);
+        }
         let hub = builtin_tools::handover_hub();
         let site = truncate_utf8(&card.site, 80);
         let store = self.mission_store.read().clone();
-        if kind == HandoverKind::Code {
-            // A one-time code is never typed into a mission answer (it would sit in the ledger
-            // and reach the model): the owner finishes this step live on the site or skips it.
-            hub.disarm(&ctx.run_id.to_string());
-            let reason = format!(
-                "a 2FA / verification code for {site} is needed; Praxi never stores it or shows it to the bot, so finish this step yourself on the site, or skip the item"
-            );
-            let key = store.and_then(|s| {
-                s.block_sole_doing_item(mission, &reason, true, storage::now_ms())
-                    .ok()
-                    .flatten()
-            });
-            self.audit(
-                ctx,
-                "system",
-                "handover.parked",
-                &json!({"call_id": call_id, "kind": kind, "site": card.site, "item": key}),
-            );
-            return (mission_park_text(key.as_deref(), &reason), true);
-        }
         let limit = self.cfg.mission_handover_timeout;
         let reason = format!("needs you on this page: a CAPTCHA on {site}");
         let now = storage::now_ms();

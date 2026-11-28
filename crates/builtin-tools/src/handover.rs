@@ -810,32 +810,23 @@ impl HandoverHub {
             );
         }
         let held = crate::browser::in_lane(lane, driver.hold_page(call_id)).await;
-        let kept = {
-            let mut parked = self.parked();
-            match (parked.get_mut(call_id), held) {
-                (Some(p), Ok(page)) => {
-                    p.armed.driver = page;
-                    p.source = Some(Arc::clone(&driver));
-                    Some(ParkedPage::Tab)
-                }
-                (Some(_), Err(_)) => Some(ParkedPage::Locked),
-                (None, held) => {
-                    if held.is_ok() {
-                        None
-                    } else {
-                        return Err(ParkRefused::NotArmed);
-                    }
-                }
+        let moved = held.is_ok();
+        let kept = self.parked().get_mut(call_id).map(|p| match held {
+            Ok(page) => {
+                p.armed.driver = page;
+                p.source = Some(Arc::clone(&driver));
+                ParkedPage::Tab
             }
-        };
-        match kept {
-            Some(page) => Ok(page),
-            None => {
-                // Released while the page moved: give the page up again.
-                driver.release_held_page(call_id, false).await;
-                Err(ParkRefused::NotArmed)
-            }
+            Err(_) => ParkedPage::Locked,
+        });
+        if let Some(page) = kept {
+            return Ok(page);
         }
+        if moved {
+            // Released while the page moved: give the page up again.
+            driver.release_held_page(call_id, false).await;
+        }
+        Err(ParkRefused::NotArmed)
     }
 
     /// End the parked CAPTCHA under `call_id`: its request is invalidated and its page let go

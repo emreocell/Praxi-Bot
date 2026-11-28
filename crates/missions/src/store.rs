@@ -247,6 +247,25 @@ fn model_item_transition_ok(from: ItemStatus, to: ItemStatus) -> bool {
     }
 }
 
+/// Whether the bot (not the owner) may move `cur` to `to`.
+fn model_may_move(cur: &Item, to: ItemStatus) -> Result<()> {
+    let key = &cur.key;
+    // A step only the owner can do on the page (a CAPTCHA, a phone check, a code): the bot
+    // cannot take the item up again by itself, the owner's answer or edit releases it.
+    if cur.status == ItemStatus::Blocked && cur.live_only && to != cur.status {
+        return Err(MissionError::Invalid(format!(
+            "item {key:?} waits for the owner to finish a step on the site; only the owner can release it. Do not retry it: take the next item"
+        )));
+    }
+    if !model_item_transition_ok(cur.status, to) {
+        return Err(MissionError::Invalid(format!(
+            "item {key:?} is {} and cannot become {to}; finished items stay finished",
+            cur.status
+        )));
+    }
+    Ok(())
+}
+
 fn check_text(what: &str, s: &str, max: usize) -> Result<String> {
     let s = s.trim();
     if s.is_empty() {
@@ -605,18 +624,8 @@ impl MissionStore {
                 "an item is parked for a wake only through mission_wait (a timer, a mail or a webhook)".into(),
             ));
         }
-        // A step only the owner can do on the page (a CAPTCHA, a phone check, a code): the bot
-        // cannot take the item up again by itself, the owner's answer or edit releases it.
-        if !by_owner && cur.status == ItemStatus::Blocked && cur.live_only && to != cur.status {
-            return Err(MissionError::Invalid(format!(
-                "item {key:?} waits for the owner to finish a step on the site; only the owner can release it. Do not retry it: take the next item"
-            )));
-        }
-        if !by_owner && !model_item_transition_ok(cur.status, to) {
-            return Err(MissionError::Invalid(format!(
-                "item {key:?} is {} and cannot become {to}; finished items stay finished",
-                cur.status
-            )));
+        if !by_owner {
+            model_may_move(&cur, to)?;
         }
         if !by_owner
             && to == ItemStatus::Doing
@@ -2273,7 +2282,7 @@ mod tests {
         assert!(s.claim_live_handover("call-1", 20).unwrap().is_some());
         assert!(s.claim_live_handover("call-1", 21).unwrap().is_none());
         // Expiry leaves a claimed row alone; the failed check puts it back.
-        assert!(s.expire_live_handovers(2000).unwrap().is_empty());
+        assert_eq!(s.expire_live_handovers(2000).unwrap().len(), 0);
         assert_eq!(
             s.unclaim_live_handover("call-1", 30).unwrap(),
             Unclaim::Restored
@@ -2330,7 +2339,7 @@ mod tests {
         status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
         park(&s, &m.id, "call-c", i64::MAX, 2);
         assert!(s.claim_live_handover("call-c", 200).unwrap().is_some());
-        assert!(s.expire_live_handovers(201).unwrap().is_empty());
+        assert_eq!(s.expire_live_handovers(201).unwrap().len(), 0);
         assert_eq!(
             s.expire_live_handovers(200 + CLAIM_STALE_MS).unwrap().len(),
             1

@@ -4199,6 +4199,21 @@ fn format_wait_duration(d: Duration) -> String {
     }
 }
 
+/// The facts of a mission's parked CAPTCHA, read from its ledger row.
+fn mission_handover_info(row: &missions::ParkedHandover, now_ms: i64) -> crate::HandoverInfo {
+    let left = u64::try_from(row.expires_at_ms.saturating_sub(now_ms)).unwrap_or(0);
+    crate::HandoverInfo {
+        run_id: RunId(uuid::Uuid::parse_str(&row.run_id).unwrap_or_default()),
+        kind: protocol::event::HandoverKind::Captcha,
+        bot_id: row.bot_id.clone(),
+        mission: Some(crate::MissionTarget {
+            mission_id: row.mission_id.clone(),
+            item: row.item.clone(),
+        }),
+        deadline: tokio::time::Instant::now() + std::time::Duration::from_millis(left),
+    }
+}
+
 #[cfg(test)]
 mod emit_tests {
     use super::*;
@@ -4249,20 +4264,5 @@ mod emit_tests {
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].seq, 0);
         assert_eq!(log[1].seq, 1);
-    }
-}
-
-/// The facts of a mission's parked CAPTCHA, read from its ledger row.
-fn mission_handover_info(row: &missions::ParkedHandover, now_ms: i64) -> crate::HandoverInfo {
-    let left = u64::try_from(row.expires_at_ms.saturating_sub(now_ms)).unwrap_or(0);
-    crate::HandoverInfo {
-        run_id: RunId(uuid::Uuid::parse_str(&row.run_id).unwrap_or_default()),
-        kind: protocol::event::HandoverKind::Captcha,
-        bot_id: row.bot_id.clone(),
-        mission: Some(crate::MissionTarget {
-            mission_id: row.mission_id.clone(),
-            item: row.item.clone(),
-        }),
-        deadline: tokio::time::Instant::now() + std::time::Duration::from_millis(left),
     }
 }
