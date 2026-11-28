@@ -2076,6 +2076,7 @@ dependencies = [
  "browser-cdp",
  "builtin-tools",
  "cap-fs-ext",
+ "cap-std",
  "channel-api",
  "chrono",
  "chrono-tz",

@@ -52,19 +52,41 @@ export function reportCounts(r: BotDeleteReport): DeleteCount[] {
     ["messages", r.messages],
     ["runs", r.runs],
     ["schedules", r.schedules],
+    ["webhooks", r.webhooks],
     ["missions", r.missions],
     ["memories", r.memories],
     ["mailboxes", r.mailboxes_removed]
   ]);
 }
 
-/** What stops the delete for now: the bot is working. */
-export type DeleteBlock = "run" | "mission" | null;
+/**
+ * What stops the delete for now: the bot is working (a run, a running mission) or leads a
+ * mission that waits for a timer, a mail or a webhook and would start again on its own.
+ */
+export type DeleteBlock = "run" | "mission" | "waiting" | null;
 
 export function deleteBlock(p: BotDeletePreview): DeleteBlock {
   if (p.active_runs > 0) return "run";
   if (p.running_missions > 0) return "mission";
+  if (p.waiting_missions > 0) return "waiting";
   return null;
+}
+
+/** Mission states "stop it first" cancels: a running one, and a waiting one that would wake. */
+export const STOPPED_MISSION_STATES: ReadonlySet<string> = new Set(["running", "waiting"]);
+
+/** A cleanup step that did not finish after the bot was deleted (`botDelete.step.<key>`). */
+export type DeleteStepKey = BotDeleteReport["cleanup_pending"][number];
+
+/**
+ * What did not finish after the bot was deleted: cleanup steps and inboxes that are still at
+ * AgentMail. Empty when everything went; otherwise the same request retries it.
+ */
+export function leftovers(r: BotDeleteReport): { steps: DeleteStepKey[]; inboxes: string[] } {
+  return {
+    steps: r.cleanup_pending,
+    inboxes: r.inboxes_not_deleted.map((n) => n.address)
+  };
 }
 
 /** AgentMail inboxes only this bot used: the owner may delete them at the provider as well. */
@@ -77,7 +99,10 @@ export function keptMailboxes(p: BotDeletePreview): BotDeletePreview["mailboxes"
   return p.mailboxes.filter((m) => m.fate !== "removed");
 }
 
-/** The second step opens the red button only for the bot's own name (spaces around it do not count). */
+/**
+ * The second step opens the red button only for the bot's own name (spaces around it do not
+ * count). Pass the name the daemon just reported (the preview), not one the screen kept.
+ */
 export function nameMatches(typed: string, name: string): boolean {
   const want = name.trim();
   return want !== "" && typed.trim() === want;

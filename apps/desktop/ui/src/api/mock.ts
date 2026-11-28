@@ -1753,6 +1753,7 @@ export class MockApiClient extends ApiClient {
       mailboxes,
       active_runs: 0,
       running_missions: 0,
+      waiting_missions: 0,
       workspace_folder: null
     };
   }
@@ -2271,7 +2272,7 @@ export class MockApiClient extends ApiClient {
         }
         if (seg[1] && !seg[2]) {
           const preview = this.mockBotDeletePreview(seg[1]);
-          if (preview.active_runs > 0 || preview.running_missions > 0) {
+          if (preview.active_runs > 0 || preview.running_missions > 0 || preview.waiting_missions > 0) {
             throw new ApiError(409, "conflict", "the bot has a run in progress: stop it first, then delete it");
           }
           const alsoInbox = opts.query?.delete_inbox === "true";
@@ -2288,11 +2289,14 @@ export class MockApiClient extends ApiClient {
             messages: preview.messages,
             runs: preview.runs,
             schedules: preview.schedules,
+            webhooks: preview.webhooks,
             missions: preview.missions,
             memories: preview.memories,
             mailboxes_removed: gone.size,
             mailboxes_kept: preview.mailboxes.length - gone.size,
-            inboxes_deleted: alsoInbox ? inboxes : []
+            inboxes_deleted: alsoInbox ? inboxes : [],
+            inboxes_not_deleted: [],
+            cleanup_pending: []
           } satisfies BotDeleteReport);
         }
         throw new ApiError(404, "not_found", `mock: ${method} ${path}`);

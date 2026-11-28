@@ -112,6 +112,13 @@ try {
   assert.equal(await red.isDisabled(), true, 'a wrong name does not enable it');
   await page.getByTestId('delete-bot-name').fill(botName);
   assert.equal(await red.isEnabled(), true, 'the exact name enables it');
+  // Back to step 1 forgets the typed name: a changed choice there is confirmed again.
+  await page.getByTestId('delete-bot-back').click();
+  assert.equal(await dialog.getAttribute('data-step'), 'review');
+  await page.getByTestId('delete-bot-continue').click();
+  assert.equal(await page.getByTestId('delete-bot-name').inputValue(), '', 'Back cleared the typed name');
+  assert.equal(await red.isDisabled(), true, 'the red button waits for the name again');
+  await page.getByTestId('delete-bot-name').fill(botName);
   await red.click();
   await dialog.waitFor({ state: 'detached', ...T });
   await page.getByTestId('bot-edit-dialog').waitFor({ state: 'detached', ...T });

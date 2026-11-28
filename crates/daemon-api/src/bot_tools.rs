@@ -683,7 +683,10 @@ impl DaemonBotHost {
             BotChange::Create(req) => self.resolve_create(&c, req),
             BotChange::Update { id, req } => self.resolve_update(&c, id, req),
             BotChange::Delete { id } => {
-                let target = self.managed_target_for_delete(&c, id)?;
+                // The same rules as a change: provenance, not itself, and the ceiling. A bot the
+                // owner widened later (more tools, permissions, files or providers than its
+                // maker) is the owner's to remove, not its maker's.
+                let target = self.managed_target(&c, id)?;
                 Ok(Resolved {
                     action: "delete",
                     name: target.name.clone(),
@@ -693,23 +696,6 @@ impl DaemonBotHost {
                 })
             }
         }
-    }
-
-    /// Delete only needs provenance and "not itself": removing a bot widens
-    /// nothing, so a bot the user widened later can still be removed by its maker.
-    fn managed_target_for_delete(&self, c: &Caller, id: &str) -> Result<Bot, String> {
-        let target = self
-            .bot_by_id(id)?
-            .ok_or_else(|| format!("there is no bot with id {id:?}"))?;
-        if target.id == c.bot.id {
-            return Err("a bot cannot change or delete itself".into());
-        }
-        if created_by(&target.config) != Some(c.bot.id.to_string().as_str()) {
-            return Err(format!(
-                "bot {id:?} was not created by you; you can only change or delete bots you created"
-            ));
-        }
-        Ok(target)
     }
 
     fn resolve_create(&self, c: &Caller, req: &BotRequest) -> Result<Resolved, String> {

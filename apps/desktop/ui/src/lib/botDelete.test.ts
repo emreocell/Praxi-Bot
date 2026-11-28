@@ -9,8 +9,10 @@ import {
   deleteOptions,
   deletedCounts,
   keptMailboxes,
+  leftovers,
   nameMatches,
   reportCounts,
+  STOPPED_MISSION_STATES,
   unfinishedRunIds
 } from "./botDelete.ts";
 
@@ -36,7 +38,25 @@ const preview = (over: Partial<BotDeletePreview> = {}): BotDeletePreview => ({
   mailboxes: [],
   active_runs: 0,
   running_missions: 0,
+  waiting_missions: 0,
   workspace_folder: null,
+  ...over
+});
+
+const report = (over: Partial<BotDeleteReport> = {}): BotDeleteReport => ({
+  name: "Nova",
+  chats: 0,
+  messages: 0,
+  runs: 0,
+  schedules: 0,
+  webhooks: 0,
+  missions: 0,
+  memories: 0,
+  mailboxes_removed: 0,
+  mailboxes_kept: 0,
+  inboxes_deleted: [],
+  inboxes_not_deleted: [],
+  cleanup_pending: [],
   ...over
 });
 
@@ -102,6 +122,11 @@ test("a working bot blocks Continue, with the reason; stopping its runs lets it 
   assert.equal(deleteBlock(preview({ active_runs: 1 })), "run");
   assert.equal(deleteBlock(preview({ running_missions: 1 })), "mission");
   assert.equal(deleteBlock(preview({ active_runs: 2, running_missions: 1 })), "run");
+  // A mission waiting for a timer, a mail or a webhook would wake on its own: cancel it first.
+  assert.equal(deleteBlock(preview({ waiting_missions: 1 })), "waiting");
+  assert.equal(deleteBlock(preview({ running_missions: 1, waiting_missions: 1 })), "mission");
+  assert.ok(STOPPED_MISSION_STATES.has("running") && STOPPED_MISSION_STATES.has("waiting"));
+  assert.ok(!STOPPED_MISSION_STATES.has("paused"));
   const runs = [
     { id: "r1", bot_id: "b1", state: "running" },
     { id: "r2", bot_id: "b1", state: "succeeded" },
@@ -123,24 +148,42 @@ test("step 2: the red button needs the bot's own name, nothing else", () => {
 });
 
 test("what was removed is summarised for the toast, without zeros", () => {
-  const r: BotDeleteReport = {
-    name: "Nova",
-    chats: 1,
-    messages: 8,
-    runs: 0,
-    schedules: 0,
-    missions: 0,
-    memories: 2,
-    mailboxes_removed: 1,
-    mailboxes_kept: 0,
-    inboxes_deleted: []
-  };
+  const r = report({ chats: 1, messages: 8, webhooks: 1, memories: 2, mailboxes_removed: 1 });
   assert.deepEqual(reportCounts(r), [
     { key: "chats", count: 1 },
     { key: "messages", count: 8 },
+    { key: "webhooks", count: 1 },
     { key: "memories", count: 2 },
     { key: "mailboxes", count: 1 }
   ]);
+  assert.deepEqual(leftovers(r), { steps: [], inboxes: [] });
+});
+
+test("what was left after the delete is named, so the toast can offer to try again", () => {
+  const r = report({
+    cleanup_pending: ["files", "mailboxes"],
+    inboxes_not_deleted: [{ account: "praxi", address: "praxi@agentmail.to", reason: "provider down" }]
+  });
+  assert.deepEqual(leftovers(r), { steps: ["files", "mailboxes"], inboxes: ["praxi@agentmail.to"] });
+  const src = read("../components/DeleteBotDialog.tsx");
+  assert.match(src, /botDelete\.leftover\.text/);
+  // Trying again sends the same request (the daemon finishes what a gone bot left).
+  assert.match(src, /client\.deleteBot\(bot\.id, opts\)\.then\(/);
+  for (const lang of ["en", "tr"]) {
+    const json = locale(lang);
+    for (const step of ["knowledge", "memory", "files", "secrets", "missions", "schedules", "links", "mailboxes"]) {
+      assert.equal(typeof at(json, `botDelete.step.${step}`), "string", `${lang} ${step}`);
+    }
+  }
+});
+
+test("Back from step 2 clears the typed name, and the name to type is the one the daemon reported", () => {
+  const src = read("../components/DeleteBotDialog.tsx");
+  assert.match(src, /const back = \(\) => \{\s*setTyped\(""\);/);
+  assert.match(src, /data-testid="delete-bot-back" onClick=\{back\}/);
+  assert.match(src, /const name = preview\?\.name \?\? bot\.name;/);
+  // "Stop it first" also cancels a waiting mission.
+  assert.match(src, /STOPPED_MISSION_STATES\.has\(m\.state\)/);
 });
 
 // ---- the dialog and its wiring --------------------------------------------------------------
@@ -155,9 +198,9 @@ test("the dialog has the two steps in order: what goes, then the typed name and 
   // Continue waits for the preview and for a bot that is not working.
   assert.match(src, /disabled=\{!preview \|\| block !== null \|\| busy\}/);
   // Step 2: the delete button is danger-toned and disabled until the name matches.
-  assert.match(src, /variant="danger"[\s\S]{0,120}disabled=\{deleting \|\| !nameMatches\(typed, bot\.name\)\}/);
+  assert.match(src, /variant="danger"[\s\S]{0,120}disabled=\{deleting \|\| !nameMatches\(typed, name\)\}/);
   // The delete call also checks the name, so Enter in the box cannot skip it.
-  assert.match(src, /!nameMatches\(typed, bot\.name\)\) return;/);
+  assert.match(src, /!nameMatches\(typed, name\)\) return;/);
   // The inbox choice starts off and is sent only as chosen.
   assert.match(src, /useState\(false\);\n {2}const \[typed/);
   assert.match(src, /deleteOptions\(preview, alsoInbox\)/);
@@ -188,7 +231,8 @@ test("every string of the dialog has English and Turkish text", () => {
     ...["chats", "messages", "runs", "schedules", "webhooks", "missions", "memories", "grants", "channels", "mailboxes"].map((k) => `botDelete.item.${k}`),
     ...["removed", "handed_over", "unlinked"].map((k) => `botDelete.mailbox.${k}`),
     "botDelete.working.run",
-    "botDelete.working.mission"
+    "botDelete.working.mission",
+    "botDelete.working.waiting"
   ];
   for (const lang of ["en", "tr"]) {
     const json = locale(lang);

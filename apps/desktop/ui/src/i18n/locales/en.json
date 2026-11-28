@@ -1610,6 +1610,11 @@
       "schedules": "Schedules and triggers",
       "webhooks": "Webhooks"
     },
+    "leftover": {
+      "inbox": "Not deleted at AgentMail: {{list}}. If its account is still in Settings › Email, you can delete it there with its inbox.",
+      "steps": "Still to remove: {{list}}. Try again to finish.",
+      "text": "{{name}} was deleted, but not everything went. {{problems}}"
+    },
     "loadFailed": "Could not check what would be deleted",
     "loading": "Checking what belongs to this bot…",
     "mailbox": {
@@ -1625,14 +1630,27 @@
       "shared": "Memories shared with your other bots.",
       "title": "Stays"
     },
+    "step": {
+      "files": "run logs and attachments",
+      "knowledge": "knowledge index",
+      "links": "app links",
+      "mailboxes": "mail accounts",
+      "memory": "memories",
+      "missions": "missions",
+      "schedules": "schedules",
+      "secrets": "webhook secrets"
+    },
     "subtitle": "Everything that belongs only to this bot is deleted with it.",
     "title": "Delete {{name}}?",
     "working": {
+      "cancelWaiting": "Cancel the waiting mission",
+      "cancelling": "Cancelling…",
       "mission": "{{name}} leads a mission that is running. Stop it first, then delete the bot.",
       "run": "{{name}} has a run in progress. Stop it first, then delete the bot.",
       "stop": "Stop it",
       "stopping": "Stopping…",
-      "title": "This bot is working right now"
+      "title": "This bot is working right now",
+      "waiting": "{{name}} leads a mission that is waiting for a timer, a mail or a webhook and would start again on its own. Cancel it first, then delete the bot."
     }
   },
   "botEdit": {

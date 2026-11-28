@@ -20,8 +20,9 @@ use connector_email::{
 };
 use daemon_api::email::{
     EmailAccountDto, EmailAccountInput, EmailAccountPatch, EmailGuardSettingsDto, EmailImapServer,
-    EmailMessageDto, EmailOptOutDto, EmailOptOutInput, EmailProbeStatus, EmailProviderKind,
-    EmailSecurity, EmailSendLogDto, EmailSendMode, EmailSmtpServer, EmailTestReport,
+    EmailInboxNotDeleted, EmailMessageDto, EmailOptOutDto, EmailOptOutInput, EmailProbeStatus,
+    EmailProviderKind, EmailSecurity, EmailSendLogDto, EmailSendMode, EmailSmtpServer,
+    EmailTestReport, ForgottenMailboxes, mailbox_exclusive, mailbox_heir,
 };
 use daemon_api::{EmailControl, EmailControlError};
 use secret_store::{SecretRef, SecretStore};
@@ -509,6 +510,26 @@ impl EmailHost {
     }
 
     /// Save, then apply to the running connector.
+    /// Delete an `AgentMail` account's inbox at the provider (irreversible). An inbox that is
+    /// already gone counts as done. Call under `ops`.
+    async fn delete_remote_inbox(&self, account: &AccountConfig) -> Result<(), EmailControlError> {
+        if account.kind != AccountKind::AgentMail {
+            return Err(invalid("this account has no inbox at a provider to delete"));
+        }
+        let key = self
+            .read_secret(account.password.name().to_owned())
+            .await
+            .ok_or_else(|| invalid("no API key is stored for this account"))?;
+        let provider = self
+            .connector
+            .agentmail_for(&key, Some(account))
+            .map_err(|e| upstream(&e))?;
+        match connector_email::MailboxProvider::delete_inbox(&provider).await {
+            Ok(()) | Err(EmailError::NotFound(_)) => Ok(()),
+            Err(e) => Err(upstream(&e)),
+        }
+    }
+
     fn commit(&self, accounts: Vec<AccountConfig>) -> Result<(), EmailControlError> {
         self.persist(&accounts)?;
         self.connector.replace_accounts(accounts).map_err(invalid)
@@ -992,23 +1013,9 @@ impl EmailControl for EmailHost {
             return Err(EmailControlError::NotFound(format!("email account {name}")));
         };
         if delete_remote {
-            if gone.kind != AccountKind::AgentMail {
-                return Err(invalid("this account has no inbox at a provider to delete"));
-            }
             // Remote first: if the provider refuses, the account stays so the
-            // user can try again. An inbox that is already gone counts as done.
-            let key = self
-                .read_secret(gone.password.name().to_owned())
-                .await
-                .ok_or_else(|| invalid("no API key is stored for this account"))?;
-            let provider = self
-                .connector
-                .agentmail_for(&key, Some(&gone))
-                .map_err(|e| upstream(&e))?;
-            match connector_email::MailboxProvider::delete_inbox(&provider).await {
-                Ok(()) | Err(EmailError::NotFound(_)) => {}
-                Err(e) => return Err(upstream(&e)),
-            }
+            // user can try again.
+            self.delete_remote_inbox(&gone).await?;
         }
         let rest: Vec<_> = list.into_iter().filter(|a| a.name != name).collect();
         self.commit(rest)?;
@@ -1226,58 +1233,84 @@ impl EmailControl for EmailHost {
     }
 
     async fn forget_bot(&self, bot_id: &str) -> Result<usize, EmailControlError> {
+        Ok(self
+            .forget_bot_mailboxes(bot_id, false)
+            .await?
+            .removed
+            .len())
+    }
+
+    async fn forget_bot_mailboxes(
+        &self,
+        bot_id: &str,
+        delete_inboxes: bool,
+    ) -> Result<ForgottenMailboxes, EmailControlError> {
+        // Under the same lock as every other account change: who shares an account is decided
+        // here, at this moment, not from an earlier look.
         let _guard = self.ops.lock().await;
-        let list = self.connector.accounts();
-        let (owned, mut rest): (Vec<_>, Vec<_>) = list.into_iter().partition(|a| {
-            a.bot
-                .as_deref()
-                .is_some_and(|b| b.eq_ignore_ascii_case(bot_id))
-        });
-        // An account other bots were given a share of is only unlinked from the deleted bot: it
-        // passes to the first of them and keeps the same bots as before (minus the deleted one),
-        // so nobody gains access. An account only this bot used goes away.
+        let is_bot = |b: &str| b.eq_ignore_ascii_case(bot_id);
+        let mut out = ForgottenMailboxes::default();
         let mut gone = Vec::new();
-        let mut handed_over = false;
-        for mut a in owned {
-            let heir = a
-                .identity
-                .shared_with
-                .iter()
-                .find(|b| !b.eq_ignore_ascii_case(bot_id))
-                .cloned();
-            match heir {
-                Some(heir) => {
-                    a.identity.shared_with.retain(|b| *b != heir);
-                    a.bot = Some(heir);
-                    handed_over = true;
-                    rest.push(a);
+        let mut rest = Vec::new();
+        let mut changed = false;
+        for mut a in self.connector.accounts() {
+            if !a.bot.as_deref().is_some_and(is_bot) {
+                // A deleted bot also leaves the sharing and default lists of the accounts that
+                // stay (this only ever narrows who may use them).
+                let before = (a.identity.shared_with.len(), a.identity.default_for.len());
+                a.identity.shared_with.retain(|b| !is_bot(b));
+                a.identity.default_for.retain(|b| !is_bot(b));
+                if before != (a.identity.shared_with.len(), a.identity.default_for.len()) {
+                    changed = true;
+                    out.kept.push(a.name.clone());
                 }
-                None => gone.push(a),
+                rest.push(a);
+                continue;
             }
+            // An account other bots were given a share of passes to the first of them and keeps
+            // the same bots as before (minus the deleted one), so nobody gains access.
+            if let Some(heir) = mailbox_heir(&a.identity.shared_with, bot_id).map(str::to_owned) {
+                a.identity
+                    .shared_with
+                    .retain(|b| !is_bot(b) && !b.eq_ignore_ascii_case(&heir));
+                a.identity.default_for.retain(|b| !is_bot(b));
+                a.bot = Some(heir);
+                changed = true;
+                out.kept.push(a.name.clone());
+                rest.push(a);
+                continue;
+            }
+            // Only this bot could use it: it goes. Its inbox at the provider goes first, and
+            // only when it is the bot's alone; if the provider refuses, the account stays
+            // (bound to the gone bot, so nobody can use it) with its key, for a retry.
+            if delete_inboxes && a.kind == AccountKind::AgentMail {
+                if !mailbox_exclusive(&a.identity.shared_with, &a.identity.default_for, bot_id) {
+                    out.inboxes_not_deleted.push(EmailInboxNotDeleted {
+                        account: a.name.clone(),
+                        address: a.address.clone(),
+                        reason: "another bot uses this address as its default".into(),
+                    });
+                } else if let Err(e) = self.delete_remote_inbox(&a).await {
+                    out.inboxes_not_deleted.push(EmailInboxNotDeleted {
+                        account: a.name.clone(),
+                        address: a.address.clone(),
+                        reason: e.to_string(),
+                    });
+                    rest.push(a);
+                    continue;
+                } else {
+                    out.inboxes_deleted.push(a.address.clone());
+                }
+            }
+            out.removed.push(a.name.clone());
+            gone.push(a);
         }
-        // A deleted bot also leaves the sharing and default lists of the
-        // accounts that stay (this only ever narrows who may use them).
-        let mut trimmed = false;
-        for a in &mut rest {
-            let (s0, d0) = (a.identity.shared_with.len(), a.identity.default_for.len());
-            a.identity
-                .shared_with
-                .retain(|b| !b.eq_ignore_ascii_case(bot_id));
-            a.identity
-                .default_for
-                .retain(|b| !b.eq_ignore_ascii_case(bot_id));
-            trimmed |= (s0, d0) != (a.identity.shared_with.len(), a.identity.default_for.len());
-        }
-        if gone.is_empty() && !trimmed && !handed_over {
-            return Ok(0);
-        }
-        if gone.is_empty() {
-            self.commit(rest)?;
-            return Ok(0);
+        if gone.is_empty() && !changed {
+            return Ok(out);
         }
         self.commit(rest)?;
         self.drop_managed_secrets(&gone).await;
-        Ok(gone.len())
+        Ok(out)
     }
 }
 

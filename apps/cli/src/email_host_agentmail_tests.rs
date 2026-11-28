@@ -676,3 +676,82 @@ async fn an_unusable_existing_inbox_id_is_refused_before_any_request() {
     }
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+/// Deleting a bot with "delete its inbox too": decided under the host's lock, account by account.
+/// Only an inbox that is still the bot's alone is deleted at the provider; one another bot shares
+/// (whatever the case of its id) passes to that bot, and one another bot lists as its default is
+/// not deleted at the provider either.
+#[tokio::test]
+async fn a_deleted_bots_own_inbox_goes_at_the_provider_only_when_it_is_still_its_alone() {
+    let server = MockServer::start().await;
+    mock_create(&server, "helper@agentmail.to").await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(202))
+        .mount(&server)
+        .await;
+    let f = fixture(&server);
+    f.host.add(input("own", Some(BOT_A))).await.unwrap();
+    let mut shared = input("shared", Some(BOT_A));
+    shared.shared_with = vec![BOT_A.to_uppercase(), BOT_B.to_uppercase()];
+    f.host.add(shared).await.unwrap();
+    let mut listed = input("listed", Some(BOT_A));
+    listed.default_for = vec![BOT_B.to_owned()];
+    f.host.add(listed).await.unwrap();
+
+    let out = f
+        .host
+        .forget_bot_mailboxes(&BOT_A.to_uppercase(), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        deletes(&server).await,
+        1,
+        "only the inbox that was its alone"
+    );
+    assert_eq!(out.inboxes_deleted, ["helper@agentmail.to"]);
+    let mut removed = out.removed.clone();
+    removed.sort();
+    assert_eq!(removed, ["listed", "own"]);
+    assert_eq!(out.kept, ["shared"]);
+    assert_eq!(out.inboxes_not_deleted.len(), 1);
+    assert_eq!(out.inboxes_not_deleted[0].account, "listed");
+    // The shared account passed to the other bot, with no copy of either id left in its list.
+    let left = f.host.list();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].name, "shared");
+    assert!(left[0].bot.as_deref().unwrap().eq_ignore_ascii_case(BOT_B));
+    assert_eq!(left[0].shared_with, Vec::<String>::new());
+    assert!(secret(&f, "email/shared/api_key").is_some());
+    assert!(secret(&f, "email/own/api_key").is_none());
+}
+
+/// When the provider refuses, the bot's account stays with its key (bound to the gone bot, so no
+/// bot can use it) and is reported; the next attempt finishes it.
+#[tokio::test]
+async fn a_refused_inbox_delete_keeps_the_account_for_a_retry() {
+    let server = MockServer::start().await;
+    mock_create(&server, "helper@agentmail.to").await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(202))
+        .mount(&server)
+        .await;
+    let f = fixture(&server);
+    f.host.add(input("own", Some(BOT_A))).await.unwrap();
+    let out = f.host.forget_bot_mailboxes(BOT_A, true).await.unwrap();
+    assert!(out.removed.is_empty() && out.inboxes_deleted.is_empty());
+    assert_eq!(out.inboxes_not_deleted.len(), 1);
+    assert_eq!(out.inboxes_not_deleted[0].address, "helper@agentmail.to");
+    assert_eq!(f.host.list().len(), 1);
+    assert!(secret(&f, "email/own/api_key").is_some());
+
+    let out = f.host.forget_bot_mailboxes(BOT_A, true).await.unwrap();
+    assert_eq!(out.removed, ["own"]);
+    assert_eq!(out.inboxes_deleted, ["helper@agentmail.to"]);
+    assert!(f.host.list().is_empty());
+    assert!(secret(&f, "email/own/api_key").is_none());
+}

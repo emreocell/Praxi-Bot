@@ -6558,6 +6558,8 @@ export interface components {
              * @description Missions in the running state. Deleting is refused while there are any.
              */
             running_missions: number;
+            /** Format: int64 */
+            waiting_missions: number;
             /**
              * Format: int64
              * @description Runs, subagent and scheduled runs included.
@@ -6577,7 +6579,18 @@ export interface components {
             workspace_folder?: string | null;
         };
         /** @description What was removed (`DELETE /v1/bots/{id}`). */
+        /** @enum {string} */
+        BotDeleteStep: "knowledge" | "memory" | "files" | "secrets" | "missions" | "schedules" | "links" | "mailboxes";
+        EmailInboxNotDeleted: {
+            account: string;
+            address: string;
+            reason: string;
+        };
         BotDeleteReport: {
+            cleanup_pending: components["schemas"]["BotDeleteStep"][];
+            inboxes_not_deleted: components["schemas"]["EmailInboxNotDeleted"][];
+            /** Format: int64 */
+            webhooks: number;
             /**
              * Format: int64
              * @description Chats removed.

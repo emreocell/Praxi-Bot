@@ -703,10 +703,11 @@ impl Shared {
             && !Self::bot_asks_explicitly(ctx, req)
     }
 
-    /// A bot change (`bot_create`, `bot_update`, `bot_delete`) in the owner's own chat on a bot at
-    /// the Full level, while the run holds no untrusted content ([`Self::bot_tools_offered`]: a
-    /// run that read a page, a mail or another bot's answer is not offered the tools at all, as a
-    /// text the owner did not write could have steered a change of standing authority): it waives
+    /// A bot change (`bot_create`, `bot_update`; never `bot_delete`, which always asks) in the
+    /// owner's own chat on a bot at the Full level, while the run holds no untrusted content
+    /// ([`Self::bot_tools_offered`]: a run that read a page, a mail or another bot's answer is not
+    /// offered the tools at all, as a text the owner did not write could have steered a change
+    /// of standing authority): it waives
     /// the always-ask test, as on that level nothing asks but money. An `Ask` the owner wrote for
     /// the category, a deny, the money floor and the host's ceiling (never broader than the
     /// caller, never `full`, only bots it made) all still apply.

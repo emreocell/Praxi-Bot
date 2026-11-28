@@ -6,7 +6,8 @@
 //!   card for every change (they are always-ask tools);
 //! * the owner's OWN chat turn on a bot at the Full level has them too, so "create a bot named
 //!   Kralinho" makes a real Praxi bot. There the owner's request is the confirmation: nothing
-//!   asks but money (see `Shared::full_bots_waive`).
+//!   asks but money (see `Shared::full_bots_waive`), except `bot_delete`, which always shows
+//!   the owner a card.
 //!
 //! Never to a schedule, a mission session, a channel or webhook run, an external agent, a
 //! subagent or a helper bot: those are text no owner typed (or a run that acts for another bot).
@@ -25,6 +26,9 @@ use crate::shared::{RunCtx, Shared};
 /// The bot tools the model gets in its direct tool list in an owner's Full chat (the other, the
 /// delete, is found with the tool search).
 pub(crate) const DIRECT_BOT_TOOLS: [&str; 3] = ["bot_list", "bot_create", "bot_update"];
+
+/// The one bot tool whose card the Full level never waives: a delete cannot be taken back.
+const BOT_DELETE: &str = "bot_delete";
 
 /// Whether `name` is one of the bot management tools.
 pub(crate) fn is_bot_tool(name: &str) -> bool {
@@ -49,8 +53,10 @@ impl Shared {
     /// A bot tool call the Full level let through without a card, as the loop asks right before
     /// it runs the call: it freezes the preview itself
     /// ([`tool_registry::ToolContext::full_waived_preview`]). The same run test as the offer.
+    /// Never `bot_delete`: deleting a bot is irreversible, so the owner always approves it on a
+    /// card, on Full too.
     pub(crate) fn bot_preview_waived(&self, ctx: &RunCtx, name: &str) -> bool {
-        is_bot_tool(name) && self.bot_tools_offered(ctx)
+        is_bot_tool(name) && name != BOT_DELETE && self.bot_tools_offered(ctx)
     }
 
     /// Whether this run may see and call `name`: every tool but the bot tools always; those

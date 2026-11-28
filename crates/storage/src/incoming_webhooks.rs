@@ -74,8 +74,13 @@ impl Storage {
     /// secret moved, until [`Self::clear_legacy_webhook_secret`] blanks it).
     ///
     /// # Errors
-    /// SQLite errors.
+    /// SQLite errors; [`crate::StorageError::Conflict`] while the bot is being deleted.
     pub fn insert_incoming_webhook(&self, hook: &IncomingWebhook) -> Result<()> {
+        if self.is_retired(hook.bot_id) {
+            return Err(crate::StorageError::Conflict(
+                "the bot is being deleted".into(),
+            ));
+        }
         let secret = "";
         self.conn().execute(
             "INSERT INTO incoming_webhooks (id, user_id, bot_id, name, instruction, secret, enabled, created_at_ms, updated_at_ms, last_fired_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",

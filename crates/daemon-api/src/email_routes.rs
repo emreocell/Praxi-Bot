@@ -72,7 +72,33 @@ pub(crate) fn canonical_bot(s: &AppState, raw: &str) -> Result<String, ApiError>
     let id = raw
         .parse()
         .map_err(|_| ApiError::bad_request("malformed bot id"))?;
-    Ok(s.bot_of_user(BotId(id))?.id.to_string())
+    let bot = s.bot_of_user(BotId(id))?.id.to_string();
+    refuse_deleted_bots(s, [bot.as_str()])?;
+    Ok(bot)
+}
+
+/// A mailbox is not given (bound, shared or made the default) to a bot that is being deleted.
+fn refuse_deleted_bots<'a>(
+    s: &AppState,
+    bots: impl IntoIterator<Item = &'a str>,
+) -> Result<(), ApiError> {
+    if bots
+        .into_iter()
+        .any(|b| crate::bot_delete_routes::is_being_deleted(s, b))
+    {
+        return Err(ApiError::conflict("that bot is being deleted"));
+    }
+    Ok(())
+}
+
+/// The bot ids a patch shares the account with or makes it the default of.
+fn listed_bots(patch: &serde_json::Value) -> Vec<&str> {
+    ["shared_with", "default_for"]
+        .into_iter()
+        .filter_map(|key| patch.get(key).and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect()
 }
 
 fn check_input(s: &AppState, input: &mut EmailAccountInput) -> Result<(), ApiError> {
@@ -97,6 +123,14 @@ fn check_input(s: &AppState, input: &mut EmailAccountInput) -> Result<(), ApiErr
     if let Some(bot) = input.bot.take() {
         input.bot = Some(canonical_bot(s, &bot)?);
     }
+    refuse_deleted_bots(
+        s,
+        input
+            .shared_with
+            .iter()
+            .chain(&input.default_for)
+            .map(String::as_str),
+    )?;
     Ok(())
 }
 
@@ -190,6 +224,7 @@ pub(crate) async fn update_email_account(
             Some(_) => return Err(ApiError::bad_request("`bot` must be a string or null")),
         }
     }
+    refuse_deleted_bots(&s, listed_bots(&patch))?;
     let before = control.list().into_iter().find(|a| a.name == name);
     let previous = before.as_ref().map(|a| a.bot.clone());
     let bound = patch

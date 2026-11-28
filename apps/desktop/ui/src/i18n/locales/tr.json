@@ -1610,6 +1610,11 @@
       "schedules": "Zamanlama ve tetikleyiciler",
       "webhooks": "Webhook"
     },
+    "leftover": {
+      "inbox": "AgentMail'de silinmeyen gelen kutusu: {{list}}. Hesabı hâlâ Ayarlar › E-posta'daysa oradan gelen kutusuyla birlikte silebilirsin.",
+      "steps": "Henüz kaldırılamayanlar: {{list}}. Tamamlamak için yeniden dene.",
+      "text": "{{name}} silindi, ancak her şey kaldırılamadı. {{problems}}"
+    },
     "loadFailed": "Nelerin silineceği kontrol edilemedi",
     "loading": "Bu bota ait olanlar kontrol ediliyor…",
     "mailbox": {
@@ -1625,14 +1630,27 @@
       "shared": "Diğer botlarınla paylaşılan hafıza kayıtları.",
       "title": "Kalacaklar"
     },
+    "step": {
+      "files": "çalışma kayıtları ve ekler",
+      "knowledge": "bilgi dizini",
+      "links": "uygulama bağlantıları",
+      "mailboxes": "e-posta hesapları",
+      "memory": "hafıza kayıtları",
+      "missions": "görevler",
+      "schedules": "zamanlamalar",
+      "secrets": "webhook gizli anahtarları"
+    },
     "subtitle": "Yalnızca bu bota ait her şey onunla birlikte silinir.",
     "title": "{{name}} silinsin mi?",
     "working": {
+      "cancelWaiting": "Bekleyen görevi iptal et",
+      "cancelling": "İptal ediliyor…",
       "mission": "{{name}} şu an çalışan bir görevi yönetiyor. Önce görevi durdur, sonra botu sil.",
       "run": "{{name}} şu an bir çalışma yürütüyor. Önce çalışmayı durdur, sonra botu sil.",
       "stop": "Durdur",
       "stopping": "Durduruluyor…",
-      "title": "Bu bot şu an çalışıyor"
+      "title": "Bu bot şu an çalışıyor",
+      "waiting": "{{name}}, bir zamanlayıcı, e-posta veya webhook bekleyen bir görevi yönetiyor; görev kendiliğinden yeniden başlayabilir. Önce görevi iptal et, sonra botu sil."
     }
   },
   "botEdit": {

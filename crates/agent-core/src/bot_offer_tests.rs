@@ -247,6 +247,35 @@ async fn the_owners_request_on_full_creates_a_real_bot_without_a_card() {
     );
 }
 
+/// Deleting a bot cannot be undone: in the owner's own Full chat it still shows the owner a
+/// card (with the daemon's Full lane on, as in production, and off), and nothing is deleted
+/// before they answer.
+#[tokio::test]
+async fn a_delete_on_full_still_shows_the_owner_a_card() {
+    for lane in [false, true] {
+        let r = rig_on(
+            FULL,
+            vec![
+                calls(&[("d1", "bot_delete", json!({"id": "x"}))]),
+                text("ok"),
+            ],
+            true,
+            lane,
+        );
+        let run = r.turn("owner");
+        assert_eq!(
+            r.card(run).await.as_deref(),
+            Some("bot_delete"),
+            "lane {lane}"
+        );
+        assert!(
+            !r.calls().iter().any(|c| c.starts_with("delete")),
+            "lane {lane}: {:?}",
+            r.calls()
+        );
+    }
+}
+
 #[tokio::test]
 async fn it_is_offered_on_the_deferred_tool_surface_too() {
     let rig = rig(FULL, vec![create_call("c1"), text("done")], false);
@@ -454,6 +483,7 @@ async fn the_preview_waiver_belongs_to_the_owners_own_chat_alone() {
     let ctx = r.lp.sh.runs.lock().get(&run).cloned().unwrap();
     assert!(r.lp.sh.bot_preview_waived(&ctx, "bot_create"));
     assert!(r.lp.sh.bot_preview_waived(&ctx, "bot_update"));
+    assert!(!r.lp.sh.bot_preview_waived(&ctx, "bot_delete"));
     assert!(!r.lp.sh.bot_preview_waived(&ctx, "pay"));
     r.lp.cancel(run).unwrap();
 }

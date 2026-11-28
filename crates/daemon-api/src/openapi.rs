@@ -599,6 +599,8 @@ impl Modify for Security {
         bot_delete_routes::BotDeleteMailbox,
         bot_delete_routes::BotDeleteMailboxFate,
         bot_delete_routes::BotDeleteChannel,
+        bot_delete_routes::BotDeleteStep,
+        crate::email::EmailInboxNotDeleted,
         dto::ChatDto,
         dto::CliAuthState,
         dto::ConfiguredProviderDto,

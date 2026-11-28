@@ -295,6 +295,8 @@ and API key. Praxi-Bot holds no key of its own and runs no relay.
   not supported and say so.
 - Removing an account (or deleting a bot) only forgets it locally. The inbox at AgentMail is
   deleted only when you ask: `bot email rm <name> --delete-inbox`, the checkbox in the app, or
-  "Also delete the inbox" when you delete the bot.
+  "Also delete the inbox" when you delete the bot. With a bot it is the last step, after the
+  bot is gone, and only for an inbox no other bot shares or uses as its default; if AgentMail
+  refuses, the account stays (no bot can use it) so you can retry.
 - At the time of writing the free plan allows 3 inboxes, 3,000 e-mails a month and 100 a day;
   see their [pricing](https://agentmail.to/pricing). Cold outreach is prohibited on the shared domain.

@@ -13,8 +13,10 @@ import {
   deleteOptions,
   deletedCounts,
   keptMailboxes,
+  leftovers,
   nameMatches,
   reportCounts,
+  STOPPED_MISSION_STATES,
   unfinishedRunIds
 } from "../lib/botDelete";
 import { openExternal } from "../lib/externalLink";
@@ -35,7 +37,9 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * Delete a bot for good, in two steps. Step 1 lists what goes (counts), what stays, the
  * optional inbox choice and the backup advice; step 2 asks for the bot's name and has the red
- * button. The daemon refuses while the bot is working: the dialog then offers to stop it.
+ * button. The daemon refuses while the bot is working or leads a waiting mission: the dialog
+ * then offers to stop (or cancel) it. When something could not be cleaned up after the bot was
+ * deleted, the toast says what and offers to try again.
  */
 export function DeleteBotDialog({
   bot,
@@ -93,8 +97,17 @@ export function DeleteBotDialog({
   const block = preview ? deleteBlock(preview) : null;
   const inboxes = preview ? deletableInboxes(preview) : [];
   const busy = stopping || deleting;
+  // The name the daemon just reported: the one to type, even if the screen behind kept an old one.
+  const name = preview?.name ?? bot.name;
 
-  /** Stop what the bot is doing (its unfinished runs, its running missions), then look again. */
+  /** Back to step 1: the typed name goes, so a changed choice there is confirmed again. */
+  const back = () => {
+    setTyped("");
+    setError(null);
+    setStep("review");
+  };
+
+  /** Stop what the bot is doing (its unfinished runs, its running or waiting missions), then look again. */
   const stopIt = async () => {
     if (!client || busy) return;
     setStopping(true);
@@ -104,7 +117,7 @@ export function DeleteBotDialog({
       await Promise.all(runs.map((id) => client.cancelRun(id).catch(() => undefined)));
       const missions = await client.listMissions(bot.id, "active");
       await Promise.all(
-        missions.filter((m) => m.state === "running").map((m) => client.steerMission(m.id, "cancel").catch(() => undefined))
+        missions.filter((m) => STOPPED_MISSION_STATES.has(m.state)).map((m) => client.steerMission(m.id, "cancel").catch(() => undefined))
       );
       for (let i = 0; i < STOP_POLLS; i++) {
         const next = await load();
@@ -120,25 +133,58 @@ export function DeleteBotDialog({
 
   const items = (rows: DeleteCount[]) => rows.map((r) => `${t(`botDelete.item.${r.key}`)}: ${r.count}`).join(", ");
 
-  const remove = async (event?: FormEvent) => {
-    event?.preventDefault();
-    if (!client || !preview || deleting || !nameMatches(typed, bot.name)) return;
-    setDeleting(true);
-    setError(null);
-    try {
-      const report = await client.deleteBot(bot.id, deleteOptions(preview, alsoInbox));
-      // Its chats and runs left with it: the sidebar and the run lists must not keep showing them.
-      await Promise.all([refreshBots(), refreshChats(), refreshRuns()]).catch(() => {});
-      const parts = [items(reportCounts(report))].filter(Boolean);
-      if (report.inboxes_deleted.length > 0) {
-        parts.push(t("botDelete.doneInbox", { list: report.inboxes_deleted.join(", ") }));
-      }
+  /** Say what was removed; when something was left over, say what and offer the same request again. */
+  const announce = (report: BotDeleteReport, opts: { deleteInbox: boolean }) => {
+    const parts = [items(reportCounts(report))].filter(Boolean);
+    if (report.inboxes_deleted.length > 0) {
+      parts.push(t("botDelete.doneInbox", { list: report.inboxes_deleted.join(", ") }));
+    }
+    const left = leftovers(report);
+    if (left.steps.length === 0 && left.inboxes.length === 0) {
       toast.show(
         parts.length > 0
           ? t("botDelete.done", { name: report.name, items: parts.join(". ") })
           : t("botDelete.doneEmpty", { name: report.name }),
         "success"
       );
+      return;
+    }
+    const problems: string[] = [];
+    if (left.steps.length > 0) {
+      problems.push(t("botDelete.leftover.steps", { list: left.steps.map((k) => t(`botDelete.step.${k}`)).join(", ") }));
+    }
+    if (left.inboxes.length > 0) {
+      problems.push(t("botDelete.leftover.inbox", { list: left.inboxes.join(", ") }));
+    }
+    const retryable = left.steps.length > 0;
+    toast.show(t("botDelete.leftover.text", { name: report.name, problems: problems.join(" ") }), "danger", {
+      durationMs: 30000,
+      action: retryable
+        ? {
+            label: t("botDelete.retry"),
+            onClick: () => {
+              if (!client) return;
+              client.deleteBot(bot.id, opts).then(
+                (again) => announce(again, opts),
+                (e: unknown) => toast.show(humanLine(e), "danger")
+              );
+            }
+          }
+        : undefined
+    });
+  };
+
+  const remove = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!client || !preview || deleting || !nameMatches(typed, name)) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const opts = deleteOptions(preview, alsoInbox);
+      const report = await client.deleteBot(bot.id, opts);
+      // Its chats and runs left with it: the sidebar and the run lists must not keep showing them.
+      await Promise.all([refreshBots(), refreshChats(), refreshRuns()]).catch(() => {});
+      announce(report, opts);
       onDeleted(report);
     } catch (e) {
       setDeleting(false);
@@ -172,10 +218,16 @@ export function DeleteBotDialog({
             {block ? (
               <Callout tone="warning" title={t("botDelete.working.title")} role="alert">
                 <p className={styles.line} data-testid="delete-bot-working">
-                  {t(block === "run" ? "botDelete.working.run" : "botDelete.working.mission", { name: bot.name })}
+                  {t(`botDelete.working.${block}`, { name })}
                 </p>
                 <Button size="sm" variant="secondary" disabled={busy} data-testid="delete-bot-stop" onClick={() => void stopIt()}>
-                  {stopping ? t("botDelete.working.stopping") : t("botDelete.working.stop")}
+                  {block === "waiting"
+                    ? stopping
+                      ? t("botDelete.working.cancelling")
+                      : t("botDelete.working.cancelWaiting")
+                    : stopping
+                      ? t("botDelete.working.stopping")
+                      : t("botDelete.working.stop")}
                 </Button>
               </Callout>
             ) : null}
@@ -269,13 +321,13 @@ export function DeleteBotDialog({
       <DialogBody testId="delete-bot-confirm">
         <Callout tone="danger" title={t("botDelete.confirm.warnTitle")}>
           <p className={styles.line}>
-            {t("botDelete.confirm.warn", { name: bot.name, items: preview ? items(deletedCounts(preview)) || t("botDelete.confirm.nothingElse") : "" })}
+            {t("botDelete.confirm.warn", { name, items: preview ? items(deletedCounts(preview)) || t("botDelete.confirm.nothingElse") : "" })}
           </p>
           {alsoInbox && inboxes.length > 0 ? (
             <p className={styles.line}>{t("botDelete.confirm.inbox", { address: inboxes.map((m) => m.address).join(", ") })}</p>
           ) : null}
         </Callout>
-        <Field label={t("botDelete.confirm.label", { name: bot.name })} htmlFor="delete-bot-name" hint={t("botDelete.confirm.hint")}>
+        <Field label={t("botDelete.confirm.label", { name })} htmlFor="delete-bot-name" hint={t("botDelete.confirm.hint")}>
           <input
             id="delete-bot-name"
             ref={nameInput}
@@ -295,13 +347,13 @@ export function DeleteBotDialog({
         ) : null}
       </DialogBody>
       <DialogFooter landmark={false}>
-        <Button type="button" variant="ghost" disabled={deleting} onClick={() => setStep("review")}>
+        <Button type="button" variant="ghost" disabled={deleting} data-testid="delete-bot-back" onClick={back}>
           {t("botDelete.back")}
         </Button>
         <Button
           type="submit"
           variant="danger"
-          disabled={deleting || !nameMatches(typed, bot.name)}
+          disabled={deleting || !nameMatches(typed, name)}
           data-testid="delete-bot-confirm-button"
         >
           <Trash2 aria-hidden="true" />
@@ -311,7 +363,7 @@ export function DeleteBotDialog({
     </form>
   );
 
-  const title = step === "review" ? t("botDelete.title", { name: bot.name }) : t("botDelete.confirm.title", { name: bot.name });
+  const title = step === "review" ? t("botDelete.title", { name }) : t("botDelete.confirm.title", { name });
   return (
     <Modal open={open} onClose={busy ? () => {} : onClose} size="md" label={title}>
       {open ? (

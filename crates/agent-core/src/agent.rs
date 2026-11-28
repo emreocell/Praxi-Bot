@@ -863,6 +863,20 @@ impl AgentLoop {
         self.sh.grants.lock().always.retain(|g| g.bot_id != bot_id);
     }
 
+    /// Whether a run of `bot_id` is alive in this loop right now (a turn, a subagent, a
+    /// native-tools engine process), whatever its database row says. Deleting the bot waits
+    /// for it.
+    #[must_use]
+    pub fn bot_has_live_run(&self, bot_id: BotId) -> bool {
+        self.sh.runs.lock().values().any(|ctx| ctx.bot_id == bot_id)
+            || self
+                .sh
+                .native_runs
+                .lock()
+                .get(&bot_id)
+                .is_some_and(|runs| !runs.is_empty())
+    }
+
     /// How many "always allow" and per-site rules a bot has (what deleting it would drop).
     #[must_use]
     pub fn count_standing_rules(&self, bot_id: BotId) -> usize {

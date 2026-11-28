@@ -4186,7 +4186,7 @@
         "tags": [
           "bots"
         ],
-        "summary": "Delete a bot and everything only it owns, whatever chats and runs it has. Irreversible.\nRefused (`409`) while the bot has a run or a mission in progress (stop it first). With\n`delete_inbox=true` the `AgentMail` inbox only this bot used is deleted at the provider first\n(`502` and nothing deleted if that fails). Files in the owner's folders are never deleted.",
+        "summary": "Delete a bot and everything only it owns, whatever chats and runs it has. Irreversible.\nRefused (`409`) while the bot has a run or a mission in progress or waiting (stop or cancel\nit first); then nothing is deleted. With `delete_inbox=true` the `AgentMail` inbox only this\nbot used is deleted at the provider as the last step, after the bot is gone here; when the\nprovider fails, the report says so (`inboxes_not_deleted`). Cleanup steps that fail after the\nbot's rows are gone are reported in `cleanup_pending`; the same request retries them (also for\na bot that is already gone). Files in the owner's folders are never deleted.",
         "operationId": "delete_bot",
         "parameters": [
           {
@@ -4201,9 +4201,9 @@
           },
           {
             "name": "delete_inbox",
-            "in": "path",
+            "in": "query",
             "description": "Also delete the `AgentMail` inbox(es) only this bot used, at the provider. Default `false`:\nthe mail in an inbox would be lost for good.",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "boolean"
             }
@@ -4242,16 +4242,6 @@
           },
           "409": {
             "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "the mail provider failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -23640,7 +23630,8 @@
           "channels",
           "mailboxes",
           "active_runs",
-          "running_missions"
+          "running_missions",
+          "waiting_missions"
         ],
         "properties": {
           "active_runs": {
@@ -23717,7 +23708,7 @@
           "running_missions": {
             "type": "integer",
             "format": "int64",
-            "description": "Missions in the running state. Deleting is refused while there are any.",
+            "description": "Missions in the running state (or holding a session). Deleting is refused while there are\nany.",
             "minimum": 0
           },
           "runs": {
@@ -23730,6 +23721,12 @@
             "type": "integer",
             "format": "int64",
             "description": "Schedules and triggers of the bot.",
+            "minimum": 0
+          },
+          "waiting_missions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Missions waiting for a timer, a mail or a webhook (they would wake on their own).\nDeleting is refused while there are any: cancel them first.",
             "minimum": 0
           },
           "webhooks": {
@@ -23749,18 +23746,21 @@
       },
       "BotDeleteReport": {
         "type": "object",
-        "description": "What was removed (`DELETE /v1/bots/{id}`).",
+        "description": "What was removed (`DELETE /v1/bots/{id}`). The bot is gone, whatever else it says.",
         "required": [
           "name",
           "chats",
           "messages",
           "runs",
           "schedules",
+          "webhooks",
           "missions",
           "memories",
           "mailboxes_removed",
           "mailboxes_kept",
-          "inboxes_deleted"
+          "inboxes_deleted",
+          "inboxes_not_deleted",
+          "cleanup_pending"
         ],
         "properties": {
           "chats": {
@@ -23769,12 +23769,26 @@
             "description": "Chats removed.",
             "minimum": 0
           },
+          "cleanup_pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BotDeleteStep"
+            },
+            "description": "Cleanup steps that did not finish. The bot is gone; `DELETE /v1/bots/{id}` again (with\nthe same `delete_inbox`) retries them."
+          },
           "inboxes_deleted": {
             "type": "array",
             "items": {
               "type": "string"
             },
             "description": "Addresses of the `AgentMail` inboxes deleted at the provider."
+          },
+          "inboxes_not_deleted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailInboxNotDeleted"
+            },
+            "description": "Inboxes asked for that were not deleted at the provider, and why."
           },
           "mailboxes_kept": {
             "type": "integer",
@@ -23821,8 +23835,28 @@
             "format": "int64",
             "description": "Schedules and triggers removed.",
             "minimum": 0
+          },
+          "webhooks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Incoming webhooks removed.",
+            "minimum": 0
           }
         }
+      },
+      "BotDeleteStep": {
+        "type": "string",
+        "description": "A cleanup step after the bot's rows were deleted.",
+        "enum": [
+          "knowledge",
+          "memory",
+          "files",
+          "secrets",
+          "missions",
+          "schedules",
+          "links",
+          "mailboxes"
+        ]
       },
       "BotDto": {
         "type": "object",
@@ -28305,6 +28339,29 @@
             "format": "int32",
             "description": "Port, default 993.",
             "minimum": 0
+          }
+        }
+      },
+      "EmailInboxNotDeleted": {
+        "type": "object",
+        "description": "An `AgentMail` inbox that was not deleted at the provider with its bot.",
+        "required": [
+          "account",
+          "address",
+          "reason"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Account name. It stays in the mail settings (no bot can use it: its bot is gone), so the\nowner can delete it with its inbox there, or delete the bot again to retry."
+          },
+          "address": {
+            "type": "string",
+            "description": "The inbox's address."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why: the provider's answer, or that another bot uses the account now."
           }
         }
       },

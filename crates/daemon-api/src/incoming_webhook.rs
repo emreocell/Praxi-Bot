@@ -369,7 +369,7 @@ fn lookup(
     Ok((Some(row), secret))
 }
 
-fn secret_name(id: Uuid) -> String {
+pub(crate) fn secret_name(id: Uuid) -> String {
     format!("{}{id}", secret_store::WEBHOOK_PREFIX)
 }
 

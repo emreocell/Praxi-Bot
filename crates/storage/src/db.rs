@@ -140,6 +140,9 @@ pub struct SearchFilter {
 pub struct Storage {
     conn: Mutex<Connection>,
     data_dir: PathBuf,
+    /// Bots being deleted: no new chat, run or webhook is inserted for them
+    /// ([`Storage::retire_bot`]).
+    retired: Mutex<std::collections::HashSet<BotId>>,
 }
 
 impl Storage {
@@ -245,6 +248,7 @@ impl Storage {
         Ok(Self {
             conn: Mutex::new(conn),
             data_dir,
+            retired: Mutex::default(),
         })
     }
 
@@ -259,6 +263,37 @@ impl Storage {
         self.conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn retired_bots(&self) -> std::sync::MutexGuard<'_, std::collections::HashSet<BotId>> {
+        self.retired
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// A bot is being deleted: from now on no chat, run or webhook is inserted for it
+    /// ([`StorageError::Conflict`]). Returns `false` when it already was. Undone by
+    /// [`Storage::restore_bot`] when the delete does not happen; a deleted bot stays retired.
+    pub fn retire_bot(&self, bot: BotId) -> bool {
+        self.retired_bots().insert(bot)
+    }
+
+    /// The delete of a retired bot did not happen: it may start work again.
+    pub fn restore_bot(&self, bot: BotId) {
+        self.retired_bots().remove(&bot);
+    }
+
+    /// Whether the bot is being (or was) deleted by this process.
+    #[must_use]
+    pub fn is_retired(&self, bot: BotId) -> bool {
+        self.retired_bots().contains(&bot)
+    }
+
+    fn refuse_retired(&self, bot: BotId) -> Result<()> {
+        if self.is_retired(bot) {
+            return Err(StorageError::Conflict("the bot is being deleted".into()));
+        }
+        Ok(())
     }
 
     // ---- users ----
@@ -709,8 +744,9 @@ impl Storage {
     /// Insert a chat.
     ///
     /// # Errors
-    /// Fails on SQLite errors.
+    /// Fails on SQLite errors; [`StorageError::Conflict`] while the bot is being deleted.
     pub fn insert_chat(&self, c: &Chat) -> Result<()> {
+        self.refuse_retired(c.bot_id)?;
         self.conn().execute(
             "INSERT INTO chats (id, user_id, bot_id, title, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -875,6 +911,7 @@ impl Storage {
         chat: &Chat,
         messages: &[(Message, &str)],
     ) -> Result<()> {
+        self.refuse_retired(chat.bot_id)?;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute(
@@ -1184,8 +1221,9 @@ impl Storage {
     /// Insert a run.
     ///
     /// # Errors
-    /// Fails on SQLite errors.
+    /// Fails on SQLite errors; [`StorageError::Conflict`] while the bot is being deleted.
     pub fn insert_run(&self, r: &Run) -> Result<()> {
+        self.refuse_retired(r.bot_id)?;
         self.conn().execute(
             "INSERT INTO runs (id, user_id, bot_id, chat_id, kind, state, error, created_at_ms, updated_at_ms, parent_run_id, spec_json, computer_target, pause_reason, computer_node, computer_node_name, paused_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
