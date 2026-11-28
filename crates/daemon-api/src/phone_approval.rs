@@ -12,6 +12,7 @@
 //! or open the page (`peer.rs`).
 
 use std::collections::{HashMap, VecDeque};
+use std::fmt::Write as _;
 
 use agent_core::ApprovalScope;
 use axum::Json;
@@ -96,6 +97,8 @@ pub(crate) struct PhoneBook {
 }
 
 impl PhoneBook {
+    // `self` carries the test clock offset; release builds read the real clock only.
+    #[cfg_attr(not(test), allow(clippy::unused_self))]
     fn now(&self) -> i64 {
         #[cfg(test)]
         let skew = self.skew_ms;
@@ -836,11 +839,11 @@ fn facts(t: &Texts, ask: &ApprovalDto) -> String {
         (t.amount, "amount"),
     ] {
         if let Some(v) = fact(key) {
-            rows.push_str(&format!("<dt>{label}</dt><dd>{v}</dd>"));
+            let _ = write!(rows, "<dt>{label}</dt><dd>{v}</dd>");
         }
     }
     let summary = esc(&ask.summary.chars().take(300).collect::<String>());
-    rows.push_str(&format!("<dt>{}</dt><dd class=s>{summary}</dd>", t.request));
+    let _ = write!(rows, "<dt>{}</dt><dd class=s>{summary}</dd>", t.request);
     format!(
         "<dl>{rows}</dl><p class=n>{}</p>",
         if checkout.is_some() {

@@ -45,8 +45,10 @@ impl Tool for Pay {
 const SHOT: &[u8] = b"\x89PNG-checkout-pixels";
 
 fn setup_money() -> T {
-    let mut config = LoopConfig::default();
-    config.legacy_tool_surface = true;
+    let config = LoopConfig {
+        legacy_tool_surface: true,
+        ..LoopConfig::default()
+    };
     let dir = tempfile::tempdir().unwrap();
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
     let tools = ToolRegistry::new();
@@ -175,8 +177,7 @@ async fn approval_state(t: &T, run: &str, call_id: &str) -> Value {
         .unwrap()
         .iter()
         .find(|a| a["call_id"] == call_id)
-        .map(|a| a["decision"].clone())
-        .unwrap_or(Value::Null)
+        .map_or(Value::Null, |a| a["decision"].clone())
 }
 
 #[tokio::test]
