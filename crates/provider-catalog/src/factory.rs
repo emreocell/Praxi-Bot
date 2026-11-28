@@ -6,6 +6,7 @@ use crate::{
     entry::{ProviderEntry, ProviderKind},
     error::ProviderError,
     gemini::GeminiProvider,
+    image::ImageProvider,
     openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider},
     provider::ChatProvider,
 };
@@ -57,6 +58,30 @@ pub fn build_embedding_provider(
         _ => {
             return Err(ProviderError::Unsupported {
                 capability: "embeddings".into(),
+            });
+        }
+    })
+}
+
+/// Build the image-generation adapter for a provider entry.
+///
+/// # Errors
+/// Returns `Unsupported` for providers without an image adapter.
+pub fn build_image_provider(
+    entry: &ProviderEntry,
+    config: OpenAiCompatConfig,
+    key: Option<String>,
+) -> Result<Box<dyn ImageProvider>, ProviderError> {
+    Ok(match entry.kind {
+        ProviderKind::OpenAiCompatible => Box::new(OpenAiCompatProvider::with_api_key(
+            entry.clone(),
+            config,
+            key,
+        )?),
+        ProviderKind::Gemini => Box::new(GeminiProvider::with_api_key(entry.clone(), config, key)?),
+        _ => {
+            return Err(ProviderError::Unsupported {
+                capability: "image_generation".into(),
             });
         }
     })

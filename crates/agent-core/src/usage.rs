@@ -44,6 +44,8 @@ pub enum CallPurpose {
     Reader,
     /// Background summary of the older part of a long chat.
     Summary,
+    /// Provider-backed image generation (`image_generate` tool).
+    ImageGeneration,
 }
 
 impl CallPurpose {
@@ -60,6 +62,7 @@ impl CallPurpose {
             Self::Decider => "decider",
             Self::Reader => "reader",
             Self::Summary => "summary",
+            Self::ImageGeneration => "image_generation",
         }
     }
 }

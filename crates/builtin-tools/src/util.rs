@@ -121,7 +121,9 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // opener or a named browser (never a program or script). A page opened can send
         // anything, so it is egress like `browser_open`; nothing comes back into the context
         // (a window list at most), so it neither taints nor reads private data.
-        | "account_register" | "tool_self_check" | "desktop_open" => ContentClass::egress(),
+        | "account_register" | "tool_self_check" | "desktop_open" | "image_generate" => {
+            ContentClass::egress()
+        }
         // A bot's name and persona are text any bot with `manage_bots` can write, so a
         // listing brings possibly untrusted text in. The download list shows file names a web
         // page chose; it sends nothing and reads no private data. The site ledger is the bot's

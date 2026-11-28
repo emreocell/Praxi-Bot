@@ -9,6 +9,7 @@
 //! Ledger-aware callers use one request per attempt.
 
 mod embedding;
+mod image;
 mod request;
 pub(crate) mod sse;
 #[cfg(test)]

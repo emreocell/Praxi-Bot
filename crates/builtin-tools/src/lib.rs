@@ -29,6 +29,7 @@ pub mod fill_secret;
 #[cfg(test)]
 mod fill_secret_tests;
 pub mod handover;
+pub mod image_generate;
 pub mod knowledge;
 pub mod knowledge_brain;
 mod mail_attachments;
@@ -101,6 +102,9 @@ pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
 pub use handover::{
     BROWSER_HANDOVER, CAPTCHA_OWN_ATTEMPTS, HANDOVER_CARD_KIND, HandoverCard, HandoverError,
     HandoverHub, HandoverKind, SolvedBy, handover_hub,
+};
+pub use image_generate::{
+    GeneratedImage, IMAGE_GENERATE, ImageGenerateBackend, note_preview, take_preview,
 };
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use notes::NOTES_TOOL_NAMES;
@@ -194,6 +198,13 @@ pub struct BuiltinConfig {
     /// loaded (`email` above, when set, binds it here too). `email_wait_for` and
     /// `account_register` use it; the run loop reads the same handle.
     pub mail: Arc<connector_email::MailHandle>,
+    /// Provider-backed image generation (`image_generate`). `None` = tool omitted.
+    pub image_generate: Option<Arc<dyn image_generate::ImageGenerateBackend>>,
+    /// When set, the agent loop wires [`image_generate`] automatically (catalog + secret store).
+    pub image_wiring: Option<(
+        Arc<provider_catalog::Catalog>,
+        Arc<dyn secret_store::SecretStore>,
+    )>,
     /// Filled when the browser tools are built: the page the run's browser is
     /// REALLY on, which `email_wait_for` checks the sign-up site against.
     pub page_origin: Arc<connector_email::PageOriginSlot>,
@@ -283,6 +294,8 @@ impl BuiltinConfig {
             optional_tools: OptionalTools::default(),
             mail: Arc::new(connector_email::MailHandle::new()),
             page_origin: Arc::new(connector_email::PageOriginSlot::new()),
+            image_generate: None,
+            image_wiring: None,
         }
     }
 
@@ -385,7 +398,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             &cfg.fs_allowed_roots,
             &cfg.fs_granted_paths,
             cfg.fs_access.clone(),
-            fs_home,
+            fs_home.clone(),
             cfg.provenance.clone(),
             cfg.optional_tools,
         ));
@@ -455,6 +468,13 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             Ok(tools) => all.extend(tools),
             Err(e) => tracing::warn!("web tools not available: {e}"),
         }
+    }
+    if let Some(backend) = &cfg.image_generate {
+        all.push(image_generate::tool(
+            Arc::clone(backend),
+            cfg.fs_access.clone(),
+            fs_home.clone(),
+        ));
     }
     all
 }

@@ -15,6 +15,7 @@ pub mod error;
 pub mod factory;
 pub mod gemini;
 pub mod hardware;
+pub mod image;
 mod limits;
 pub mod local_advice;
 pub mod local_detect;
@@ -48,9 +49,13 @@ pub use entry::{
     ProviderKind,
 };
 pub use error::{FailureClass, ProviderError};
-pub use factory::{build_chat_provider, build_embedding_provider};
+pub use factory::{build_chat_provider, build_embedding_provider, build_image_provider};
 pub use gemini::GeminiProvider;
 pub use hardware::{GpuInfo, HardwareInfo, probe_hardware};
+pub use image::{
+    ImageGenerateRequest, ImageGenerateResponse, ImageProvider, ImageWireFormat,
+    MAX_IMAGE_PROMPT_CHARS,
+};
 pub use local_advice::{LocalAdvice, Recommendation, catalog_candidates, recommend};
 pub use local_detect::{LocalServer, detect_local_servers};
 pub use model_metadata::{

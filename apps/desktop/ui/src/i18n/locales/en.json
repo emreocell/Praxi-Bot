@@ -3177,6 +3177,11 @@
         "failed": "Couldn't search the web",
         "running": "Searching the web"
       },
+      "image_generate": {
+        "done": "Generated an image",
+        "failed": "Couldn't generate an image",
+        "running": "Generating an image"
+      },
       "workflow": {
         "done": "Ran a workflow",
         "failed": "Didn't run a workflow",

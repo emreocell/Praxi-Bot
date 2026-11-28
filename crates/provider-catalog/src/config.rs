@@ -297,6 +297,26 @@ impl ProviderSettings {
         crate::factory::build_embedding_provider(entry, config, key)
     }
 
+    /// Build an image-generation adapter using this provider's endpoint and key.
+    ///
+    /// # Errors
+    /// Disabled/session providers, missing credentials, or unsupported adapters.
+    pub fn build_image_provider(
+        &self,
+        entry: &ProviderEntry,
+        store: &dyn SecretStore,
+        config: OpenAiCompatConfig,
+    ) -> Result<Box<dyn crate::image::ImageProvider>, ProviderError> {
+        if !self.enabled || self.cli.is_some() || self.id != entry.id {
+            return Err(ProviderError::InvalidRequest(
+                "image provider is disabled or mismatched".into(),
+            ));
+        }
+        crate::embedding::endpoint_identity(&entry.base_url)?;
+        let key = self.resolve_key(entry, store)?;
+        crate::factory::build_image_provider(entry, config, key)
+    }
+
     fn resolve_key(
         &self,
         entry: &ProviderEntry,
