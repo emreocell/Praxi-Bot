@@ -785,15 +785,14 @@ async fn clean_up(
     }
     s.agent().forget_bot(c.bot_id);
 
-    if let Some(mail) = forget_mailboxes(s, c)
-        .await
-        .and_then(|r| out.step(BotDeleteStep::Mailboxes, r))
-    {
+    if let Some((mail, done)) = forget_mailboxes(s, c).await {
+        let failed = out.step(BotDeleteStep::Mailboxes, done).is_none();
         // An account kept because the provider refused its inbox is left for the retry.
-        if mail
-            .inboxes_not_deleted
-            .iter()
-            .any(|n| !mail.removed.contains(&n.account))
+        if !failed
+            && mail
+                .inboxes_not_deleted
+                .iter()
+                .any(|n| !mail.removed.contains(&n.account))
         {
             out.pending.push(BotDeleteStep::Mailboxes);
         }
@@ -852,45 +851,46 @@ fn remove_knowledge(s: &AppState, bot: &Bot) -> Result<(), String> {
 
 /// Step 4: the bot's mailboxes, and with `delete_inbox` its own inbox at the provider; then the
 /// mail tools of the bots that keep or lose an account, and the knowledge sources read from
-/// removed accounts. `None` when there is nothing to do: no mail host, no mail settings and no
-/// sources left to revoke. Without the mail host while mail settings exist, the step stays
-/// pending.
+/// removed accounts. Returns what the mail host removed and whether the step finished; `None`
+/// when there is nothing to do: no mail host, no mail settings and no sources left to revoke.
+/// Without the mail host while mail settings exist, the step stays pending.
 async fn forget_mailboxes(
     s: &AppState,
     c: &BotDeleteCleanup,
-) -> Option<Result<ForgottenMailboxes, String>> {
+) -> Option<(ForgottenMailboxes, Result<(), String>)> {
     let email = s.email();
     if email.is_none() && c.email_sources.is_empty() && !s.data_dir().join(EMAIL_FILE).exists() {
         return None;
     }
-    Some(
-        async {
-            fault(c.bot_id, Fault::Step(BotDeleteStep::Mailboxes)).map_err(|e| e.to_string())?;
-            let Some(email) = email else {
-                revoke_mail_sources(s, c, &[]).await?;
-                if s.data_dir().join(EMAIL_FILE).exists() {
-                    return Err("the mail host is not available".into());
-                }
-                return Ok(ForgottenMailboxes::default());
-            };
-            let id = c.bot_id.to_string();
-            let before = email.list();
-            let out = email
-                .forget_bot_mailboxes(&id, c.delete_inbox)
-                .await
-                .map_err(|e| e.to_string())?;
-            // The mail host saved the change: the tools follow it whatever fails below.
-            let affected: BTreeSet<String> = before
-                .iter()
-                .filter(|a| out.removed.contains(&a.name) || out.kept.contains(&a.name))
-                .flat_map(crate::email_bot_tools::bots_of)
-                .collect();
-            crate::email_bot_tools::sync(s, &email.list(), &affected);
-            revoke_mail_sources(s, c, &out.removed).await?;
-            Ok::<_, String>(out)
-        }
-        .await,
-    )
+    if let Err(e) = fault(c.bot_id, Fault::Step(BotDeleteStep::Mailboxes)) {
+        return Some((ForgottenMailboxes::default(), Err(e.to_string())));
+    }
+    let Some(email) = email else {
+        let done = revoke_mail_sources(s, c, &[]).await.and_then(|()| {
+            if s.data_dir().join(EMAIL_FILE).exists() {
+                Err("the mail host is not available".into())
+            } else {
+                Ok(())
+            }
+        });
+        return Some((ForgottenMailboxes::default(), done));
+    };
+    let id = c.bot_id.to_string();
+    let before = email.list();
+    let out = match email.forget_bot_mailboxes(&id, c.delete_inbox).await {
+        Ok(out) => out,
+        Err(e) => return Some((ForgottenMailboxes::default(), Err(e.to_string()))),
+    };
+    // The mail host saved the change: the tools follow it whatever fails below, and the report
+    // says what it removed.
+    let affected: BTreeSet<String> = before
+        .iter()
+        .filter(|a| out.removed.contains(&a.name) || out.kept.contains(&a.name))
+        .flat_map(crate::email_bot_tools::bots_of)
+        .collect();
+    crate::email_bot_tools::sync(s, &email.list(), &affected);
+    let done = revoke_mail_sources(s, c, &out.removed).await;
+    Some((out, done))
 }
 
 /// The knowledge sources read from the mail accounts the delete removed (`removed` now, and those
