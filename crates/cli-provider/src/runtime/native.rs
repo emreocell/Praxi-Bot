@@ -725,6 +725,13 @@ impl Run<'_> {
                 continue;
             }
             if v.get("error").is_some() {
+                if v["id"] == 2
+                    && self.nt.driver == Driver::Agy
+                    && !self.nt.turn.tools.is_empty()
+                    && v["error"]["code"] == -32602
+                {
+                    return Err(CliError::PraxiBridgeUnavailable);
+                }
                 let classified = child_error(&v);
                 if classified == CliError::Protocol
                     && (v["error"]["code"] == -32000
@@ -737,7 +744,13 @@ impl Run<'_> {
             match v["id"].as_i64() {
                 Some(1) => {
                     let http = v["result"]["agentCapabilities"]["mcpCapabilities"]["http"] == true;
-                    let servers = if http && !self.nt.turn.tools.is_empty() {
+                    // Antigravity omits mcpCapabilities. Try HTTP rather than treating
+                    // omission as an explicit refusal.
+                    let bridge = http || self.nt.driver == Driver::Agy;
+                    if !bridge && !self.nt.turn.tools.is_empty() {
+                        return Err(CliError::PraxiBridgeUnavailable);
+                    }
+                    let servers = if bridge && !self.nt.turn.tools.is_empty() {
                         json!([{"type":"http","name":"praxi","url":self.server.url,
                             "headers":[{"name":"Authorization","value":self.server.authorization}]}])
                     } else {

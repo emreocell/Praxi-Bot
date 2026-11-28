@@ -48,6 +48,8 @@ pub enum CliError {
     SignedOut,
     #[error("native_tools_open")]
     NativeToolsOpen,
+    #[error("praxi_bridge_unavailable")]
+    PraxiBridgeUnavailable,
     #[error("cancelled")]
     Cancelled,
     #[error("quota_exceeded (subscription; non-retryable)")]
@@ -86,6 +88,7 @@ impl CliError {
             Self::ShimRefused => "shim_refused",
             Self::SignedOut => "signed_out",
             Self::NativeToolsOpen => "native_tools_open",
+            Self::PraxiBridgeUnavailable => "praxi_bridge_unavailable",
             Self::Cancelled => "cancelled",
             Self::Quota => "quota_exceeded",
             Self::Overloaded => "provider_overloaded",

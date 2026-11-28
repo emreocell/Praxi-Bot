@@ -1384,6 +1384,7 @@ async fn bot_tool_allow_exclude_hides_and_blocks_tools() {
         "excluded tool cannot be called even by name"
     );
     assert!(tool_messages(&fake.request(1))[0].contains("unknown tool"));
+    assert!(tool_messages(&fake.request(1))[0].contains("tool_search"));
 }
 
 #[tokio::test]

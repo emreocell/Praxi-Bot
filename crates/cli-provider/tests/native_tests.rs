@@ -163,6 +163,103 @@ async fn acp_agent_permissions_follow_the_level_and_fs_is_refused() {
     assert!(log(&dir, "permission_answer").contains("\"optionId\":\"yes\""));
 }
 
+#[tokio::test]
+async fn agy_receives_http_bridge_even_without_capability_advertisement() {
+    for mode in ["", "acp-no-capabilities"] {
+        let (dir, workspace, env) = setup();
+        let env = env.with_env_var("FAKE_MODE", mode);
+        let host = Arc::new(Host {
+            allow: false,
+            choose: None,
+            questions: Mutex::new(Vec::new()),
+            permissions: Mutex::new(Vec::new()),
+            text: Mutex::new(String::new()),
+        });
+        let nt = NativeTurn {
+            turn: turn(),
+            driver: Driver::Agy,
+            level: ApprovalLevel::Full,
+            workspace: workspace.path().to_owned(),
+        };
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            run_native_turn("fixture", &env, nt, host, CancellationToken::new()),
+        )
+        .await
+        .expect("agent timed out")
+        .expect("agent failed");
+        let new: Value = serde_json::from_str(&log(&dir, "session_new")).unwrap();
+        assert_eq!(new["mcpServers"][0]["type"], "http");
+        assert_eq!(new["mcpServers"][0]["name"], "praxi");
+        if mode == "acp-no-capabilities" {
+            assert_eq!(log(&dir, "bridge_tool_count"), "2");
+        }
+    }
+}
+
+#[tokio::test]
+async fn missing_bridge_capability_stops_before_prompt_for_other_agents() {
+    let (dir, workspace, env) = setup();
+    let env = env.with_env_var("FAKE_MODE", "acp-no-capabilities");
+    let host = Arc::new(Host {
+        allow: false,
+        choose: None,
+        questions: Mutex::new(Vec::new()),
+        permissions: Mutex::new(Vec::new()),
+        text: Mutex::new(String::new()),
+    });
+    let nt = NativeTurn {
+        turn: turn(),
+        driver: Driver::Cursor,
+        level: ApprovalLevel::Full,
+        workspace: workspace.path().to_owned(),
+    };
+    let error = tokio::time::timeout(
+        Duration::from_secs(30),
+        run_native_turn("fixture", &env, nt, host, CancellationToken::new()),
+    )
+    .await
+    .expect("agent timed out")
+    .unwrap_err();
+    assert_eq!(
+        error,
+        cli_provider::runtime::CliError::PraxiBridgeUnavailable
+    );
+    assert!(!dir.path().join("session_new").exists());
+    assert!(!dir.path().join("prompt").exists());
+}
+
+#[tokio::test]
+async fn agy_rejecting_http_bridge_stops_before_prompt() {
+    let (dir, workspace, env) = setup();
+    let env = env.with_env_var("FAKE_MODE", "acp-reject-bridge");
+    let host = Arc::new(Host {
+        allow: false,
+        choose: None,
+        questions: Mutex::new(Vec::new()),
+        permissions: Mutex::new(Vec::new()),
+        text: Mutex::new(String::new()),
+    });
+    let nt = NativeTurn {
+        turn: turn(),
+        driver: Driver::Agy,
+        level: ApprovalLevel::Full,
+        workspace: workspace.path().to_owned(),
+    };
+    let error = tokio::time::timeout(
+        Duration::from_secs(30),
+        run_native_turn("fixture", &env, nt, host, CancellationToken::new()),
+    )
+    .await
+    .expect("agent timed out")
+    .unwrap_err();
+    assert_eq!(
+        error,
+        cli_provider::runtime::CliError::PraxiBridgeUnavailable
+    );
+    assert!(!dir.path().join("prompt").exists());
+}
+
 /// One run of the Kimi fake session that asks two multiple-choice questions.
 async fn kimi_questions(
     level: ApprovalLevel,
