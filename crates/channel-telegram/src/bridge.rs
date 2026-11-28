@@ -1402,20 +1402,40 @@ impl TelegramChannel {
         // possible, approval is left to the desktop app.
         // Buttons only for low-risk asks. Anything else (or an event that does not
         // say) is decided in the desktop app, and the card says so.
-        let low_risk = a
+        // A payment never gets a button here, whatever its label says.
+        let money = a
             .details
             .as_ref()
-            .and_then(|d| d.get("risk"))
-            .and_then(serde_json::Value::as_str)
-            == Some("low");
+            .and_then(|d| d.get("money_movement"))
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+        let low_risk = !money
+            && a.details
+                .as_ref()
+                .and_then(|d| d.get("risk"))
+                .and_then(serde_json::Value::as_str)
+                == Some("low");
         if !low_risk {
-            let _ = self
-                .send_redacted(
-                    chat_id,
-                    &Message::ApprovalDesktopOnly { tool }.render(language),
-                    None,
-                )
-                .await;
+            // A money ask may be decided on the phone approval page (the PIN is asked there),
+            // never here: the card carries a link and no button.
+            // A link the redactor would cut (a nonce that happens to look like a secret) is
+            // useless on the phone: such a card says "decide in the app" instead.
+            let link = if money {
+                self.inner
+                    .api_client
+                    .phone_approval_link(a.call_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|l| self.redact(&l.url) == l.url)
+            } else {
+                None
+            };
+            let text = match &link {
+                Some(l) => Message::ApprovalPhoneLink { tool, url: &l.url }.render(language),
+                None => Message::ApprovalDesktopOnly { tool }.render(language),
+            };
+            let _ = self.send_redacted(chat_id, &text, None).await;
             return Ok(());
         }
         let (body, offer) = match &a.details {

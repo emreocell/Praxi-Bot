@@ -147,6 +147,13 @@ pub trait DaemonClient: Send + Sync {
     /// `POST /v1/questions/{call_id}`: answer a pending `ask_user` question.
     async fn answer_question(&self, call_id: ToolCallId, answer: &str) -> Result<()>;
 
+    /// `POST /v1/phone-approval/links`: a one-time link to approve a pending money ask on the
+    /// phone page (it needs the owner's PIN there; the chat itself can never approve money).
+    /// `None` when phone approval is off or this ask cannot get a link. The default has none.
+    async fn phone_approval_link(&self, _call_id: ToolCallId) -> Result<Option<PhoneLink>> {
+        Ok(None)
+    }
+
     /// `POST /v1/runs/{run_id}/cancel`: cancel an active run.
     async fn cancel_run(&self, run_id: RunId) -> Result<()>;
 
@@ -232,6 +239,15 @@ fn missions_unsupported() -> TelegramError {
         status: 503,
         message: "missions are not supported by this client".to_owned(),
     }
+}
+
+/// A one-time phone approval link (`POST /v1/phone-approval/links`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PhoneLink {
+    /// Opens the phone approval page; works once, for 10 minutes, with the PIN.
+    pub url: String,
+    /// When it stops working (Unix ms).
+    pub expires_at_ms: i64,
 }
 
 /// One event of the daemon's owner-notice stream (`GET /v1/owner-notices/stream`).
@@ -322,6 +338,9 @@ impl HttpDaemonClient {
         if (path.starts_with("/v1/chats/") && path.ends_with("/messages")) || starts_mission {
             rb = rb.header("x-praxi-message-source", self.message_source);
         }
+        // Every request says it comes from a chat channel: the daemon refuses to let a channel
+        // approve money (phone approval ADR), whatever the bridge's own checks do.
+        rb = rb.header("x-praxi-channel", self.message_source);
         if let Some(key) = &self.owner_key {
             rb = rb.header("x-praxi-owner-key", key.expose());
         }
@@ -524,6 +543,21 @@ impl DaemonClient for HttpDaemonClient {
             )
             .await?;
         Ok(())
+    }
+
+    async fn phone_approval_link(&self, call_id: ToolCallId) -> Result<Option<PhoneLink>> {
+        // Off, locked or not a money ask: the card falls back to "decide in the app".
+        let Ok(v) = self
+            .request(
+                Method::POST,
+                "/v1/phone-approval/links",
+                Some(json!({ "call_id": call_id.0 })),
+            )
+            .await
+        else {
+            return Ok(None);
+        };
+        Ok(serde_json::from_value(v).ok())
     }
 
     async fn answer_question(&self, call_id: ToolCallId, answer: &str) -> Result<()> {
