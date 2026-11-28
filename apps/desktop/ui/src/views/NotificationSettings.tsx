@@ -5,6 +5,7 @@ import { SettingsCard, SwitchField, SwitchGrid } from "../components/SettingsUi"
 import formStyles from "../components/Form.module.css";
 import { type QuietHours } from "../lib/quietHours";
 import { ChannelNotifySettings } from "./ChannelNotifySettings";
+import { PhoneApprovalSettings } from "./PhoneApprovalSettings";
 import type { AppSettings } from "../store/settingsStore";
 import styles from "./NotificationSettings.module.css";
 
@@ -67,6 +68,7 @@ export function NotificationSettings({
         <p className={formStyles.hint}>{t("settings.channelNotify.description")}</p>
         <ChannelNotifySettings />
       </div>
+      <PhoneApprovalSettings />
       <div className={styles.pair}>
       <div className={styles.group} data-testid="quiet-hours">
         <h3 className={styles.subHeading}>{t("settings.quiet.title")}</h3>

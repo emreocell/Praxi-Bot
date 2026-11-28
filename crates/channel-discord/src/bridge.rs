@@ -1377,12 +1377,10 @@ impl Inner {
     async fn send_approval(&self, chat: &ChatRef, a: protocol::event::ApprovalNeeded) {
         let lang = self.lang();
         let tool = a.tool_name.as_str();
-        let low_risk = a
-            .details
-            .as_ref()
-            .and_then(|d| d.get("risk"))
-            .and_then(serde_json::Value::as_str)
-            == Some("low");
+        // A payment never gets a button here, whatever its label says (phone approval ADR).
+        let detail = |k: &str| a.details.as_ref().and_then(|d| d.get(k));
+        let money = detail("money_movement").and_then(serde_json::Value::as_bool) == Some(true);
+        let low_risk = !money && detail("risk").and_then(serde_json::Value::as_str) == Some("low");
         if !low_risk {
             self.say(chat, &Msg::ApprovalDesktopOnly(tool).render(lang))
                 .await;

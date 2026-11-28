@@ -813,6 +813,43 @@ async fn approval_buttons_are_owner_only_low_risk_once_or_deny() {
 }
 
 #[tokio::test]
+async fn a_payment_gets_no_button_even_when_labelled_low_risk() {
+    let call = ToolCallId::new();
+    let pay = Event::ApprovalNeeded(ApprovalNeeded {
+        run_id: RunId::new(),
+        call_id: call,
+        tool_name: "browser".into(),
+        input: json!({}),
+        summary: "Pay €12 at shop.example".into(),
+        details: Some(json!({"risk": "low", "money_movement": true})),
+    });
+    let daemon = FakeDaemon::new(vec![vec![pay]], true);
+    let h = harness(daemon).await;
+    pair_owner(&h).await;
+    h.gw.message("2", OWNER, (None, "777"), "buy it");
+    let s = wait_sent(&h.rest, 2).await;
+    assert_eq!(s[1]["components"], json!([]));
+    assert!(
+        s[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("only be approved in the app")
+    );
+    // A forged press for the payment finds no card and decides nothing.
+    h.gw.push
+        .send(press_json(
+            "501",
+            OWNER,
+            (None, "777"),
+            &format!("approve:once:{}", call.0),
+        ))
+        .unwrap();
+    settle().await;
+    assert!(h.daemon.decisions.lock().is_empty());
+    h.channel.shutdown().await;
+}
+
+#[tokio::test]
 async fn server_channels_need_the_owner_to_allow_them() {
     let daemon = FakeDaemon::new(vec![vec![delta("ok "), finished()]], false);
     let h = harness(daemon).await;

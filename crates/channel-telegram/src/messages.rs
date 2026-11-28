@@ -86,6 +86,11 @@ pub(crate) enum Message<'a> {
     ApprovalDesktopOnly {
         tool: &'a str,
     },
+    /// A money ask: approve it on the phone page (PIN needed), never in this chat.
+    ApprovalPhoneLink {
+        tool: &'a str,
+        url: &'a str,
+    },
     SecretRequestNotice,
     ElicitationNotice,
     LanguageSet,
@@ -252,6 +257,12 @@ impl<'a> Message<'a> {
             (Self::ApprovalDesktopOnly { tool }, true) => format!(
                 "🔒 {tool} için onayın gerekiyor ve bu tür bir işlem yalnızca masaüstü uygulamasında onaylanabilir (Telegram’dan değil). İzin vermek veya reddetmek için masaüstü uygulamasını aç."
             ).into(),
+            (Self::ApprovalPhoneLink { tool, url }, false) => format!(
+                "💳 {tool} wants to make a payment. It cannot be approved in this chat.\nTo decide on your phone, open this link and enter your phone approval PIN (it works once, for 10 minutes):\n{url}\nCheck that the address is yours before you type the PIN. You can also decide in the desktop app."
+            ).into(),
+            (Self::ApprovalPhoneLink { tool, url }, true) => format!(
+                "💳 {tool} bir ödeme yapmak istiyor. Bu ödeme bu sohbetten onaylanamaz.\nTelefonundan karar vermek için bu bağlantıyı aç ve telefondan onay PIN'ini gir (bir kez ve 10 dakika geçerli):\n{url}\nPIN'i yazmadan önce adresin sana ait olduğunu kontrol et. Masaüstü uygulamasında da karar verebilirsin."
+            ).into(),
             (Self::ApprovalIncomplete, false) => "Approval could not be shown completely here. Approve or deny it in the desktop app.".into(),
             (Self::ApprovalIncomplete, true) => "Onay isteğinin tamamı burada gösterilemedi. Masaüstü uygulamasında onayla veya reddet.".into(),
             (Self::VoiceUnavailable, false) => "I can't read voice notes yet. Turn on offline voice in the desktop app (Settings > Dictation), or send your request as text.".into(),
@@ -377,6 +388,7 @@ mod tests {
             | Message::ApprovalDetailsUnavailable { tool }
             | Message::ApprovalTooLarge { tool }
             | Message::ApprovalDesktopOnly { tool } => vec![tool.into()],
+            Message::ApprovalPhoneLink { tool, url } => vec![tool.into(), url.into()],
             Message::BotSwitched { name, id } => vec![name.into(), id.into()],
             Message::RunStoppedId { run } => vec![run.into()],
             Message::Status {
@@ -484,6 +496,10 @@ mod tests {
             Message::ApprovalTooLarge { tool },
             Message::ApprovalIncomplete,
             Message::ApprovalDesktopOnly { tool },
+            Message::ApprovalPhoneLink {
+                tool,
+                url: "https://pay.example.org/v1/phone-approval/p/x",
+            },
             Message::SecretRequestNotice,
             Message::ElicitationNotice,
             Message::LanguageSet,

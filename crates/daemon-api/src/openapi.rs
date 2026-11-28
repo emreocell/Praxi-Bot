@@ -58,6 +58,7 @@ use crate::openapi_apps_routes;
 use crate::owner_notify;
 use crate::page_reader_routes;
 use crate::peer;
+use crate::phone_approval;
 use crate::profile_share;
 use crate::profile_share_routes;
 use crate::routes;
@@ -468,6 +469,10 @@ impl Modify for Security {
         incoming_webhook::rotate_webhook_secret,
         incoming_webhook::test_webhook,
         incoming_webhook::update_webhook,
+        phone_approval::create_phone_link,
+        phone_approval::delete_phone_approval,
+        phone_approval::get_phone_approval,
+        phone_approval::put_phone_approval,
         data_routes::get_data_usage,
         data_routes::post_clear_cache,
         embeddings_routes::get_embeddings,
@@ -919,6 +924,10 @@ impl Modify for Security {
         incoming_webhook::IncomingWebhookAccepted,
         incoming_webhook::IncomingWebhookCreated,
         incoming_webhook::IncomingWebhookDto,
+        phone_approval::PhoneApprovalSetup,
+        phone_approval::PhoneApprovalStatus,
+        phone_approval::PhoneLink,
+        phone_approval::PhoneLinkRequest,
         incoming_webhook::IncomingWebhookInput,
         incoming_webhook::IncomingWebhookPatch,
         incoming_webhook::IncomingWebhookRotated,

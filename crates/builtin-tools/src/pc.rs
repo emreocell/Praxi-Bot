@@ -326,6 +326,13 @@ impl ToolWrapper for Renamed {
     async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
         self.inner.payment_page(ctx, input).await
     }
+    async fn checkout_facts(
+        &self,
+        ctx: &ToolContext,
+        input: &Value,
+    ) -> Option<tool_registry::CheckoutFacts> {
+        self.inner.checkout_facts(ctx, input).await
+    }
     async fn approval_details(
         &self,
         ctx: &ToolContext,
@@ -764,6 +771,16 @@ impl ToolWrapper for Dispatch {
         // The calling bot's own instance sees the page it would act on.
         match self.family.tool(ctx, &self.spec.name) {
             Ok(t) => t.payment_page(ctx, input).await,
+            Err(_) => None,
+        }
+    }
+    async fn checkout_facts(
+        &self,
+        ctx: &ToolContext,
+        input: &Value,
+    ) -> Option<tool_registry::CheckoutFacts> {
+        match self.family.tool(ctx, &self.spec.name) {
+            Ok(t) => t.checkout_facts(ctx, input).await,
             Err(_) => None,
         }
     }

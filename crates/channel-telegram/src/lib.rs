@@ -58,7 +58,7 @@ pub use channel_trait::{
 pub use control::{Answer, ControlHub};
 pub use daemon_client::{
     ApiClient, ApprovalDecision, ApprovalScope, BotSummary, ChatSummary, DaemonClient,
-    DaemonStatus, DeliveryKind, HttpDaemonClient, NoticeEvent, SendOutcome,
+    DaemonStatus, DeliveryKind, HttpDaemonClient, NoticeEvent, PhoneLink, SendOutcome,
     format_approval_callback, format_question_callback, parse_approval_callback,
     parse_question_callback,
 };

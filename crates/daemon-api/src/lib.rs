@@ -78,6 +78,7 @@ pub mod owner;
 mod owner_notify;
 pub mod pc_access;
 pub mod peer;
+pub mod phone_approval;
 pub mod policy;
 pub mod profile_share;
 mod profile_share_routes;
@@ -378,6 +379,8 @@ struct Inner {
     policy_lock: parking_lot::Mutex<()>,
     /// Target sets of `POST /v1/runs/stop` (see `stop`).
     stops: parking_lot::Mutex<stop::StopBook>,
+    /// Phone approval of money asks: settings and the live one-time links.
+    phone: parking_lot::Mutex<phone_approval::PhoneBook>,
     #[cfg(test)]
     stop_seam: stop::Seam,
     restore_locks: parking_lot::Mutex<std::collections::HashSet<RunId>>,
@@ -588,6 +591,7 @@ impl AppState {
             ),
             policy_lock: parking_lot::Mutex::new(()),
             stops: parking_lot::Mutex::new(stop::StopBook::default()),
+            phone: parking_lot::Mutex::new(phone_approval::PhoneBook::default()),
             #[cfg(test)]
             stop_seam: stop::Seam::default(),
             restore_locks: parking_lot::Mutex::new(std::collections::HashSet::new()),
@@ -1317,6 +1321,9 @@ impl AppState {
     pub(crate) fn stop_seam(&self) -> &stop::Seam {
         &self.0.stop_seam
     }
+    pub(crate) fn phone_book(&self) -> &parking_lot::Mutex<phone_approval::PhoneBook> {
+        &self.0.phone
+    }
     pub(crate) fn stops(&self) -> &parking_lot::Mutex<stop::StopBook> {
         &self.0.stops
     }
@@ -1791,6 +1798,29 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/bots/{id}/incoming-webhooks/{hook}/rotate-secret",
             post(incoming_webhook::rotate_webhook_secret),
+        )
+        .route(
+            "/v1/phone-approval",
+            get(phone_approval::get_phone_approval)
+                .put(phone_approval::put_phone_approval)
+                .delete(phone_approval::delete_phone_approval),
+        )
+        .route(
+            "/v1/phone-approval/links",
+            post(phone_approval::create_phone_link),
+        )
+        .route("/v1/phone-approval/p/{nonce}", get(phone_approval::page))
+        .route(
+            "/v1/phone-approval/p/{nonce}/unlock",
+            post(phone_approval::unlock).layer(axum::extract::DefaultBodyLimit::max(
+                phone_approval::MAX_FORM,
+            )),
+        )
+        .route(
+            "/v1/phone-approval/p/{nonce}/decide",
+            post(phone_approval::decide).layer(axum::extract::DefaultBodyLimit::max(
+                phone_approval::MAX_FORM,
+            )),
         )
         .route(
             "/v1/incoming-webhooks/{hook}",

@@ -116,6 +116,9 @@ fn level_of_mode(mode: AutonomyMode) -> AutonomyLevel {
 pub(crate) const FULL_POLICY_REASON: &str = "mode.full.policy";
 static FULL_POLICY: OnceLock<Policy> = OnceLock::new();
 
+/// Checkout screenshots kept for parked money asks at once (each at most 4 MB).
+const MAX_CHECKOUT_SHOTS: usize = 8;
+
 /// Stable audit code for the existing Full browser and public web waiver.
 const FULL_BROWSE_REASON: &str = "mode.full.owner_browse";
 /// Audit reason when the Full level let a bot's own sign-up through without a card.
@@ -2690,6 +2693,37 @@ impl Shared {
         }
     }
 
+    /// What the checkout page of a money ask shows (see `Tool::checkout_facts`).
+    async fn checkout_facts(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        input: &Value,
+    ) -> Option<tool_registry::CheckoutFacts> {
+        let tool = self.tools.get(name)?;
+        tool.checkout_facts(
+            &tool_registry::ToolContext {
+                run_id: ctx.run_id.to_string(),
+                bot_id: Some(ctx.bot_id.to_string()),
+                lane: ctx.lane(),
+                ..tool_registry::ToolContext::default()
+            },
+            input,
+        )
+        .await
+    }
+
+    /// Keep the checkout screenshot of a parked money ask until the ask closes. Only shots of
+    /// asks still waiting are kept, at most [`MAX_CHECKOUT_SHOTS`].
+    fn keep_checkout_shot(&self, call_id: ToolCallId, shot: (Vec<u8>, &'static str)) {
+        let pending = self.pending.lock();
+        let mut shots = self.checkout_shots.lock();
+        shots.retain(|id, _| pending.contains_key(id));
+        if shots.len() < MAX_CHECKOUT_SHOTS && pending.contains_key(&call_id) {
+            shots.insert(call_id, shot);
+        }
+    }
+
     /// What the tool wants the approval card to show for this call, plus the
     /// bot's permission picture (it applies to every future firing).
     ///
@@ -2908,6 +2942,7 @@ impl Shared {
                 gate_grant: false,
                 run_tool: false,
                 always_refused: false,
+                money: false,
                 run_id: ctx.run_id,
                 approval_id,
                 kind,
@@ -3424,10 +3459,27 @@ impl Shared {
             );
         let always_offered = !once_only && !always_refused;
         let class = self.content_class(ctx, name, input);
+        // What the checkout page shows, for the phone approval page (display only).
+        let mut checkout = if category == PermissionCategory::Money {
+            self.checkout_facts(ctx, name, input).await
+        } else {
+            None
+        };
         if let Some(obj) = details.get_or_insert_with(|| json!({})).as_object_mut() {
             obj.insert("why".into(), json!(why));
             if category == PermissionCategory::Money {
                 obj.insert("money_movement".into(), json!(true));
+                if let Some(c) = &checkout {
+                    let fact = |v: &Option<String>| v.clone().map(|t| self.redact(t));
+                    obj.insert(
+                        "checkout".into(),
+                        json!({
+                            "domain": c.domain,
+                            "merchant": fact(&c.merchant),
+                            "amount": fact(&c.amount),
+                        }),
+                    );
+                }
             }
             obj.insert("once_only".into(), json!(once_only));
             obj.insert("run_grant".into(), json!(run_tool));
@@ -3436,6 +3488,7 @@ impl Shared {
             // a missing value counts as "high". Low: an ordinary policy ask, never destructive,
             // never on the owner's PC or browser, never for an external caller.
             let low_risk = why == "policy"
+                && category != PermissionCategory::Money
                 && effect != Effect::Destructive
                 && ctx.initiator == InitiatorKind::Human
                 && !class.in_owner_browser
@@ -3482,6 +3535,10 @@ impl Shared {
             p.gate_grant = gate_grant || (memory.is_some() && !once_only);
             p.run_tool = run_tool;
             p.always_refused = always_refused;
+            p.money = category == PermissionCategory::Money;
+        }
+        if let Some(shot) = checkout.as_mut().and_then(|c| c.screenshot.take()) {
+            self.keep_checkout_shot(call_id, shot);
         }
         let parked_at = policy_revision(self);
         self.remember_parked(
@@ -3507,6 +3564,7 @@ impl Shared {
         );
         let waited = self.wait_verdict(ctx, rx, true).await;
         guard.resume();
+        self.checkout_shots.lock().remove(&call_id);
         let verdict = match waited {
             Waited::Verdict(v) => v,
             Waited::Paused => {

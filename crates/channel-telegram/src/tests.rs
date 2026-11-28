@@ -78,6 +78,9 @@ struct FakeDaemon {
     missions_started: Mutex<Vec<(BotId, String)>>,
     /// Make every mission call fail with this HTTP status.
     mission_fail: Mutex<Option<u16>>,
+    /// What `phone_approval_link` answers (`None`: phone approval is off), and who asked.
+    phone_link: Mutex<Option<String>>,
+    phone_link_requests: Mutex<Vec<ToolCallId>>,
 }
 
 impl FakeDaemon {
@@ -108,6 +111,8 @@ impl FakeDaemon {
             mission_calls: Mutex::new(Vec::new()),
             missions_started: Mutex::new(Vec::new()),
             mission_fail: Mutex::new(None),
+            phone_link: Mutex::new(None),
+            phone_link_requests: Mutex::new(Vec::new()),
         }
     }
 
@@ -151,6 +156,14 @@ impl FakeDaemon {
 
 #[async_trait]
 impl DaemonClient for FakeDaemon {
+    async fn phone_approval_link(&self, call_id: ToolCallId) -> Result<Option<crate::PhoneLink>> {
+        self.phone_link_requests.lock().push(call_id);
+        Ok(self.phone_link.lock().clone().map(|url| crate::PhoneLink {
+            url,
+            expires_at_ms: 0,
+        }))
+    }
+
     async fn transcribe_voice(&self, audio: Vec<u8>, mime: &str) -> Result<Option<String>> {
         assert_eq!(mime, "audio/ogg");
         assert_eq!(audio, b"OGGDATA");
@@ -4868,9 +4881,18 @@ async fn http_client_only_transcribes_with_the_on_device_provider() {
 async fn approval_channel(
     risk: Option<&str>,
 ) -> (MockServer, TelegramChannel, Arc<FakeDaemon>, ToolCallId) {
+    approval_channel_with(risk.map(|r| json!({ "risk": r })), None).await
+}
+
+/// [`approval_channel`] with the card's details and the phone link the daemon hands out.
+async fn approval_channel_with(
+    details: Option<serde_json::Value>,
+    phone_link: Option<&str>,
+) -> (MockServer, TelegramChannel, Arc<FakeDaemon>, ToolCallId) {
     let server = MockServer::start().await;
     mount_telegram_mocks(&server).await;
     let daemon = one_bot_daemon();
+    *daemon.phone_link.lock() = phone_link.map(str::to_owned);
     let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
         .with_api_base_url(server.uri())
         .with_paired_users([PAIRED_USER_ID, SECOND_USER_ID]);
@@ -4878,7 +4900,6 @@ async fn approval_channel(
     let run_id = RunId::new();
     let call_id = ToolCallId::new();
     let tx = daemon.queue_open_run(run_id);
-    let details = risk.map(|r| json!({ "risk": r }));
     tx.send(Envelope::new(
         0,
         Event::ApprovalNeeded(ApprovalNeeded {
@@ -4923,6 +4944,125 @@ async fn high_risk_or_unlabelled_approvals_get_no_buttons_and_say_desktop() {
             .unwrap();
         assert!(daemon.approvals.lock().is_empty());
     }
+}
+
+#[tokio::test]
+async fn a_money_card_links_the_phone_page_and_no_press_here_can_approve_it() {
+    // A real link carries 32 random bytes; the redactor must leave it whole.
+    const LINK: &str =
+        "https://pay.example.org/v1/phone-approval/p/q3Zk_8vLx0Yb-TQ2mN7cR4sWfH1uJ9eA6dKgP5oVi0E";
+    // Even a card wrongly labelled low risk gets no button once it moves money.
+    for risk in ["high", "low"] {
+        let details = json!({ "risk": risk, "money_movement": true });
+        let (server, channel, daemon, call_id) =
+            approval_channel_with(Some(details), Some(LINK)).await;
+        let reqs = server.received_requests().await.unwrap();
+        let msgs = sent_messages(&reqs);
+        assert!(msgs.iter().all(|m| m.get("reply_markup").is_none()));
+        {
+            let card = msgs
+                .iter()
+                .find(|m| m["text"].as_str().unwrap().contains(LINK))
+                .expect("the card carries the phone link");
+            assert!(card["text"].as_str().unwrap().contains("PIN"));
+            assert_eq!(*daemon.phone_link_requests.lock(), vec![call_id]);
+        }
+        // Telegram-only presses, forged or replayed, decide nothing.
+        for (i, action) in ["once", "deny", "once"].into_iter().enumerate() {
+            channel
+                .handle_update(update(callback_update(
+                    20 + i64::try_from(i).unwrap(),
+                    PAIRED_USER_ID,
+                    TEST_CHAT_ID,
+                    "forged",
+                    &format_approval_callback(call_id, action),
+                )))
+                .await
+                .unwrap();
+        }
+        assert!(daemon.approvals.lock().is_empty(), "{risk}");
+    }
+}
+
+#[tokio::test]
+async fn a_money_card_without_phone_approval_stays_in_the_app() {
+    let details = json!({ "risk": "high", "money_movement": true });
+    let (server, _channel, daemon, call_id) = approval_channel_with(Some(details), None).await;
+    let reqs = server.received_requests().await.unwrap();
+    let msgs = sent_messages(&reqs);
+    assert!(msgs.iter().all(|m| m.get("reply_markup").is_none()));
+    assert!(
+        msgs.iter()
+            .any(|m| m["text"].as_str().unwrap().contains("desktop app"))
+    );
+    assert_eq!(*daemon.phone_link_requests.lock(), vec![call_id]);
+    // A high-risk card that is not a payment never asks for a link.
+    let (_server, _channel, daemon, _) = approval_channel(Some("high")).await;
+    assert!(daemon.phone_link_requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn a_phone_link_the_redactor_would_cut_is_not_sent() {
+    let link = format!("https://pay.example.org/v1/phone-approval/p/{TEST_BOT_TOKEN}");
+    let details = json!({ "risk": "high", "money_movement": true });
+    let (server, _channel, _daemon, _) = approval_channel_with(Some(details), Some(&link)).await;
+    let reqs = server.received_requests().await.unwrap();
+    let msgs = sent_messages(&reqs);
+    assert!(msgs.iter().all(|m| m.get("reply_markup").is_none()));
+    assert!(
+        msgs.iter()
+            .all(|m| !m["text"].as_str().unwrap().contains("phone-approval")),
+        "{msgs:?}"
+    );
+    assert!(
+        msgs.iter()
+            .any(|m| m["text"].as_str().unwrap().contains("desktop app"))
+    );
+}
+
+#[tokio::test]
+async fn the_http_client_marks_itself_as_a_channel_and_reads_phone_links() {
+    use wiremock::matchers::header;
+    let srv = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/phone-approval/links"))
+        .and(header("x-praxi-channel", "telegram"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "url": "https://pay.example.org/v1/phone-approval/p/x",
+            "expires_at_ms": 5,
+        })))
+        .mount(&srv)
+        .await;
+    let call_id = ToolCallId::new();
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/approvals/{}", call_id.0)))
+        .and(header("x-praxi-channel", "telegram"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&srv)
+        .await;
+    let client = HttpDaemonClient::new(srv.uri(), SecretValue::new("t"));
+    let link = client.phone_approval_link(call_id).await.unwrap().unwrap();
+    assert_eq!(link.expires_at_ms, 5);
+    client
+        .decide_approval(
+            call_id,
+            ApprovalDecision::Approve,
+            crate::daemon_client::ApprovalScope::Once,
+            None,
+        )
+        .await
+        .unwrap();
+    // Off or refused: no link, no error.
+    let off = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/phone-approval/links"))
+        .respond_with(
+            ResponseTemplate::new(409).set_body_json(json!({"code": "phone_approval_off"})),
+        )
+        .mount(&off)
+        .await;
+    let client = HttpDaemonClient::new(off.uri(), SecretValue::new("t"));
+    assert_eq!(client.phone_approval_link(call_id).await.unwrap(), None);
 }
 
 #[tokio::test]

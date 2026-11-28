@@ -71,7 +71,8 @@ How it is kept safe:
   Telegram by the paired owner (the same standing as a chat message from here, below a
   mission started in the app), a pasted secret is cut out before it is sent, and the
   mission runs under the bot's own limits, budgets and approval rules. Money, mail sending
-  and secrets still ask **in the app**.
+  and secrets still ask **in the app** (a payment can also be approved
+  [from your phone](#approving-a-payment-from-your-phone), with your PIN).
 - **Escaping.** Mission titles, reasons and results are the bot's words (and, through it,
   web pages'). They are quoted with links, mentions and `/commands` made harmless.
 - Answers never repeat the daemon's own error text; you get a short line that says what
@@ -100,7 +101,9 @@ flood your phone.
 
 **Money and approvals stay in the app.** A purchase, a one-time code or any other
 approval is listed as "waiting in the app", with no button here. The chat can only
-answer questions and say "try again"; it can never approve anything.
+answer questions and say "try again"; it can never approve anything. (A payment
+can also be approved on your phone, with a PIN, through the link described in
+[Approving a payment from your phone](#approving-a-payment-from-your-phone).)
 
 **What is in a message is not trusted.** Titles, reasons, results and questions come from
 the bot, and through it from web pages. They are shown as quoted lines with links,
@@ -115,6 +118,44 @@ set **quiet hours**. Messages that arrive during quiet hours wait and are sent w
 the window ends, marked as held back; a progress note that was missed is dropped.
 The same digests appear in the app's notifications panel. The settings live on the
 daemon, so they also apply when it runs on a server and the app is closed.
+
+## Approving a payment from your phone
+
+A payment is the one thing the bot still asks about at the Full level. Its card in
+the chat never has a button: **the chat alone can never approve money**, not even
+from your own paired account. If you are away from the desktop, you can still
+decide on your phone, with a second factor that never goes through Telegram.
+
+Turn it on in **Settings > Notifications > Approve payments from your phone**:
+
+1. Choose a **PIN** of 6 to 12 digits (not your phone's unlock code). The daemon
+   keeps only a hash of it.
+2. Enter the public **https address of a tunnel** to this computer's daemon, the
+   same kind of tunnel as for [incoming webhooks](incoming-webhooks.md) (for example
+   a Cloudflare Tunnel). The daemon still listens only on `127.0.0.1`, and it only
+   answers requests whose `Host` is a local name: set the tunnel to send
+   `Host: 127.0.0.1` (for Cloudflare Tunnel, `httpHostHeader: 127.0.0.1`).
+
+From then on, a payment card in the chat carries a link instead of a button:
+
+- The link works **once**, for **10 minutes**, and only for that one payment. A new
+  card for the same payment replaces the old link.
+- The page first shows the merchant, the site, the amount and what the bot asked
+  for, then asks for your **PIN**. Only after the right PIN does it show a
+  screenshot of the checkout page and the **Approve this payment** and **Deny**
+  buttons. Approving allows this one payment; it is never a standing permission.
+- Merchant, amount and the screenshot are what the checkout page itself shows, and a
+  page can lie. The **site** is the address the bot's browser is on: check it.
+- Three wrong PINs burn a link. Five wrong PINs within 15 minutes lock phone
+  approval for 15 minutes (the settings show until when).
+- A link stops working when it is used, when it expires, when you decide in the
+  app, and when you change the PIN or turn phone approval off.
+- **Check the address before you type the PIN.** Someone who controls the chat could
+  send a link to a look-alike page. Your PIN on the real page is what approves.
+
+Without a PIN (the default), payments are approved only in the desktop app, as
+before. The design and its threat model are in
+[the phone approval ADR](../design/phone-money-approval-adr.md).
 
 ## Language
 

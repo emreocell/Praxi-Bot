@@ -65,10 +65,44 @@ Nasıl güvende tutulur:
 - **Yeni görev, başka sohbet metinleri gibidir.** Hedefi, eşleşmiş sahip tarafından Telegram'da yazılmış diye
   etiketlenir (buradan gelen sohbet mesajıyla aynı konum; uygulamada başlatılan görevin bir altında), yapıştırdığın
   bir gizli bilgi gönderilmeden önce kesilir ve görev botun kendi sınırları, bütçeleri ve onay kurallarıyla çalışır.
-  Para, e-posta gönderme ve gizli bilgiler yine **uygulamada** sorar.
+  Para, e-posta gönderme ve gizli bilgiler yine **uygulamada** sorar (bir ödemeyi PIN'inle
+  [telefondan da onaylayabilirsin](#bir-ödemeyi-telefondan-onaylamak)).
 - **Kaçış.** Görev başlıkları, nedenler ve sonuçlar botun (ve onun üzerinden web sayfalarının) sözleridir. Bağlantılar,
   anmalar ve `/komutlar` zararsız hâle getirilerek alıntı olarak gösterilir.
 - Yanıtlar daemon'ın kendi hata metnini tekrarlamaz; ne yapacağını söyleyen kısa bir satır alırsın.
+
+## Bir ödemeyi telefondan onaylamak
+
+Ödeme, Tam seviyede botun hâlâ sorduğu tek şeydir. Sohbetteki ödeme kartında hiçbir zaman düğme olmaz:
+**para tek başına sohbetten asla onaylanamaz**, kendi eşleştirdiğin hesaptan bile. Masaüstünden uzaktaysan
+yine de telefonundan karar verebilirsin; bunun için Telegram'dan hiç geçmeyen ikinci bir doğrulama gerekir.
+
+Bunu **Ayarlar > Bildirimler > Ödemeleri telefondan onayla** bölümünden aç:
+
+1. 6 ile 12 rakamlık bir **PIN** seç (telefonunun kilit kodu olmasın). Daemon yalnızca özetini saklar.
+2. Bu bilgisayardaki daemon'a giden bir **tünelin herkese açık https adresini** gir;
+   [gelen webhook'lardaki](incoming-webhooks.md) gibi bir tünel (örneğin Cloudflare Tunnel). Daemon yine
+   yalnızca `127.0.0.1` üzerinde dinler ve yalnızca `Host` değeri yerel bir ad olan isteklere yanıt verir:
+   tüneli `Host: 127.0.0.1` gönderecek şekilde ayarla (Cloudflare Tunnel için `httpHostHeader: 127.0.0.1`).
+
+Bundan sonra sohbetteki ödeme kartında düğme yerine bir bağlantı olur:
+
+- Bağlantı **bir kez**, **10 dakika** boyunca ve yalnızca o ödeme için çalışır. Aynı ödeme için yeni bir kart
+  eski bağlantının yerini alır.
+- Sayfa önce satıcıyı, siteyi, tutarı ve botun ne istediğini gösterir, sonra **PIN**'ini sorar. Ödeme
+  sayfasının ekran görüntüsünü ve **Bu ödemeyi onayla** ile **Reddet** düğmelerini ancak doğru PIN'den sonra
+  gösterir. Onay yalnızca bu tek ödemeye izin verir; asla kalıcı bir izin değildir.
+- Satıcı, tutar ve ekran görüntüsü ödeme sayfasının kendi gösterdiğidir ve bir sayfa yalan söyleyebilir.
+  **Site** ise botun tarayıcısının açık olduğu adrestir: onu kontrol et.
+- Üç yanlış PIN bir bağlantıyı yakar. 15 dakika içinde beş yanlış PIN, telefondan onayı 15 dakika kilitler
+  (ayarlar ne zamana kadar olduğunu gösterir).
+- Bağlantı kullanıldığında, süresi dolduğunda, uygulamada karar verdiğinde, PIN'i değiştirdiğinde ya da
+  telefondan onayı kapattığında çalışmaz olur.
+- **PIN'i yazmadan önce adresi kontrol et.** Sohbeti ele geçiren biri benzer görünen bir sayfaya bağlantı
+  gönderebilir. Onayı veren, gerçek sayfaya yazdığın PIN'dir.
+
+PIN yoksa (varsayılan) ödemeler eskisi gibi yalnızca masaüstü uygulamasında onaylanır. Tasarım ve tehdit
+modeli [telefondan onay ADR'sinde](../../design/phone-money-approval-adr.md) (İngilizce).
 
 ## Dil
 

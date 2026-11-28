@@ -98,6 +98,12 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/chats/import"),
     // approvals and questions: a token must not approve its own tool calls
     ("POST", "/v1/approvals/{}"),
+    // phone approval of money asks: the PIN, the address and minting a one-time link
+    ("GET", "/v1/phone-approval"),
+    ("HEAD", "/v1/phone-approval"),
+    ("PUT", "/v1/phone-approval"),
+    ("DELETE", "/v1/phone-approval"),
+    ("POST", "/v1/phone-approval/links"),
     ("POST", "/v1/questions/{}"),
     // edit & resend / regenerate: stored as the owner's own message
     ("POST", "/v1/chats/{}/resend"),
@@ -493,6 +499,9 @@ pub const TOKEN_OK_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/webhooks/{}"),
     // HMAC is the credential. The handler rejects a call that is not signed.
     ("POST", "/v1/incoming-webhooks/{}"),
+    // The one-time nonce plus the owner's PIN are the credential (phone approval page).
+    ("POST", "/v1/phone-approval/p/{}/unlock"),
+    ("POST", "/v1/phone-approval/p/{}/decide"),
     ("POST", "/v1/mcp-server/call"),
     ("PUT", "/v1/admin/default-provider"),
     ("PUT", "/v1/admin/home"),

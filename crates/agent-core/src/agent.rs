@@ -262,6 +262,7 @@ impl AgentLoop {
                 events,
                 runs: Mutex::new(HashMap::new()),
                 pending: Mutex::new(HashMap::new()),
+                checkout_shots: Mutex::new(HashMap::new()),
                 grants: Mutex::new(load_grants(&storage)),
                 profile_rules: Mutex::new(crate::site_profiles::load_profile_rules(&storage)),
                 active: Mutex::new(HashMap::new()),
@@ -2095,6 +2096,26 @@ impl AgentLoop {
             .lock()
             .get(&call_id)
             .is_some_and(|p| p.gate_grant)
+    }
+
+    /// The pending card asks to move money (the money floor). A chat channel must not approve
+    /// it; the phone approval page may, with the owner's second factor.
+    #[must_use]
+    pub fn approval_is_money(&self, call_id: ToolCallId) -> bool {
+        self.sh
+            .pending
+            .lock()
+            .get(&call_id)
+            .is_some_and(|p| p.kind == PendingKind::Approval && p.money)
+    }
+
+    /// The checkout screenshot of a pending money ask (bytes, MIME type), while it waits.
+    #[must_use]
+    pub fn checkout_screenshot(&self, call_id: ToolCallId) -> Option<(Vec<u8>, &'static str)> {
+        if !self.approval_is_money(call_id) {
+            return None;
+        }
+        self.sh.checkout_shots.lock().get(&call_id).cloned()
     }
 
     /// Deny a pending tool call; the model receives a denial message.

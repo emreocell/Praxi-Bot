@@ -60,6 +60,7 @@ mod openapi_apps;
 mod owner_notices;
 mod peer_knowledge;
 mod peer_owner;
+mod phone_approval;
 mod profile_share;
 mod safe_mode;
 mod schedules;

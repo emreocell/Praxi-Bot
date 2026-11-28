@@ -6394,6 +6394,32 @@
     "relay": "Relay · {{rtt}} ms",
     "relayHint": "Relayed: the connection goes through a helper server, so it can be a little slower. The number is the delay."
   },
+  "phoneApproval": {
+    "address": "Public address of your tunnel",
+    "addressHint": "An https address that forwards to Praxi on this computer, for example a Cloudflare Tunnel. Only the address, no path. The tunnel must send Host: 127.0.0.1.",
+    "badAddress": "Enter an https address with no path, for example https://pay.example.org.",
+    "badPin": "The PIN must be 6 to 12 digits.",
+    "checkout": {
+      "amount": "Amount: {{value}}",
+      "claims": "(merchant and amount as the checkout page shows them)",
+      "merchant": "Merchant: {{value}}",
+      "site": "Site: {{value}}"
+    },
+    "description": "Money is never approved in Telegram or Discord. With this on, a payment card in the chat carries a one-time link (10 minutes) to a page on this computer, reached through your own tunnel. The page asks for this PIN before it shows the checkout and the Approve button.",
+    "locked": "Too many wrong PINs. Phone links do not work until {{time}}.",
+    "newPin": "New PIN (leave empty to keep the current one)",
+    "off": "Off: payments are approved only in this app.",
+    "on": "On: payment cards in the chat carry a phone link.",
+    "pin": "PIN",
+    "pinHint": "6 to 12 digits. It is stored only as a hash and never sent to the chat. Do not use your phone's unlock code.",
+    "pinMismatch": "The two PINs are not the same.",
+    "repeatPin": "PIN again",
+    "save": "Save",
+    "saved": "Saved. Links sent before this change no longer work.",
+    "title": "Approve payments from your phone",
+    "turnOff": "Turn off",
+    "turnOn": "Turn on"
+  },
   "popout": {
     "chatFallbackTitle": "Chat window",
     "connecting": "Connecting...",
