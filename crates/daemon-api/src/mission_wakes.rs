@@ -7,11 +7,12 @@
 //! ([`connector_email::wait_for_mail`], one look instead of a polling loop): the filter is applied
 //! locally, nothing the model wrote reaches the mail server.
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use builtin_tools::connector_email::reply_classification::classify_reply;
+use builtin_tools::connector_email::inbound::{apply_to_message, sweep_reports};
 use builtin_tools::connector_email::{
     MailHandle, WaitEnd, WaitFilter, WaitPlan, found_json, link_basis, wait_for_mail,
 };
@@ -90,9 +91,35 @@ impl WakeChecks for DaemonWakeChecks {
     }
 }
 
+/// How often the inbox of one mailbox is searched for delivery reports (bounces).
+const REPORT_SWEEP_EVERY: Duration = Duration::from_secs(5 * 60);
+
 /// One look into the bot's own inbox (and junk folder) for the wake loop.
 pub(crate) struct OwnInboxProbe {
     pub(crate) mail: Arc<MailHandle>,
+    /// When each mailbox was last searched for delivery reports.
+    pub(crate) sweeps: parking_lot::Mutex<HashMap<String, Instant>>,
+}
+
+impl OwnInboxProbe {
+    pub(crate) fn new(mail: Arc<MailHandle>) -> Self {
+        Self {
+            mail,
+            sweeps: parking_lot::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Whether `account` is due for a search for delivery reports (and marks it done).
+    fn sweep_due(&self, account: &str) -> bool {
+        let mut sweeps = self.sweeps.lock();
+        let due = sweeps
+            .get(account)
+            .is_none_or(|at| at.elapsed() >= REPORT_SWEEP_EVERY);
+        if due {
+            sweeps.insert(account.to_owned(), Instant::now());
+        }
+        due
+    }
 }
 
 #[async_trait]
@@ -113,6 +140,14 @@ impl MailProbe for OwnInboxProbe {
             f.keyword.as_deref(),
         )
         .map_err(|e| e.to_string())?;
+        // Bounces come from a mail system, not from the person the wait is for: look for them
+        // on their own (at most every few minutes per mailbox), whatever the filter says. A hard
+        // bounce suppresses the address and a temporary failure is counted, before any wait or
+        // session writes to it again.
+        let guard = connector.guard();
+        if self.sweep_due(&acct.name) {
+            sweep_reports(&scoped, &guard, &acct.name).await;
+        }
         let waited_ms = u64::try_from(req.now_ms.saturating_sub(req.registered_at_ms)).unwrap_or(0);
         // One look, no polling loop: the wake loop paces the looks itself.
         let plan = WaitPlan {
@@ -120,8 +155,9 @@ impl MailProbe for OwnInboxProbe {
             max_age: Duration::from_millis(waited_ms) + MAIL_SLACK,
             // The wait's own start (less the slack) is its watermark: an earlier mail is not it.
             since: Some(
-                (req.registered_at_ms / 1000)
-                    - i64::try_from(MAIL_SLACK.as_secs()).unwrap_or(i64::MAX),
+                ((req.registered_at_ms / 1000)
+                    - i64::try_from(MAIL_SLACK.as_secs()).unwrap_or(i64::MAX))
+                .max(req.not_before_ms.div_euclid(1000) + 1),
             ),
             first_pause: Duration::from_secs(1),
             max_pause: Duration::from_secs(1),
@@ -142,17 +178,30 @@ impl MailProbe for OwnInboxProbe {
                 let basis = link_basis(None, None);
                 let owner_domains = connector.guard().settings().verification_domains();
                 let mut summary = found_json(&detail, &acct.name, &basis, &owner_domains);
-                let auto_submitted = detail
-                    .summary
-                    .automation_headers
-                    .as_ref()
-                    .map(|h| h.auto_submitted.as_str());
-                let class =
-                    classify_reply(&detail.summary.subject, &detail.body_text, auto_submitted);
+                // Match it to what this mailbox sent and act on a confident match (suppress a
+                // sender who said STOP, count a temporary failure, note a follow-up date). What
+                // the mail says is data: it only picks one of these fixed actions.
+                let outcome = apply_to_message(&guard, &acct.name, &detail);
+                // An out-of-office notice for a mail of ANOTHER mission does not put this
+                // mission's wait off.
+                let follow_up_at_ms = outcome
+                    .follow_up_secs()
+                    .filter(|_| {
+                        outcome
+                            .mission_id
+                            .as_deref()
+                            .is_none_or(|m| m == req.mission_id)
+                    })
+                    .and_then(|secs| i64::try_from(secs).ok())
+                    .and_then(|secs| secs.checked_mul(1000));
                 if let Some(object) = summary.as_object_mut() {
-                    object.insert("reply_class_hint".into(), serde_json::json!(class));
+                    object.insert("reply_class_hint".into(), serde_json::json!(outcome.class));
+                    object.insert("inbound".into(), serde_json::json!(outcome));
                 }
-                Ok(Some(MailHit { summary }))
+                Ok(Some(MailHit {
+                    summary,
+                    follow_up_at_ms,
+                }))
             }
             Ok(WaitEnd::TimedOut { .. } | WaitEnd::Cancelled) => Ok(None),
             Err(e) => Err(e.to_string()),

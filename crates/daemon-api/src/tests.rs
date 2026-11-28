@@ -52,6 +52,7 @@ mod mcp;
 mod memory;
 mod memory_controls;
 mod mission_long_run;
+mod mission_mail_probe;
 mod missions;
 mod model_catalog;
 mod offline_schedule;

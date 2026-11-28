@@ -7998,6 +7998,10 @@
       }
     },
     "mailGuard": {
+      "budget": "Posta kutusu başına günde en fazla e-posta (0 = sınır yok)",
+      "budgetHelp": "Bu sınırı aşan gönderim, sayı düşene kadar reddedilir. Varsayılan 20.",
+      "budgetHint": "Yukarıdaki uyarıların aksine bu sınır engeller. Siz başında değilken botlarınızın gönderdiği e-postalar ile görevler için geçerlidir; son 24 saat üzerinden sayılır.",
+      "budgetTitle": "Toplu gönderim bütçesi",
       "colBot": "Bot",
       "colNote": "Not",
       "colSubject": "Konu",
@@ -8029,6 +8033,8 @@
       "optOutPlaceholder": "ayse@ornek.com ya da ornek.com",
       "optOutRemove": "{{value}} kaydını kaldır",
       "optOutTitle": "Yazmayacağım kişiler",
+      "reasonHardBounce": "kalıcı olarak geri döndü",
+      "reasonStopReply": "durdurmayı istedi",
       "retry": "Tekrar dene",
       "save": "Kaydet",
       "saved": "Kaydedildi",
@@ -8042,7 +8048,9 @@
       "verifyDomains": "Doğrulama e-postasının bağlantı verebileceği ek siteler",
       "verifyDomainsHint": "Bir sitede kayıt olan bot, doğrulama e-postasından yalnızca o sitenin bağlantılarını alır. Bir site e-postalarını başka bir hizmet üzerinden gönderiyorsa (örneğin bir izleme alan adı), o alan adını buraya satır başına bir tane ekleyin (example.com). Emin değilseniz boş bırakın: bot o zaman size sorar.",
       "verifyDomainsPlaceholder": "posta.ornek.com",
-      "verifyDomainsShort": "Doğrulama bağlantıları başka bir sunucudaysa satır başına bir alan adı."
+      "verifyDomainsShort": "Doğrulama bağlantıları başka bir sunucudaysa satır başına bir alan adı.",
+      "warmup": "Yeni bir posta kutusunun bu sayıya ulaşması için gün (0 = kademeli artış yok)",
+      "warmupHelp": "Hiç gönderim geçmişi olmayan bir posta kutusu günde 5 e-postayla başlar ve bu günler boyunca sınıra çıkar. Daha önce gönderim yapmış bir posta kutusu doğrudan tam sınırla başlar."
     },
     "mode": {
       "moreHint": "Nadiren gerekir. Ayarları bir dahaki açışında yine kapalı gelir.",

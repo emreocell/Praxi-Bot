@@ -8242,6 +8242,18 @@ export interface components {
             opt_out_line: boolean;
             /**
              * Format: int32
+             * @description Hard daily budget per mailbox for outreach (mail an unattended bot or a mission
+             *     sends): a send past it is refused. `0` = no budget. Default 20.
+             */
+            outreach_daily_budget?: number;
+            /**
+             * Format: int32
+             * @description Days a mailbox with no sending history takes to ramp up to the budget (`0` = no ramp).
+             *     Default 14.
+             */
+            outreach_warmup_days?: number;
+            /**
+             * Format: int32
              * @description Warn when a recipient got mail within this many days (`0` = no warning). Default 0 (off).
              */
             same_recipient_days: number;
@@ -8288,8 +8300,15 @@ export interface components {
             added_at: number;
             /** @description `address` or `domain`. */
             kind: string;
+            /** @description The `Message-ID` of the mail we sent that the bounce or reply answered. Empty: none. */
+            message_id?: string;
             /** @description The owner's note. */
             note: string;
+            /**
+             * @description Why the program added it: `hard_bounce` (the address bounced for good) or `stop_reply`
+             *     (the person answered STOP). Empty when the owner added it.
+             */
+            reason?: string;
             /** @description `ann@example.com` or `example.com`. */
             value: string;
         };

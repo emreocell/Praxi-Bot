@@ -282,6 +282,8 @@ fn settings_dto(s: GuardSettings) -> EmailGuardSettingsDto {
         opt_out_line: s.opt_out_line,
         footer: s.footer,
         verification_link_domains: s.verification_link_domains,
+        outreach_daily_budget: s.outreach_daily_budget,
+        outreach_warmup_days: s.outreach_warmup_days,
     }
 }
 
@@ -291,6 +293,8 @@ fn opt_out_dto(o: connector_email::OptOut) -> EmailOptOutDto {
         kind: o.kind,
         added_at: o.added_at,
         note: o.note,
+        reason: o.reason,
+        message_id: o.message_id,
     }
 }
 
@@ -1124,6 +1128,8 @@ impl EmailControl for EmailHost {
             opt_out_line: s.opt_out_line,
             footer: s.footer,
             verification_link_domains: s.verification_link_domains,
+            outreach_daily_budget: s.outreach_daily_budget,
+            outreach_warmup_days: s.outreach_warmup_days,
         };
         self.connector
             .guard()

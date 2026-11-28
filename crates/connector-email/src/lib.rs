@@ -22,10 +22,12 @@ pub mod channel;
 pub mod config;
 pub mod connector;
 mod cred;
+pub mod dsn;
 pub mod error;
 pub mod guard;
 pub mod imap;
 pub mod imap_provider;
+pub mod inbound;
 pub mod message;
 pub mod probe;
 pub mod provider;
@@ -48,11 +50,15 @@ pub use config::{
     SmtpSettings, normalize_sender, validate_account_name, validate_host,
 };
 pub use connector::{
-    ATTACHMENTS_DIR_NAME, EmailConnector, MAX_ATTACHMENT_BYTES, SavedAttachment, Scoped,
-    SearchResult,
+    ATTACHMENTS_DIR_NAME, EmailConnector, MAX_ATTACHMENT_BYTES, MissionResolver, SavedAttachment,
+    Scoped, SearchResult,
 };
+pub use dsn::{DeliveryStatus, DsnRecipient};
 pub use error::{EmailError, ProviderError};
-pub use guard::{GuardReport, GuardSettings, MailGuard, OptOut, SendLogEntry, Warning};
+pub use guard::{
+    BudgetBlock, GuardReport, GuardSettings, InboundAction, InboundMail, InboundOutcome, MailGuard,
+    OptOut, SendLogEntry, SoftBounce, Warning,
+};
 pub use imap::{FolderInfo, SearchQuery};
 pub use imap_provider::ImapSmtpProvider;
 pub use message::{AttachmentInfo, MessageDetail, MessageSummary};

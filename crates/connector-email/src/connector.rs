@@ -75,7 +75,12 @@ pub struct EmailConnector {
     attachment_place: RwLock<Option<Arc<dyn AttachmentPlace>>>,
     /// Outgoing-mail guardrails (send log, opt-out list, limits).
     guard: RwLock<Arc<MailGuard>>,
+    /// Finds the mission a run belongs to (set by the daemon; `None` = nothing is a mission).
+    mission_resolver: RwLock<Option<MissionResolver>>,
 }
+
+/// Maps a run id to the mission whose session it is.
+pub type MissionResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// Longest a search that also looks in the junk folders takes, over all its folders.
 const JUNK_SEARCH_BUDGET: Duration = Duration::from_secs(30);
@@ -154,7 +159,28 @@ impl EmailConnector {
             attachments_dir: RwLock::new(None),
             attachment_place: RwLock::new(None),
             guard: RwLock::new(Arc::new(MailGuard::in_memory())),
+            mission_resolver: RwLock::new(None),
         }
+    }
+
+    /// Tell the connector how to find the mission a run belongs to, so the send log can name
+    /// it (the daemon knows; this crate does not know about missions).
+    pub fn set_mission_resolver(&self, resolver: MissionResolver) {
+        *self
+            .mission_resolver
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(resolver);
+    }
+
+    /// The mission whose session is run `run_id`, when there is one.
+    #[must_use]
+    pub fn mission_of_run(&self, run_id: &str) -> Option<String> {
+        let resolver = self
+            .mission_resolver
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()?;
+        resolver(run_id)
     }
 
     /// The outgoing-mail guard (shared; the host reads and edits the log and the lists here).

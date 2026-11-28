@@ -7235,6 +7235,10 @@
       }
     },
     "mailGuard": {
+      "budget": "Máximo de correos por día y buzón (0 = sin límite)",
+      "budgetHelp": "Un envío por encima del límite se rechaza hasta que el recuento baje. Por defecto: 20.",
+      "budgetHint": "A diferencia de los avisos de arriba, este límite bloquea. Se aplica a los correos que tus bots envían sin que los veas y a las misiones, y se cuenta sobre 24 horas.",
+      "budgetTitle": "Presupuesto de envíos",
       "colBot": "Bot",
       "colNote": "Nota",
       "colSubject": "Asunto",
@@ -7261,6 +7265,8 @@
       "optOutPlaceholder": "ana@ejemplo.com o ejemplo.com",
       "optOutRemove": "Quitar {{value}}",
       "optOutTitle": "Personas a las que no escribiré",
+      "reasonHardBounce": "rebotó definitivamente",
+      "reasonStopReply": "pidió parar",
       "retry": "Reintentar",
       "save": "Guardar",
       "saved": "Guardado",
@@ -7269,7 +7275,9 @@
       "title": "Envío seguro",
       "verifyDomains": "Sitios adicionales a los que puede enlazar un correo de verificación",
       "verifyDomainsHint": "Un bot que se registra en un sitio solo recibe del correo de verificación los enlaces de ese sitio. Si un sitio envía sus correos a través de otro servicio (por ejemplo un dominio de seguimiento), añada ese dominio aquí, uno por línea (example.com). Déjelo vacío si no está seguro: el bot le preguntará.",
-      "verifyDomainsPlaceholder": "correo.ejemplo.com"
+      "verifyDomainsPlaceholder": "correo.ejemplo.com",
+      "warmup": "Días que tarda un buzón nuevo en llegar a esa cifra (0 = sin aumento gradual)",
+      "warmupHelp": "Un buzón sin historial de envíos empieza con 5 correos al día y sube hasta el límite durante estos días. Un buzón que ya envía desde hace tiempo empieza con el límite completo."
     },
     "mode": {
       "moreHint": "Rara vez necesarios. Se cierran de nuevo la próxima vez que abras los ajustes.",

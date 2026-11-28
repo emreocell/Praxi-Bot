@@ -184,9 +184,17 @@ pub struct ComposedMail {
     raw: Vec<u8>,
     from: String,
     recipients: Vec<String>,
+    message_id: String,
 }
 
 impl ComposedMail {
+    /// The `Message-ID` header this message carries (without angle brackets). We write it
+    /// ourselves, so a later reply or delivery report can be matched to the send.
+    #[must_use]
+    pub fn message_id(&self) -> &str {
+        &self.message_id
+    }
+
     /// RFC 5322 message bytes.
     #[must_use]
     pub fn formatted(&self) -> Vec<u8> {
@@ -289,6 +297,9 @@ fn compose_message(
     if !references.is_empty() {
         builder = builder.references(references);
     }
+    // Our own id, never the library's: the send log keeps it to match replies and bounces.
+    let message_id = new_message_id(&from.1);
+    builder = builder.message_id(message_id.clone());
     let raw = builder
         .write_to_vec()
         .map_err(|e| EmailError::Input(format!("cannot build message: {e}")))?;
@@ -296,7 +307,23 @@ fn compose_message(
         raw,
         from: from.1,
         recipients,
+        message_id,
     })
+}
+
+/// A fresh `Message-ID` (no angle brackets): a random part nobody can guess, and the sending
+/// address's domain, like every mail program writes it.
+fn new_message_id(from_address: &str) -> String {
+    let domain = from_address
+        .rsplit_once('@')
+        .map(|(_, d)| d.trim())
+        .filter(|d| {
+            !d.is_empty()
+                && d.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        })
+        .unwrap_or("praxi.invalid");
+    format!("{}@{domain}", uuid::Uuid::new_v4().simple())
 }
 
 /// `text` with every copy of `password` blanked. An empty password is skipped: replacing
@@ -309,7 +336,8 @@ fn redact_password(text: &str, password: &str) -> String {
     }
 }
 
-/// Submit a composed message. TLS is always required; there is no plaintext path.
+/// Submit a composed message. TLS is always required; there is no plaintext path. Returns the
+/// `Message-ID` the message went out with.
 ///
 /// # Errors
 /// TLS, authentication or delivery failures.
@@ -335,11 +363,12 @@ pub async fn send(
         .timeout(acct.timeout());
     builder.tls_connector = crate::tls::connector(acct.extra_root_pem.as_deref())?;
     let mut client = builder.connect().await.map_err(map_error)?;
+    let message_id = msg.message_id;
     let envelope = mail_send::smtp::message::Message::new(msg.from, msg.recipients, msg.raw);
     client.send(envelope).await.map_err(map_error)?;
     // DATA acceptance is success. A QUIT failure must not invite duplicate delivery.
     let _ = client.quit().await;
-    Ok("SMTP server accepted message".into())
+    Ok(message_id)
 }
 
 #[cfg(test)]
@@ -373,6 +402,25 @@ mod tests {
         let raw = String::from_utf8(m.formatted()).unwrap();
         assert!(raw.contains("Subject: Hello"));
         assert!(raw.contains("bob@example.com"));
+    }
+
+    #[test]
+    fn every_message_carries_our_own_fresh_message_id() {
+        let a = compose("me@example.com", &mail()).unwrap();
+        let b = compose("me@example.com", &mail()).unwrap();
+        assert_ne!(a.message_id(), b.message_id());
+        assert!(
+            a.message_id().ends_with("@example.com"),
+            "{}",
+            a.message_id()
+        );
+        let raw = String::from_utf8(a.formatted()).unwrap();
+        assert!(
+            raw.contains(&format!("Message-ID: <{}>", a.message_id())),
+            "{raw}"
+        );
+        // A From domain that cannot be written into an id falls back to a reserved one.
+        assert!(new_message_id("odd@bad domain>").ends_with("@praxi.invalid"));
     }
 
     #[test]

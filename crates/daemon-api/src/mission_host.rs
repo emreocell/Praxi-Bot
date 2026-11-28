@@ -295,9 +295,7 @@ impl AppState {
         self.0
             .agent
             .set_mission_child_wake(Arc::new(SupChildWake(Arc::clone(&supervisor))));
-        supervisor.set_mail_probe(Arc::new(OwnInboxProbe {
-            mail: self.0.agent.mail_handle(),
-        }));
+        supervisor.set_mail_probe(Arc::new(OwnInboxProbe::new(self.0.agent.mail_handle())));
         let weak = self.downgrade();
         supervisor.set_change_hook(Arc::new(move |id| {
             if let Some(state) = weak.upgrade() {

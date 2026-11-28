@@ -676,6 +676,15 @@
     "summary": "Başka dilde: English · Deutsch."
   },
   {
+    "doc": "tr/missions.md",
+    "title": "Görevler: tek büyük iş, ara onay olmadan",
+    "headings": [
+      "Bir postayı, zamanlayıcıyı veya webhook'u beklemek",
+      "Bu sürümün sınırları"
+    ],
+    "summary": "Uzun süren görevler oturumlar halinde ilerler; bekleme kayıtları yeniden başlatmadan sonra da durur."
+  },
+  {
     "doc": "tr/model-catalog.md",
     "title": "Model seçici bilgileri",
     "headings": [

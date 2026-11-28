@@ -7235,6 +7235,10 @@
       }
     },
     "mailGuard": {
+      "budget": "Höchstens so viele E-Mails pro Tag und Postfach (0 = kein Limit)",
+      "budgetHelp": "Ein Versand über diesem Limit wird abgelehnt, bis die Zahl wieder sinkt. Standard: 20.",
+      "budgetHint": "Anders als die Warnungen oben blockiert dieses Limit. Es gilt für E-Mails, die Ihre Bots ohne Ihre Aufsicht senden, und für Missionen, und wird über 24 Stunden gezählt.",
+      "budgetTitle": "Versandbudget",
       "colBot": "Bot",
       "colNote": "Hinweis",
       "colSubject": "Betreff",
@@ -7261,6 +7265,8 @@
       "optOutPlaceholder": "anna@beispiel.de oder beispiel.de",
       "optOutRemove": "{{value}} entfernen",
       "optOutTitle": "Personen, die ich nicht anschreibe",
+      "reasonHardBounce": "dauerhaft unzustellbar",
+      "reasonStopReply": "bat um Stopp",
       "retry": "Erneut versuchen",
       "save": "Speichern",
       "saved": "Gespeichert",
@@ -7269,7 +7275,9 @@
       "title": "Sicher senden",
       "verifyDomains": "Weitere Seiten, auf die eine Bestätigungs-E-Mail verlinken darf",
       "verifyDomainsHint": "Ein Bot, der sich auf einer Seite registriert, bekommt aus der Bestätigungs-E-Mail nur die Links dieser Seite zurück. Verschickt eine Seite ihre E-Mails über einen anderen Dienst (zum Beispiel eine Tracking-Domain), tragen Sie diese Domain hier ein, eine pro Zeile (example.com). Lassen Sie das Feld leer, wenn Sie unsicher sind: Der Bot fragt dann bei Ihnen nach.",
-      "verifyDomainsPlaceholder": "mail.beispiel.de"
+      "verifyDomainsPlaceholder": "mail.beispiel.de",
+      "warmup": "Tage, die ein neues Postfach braucht, um diese Zahl zu erreichen (0 = kein Anlaufen)",
+      "warmupHelp": "Ein Postfach ohne Versandverlauf beginnt mit 5 E-Mails pro Tag und steigt über diese Tage bis zum Limit. Ein Postfach, das schon länger sendet, beginnt gleich mit dem vollen Limit."
     },
     "mode": {
       "moreHint": "Selten nötig. Beim nächsten Öffnen der Einstellungen wieder zu.",

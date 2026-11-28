@@ -340,6 +340,11 @@ pub struct Wake {
 /// What one look into a mailbox asks.
 #[derive(Debug, Clone, Copy)]
 pub struct MailCheck<'a> {
+    /// The mission the wait belongs to.
+    pub mission_id: &'a str,
+    /// Mail that arrived before this moment (Unix ms) is not the awaited one, whatever the
+    /// wait's own start says: an out-of-office notice the wait was already put off for.
+    pub not_before_ms: i64,
     /// The mission's bot: only its own mail identity is looked into.
     pub bot_id: &'a str,
     /// Which mail.
@@ -356,7 +361,14 @@ pub struct MailHit {
     /// Sender, subject, time, one-time codes and the judged links, already cleaned and capped.
     /// Untrusted: it comes from a stranger.
     pub summary: Value,
+    /// The mail says the person is away and the wait should go on until then (Unix ms) instead
+    /// of waking the item: set only for a mail matched to a mail we sent. The wait gives up no
+    /// earlier than this; a hit after [`MAX_MAIL_DEFERS`] earlier ones wakes the item anyway.
+    pub follow_up_at_ms: Option<i64>,
 }
+
+/// How often one mail wait is put off for an out-of-office reply before the mail wakes the item.
+pub const MAX_MAIL_DEFERS: u32 = 3;
 
 /// Looks into the bot's own mailbox once. The daemon implements it over the mail connector;
 /// tests implement it with a fake inbox.

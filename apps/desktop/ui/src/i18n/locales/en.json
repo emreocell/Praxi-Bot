@@ -7998,6 +7998,10 @@
       }
     },
     "mailGuard": {
+      "budget": "Most e-mails per day, per mailbox (0 = no limit)",
+      "budgetHelp": "A send over this limit is refused until the count falls again. Default 20.",
+      "budgetHint": "Unlike the warnings above, this limit blocks. It applies to e-mail your bots send without you watching and to missions, and it is counted over a rolling 24 hours.",
+      "budgetTitle": "Outreach budget",
       "colBot": "Bot",
       "colNote": "Note",
       "colSubject": "Subject",
@@ -8029,6 +8033,8 @@
       "optOutPlaceholder": "ann@example.com or example.com",
       "optOutRemove": "Remove {{value}}",
       "optOutTitle": "People I will not write to",
+      "reasonHardBounce": "bounced for good",
+      "reasonStopReply": "asked to stop",
       "retry": "Try again",
       "save": "Save",
       "saved": "Saved",
@@ -8042,7 +8048,9 @@
       "verifyDomains": "Extra sites a verification e-mail may link to",
       "verifyDomainsHint": "A bot that signs up on a site gets back only the links of that site from its verification e-mail. If a site sends its mails through another service (for example a tracking domain), add that domain here, one per line (example.com). Leave it empty if you are unsure: the bot then asks you.",
       "verifyDomainsPlaceholder": "mail.example.com",
-      "verifyDomainsShort": "One domain per line when verification links use another host."
+      "verifyDomainsShort": "One domain per line when verification links use another host.",
+      "warmup": "Days a new mailbox takes to reach that number (0 = no ramp-up)",
+      "warmupHelp": "A mailbox with no sending history starts at 5 e-mails a day and climbs to the limit over these days. A mailbox that has been sending for longer starts at the full limit."
     },
     "mode": {
       "moreHint": "Rarely needed. Closed again the next time you open Settings.",

@@ -346,6 +346,59 @@ impl MissionStore {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    /// A mail wait whose awaited person is away: the wait goes on, but gives up no earlier than
+    /// `follow_up_ms` (a later give-up time stays as it is), and mail from before `now_ms` is no
+    /// longer the awaited reply. The item stays parked and no wake is recorded; the pause is
+    /// durable (it is the wait's own row). Returns `false` when nothing was changed: the wait
+    /// already ended, or it was put off `max_defers` times before (then the mail wakes the item).
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn defer_mail_wait(
+        &self,
+        wait_id: i64,
+        follow_up_ms: i64,
+        now_ms: i64,
+        max_defers: u32,
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let w = wait_in(&tx, wait_id)?;
+        if w.state != WaitState::Waiting || !matches!(w.spec, WaitSpec::Mail { .. }) {
+            return Ok(false);
+        }
+        let changed = tx.execute(
+            "UPDATE mission_waits SET due_at_ms = MAX(due_at_ms, ?2), not_before_ms = ?3, \
+             defers = defers + 1 WHERE id = ?1 AND state = 'waiting' AND defers < ?4",
+            params![wait_id, follow_up_ms, now_ms, i64::from(max_defers)],
+        )?;
+        if changed == 0 {
+            return Ok(false);
+        }
+        event(
+            &tx,
+            &w.mission_id,
+            now_ms,
+            "wait_deferred",
+            Some(&w.item_key),
+            &json!({"wait": wait_id, "follow_up_at_ms": follow_up_ms.max(w.due_at_ms), "why": "out_of_office"}),
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// `(not_before_ms, defers)` of a wait: see [`Self::defer_mail_wait`].
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn wait_deferral(&self, wait_id: i64) -> Result<(i64, u32)> {
+        Ok(self.conn().query_row(
+            "SELECT not_before_ms, defers FROM mission_waits WHERE id = ?1",
+            [wait_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    }
+
     /// A look into the mailbox found nothing: the next one is not before `next_at_ms`. `error`
     /// is the reason a failed look gave (the wait goes on).
     ///

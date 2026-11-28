@@ -347,6 +347,22 @@ pub struct EmailGuardSettingsDto {
     /// by default. A bot never sees or changes this list.
     #[serde(default)]
     pub verification_link_domains: Vec<String>,
+    /// Hard daily budget per mailbox for outreach (mail an unattended bot or a mission
+    /// sends): a send past it is refused. `0` = no budget. Default 20.
+    #[serde(default = "default_outreach_budget")]
+    pub outreach_daily_budget: u32,
+    /// Days a mailbox with no sending history takes to ramp up to the budget (`0` = no ramp).
+    /// Default 14.
+    #[serde(default = "default_outreach_warmup")]
+    pub outreach_warmup_days: u32,
+}
+
+fn default_outreach_budget() -> u32 {
+    builtin_tools::connector_email::guard::DEFAULT_OUTREACH_BUDGET
+}
+
+fn default_outreach_warmup() -> u32 {
+    builtin_tools::connector_email::guard::DEFAULT_WARMUP_DAYS
 }
 
 /// One address or domain the owner will not write to.
@@ -360,6 +376,13 @@ pub struct EmailOptOutDto {
     pub added_at: u64,
     /// The owner's note.
     pub note: String,
+    /// Why the program added it: `hard_bounce` (the address bounced for good) or `stop_reply`
+    /// (the person answered STOP). Empty when the owner added it.
+    #[serde(default)]
+    pub reason: String,
+    /// The `Message-ID` of the mail we sent that the bounce or reply answered. Empty: none.
+    #[serde(default)]
+    pub message_id: String,
 }
 
 /// Body of `POST /v1/email/guard/opt-out`.

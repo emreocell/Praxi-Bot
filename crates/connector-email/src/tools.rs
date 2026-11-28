@@ -1194,6 +1194,18 @@ impl EmailTool {
         // line) kept the reply from being an owner-thread reply at all.
         let unattended_logged =
             resolve_pre_send_warnings(ctx, &plan.report, overridden, owner_thread)?;
+        // Outreach is held to a hard daily budget however it was approved: a bot nobody
+        // watches, and a mission session (whose owner approved a plan, not every mail).
+        let mission_id = self.conn.mission_of_run(&ctx.run_id);
+        if ctx.unattended_mail || mission_id.is_some() {
+            guard
+                .check_outreach_budget(&plan.account, plan.recipients.len())
+                .map_err(|b| {
+                    ToolError::Execution(format!(
+                        "Not sent: {b}. Wait until it frees up (it is counted over a rolling 24 hours) or ask the owner to raise it in Settings, Mail."
+                    ))
+                })?;
+        }
         let mut mail = i.mail.clone();
         if let Some(f) = &plan.report.footer {
             mail.body = guard::with_footer(&mail.body, f);
@@ -1216,6 +1228,8 @@ impl EmailTool {
             recipients: plan.recipients,
             subject: i.mail.subject.clone(),
             message_id: receipt.id.clone(),
+            thread_id: receipt.thread_id.clone(),
+            mission_id,
             opt_out_line: plan.line_on,
             overridden: if overridden {
                 plan.report.codes()
@@ -1229,7 +1243,7 @@ impl EmailTool {
             "in_reply_to": reply.as_ref().map(|r| r.id.clone()),
             "opt_out_line_added": plan.line_on,
             "owner_sent_anyway": overridden,
-            "server_response": receipt.id,
+            "message_id": receipt.id,
         });
         note_unattended_warnings(&mut sent, &unattended_logged);
         Ok(json_out(sent))

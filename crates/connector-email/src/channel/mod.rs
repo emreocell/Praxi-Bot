@@ -539,6 +539,8 @@ impl Core {
                 recipients,
                 subject: reply.subject.clone(),
                 message_id: receipt.id.clone(),
+                thread_id: receipt.thread_id.clone(),
+                mission_id: None,
                 opt_out_line: false,
                 overridden: Vec::new(),
             });

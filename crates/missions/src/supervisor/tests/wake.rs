@@ -9,8 +9,8 @@ use crate::model::Item;
 
 use super::*;
 use crate::wake::{
-    MailCheck, MailFilter, MailHit, MailProbe, NewWait, WAKE_RELEASES_PER_HOUR, WAKE_RETENTION_MS,
-    WaitSpec,
+    MAX_MAIL_DEFERS, MailCheck, MailFilter, MailHit, MailProbe, NewWait, WAKE_RELEASES_PER_HOUR,
+    WAKE_RETENTION_MS, WaitSpec,
 };
 
 const MIN: i64 = 60_000;
@@ -45,10 +45,14 @@ impl MailProbe for FakeInbox {
             .lock()
             .iter()
             .find(|(at, from, _)| {
-                *at <= req.now_ms && *at >= req.registered_at_ms - 2 * MIN && *from == wanted
+                *at <= req.now_ms
+                    && *at >= req.registered_at_ms - 2 * MIN
+                    && *at >= req.not_before_ms
+                    && *from == wanted
             })
             .map(|(_, _, summary)| MailHit {
                 summary: summary.clone(),
+                follow_up_at_ms: summary["follow_up_at_ms"].as_i64(),
             }))
     }
 }
@@ -979,4 +983,66 @@ async fn child_run_wake_unparks_the_item() {
     );
     let item = w.store.items(&w.mission, None).unwrap()[0].clone();
     assert_eq!(item.status, ItemStatus::Todo);
+}
+
+/// The person answered "out of office": the mission is not woken, the wait is put off (durably)
+/// until the follow-up time, and that same notice is not found again. The real answer then wakes
+/// the item; a chain of notices stops deferring after [`MAX_MAIL_DEFERS`].
+#[tokio::test]
+async fn an_out_of_office_notice_puts_the_wait_off_instead_of_waking_the_mission() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    w.sup.step(&w.mission).await.unwrap();
+    let wait = || w.store.active_waits(&w.mission).unwrap().remove(0);
+    let first_due = wait().due_at_ms;
+    let three_days = 3 * 24 * 60 * MIN;
+    let start = w.clock.now_ms();
+
+    w.inbox.deliver(
+        start + 5 * MIN,
+        "site-0.example",
+        json!({"message": {"subject": "Out of office"}, "follow_up_at_ms": start + three_days}),
+    );
+    w.advance(10 * MIN);
+    let pass = w.sup.wake_pass().await.unwrap();
+    assert_eq!((pass.fired, pass.released), (0, 0), "{pass:?}");
+    assert_eq!(w.state(), MissionState::Waiting);
+    assert_eq!(w.item("site-0.example").status, ItemStatus::Waiting);
+    let d = wait();
+    assert_eq!(d.due_at_ms, start + three_days);
+    assert!(d.due_at_ms > first_due);
+    assert_eq!(w.store.wait_deferral(d.id).unwrap().1, 1);
+
+    // The same notice is not found again, and the wait does not give up at the old time.
+    w.advance(30 * MIN);
+    let pass = w.sup.wake_pass().await.unwrap();
+    assert_eq!((pass.fired, pass.timed_out), (0, 0), "{pass:?}");
+    assert_eq!(w.state(), MissionState::Waiting);
+
+    // The real answer a day later wakes the item.
+    w.advance(24 * 60 * MIN);
+    w.inbox.deliver(
+        w.clock.now_ms() - MIN,
+        "site-0.example",
+        json!({"message": {"subject": "Re: Hello"}}),
+    );
+    let pass = w.sup.wake_pass().await.unwrap();
+    assert_eq!((pass.fired, pass.released), (1, 1), "{pass:?}");
+    assert_eq!(w.item("site-0.example").status, ItemStatus::Todo);
+}
+
+#[tokio::test]
+async fn a_chain_of_out_of_office_notices_cannot_park_an_item_for_ever() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    w.sup.step(&w.mission).await.unwrap();
+    let mut fired = 0;
+    for i in 0..=MAX_MAIL_DEFERS {
+        w.advance(10 * MIN);
+        w.inbox.deliver(
+            w.clock.now_ms() - MIN,
+            "site-0.example",
+            json!({"message": {"subject": "Out of office"}, "follow_up_at_ms": w.clock.now_ms() + 10 * MIN}),
+        );
+        fired += w.sup.wake_pass().await.unwrap().fired;
+        assert_eq!(fired, u32::from(i == MAX_MAIL_DEFERS), "notice {i}");
+    }
 }

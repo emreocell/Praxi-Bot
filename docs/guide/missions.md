@@ -205,11 +205,35 @@ With Telegram or Discord paired you can steer missions without the app: `/missio
 Answering the blocked items of a mission still happens through the "needs you" message
 (`/answer`) or the app.
 
-A mail wake includes a conservative, rule-based reply classification hint for STOP,
-permanent delivery failure and out-of-office replies. It is untrusted and may miss replies;
-it does not suppress recipients or reschedule follow-ups. Review replies and manage the
-opt-out list manually. The mail guard's daily limit is an approval warning, not an
-unattended outreach pacing system.
+Every mail the bot sends carries a `Message-ID` the app wrote itself (an API mailbox gives
+a message and a thread id instead); the send log keeps it with the recipient, the bot and the
+mission. When something comes back, the app matches it to that record, without a model and
+without trusting what the text says, and acts only on a confident match (the same mailbox,
+our own id in `In-Reply-To` / `References` or the same thread, and a sender that is one of
+the people the mail went to):
+
+- **A hard bounce** (a delivery report with a permanent failure for an address the mail went
+  to) puts that address on the opt-out list, with the reason and the message id. A
+  **temporary failure** is only counted per address; it never suppresses. The app also looks
+  for delivery reports in the bot's inbox on its own, every few minutes, because a bounce comes
+  from a mail system and not from the person the mission waits for.
+- **An explicit STOP** ("STOP", "DURDUR", "unsubscribe" on a line of its own in the new part of
+  the reply) from one of the recipients puts that sender on the opt-out list.
+- **An out-of-office reply** does not wake the item. The mail wait goes on until the date the
+  reply states (only a future date within 60 days is believed), otherwise for three more days,
+  and that notice is not found again. The pause is saved with the wait, so it survives a
+  restart; after three such notices the next one wakes the item anyway.
+- **A budget** limits outreach per mailbox: mail an unattended bot or a mission session sends
+  is refused once the mailbox has sent its daily budget in the last 24 hours (default 20).
+  A mailbox with no sending history ramps up from 5 a day over 14 days. Both numbers are in
+  Settings > Mail > Safe sending; the count comes from the send log, so a restart does not
+  reset it. Mail you approve yourself in a chat is not held to it.
+
+The mail wake also carries an `inbound` field with what was matched and done, and the
+rule-based `reply_class_hint` for the text. Both are data, never instructions. A recipient
+who writes a fake "delivery report" can only speak for their own address. Replies the app
+cannot match (an alias, a forwarded mail, a reply with its headers stripped) change nothing:
+read them and use the opt-out list yourself.
 
 ## Limits of this first version
 
@@ -218,8 +242,7 @@ What works today: the item list, session chaining, budgets, parking of 2FA and
 approval items, giving up CAPTCHA items, starting a mission from a Full-level chat,
 waking by a timer, a recurring schedule, a child run finishing, a mail in the bot's own inbox or a webhook, the
 report, pause/resume/stop, restart recovery, the `/mission` command with its
-chat card, and the Activity list. What does **not** exist yet: automatic action on mail reply classification, a separate permission scope per mission, mail pacing and
-opt-out handling for outreach and sub-missions for helper bots. A mission session is **not** your own typing, because its first
+chat card, and the Activity list. What does **not** exist yet: a separate permission scope per mission and sub-missions for helper bots. A mission session is **not** your own typing, because its first
 message is built from a list that earlier sessions filled with text from web
 pages and mails. It runs as its own kind (`mission`): that text never counts as
 your words (the sites you named, the URLs you typed), it never reaches your own

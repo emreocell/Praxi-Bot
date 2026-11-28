@@ -3370,6 +3370,8 @@ export class MockApiClient extends ApiClient {
     daily_limit: 20,
     verification_link_domains: [],
     same_recipient_days: 0,
+    outreach_daily_budget: 20,
+    outreach_warmup_days: 14,
     opt_out_line: true,
     footer: ""
   };

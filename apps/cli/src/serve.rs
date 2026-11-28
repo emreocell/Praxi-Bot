@@ -1259,6 +1259,15 @@ pub fn serve(
         // The run loop and the built-in tools (`email_wait_for`, `account_register`)
         // learn which mail identities exist from this one handle.
         if let Some(host) = &email {
+            // The send log names the mission a mail came from: a mission session is a run whose
+            // kind carries the mission id.
+            let runs = Arc::clone(&storage);
+            host.connector()
+                .set_mission_resolver(Arc::new(move |run_id: &str| {
+                    let id = uuid::Uuid::parse_str(run_id).ok()?;
+                    let run = runs.get_run(protocol::RunId(id)).ok().flatten()?;
+                    missions::mission_of_kind(&run.kind).map(str::to_owned)
+                }));
             agent.mail_handle().set(Arc::clone(host.connector()));
         }
         let homeassistant = crate::homeassistant_host::start_homeassistant(

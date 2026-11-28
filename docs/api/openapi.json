@@ -27915,6 +27915,18 @@
             "type": "boolean",
             "description": "Add the opt-out line to outgoing mail by default."
           },
+          "outreach_daily_budget": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hard daily budget per mailbox for outreach (mail an unattended bot or a mission\nsends): a send past it is refused. `0` = no budget. Default 20.",
+            "minimum": 0
+          },
+          "outreach_warmup_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days a mailbox with no sending history takes to ramp up to the budget (`0` = no ramp).\nDefault 14.",
+            "minimum": 0
+          },
           "same_recipient_days": {
             "type": "integer",
             "format": "int32",
@@ -28004,9 +28016,17 @@
             "type": "string",
             "description": "`address` or `domain`."
           },
+          "message_id": {
+            "type": "string",
+            "description": "The `Message-ID` of the mail we sent that the bounce or reply answered. Empty: none."
+          },
           "note": {
             "type": "string",
             "description": "The owner's note."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the program added it: `hard_bounce` (the address bounced for good) or `stop_reply`\n(the person answered STOP). Empty when the owner added it."
           },
           "value": {
             "type": "string",

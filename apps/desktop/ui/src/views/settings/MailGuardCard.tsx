@@ -92,6 +92,8 @@ export function MailGuardCard() {
     settings && saved
       ? settings.daily_limit !== saved.daily_limit ||
         settings.same_recipient_days !== saved.same_recipient_days ||
+        settings.outreach_daily_budget !== saved.outreach_daily_budget ||
+        settings.outreach_warmup_days !== saved.outreach_warmup_days ||
         settings.opt_out_line !== saved.opt_out_line ||
         settings.footer !== saved.footer ||
         domains !== (saved.verification_link_domains ?? []).join("\n")
@@ -178,6 +180,44 @@ export function MailGuardCard() {
                 min={0}
                 value={settings.same_recipient_days}
                 onChange={(e) => setSettings({ ...settings, same_recipient_days: number(e.target.value) })}
+              />
+            </FormField>
+          </div>
+          <h3 id="mail-guard-budget" className={styles.sectionTitle}>
+            {t(`${K}.budgetTitle`)}
+          </h3>
+          <p className={formStyles.hint}>{t(`${K}.budgetHint`)}</p>
+          <div className={styles.limitRow}>
+            <FormField
+              id="mg-budget"
+              label={t(`${K}.budget`)}
+              helpTitle={t(`${K}.budget`)}
+              helpBody={t(`${K}.budgetHelp`)}
+              width="sm"
+            >
+              <input
+                id="mg-budget"
+                className={formStyles.input}
+                type="number"
+                min={0}
+                value={settings.outreach_daily_budget}
+                onChange={(e) => setSettings({ ...settings, outreach_daily_budget: number(e.target.value) })}
+              />
+            </FormField>
+            <FormField
+              id="mg-warmup"
+              label={t(`${K}.warmup`)}
+              helpTitle={t(`${K}.warmup`)}
+              helpBody={t(`${K}.warmupHelp`)}
+              width="sm"
+            >
+              <input
+                id="mg-warmup"
+                className={formStyles.input}
+                type="number"
+                min={0}
+                value={settings.outreach_warmup_days}
+                onChange={(e) => setSettings({ ...settings, outreach_warmup_days: number(e.target.value) })}
               />
             </FormField>
           </div>
@@ -277,6 +317,11 @@ export function MailGuardCard() {
                   <span className={formStyles.hint}>
                     {t(o.kind === "domain" ? `${K}.kindDomain` : `${K}.kindAddress`)}
                   </span>{" "}
+                  {o.reason === "hard_bounce" || o.reason === "stop_reply" ? (
+                    <span className={formStyles.hint} data-testid="mail-guard-optout-reason">
+                      ({t(o.reason === "hard_bounce" ? `${K}.reasonHardBounce` : `${K}.reasonStopReply`)})
+                    </span>
+                  ) : null}{" "}
                   <Button
                     size="sm"
                     variant="ghost"

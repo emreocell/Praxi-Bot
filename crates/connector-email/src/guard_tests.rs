@@ -424,3 +424,77 @@ async fn a_body_that_already_has_real_line_breaks_is_never_altered() {
     t.call(&ctx(), input).await.unwrap();
     assert!(sent_bodies(&server).await[0].starts_with(body));
 }
+
+#[tokio::test]
+async fn the_thread_id_and_the_mission_of_a_send_are_logged() {
+    let (_server, conn) = setup().await;
+    conn.set_mission_resolver(Arc::new(|run: &str| {
+        (run == "run-1").then(|| "mission-7".to_owned())
+    }));
+    let t = send_tool(&conn);
+    t.call(&ctx(), mail("bob@example.com")).await.unwrap();
+    let e = conn.guard().log(1).remove(0);
+    assert_eq!(e.thread_id.as_deref(), Some("t"));
+    assert_eq!(e.mission_id.as_deref(), Some("mission-7"));
+    // A reply that quotes the id, or comes in the thread, finds it.
+    let by_id = conn.guard().find_sent("work", "sent1", None).unwrap();
+    assert_eq!(by_id.mission_id.as_deref(), Some("mission-7"));
+    assert!(conn.guard().find_sent("work", "x", Some("t")).is_some());
+}
+
+fn tight_budget(conn: &Arc<EmailConnector>, budget: u32) {
+    let mut s = conn.guard().settings();
+    s.outreach_daily_budget = budget;
+    s.outreach_warmup_days = 0;
+    s.daily_limit = 0;
+    s.same_recipient_days = 0;
+    conn.guard().set_settings(s).unwrap();
+}
+
+#[tokio::test]
+async fn an_unattended_bot_is_refused_past_the_daily_outreach_budget() {
+    let (server, conn) = setup().await;
+    tight_budget(&conn, 2);
+    let t = send_tool(&conn);
+    t.call(&full_ctx(), mail("a@example.com")).await.unwrap();
+    t.call(&full_ctx(), mail("b@example.com")).await.unwrap();
+    let e = t
+        .call(&full_ctx(), mail("c@example.com"))
+        .await
+        .unwrap_err();
+    let ToolError::Execution(m) = e else {
+        panic!("{e:?}")
+    };
+    assert!(m.contains("Not sent") && m.contains("2 of 2"), "{m}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(conn.guard().log(10).len(), 2);
+    // The owner at the screen decides for their own mail: the budget is for outreach.
+    t.call(&ctx(), mail("c@example.com")).await.unwrap();
+    // A mission session is outreach whoever approved the card.
+    conn.set_mission_resolver(Arc::new(|_| Some("m".to_owned())));
+    assert!(t.call(&ctx(), mail("d@example.com")).await.is_err());
+    // Raising the budget lets it through again.
+    tight_budget(&conn, 10);
+    t.call(&ctx(), mail("d@example.com")).await.unwrap();
+}
+
+#[tokio::test]
+async fn parallel_unattended_sends_cannot_share_the_last_slot_of_the_budget() {
+    let (server, conn) = setup().await;
+    tight_budget(&conn, 3);
+    let mut tasks = Vec::new();
+    for i in 0..8 {
+        let t = send_tool(&conn);
+        tasks.push(tokio::spawn(async move {
+            t.call(&full_ctx(), mail(&format!("p{i}@example.com")))
+                .await
+                .is_ok()
+        }));
+    }
+    let mut ok = 0;
+    for t in tasks {
+        ok += usize::from(t.await.unwrap());
+    }
+    assert_eq!(ok, 3);
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+}
