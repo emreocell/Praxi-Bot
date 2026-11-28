@@ -397,8 +397,9 @@ pub trait WakeChecks: Send + Sync {
 
 /// When a child run a mission was waiting for finishes, the runtime delivers it here.
 pub trait ChildWakeSink: Send + Sync {
-    /// `summary` is untrusted: the child's final text.
-    fn deliver(&self, child_run_id: &str, summary: &str);
+    /// `summary` is untrusted: the child's final text. When `mission_id` is set, only that
+    /// mission's waits are woken.
+    fn deliver(&self, child_run_id: &str, summary: &str, mission_id: Option<&str>);
 }
 
 /// Clean text that came from the outside before it is stored in a wake: control characters

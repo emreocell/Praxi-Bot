@@ -126,7 +126,7 @@ pub fn tools(
             "timezone":{"type":"string","description":"IANA zone for local wall time, e.g. Europe/Istanbul (default UTC)."},
             "dtstart_ms":{"type":"integer","description":"Series anchor (Unix ms); default is now (sets the time of day for the rule)."}
         },"required":["rrule"]},
-        "child_run":{"type":"string","description":"Wake me when this child run (spawn_subagent or ask_bot) finishes. It must be a run you started in this session."},
+        "child_run":{"type":"string","description":"Wake me when this child run (spawn_subagent) finishes. It must be a run you started in this session."},
         "timeout_minutes":{"type":"integer","minimum":1,"maximum":MAX_TIMEOUT_MINUTES,"description":"Mail, webhook or child: give up after this long (default 60). The item is then parked for the owner."}
     },"required":["item","reason"]});
     let complete_schema = json!({"type":"object","properties":{
@@ -287,11 +287,12 @@ fn wait_spec(
     if let Some(every) = &i.every {
         connector_calendar::rrule::parse(every.rrule.trim()).map_err(ToolError::InvalidInput)?;
         let dtstart_ms = every.dtstart_ms.unwrap_or(now);
+        let earliest = now.saturating_add(i64::try_from(MIN_AFTER_SECS).unwrap_or(i64::MAX) * 1000);
         let due = recur::next_due(
             every.rrule.trim(),
             dtstart_ms,
             every.timezone.as_deref(),
-            now.saturating_sub(1),
+            earliest,
         )
         .map_err(ToolError::InvalidInput)?
         .ok_or_else(|| {

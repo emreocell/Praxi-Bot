@@ -569,6 +569,11 @@ impl AgentLoop {
         *self.sh.mission_child_wake.write() = Some(sink);
     }
 
+    /// Stop delivering child-run finishes (leader hand-off or missions shutdown).
+    pub fn clear_mission_child_wake(&self) {
+        *self.sh.mission_child_wake.write() = None;
+    }
+
     /// Install the paired servers a bot may use as its own computer
     /// (`[runtime].computer = "server:<key>"`) while its brain stays here.
     pub fn set_server_links(&self, links: Arc<dyn builtin_tools::pc::ServerLinks>) {

@@ -779,8 +779,8 @@ mod wakes;
 pub use wakes::WakePass;
 
 impl crate::wake::ChildWakeSink for Supervisor {
-    fn deliver(&self, child_run_id: &str, summary: &str) {
-        if let Err(e) = self.deliver_child_finished(child_run_id, summary) {
+    fn deliver(&self, child_run_id: &str, summary: &str, mission_id: Option<&str>) {
+        if let Err(e) = self.deliver_child_finished(mission_id, child_run_id, summary) {
             tracing::warn!("missions: child wake delivery failed: {e}");
         }
     }

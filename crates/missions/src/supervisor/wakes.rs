@@ -78,8 +78,20 @@ impl Supervisor {
 
         for w in self.store.due_timers(now)? {
             let fired = match &w.spec {
-                WaitSpec::Every { .. } => self.store.fire_recurring_wait(w.id, now)?,
-                WaitSpec::After => self.store.fire_wait(w.id, WakeReason::Timer, None, now)?,
+                WaitSpec::Every { .. } => match self.store.fire_recurring_wait(w.id, now) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("missions: recurring wait {} failed: {e}", w.id);
+                        continue;
+                    }
+                },
+                WaitSpec::After => match self.store.fire_wait(w.id, WakeReason::Timer, None, now) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("missions: timer wait {} failed: {e}", w.id);
+                        continue;
+                    }
+                },
                 _ => continue,
             };
             if fired.is_some() {
@@ -204,11 +216,16 @@ impl Supervisor {
     ///
     /// # Errors
     /// Storage failures.
-    pub fn deliver_child_finished(&self, child_run_id: &str, summary: &str) -> Result<u32> {
+    pub fn deliver_child_finished(
+        &self,
+        mission_id: Option<&str>,
+        child_run_id: &str,
+        summary: &str,
+    ) -> Result<u32> {
         let now = self.clock.now_ms();
         let woken = self
             .store
-            .deliver_child_finished(child_run_id, summary, now)?;
+            .deliver_child_finished(mission_id, child_run_id, summary, now)?;
         let mut released = 0;
         for id in &woken {
             if self

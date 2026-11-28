@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::{MissionStore, bump, event, item_in, transition_in};
 use crate::error::{MissionError, Result};
 use crate::model::{
-    ItemStatus, MAX_ACTIVE_WAITS, MAX_TEXT_CHARS, MAX_WAITS_PER_ITEM, MissionState, clip,
+    Budgets, ItemStatus, MAX_ACTIVE_WAITS, MAX_TEXT_CHARS, MAX_WAITS_PER_ITEM, MissionState, clip,
 };
 use crate::recur;
 use crate::wake::{
@@ -70,6 +70,27 @@ fn wake_of(row: &Row<'_>) -> rusqlite::Result<Wake> {
 const WAKE_COLS: &str = "w.id, w.mission_id, w.wait_id, w.item_key, w.reason, w.payload_json, w.created_at_ms, \
     (SELECT x.reason FROM mission_waits x WHERE x.id = w.wait_id), \
     (SELECT x.spec_json FROM mission_waits x WHERE x.id = w.wait_id)";
+
+fn mission_deadline_ms(tx: &Transaction<'_>, mission_id: &str) -> rusqlite::Result<i64> {
+    tx.query_row(
+        "SELECT started_at_ms, budgets_json FROM missions WHERE id = ?1",
+        [mission_id],
+        |r| {
+            let started: i64 = r.get(0)?;
+            let budgets: String = r.get(1)?;
+            let budgets: Budgets = serde_json::from_str(&budgets).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            Ok(started.saturating_add(
+                i64::try_from(budgets.max_minutes.saturating_mul(60_000)).unwrap_or(i64::MAX),
+            ))
+        },
+    )
+}
 
 /// The wait ends because the item left it: nobody watches it any more.
 pub(super) fn cancel_item_waits(tx: &Transaction<'_>, id: &str, key: &str, now: i64) -> Result<()> {
@@ -177,6 +198,13 @@ impl MissionStore {
                 "item {:?} already has {MAX_WAITS_PER_ITEM} waits",
                 item.key
             )));
+        }
+        if matches!(&new.spec, WaitSpec::Every { .. }) {
+            tx.execute(
+                "UPDATE mission_waits SET state = 'cancelled', ended_at_ms = ?3 \
+                 WHERE mission_id = ?1 AND item_key = ?2 AND kind = 'every' AND state = 'waiting'",
+                params![id, item.key, now],
+            )?;
         }
         let kind = new.spec.kind();
         tx.execute(
@@ -442,7 +470,9 @@ impl MissionStore {
             return Ok(None);
         };
         let fired_at = w.due_at_ms;
-        let next_due = recur::next_due(rrule, *dtstart_ms, timezone.as_deref(), fired_at)
+        let after_ms = fired_at.max(now);
+        let deadline = mission_deadline_ms(&tx, &w.mission_id)?;
+        let next_due = recur::next_due(rrule, *dtstart_ms, timezone.as_deref(), after_ms)
             .map_err(MissionError::Invalid)?;
         let item = item_in(&tx, &w.mission_id, &w.item_key)?;
         if item.status == ItemStatus::Waiting {
@@ -497,7 +527,7 @@ impl MissionStore {
             &json!({"wait": wait_id, "reason": WakeReason::Schedule.as_str()}),
         )?;
         bump(&tx, &w.mission_id, now)?;
-        if let Some(next) = next_due {
+        if let Some(next) = next_due.filter(|n| *n <= deadline) {
             tx.execute(
                 "UPDATE mission_waits SET due_at_ms = ?2 WHERE id = ?1 AND state = 'waiting'",
                 params![wait_id, next],
@@ -693,6 +723,7 @@ impl MissionStore {
     /// SQLite failure.
     pub fn deliver_child_finished(
         &self,
+        mission_id: Option<&str>,
         child_run_id: &str,
         summary: &str,
         now: i64,
@@ -705,6 +736,9 @@ impl MissionStore {
                 continue;
             };
             if run_id != child {
+                continue;
+            }
+            if mission_id.is_some_and(|id| w.mission_id != id) {
                 continue;
             }
             let payload = json!({

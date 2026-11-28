@@ -2,7 +2,7 @@
 //! world, the real store, ledger, brief and supervisor run. Nothing sleeps for real except the
 //! loop test, which polls a few milliseconds.
 
-use chrono::{Offset, TimeZone, Timelike};
+use chrono::{TimeZone, Timelike};
 use serde_json::{Value, json};
 
 use crate::model::Item;
@@ -854,32 +854,100 @@ async fn recurring_wake_still_due_after_a_restart() {
 }
 
 #[test]
-fn weekly_recurrence_honours_new_york_dst() {
+fn weekly_recurrence_crosses_new_york_spring_forward() {
     let tz = "America/New_York";
     let zone: chrono_tz::Tz = tz.parse().unwrap();
     let anchor = zone
-        .with_ymd_and_hms(2026, 3, 17, 9, 0, 0)
+        .with_ymd_and_hms(2026, 3, 1, 9, 0, 0)
         .unwrap()
         .with_timezone(&chrono::Utc)
         .timestamp_millis();
-    let rrule = "FREQ=WEEKLY;BYDAY=TU";
-    let mut cursor = anchor - 1;
-    let mut locals = Vec::new();
-    for _ in 0..6 {
-        let next = crate::recur::next_due(rrule, anchor, Some(tz), cursor)
-            .unwrap()
-            .unwrap();
-        let local = chrono::DateTime::from_timestamp_millis(next)
-            .unwrap()
-            .with_timezone(&tz.parse::<chrono_tz::Tz>().unwrap());
-        assert_eq!(local.hour(), 9);
-        locals.push((local.date_naive(), local.offset().fix().local_minus_utc()));
-        cursor = next;
-    }
+    let before = zone
+        .with_ymd_and_hms(2026, 3, 7, 12, 0, 0)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .timestamp_millis();
+    let after = crate::recur::next_due("FREQ=DAILY;INTERVAL=1", anchor, Some(tz), before)
+        .unwrap()
+        .unwrap();
+    let local = chrono::DateTime::from_timestamp_millis(after)
+        .unwrap()
+        .with_timezone(&zone);
+    assert_eq!(local.date_naive().to_string(), "2026-03-08");
+    assert_eq!(local.hour(), 9);
+}
+
+#[test]
+fn weekly_recurrence_crosses_new_york_fall_back() {
+    let tz = "America/New_York";
+    let zone: chrono_tz::Tz = tz.parse().unwrap();
+    let anchor = zone
+        .with_ymd_and_hms(2026, 10, 1, 9, 0, 0)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .timestamp_millis();
+    let before = zone
+        .with_ymd_and_hms(2026, 10, 31, 12, 0, 0)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .timestamp_millis();
+    let occurrence = crate::recur::next_due("FREQ=DAILY;INTERVAL=1", anchor, Some(tz), before)
+        .unwrap()
+        .unwrap();
+    let local = chrono::DateTime::from_timestamp_millis(occurrence)
+        .unwrap()
+        .with_timezone(&zone);
+    assert_eq!(local.date_naive().to_string(), "2026-11-01");
+    assert_eq!(local.hour(), 9);
+}
+
+#[tokio::test]
+async fn recurring_wake_after_downtime_does_not_catch_up_storm() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    let anchor = w.clock.now_ms();
+    let first = anchor + 86_400_000;
+    start_item(&w.store, &w.mission, "site-0.example");
+    w.store
+        .register_wait(
+            &w.mission,
+            &every_wait("FREQ=DAILY;INTERVAL=1", anchor, first),
+            anchor,
+        )
+        .unwrap();
+    w.store
+        .set_state(&w.mission, MissionState::Waiting, None, anchor)
+        .unwrap();
+    let late = first + 5 * 86_400_000;
+    w.clock.0.store(late, Ordering::SeqCst);
+    assert_eq!(w.sup.wake_pass().await.unwrap().fired, 1);
+    let wait = w.store.active_waits(&w.mission).unwrap().remove(0);
     assert!(
-        locals.windows(2).all(|w| w[1].0 > w[0].0),
-        "local dates move forward: {locals:?}"
+        wait.due_at_ms > late,
+        "next due is after now, not the missed instant: {}",
+        wait.due_at_ms
     );
+    assert_eq!(w.sup.wake_pass().await.unwrap().fired, 0);
+}
+
+#[tokio::test]
+async fn done_item_cancels_a_recurring_wait() {
+    let w = world(sites(1), Budgets::default(), signup_then_finish);
+    let anchor = w.clock.now_ms();
+    let first = anchor + 60_000;
+    start_item(&w.store, &w.mission, "site-0.example");
+    w.store
+        .register_wait(&w.mission, &every_wait("FREQ=DAILY", anchor, first), anchor)
+        .unwrap();
+    w.clock.0.store(first, Ordering::SeqCst);
+    w.sup.wake_pass().await.unwrap();
+    set(
+        &w.store,
+        &w.mission,
+        "site-0.example",
+        ItemStatus::Done,
+        None,
+    );
+    assert_eq!(w.store.active_waits(&w.mission).unwrap(), Vec::new());
 }
 
 #[tokio::test]
@@ -905,7 +973,7 @@ async fn child_run_wake_unparks_the_item() {
         .unwrap();
     assert_eq!(
         w.sup
-            .deliver_child_finished("child-run-1", "helper answer")
+            .deliver_child_finished(Some(&w.mission), "child-run-1", "helper answer")
             .unwrap(),
         1
     );

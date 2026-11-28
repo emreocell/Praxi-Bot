@@ -146,7 +146,9 @@ fn wake_block(w: &Wake) -> String {
     if let Some(p) = &w.payload {
         let origin = match w.reason {
             WakeReason::Mail => "mail wake",
-            _ => "webhook wake",
+            WakeReason::Child => "child wake",
+            WakeReason::Webhook => "webhook wake",
+            _ => "wake",
         };
         s.push_str(&untrusted_block(origin, &p.to_string(), WAKE_PAYLOAD_BYTES));
         s.push('\n');

@@ -27,8 +27,8 @@ use crate::{AppState, error::ApiError};
 struct SupChildWake(Arc<Supervisor>);
 
 impl missions::ChildWakeSink for SupChildWake {
-    fn deliver(&self, child_run_id: &str, summary: &str) {
-        missions::ChildWakeSink::deliver(self.0.as_ref(), child_run_id, summary);
+    fn deliver(&self, child_run_id: &str, summary: &str, mission_id: Option<&str>) {
+        missions::ChildWakeSink::deliver(self.0.as_ref(), child_run_id, summary, mission_id);
     }
 }
 
@@ -317,6 +317,7 @@ impl AppState {
     /// leader change never runs next to a leftover one. The missions stay `running` and
     /// continue from their ledger at the next start.
     pub(crate) async fn stop_missions(&self) {
+        self.0.agent.clear_mission_child_wake();
         let runtime = self.0.missions.lock().take();
         if let Some(r) = runtime {
             r.stop().await;

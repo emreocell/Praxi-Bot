@@ -122,11 +122,11 @@ Some steps cannot go on at once: a site sends a verification mail, an account is
 reviewed "within a few hours", a form tool calls you back. The bot does not hold a
 session open for that. It **parks the item** with `mission_wait` and takes the next
 one; when nothing else is open, the session ends and the mission shows
-**Waiting**. Three things can wake it:
+**Waiting**. Five things can wake it:
 
 * **A timer** (`after_seconds`, 30 seconds to 7 days). The item continues when it is due.
 * **A recurring schedule** (`every`: an RFC 5545 `RRULE` such as `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`, with an optional IANA time zone so weekdays follow your local clock across DST). Each occurrence wakes the mission; the wait stays registered until the series ends.
-* **A child run finishing** (`child_run`: a `spawn_subagent` or `ask_bot` run the bot started in the same mission session). The helper's final text arrives in the next brief as untrusted data, like a webhook body.
+* **A child run finishing** (`child_run`: a `spawn_subagent` run the bot started in the same mission session). The helper's final text arrives in the next brief as untrusted data, like a webhook body.
 * **A mail in the bot's own inbox** (a sender domain, a word in the subject or a
   keyword). The daemon looks into the inbox and junk folder of the bot's **own**
   mail identity about once a minute; the owner's mailbox is never read for this.
@@ -210,7 +210,7 @@ Answering the blocked items of a mission still happens through the "needs you" m
 Missions are delivered in waves (see the [design](../design/missions-adr.md)).
 What works today: the item list, session chaining, budgets, parking of 2FA and
 approval items, giving up CAPTCHA items, starting a mission from a Full-level chat,
-waking by a timer, a mail in the bot's own inbox or a webhook, the
+waking by a timer, a recurring schedule, a child run finishing, a mail in the bot's own inbox or a webhook, the
 report, pause/resume/stop, restart recovery, the `/mission` command with its
 chat card, and the Activity list. What does **not** exist yet: mail reply classification (bounce, STOP), a separate permission scope per mission, mail pacing and
 opt-out handling for outreach and sub-missions for helper bots. A mission session is **not** your own typing, because its first
